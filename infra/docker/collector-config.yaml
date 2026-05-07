@@ -1,0 +1,11 @@
+# Local-dev collector pointed at the dockerized API. Replace UUIDs after running `make seed`
+# and enrolling the collector via POST /api/v1/collectors/enroll.
+collector_id: 00000000-0000-0000-0000-0000000000aa
+site_id: 00000000-0000-0000-0000-0000000000bb
+ingest_url: http://api:8000
+heartbeat_interval_seconds: 30
+buffer_path: /var/lib/dcim-collector/buffer.db
+mtls:
+  enabled: false
+api_token_file: null
+devices: []

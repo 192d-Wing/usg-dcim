@@ -1,0 +1,117 @@
+# Default values for dcim Helm chart.
+# Override with `helm install dcim infra/helm/dcim -f my-values.yaml`.
+
+image:
+  registry: ghcr.io/usg-dcim
+  pullPolicy: IfNotPresent
+  tag: "0.1.0"
+
+api:
+  replicaCount: 3
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: 1,    memory: 2Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+  service:
+    type: ClusterIP
+    port: 8000
+
+worker:
+  replicaCount: 2
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: 1,    memory: 2Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    queueDepthTarget: 50
+
+ingest:
+  replicaCount: 3
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: 2,    memory: 4Gi }
+  service:
+    type: ClusterIP
+    port: 8443
+  mtls:
+    enabled: true
+    caBundleSecret: dcim-collector-ca
+
+frontend:
+  replicaCount: 2
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
+  service:
+    type: ClusterIP
+    port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: dcim.example.mil
+      paths:
+        - path: /
+          pathType: Prefix
+          backend: frontend
+        - path: /api
+          pathType: Prefix
+          backend: api
+  tls:
+    - secretName: dcim-tls
+      hosts: [dcim.example.mil]
+
+postgresql:
+  external: true
+  dsn: "postgresql+asyncpg://dcim:CHANGE_ME@postgres-ha:5432/dcim"
+
+elasticsearch:
+  external: true
+  url: "https://elastic:9200"
+  authSecret: dcim-elastic-creds
+
+redis:
+  external: true
+  dsn: "redis://redis-ha:6379/0"
+
+objectStorage:
+  endpoint: "https://s3.example.mil"
+  bucket: dcim-reports
+  credentialsSecret: dcim-s3-creds
+
+config:
+  jwtSecret:                "PROVIDE_VIA_SECRET"
+  collectorTokenSecret:     "PROVIDE_VIA_SECRET"
+  collectorStaleSeconds:    600
+  alertEvalIntervalSeconds: 30
+  oidc:
+    issuer: ""
+    clientId: ""
+    clientSecretRef: ""
+  saml:
+    metadataUrl: ""
+
+migrations:
+  runOnInstall: true
+  runOnUpgrade: true
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile: { type: RuntimeDefault }
+
+networkPolicy:
+  enabled: true
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring

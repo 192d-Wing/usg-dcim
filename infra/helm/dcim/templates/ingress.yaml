@@ -1,0 +1,25 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "dcim.fullname" . }}
+  labels: {{- include "dcim.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  tls: {{- toYaml .Values.ingress.tls | nindent 4 }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "dcim.fullname" $ }}-{{ .backend }}
+                port:
+                  number: {{ if eq .backend "api" }}{{ $.Values.api.service.port }}{{ else }}{{ $.Values.frontend.service.port }}{{ end }}
+          {{- end }}
+    {{- end }}
+{{- end }}

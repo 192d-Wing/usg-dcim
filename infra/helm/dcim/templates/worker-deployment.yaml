@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dcim.fullname" . }}-worker
+  labels:
+    {{- include "dcim.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Chart.Name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "dcim.labels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: worker
+          image: {{ include "dcim.image" (dict "Values" .Values "name" "api") }}
+          command: ["arq", "dcim.worker.WorkerSettings"]
+          env:
+            - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
+            - { name: DCIM_ELASTIC_URL,  value: {{ .Values.elasticsearch.url | quote }} }
+            - { name: DCIM_REDIS_DSN,    value: {{ .Values.redis.dsn | quote }} }
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
