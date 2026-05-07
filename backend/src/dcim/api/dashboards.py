@@ -141,6 +141,9 @@ async def rack_detail(
     for aid, fresh, n in fresh_rows:
         by_asset_freshness.setdefault(str(aid), {})[fresh.value if hasattr(fresh, "value") else fresh] = int(n)
 
+    from ..services.capacity import compute_rack_capacity
+    capacity = await compute_rack_capacity(db, rack, list(assets))
+
     return {
         "rack": {
             "id": str(rack.id),
@@ -152,6 +155,7 @@ async def rack_detail(
             "max_kw": float(rack.max_kw) if rack.max_kw is not None else None,
             "serial": rack.serial,
         },
+        "capacity": capacity,
         "assets": [
             {
                 "id": str(a.id),
@@ -170,6 +174,28 @@ async def rack_detail(
             for a in assets
         ],
     }
+
+
+@router.get("/free-space")
+async def free_space(
+    u: int = Query(1, ge=0, le=60, description="Minimum contiguous U slots required (0 returns all racks for capacity overview)"),
+    site_id: UUID | None = Query(None),
+    region_id: UUID | None = Query(None),
+    min_kw_headroom: float | None = Query(None, description="Minimum unused kW the rack must still have"),
+    limit: int = Query(50, ge=1, le=500),
+    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find racks with at least `u` contiguous free U slots, ranked by biggest run."""
+    from ..services.capacity import find_free_space
+    racks = await find_free_space(
+        db, min_u=u, site_id=site_id, region_id=region_id,
+        min_kw_headroom=min_kw_headroom, limit=limit,
+    )
+    return {"query": {"min_u": u, "site_id": str(site_id) if site_id else None,
+                      "region_id": str(region_id) if region_id else None,
+                      "min_kw_headroom": min_kw_headroom},
+            "racks": racks, "count": len(racks)}
 
 
 @router.get("/assets/{asset_id}")

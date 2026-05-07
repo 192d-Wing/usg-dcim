@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useList } from '@refinedev/core';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Server } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,9 +9,17 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { CapacityBar } from '@/components/capacity-bar';
+import { http } from '@/lib/http';
 
 type Site = { id: string; code: string; name: string };
 type Rack = { id: string; name: string; code: string; u_height: number; max_kw: number | null; serial: string | null; site_id: string };
+type CapacityRow = {
+  rack_id: string;
+  u_used: number; u_total: number; u_pct: number;
+  kw_current: number | null; kw_max: number | null; kw_pct: number | null;
+  biggest_contiguous_free: number;
+};
 
 export function RacksListPage() {
   const nav = useNavigate();
@@ -22,6 +31,24 @@ export function RacksListPage() {
     pagination: { pageSize: 200 },
     filters: siteId === 'all' ? [] : [{ field: 'site_id', operator: 'eq', value: siteId }],
   });
+
+  // Pull capacity for the same filter set in one round-trip.
+  const capacityRes = useQuery({
+    queryKey: ['racks-capacity', siteId],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { u: 0, limit: 500 };
+      if (siteId !== 'all') params.site_id = siteId;
+      const r = await http.get<{ racks: CapacityRow[] }>('/dashboards/free-space', { params });
+      return r.data.racks;
+    },
+    refetchInterval: 30_000,
+  });
+
+  const capById = useMemo(() => {
+    const m = new Map<string, CapacityRow>();
+    for (const c of capacityRes.data ?? []) m.set(c.rack_id, c);
+    return m;
+  }, [capacityRes.data]);
 
   const sites = sitesRes.result.data ?? [];
   const racks = racksRes.result.data ?? [];
@@ -54,29 +81,63 @@ export function RacksListPage() {
 
       {racksRes.query.isLoading ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-28 rounded-lg" />)}
+          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-44 rounded-lg" />)}
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {racks.map((r) => (
-            <Card
-              key={r.id}
-              role="button"
-              onClick={() => nav(`/racks/${r.id}`)}
-              className="cursor-pointer transition-colors hover:bg-accent/40"
-            >
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Server className="h-3.5 w-3.5" /> {r.code}
-                </div>
-                <div className="mt-1 truncate text-base font-semibold">{r.name}</div>
-                <div className="mt-2 text-xs text-muted-foreground">
-                  {r.u_height}U · {r.max_kw ? `${r.max_kw} kW` : 'unrated'}
-                </div>
-                {r.serial && <div className="mt-1 truncate text-[11px] text-muted-foreground">SN {r.serial}</div>}
-              </CardContent>
-            </Card>
-          ))}
+          {racks.map((r) => {
+            const cap = capById.get(r.id);
+            return (
+              <Card
+                key={r.id}
+                role="button"
+                onClick={() => nav(`/racks/${r.id}`)}
+                className="cursor-pointer transition-colors hover:bg-accent/40"
+              >
+                <CardContent className="space-y-3 p-4">
+                  <div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Server className="h-3.5 w-3.5" /> {r.code}
+                    </div>
+                    <div className="mt-1 truncate text-base font-semibold">{r.name}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {r.u_height}U · {r.max_kw ? `${r.max_kw} kW` : 'unrated'}
+                    </div>
+                  </div>
+
+                  {cap ? (
+                    <div className="space-y-2">
+                      <CapacityBar
+                        used={cap.u_used} total={cap.u_total}
+                        leftLabel={`${cap.u_used}/${cap.u_total} U`}
+                        compact
+                      />
+                      {cap.kw_max !== null ? (
+                        <CapacityBar
+                          used={cap.kw_current ?? 0}
+                          total={cap.kw_max}
+                          unknown={cap.kw_current === null}
+                          leftLabel={
+                            cap.kw_current === null
+                              ? `—/${cap.kw_max} kW`
+                              : `${cap.kw_current.toFixed(1)}/${cap.kw_max} kW`
+                          }
+                          compact
+                        />
+                      ) : (
+                        <div className="text-[11px] text-muted-foreground">No kW rating</div>
+                      )}
+                      <div className="text-[11px] text-muted-foreground">
+                        Largest gap: <span className="font-mono">{cap.biggest_contiguous_free}U</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <Skeleton className="h-16 w-full" />
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
           {racks.length === 0 && (
             <p className="col-span-full text-sm text-muted-foreground">No racks for this filter.</p>
           )}

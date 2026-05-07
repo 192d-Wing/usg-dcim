@@ -29,6 +29,7 @@ import {
 import { RackVisualization } from '@/components/rack-visualization';
 import { RackHeightPicker } from '@/components/rack-height-picker';
 import { useStencilCatalog } from '@/components/stencil';
+import { CapacityPanel, type Capacity } from '@/components/capacity-panel';
 import { toast } from 'sonner';
 
 type RackDetail = {
@@ -36,6 +37,7 @@ type RackDetail = {
     id: string; site_id: string; row_id: string; name: string; code: string;
     u_height: number; max_kw: number | null; serial: string | null;
   };
+  capacity: Capacity;
   assets: Array<{
     id: string; name: string; hostname: string | null; kind: string;
     manufacturer: string | null; model: string | null; serial: string | null;
@@ -143,6 +145,8 @@ export function RackShowPage() {
           )}
         </div>
       </div>
+
+      {detail.data.capacity && <CapacityPanel capacity={detail.data.capacity} />}
 
       <Card>
         <CardContent className="p-6">

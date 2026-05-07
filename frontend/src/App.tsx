@@ -22,6 +22,7 @@ import { RackCreatePage } from '@/pages/rack-create';
 import { AssetShowPage } from '@/pages/asset-show';
 import { AlertsPage } from '@/pages/alerts';
 import { CollectorsPage } from '@/pages/collectors';
+import { CapacityPage } from '@/pages/capacity';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -63,6 +64,7 @@ export function App() {
               <Route path="/racks/new" element={<RackCreatePage />} />
               <Route path="/racks/:id" element={<RackShowPage />} />
               <Route path="/assets/:id" element={<AssetShowPage />} />
+              <Route path="/capacity" element={<CapacityPage />} />
               <Route path="/alerts" element={<AlertsPage />} />
               <Route path="/collectors" element={<CollectorsPage />} />
             </Route>
