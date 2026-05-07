@@ -95,33 +95,86 @@ async def seed() -> None:
                         )
                         db.add(rack)
                         await db.flush()
-                        # Scale device counts so smaller racks aren't overfull. Place
-                        # devices bottom-up with a running cursor so kinds don't collide.
+                        # Two vertical 0U PDUs (rear corners), one A-side, one B-side.
+                        # APC AP8941 stencil = 24-outlet vertical.
+                        from ..models.inventory import AssetFace, AssetMount, PduSide
+                        from ..models.power import Outlet, PowerConnection
+                        pdu_a = Asset(
+                            site_id=site.id, rack_id=rack.id,
+                            name=f"{rack.code}-PDU-A",
+                            hostname=f"{code.lower()}-{rack.code.lower()}-pdu-a",
+                            kind=AssetKind.pdu, manufacturer="APC", model="AP8941",
+                            serial=str(uuid4())[:8],
+                            face=AssetFace.rear, mount=AssetMount.vertical_left,
+                            pdu_side=PduSide.a,
+                        )
+                        pdu_b = Asset(
+                            site_id=site.id, rack_id=rack.id,
+                            name=f"{rack.code}-PDU-B",
+                            hostname=f"{code.lower()}-{rack.code.lower()}-pdu-b",
+                            kind=AssetKind.pdu, manufacturer="APC", model="AP8941",
+                            serial=str(uuid4())[:8],
+                            face=AssetFace.rear, mount=AssetMount.vertical_right,
+                            pdu_side=PduSide.b,
+                        )
+                        db.add_all([pdu_a, pdu_b])
+                        await db.flush()
+                        # 24 outlets per PDU; phase A on odd/even doesn't matter here.
+                        outlets_a, outlets_b = [], []
+                        for i in range(1, 25):
+                            oa = Outlet(pdu_asset_id=pdu_a.id, position=i, label=f"{i:02d}",
+                                        phase=PduSide.a, max_amps=10, receptacle="C13")
+                            ob = Outlet(pdu_asset_id=pdu_b.id, position=i, label=f"{i:02d}",
+                                        phase=PduSide.b, max_amps=10, receptacle="C13")
+                            outlets_a.append(oa)
+                            outlets_b.append(ob)
+                            db.add_all([oa, ob])
+                        await db.flush()
+
+                        # Place rack-mount devices in the U-grid. Front face servers, rear sensor.
                         n_servers = max(2, min(8, u // 6))
                         slot = 1
-                        for kind, n, kind_u in [
-                            (AssetKind.pdu, 2, 1),       # 1U PDU each
-                            (AssetKind.server, n_servers, 2),  # 2U servers
-                            (AssetKind.sensor, 1, 1),
+                        servers_created: list[Asset] = []
+                        for kind, n, kind_u, face in [
+                            (AssetKind.server, n_servers, 2, AssetFace.front),
+                            (AssetKind.sensor, 1, 1, AssetFace.rear),
                         ]:
                             for k in range(n):
                                 if slot + kind_u - 1 > u:
-                                    break  # rack is full; remaining devices go unplaced (rack_position_u=None)
-                                db.add(
-                                    Asset(
-                                        site_id=site.id,
-                                        rack_id=rack.id,
-                                        name=f"{rack.code}-{kind.value}{k+1}",
-                                        hostname=f"{code.lower()}-{rack.code.lower()}-{kind.value}{k+1}",
-                                        kind=kind,
-                                        manufacturer="Demo",
-                                        model="X1",
-                                        serial=str(uuid4())[:8],
-                                        rack_position_u=slot,
-                                        rack_units=kind_u,
-                                    )
+                                    break
+                                a = Asset(
+                                    site_id=site.id, rack_id=rack.id,
+                                    name=f"{rack.code}-{kind.value}{k+1}",
+                                    hostname=f"{code.lower()}-{rack.code.lower()}-{kind.value}{k+1}",
+                                    kind=kind, manufacturer="Demo", model="X1",
+                                    serial=str(uuid4())[:8],
+                                    rack_position_u=slot, rack_units=kind_u,
+                                    face=face, mount=AssetMount.rack,
+                                    psu_count=2 if kind == AssetKind.server else None,
                                 )
+                                db.add(a)
+                                if kind == AssetKind.server:
+                                    servers_created.append(a)
                                 slot += kind_u
+                        await db.flush()
+
+                        # Connect each server's two PSUs to outlets on PDU-A + PDU-B (redundant by default).
+                        # First server in odd-indexed racks gets only one PSU connected to demonstrate a
+                        # "single-feed" gap that the redundancy badge will flag.
+                        for idx, srv in enumerate(servers_created):
+                            outlet_pos = idx + 1
+                            if outlet_pos > 24:
+                                break
+                            db.add(PowerConnection(
+                                outlet_id=outlets_a[outlet_pos - 1].id,
+                                asset_id=srv.id, psu_index=1, cord_color="blue",
+                            ))
+                            # Skip second PSU for the first server in odd-numbered racks → "single" gap
+                            if not (ridx % 2 == 0 and idx == 0):
+                                db.add(PowerConnection(
+                                    outlet_id=outlets_b[outlet_pos - 1].id,
+                                    asset_id=srv.id, psu_index=2, cord_color="red",
+                                ))
                     db.add(
                         Collector(
                             site_id=site.id, name=f"{code}-collector",

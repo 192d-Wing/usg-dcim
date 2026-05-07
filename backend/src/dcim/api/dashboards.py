@@ -142,7 +142,12 @@ async def rack_detail(
         by_asset_freshness.setdefault(str(aid), {})[fresh.value if hasattr(fresh, "value") else fresh] = int(n)
 
     from ..services.capacity import compute_rack_capacity
+    from ..services.power_chain import compute_power_chain
     capacity = await compute_rack_capacity(db, rack, list(assets))
+    power_chain = await compute_power_chain(db, list(assets))
+
+    def enum_val(v):
+        return v.value if v is not None and hasattr(v, "value") else v
 
     return {
         "rack": {
@@ -156,20 +161,26 @@ async def rack_detail(
             "serial": rack.serial,
         },
         "capacity": capacity,
+        "power_chain": power_chain,
         "assets": [
             {
                 "id": str(a.id),
                 "name": a.name,
                 "hostname": a.hostname,
-                "kind": a.kind.value if hasattr(a.kind, "value") else a.kind,
+                "kind": enum_val(a.kind),
                 "manufacturer": a.manufacturer,
                 "model": a.model,
                 "serial": a.serial,
                 "rack_position_u": a.rack_position_u,
                 "rack_units": a.rack_units or 1,
-                "lifecycle_state": a.lifecycle_state.value if hasattr(a.lifecycle_state, "value") else a.lifecycle_state,
+                "face": enum_val(a.face),
+                "mount": enum_val(a.mount),
+                "pdu_side": enum_val(a.pdu_side),
+                "psu_count": a.psu_count,
+                "lifecycle_state": enum_val(a.lifecycle_state),
                 "open_alerts": open_alert_count.get(str(a.id), 0),
                 "freshness": by_asset_freshness.get(str(a.id), {}),
+                "redundancy": power_chain["per_asset"].get(str(a.id), {}).get("redundancy"),
             }
             for a in assets
         ],

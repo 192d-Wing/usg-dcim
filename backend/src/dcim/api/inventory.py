@@ -391,9 +391,23 @@ async def create_asset(
     principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
     db: AsyncSession = Depends(get_db),
 ):
+    from ..models.inventory import AssetKind, PduSide
+    from ..models.power import Outlet
     obj = Asset(**payload.model_dump())
     db.add(obj)
     await db.flush()
+    # Auto-seed outlets for new PDUs so the power-chain UI has slots to bind to.
+    # Heuristic: 24 outlets, half on side A, half on side B, alternating C13 receptacles.
+    if obj.kind == AssetKind.pdu:
+        for i in range(1, 25):
+            db.add(Outlet(
+                pdu_asset_id=obj.id,
+                position=i,
+                label=f"{i:02d}",
+                phase=PduSide.a if i <= 12 else PduSide.b,
+                max_amps=10,
+                receptacle="C13",
+            ))
     await audit.record(db, principal, action="asset.create", target_type="asset",
                        target_id=str(obj.id), site_id=obj.site_id)
     await db.commit()

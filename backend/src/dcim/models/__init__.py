@@ -6,9 +6,12 @@ from .auth import ApiToken, Permission, Role, RoleScope, User, UserRole
 from .collectors import Collector, CollectorHeartbeat
 from .inventory import (
     Asset,
+    AssetFace,
+    AssetMount,
     Building,
     Cable,
     Circuit,
+    PduSide,
     PowerFeed,
     Rack,
     Region,
@@ -18,6 +21,7 @@ from .inventory import (
     SiteGroup,
     SiteGroupMembership,
 )
+from .power import Outlet, PowerConnection
 from .telemetry_meta import TelemetrySource
 
 __all__ = [
@@ -25,6 +29,8 @@ __all__ = [
     "AlertRule",
     "ApiToken",
     "Asset",
+    "AssetFace",
+    "AssetMount",
     "AuditLog",
     "Building",
     "Cable",
@@ -32,7 +38,10 @@ __all__ = [
     "Collector",
     "CollectorHeartbeat",
     "MaintenanceWindow",
+    "Outlet",
+    "PduSide",
     "Permission",
+    "PowerConnection",
     "PowerFeed",
     "Rack",
     "Region",

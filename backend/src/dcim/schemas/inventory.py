@@ -177,6 +177,10 @@ class AssetBase(BaseModel):
     firmware: str | None = None
     rack_position_u: int | None = None
     rack_units: int | None = 1
+    face: str = "front"           # asset_face enum
+    mount: str = "rack"           # asset_mount enum
+    pdu_side: str | None = None   # PDUs only
+    psu_count: int | None = None  # for redundancy gap detection on devices
     mgmt_ip: str | None = None
     mgmt_protocol: str | None = None
     mgmt_port: int | None = None
@@ -195,6 +199,10 @@ class AssetUpdate(BaseModel):
     rack_id: UUID | None = None
     rack_position_u: int | None = None
     rack_units: int | None = None
+    face: str | None = None
+    mount: str | None = None
+    pdu_side: str | None = None
+    psu_count: int | None = None
     mgmt_ip: str | None = None
     mgmt_protocol: str | None = None
     mgmt_port: int | None = None

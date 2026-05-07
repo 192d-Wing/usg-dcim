@@ -54,6 +54,31 @@ class AssetKind(str, enum.Enum):
     other = "other"
 
 
+class AssetFace(str, enum.Enum):
+    """Which side of the rack the asset is mounted on."""
+    front = "front"
+    rear = "rear"
+
+
+class AssetMount(str, enum.Enum):
+    """How the asset attaches to the rack.
+
+    `rack` — standard rack-mount; uses rack_position_u + rack_units in the U-grid.
+    `vertical-left` / `vertical-right` — 0U vertical PDU on the side rails;
+    spans the full rack height visually and ignores rack_position_u.
+    """
+    rack = "rack"
+    vertical_left = "vertical-left"
+    vertical_right = "vertical-right"
+
+
+class PduSide(str, enum.Enum):
+    """A/B feed designation on a PDU (used to classify redundancy)."""
+    a = "A"
+    b = "B"
+    c = "C"
+
+
 class Region(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "regions"
 
@@ -219,6 +244,21 @@ class Asset(UUIDPrimaryKey, Timestamped, Base):
 
     rack_position_u: Mapped[int | None] = mapped_column(Integer)
     rack_units: Mapped[int | None] = mapped_column(Integer, default=1)
+    # values_callable forces SQLAlchemy to persist the enum VALUE (e.g. "vertical-left")
+    # rather than the Python identifier ("vertical_left"), matching the DDL.
+    face: Mapped[AssetFace] = mapped_column(
+        Enum(AssetFace, name="asset_face", values_callable=lambda x: [e.value for e in x]),
+        default=AssetFace.front, nullable=False,
+    )
+    mount: Mapped[AssetMount] = mapped_column(
+        Enum(AssetMount, name="asset_mount", values_callable=lambda x: [e.value for e in x]),
+        default=AssetMount.rack, nullable=False,
+    )
+    pdu_side: Mapped[PduSide | None] = mapped_column(
+        Enum(PduSide, name="pdu_side", values_callable=lambda x: [e.value for e in x])
+    )
+    # Devices only: how many independent PSUs the device has (for redundancy gap detection)
+    psu_count: Mapped[int | None] = mapped_column(Integer)
 
     mgmt_ip: Mapped[str | None] = mapped_column(String(64))
     mgmt_protocol: Mapped[str | None] = mapped_column(String(16))  # snmp|redfish|modbus|rest|ipmi

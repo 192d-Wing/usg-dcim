@@ -30,6 +30,7 @@ import { RackVisualization } from '@/components/rack-visualization';
 import { RackHeightPicker } from '@/components/rack-height-picker';
 import { useStencilCatalog } from '@/components/stencil';
 import { CapacityPanel, type Capacity } from '@/components/capacity-panel';
+import { PowerChainPanel, type PduSummary, type PerAsset } from '@/components/power-chain-panel';
 import { toast } from 'sonner';
 
 type RackDetail = {
@@ -38,10 +39,16 @@ type RackDetail = {
     u_height: number; max_kw: number | null; serial: string | null;
   };
   capacity: Capacity;
+  power_chain: { per_asset: Record<string, PerAsset>; pdus: PduSummary[] };
   assets: Array<{
     id: string; name: string; hostname: string | null; kind: string;
     manufacturer: string | null; model: string | null; serial: string | null;
     rack_position_u: number | null; rack_units: number;
+    face?: 'front' | 'rear';
+    mount?: 'rack' | 'vertical-left' | 'vertical-right';
+    pdu_side?: 'A' | 'B' | 'C' | null;
+    psu_count?: number | null;
+    redundancy?: 'redundant' | 'single' | 'unpowered' | 'n/a';
     lifecycle_state: string; open_alerts: number;
   }>;
 };
@@ -150,9 +157,22 @@ export function RackShowPage() {
 
       <Card>
         <CardContent className="p-6">
-          <RackVisualization rackId={id} uHeight={r.u_height} assets={assets} mode={mode} />
+          <RackVisualization rackId={id} uHeight={r.u_height} assets={assets as any} mode={mode} />
         </CardContent>
       </Card>
+
+      {detail.data.power_chain && (
+        <PowerChainPanel
+          rackId={id}
+          pdus={detail.data.power_chain.pdus}
+          perAsset={detail.data.power_chain.per_asset}
+          assets={assets.map((a) => ({
+            id: a.id, name: a.name, kind: a.kind,
+            pdu_side: a.pdu_side, psu_count: a.psu_count,
+            redundancy: a.redundancy,
+          }))}
+        />
+      )}
 
       <Card>
         <CardHeader><CardTitle className="text-base">Devices</CardTitle></CardHeader>
