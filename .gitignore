@@ -42,3 +42,6 @@ secrets/
 # Build artifacts
 build/
 *.tgz
+
+# TypeScript incremental build cache
+*.tsbuildinfo
