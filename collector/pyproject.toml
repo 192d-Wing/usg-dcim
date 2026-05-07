@@ -1,0 +1,35 @@
+[project]
+name = "dcim-collector"
+version = "0.1.0"
+description = "USG DCIM site collector — local SNMP/Redfish/Modbus/REST/IPMI poller with store-and-forward"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.4",
+    "pyyaml>=6.0",
+    "structlog>=24.1",
+    "tenacity>=8.2",
+    "pymodbus>=3.6",
+    "aiosqlite>=0.20",
+    "cryptography>=42.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+# Heavy native deps are opt-in so the agent boots in dev without compiling pysnmp etc.
+snmp = ["pysnmp-lextudio>=6.1"]
+redfish = ["sushy>=5.0"]
+ipmi = ["python-ipmi>=0.5"]
+all = ["pysnmp-lextudio>=6.1", "sushy>=5.0", "python-ipmi>=0.5"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dcim_collector"]
+
+[project.scripts]
+dcim-collector = "dcim_collector.main:cli"
