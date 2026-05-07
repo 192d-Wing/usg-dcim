@@ -1,0 +1,7 @@
+# Top-level uv workspace. `uv sync` from here resolves backend + collector together.
+[tool.uv.workspace]
+members = ["backend", "collector"]
+
+[tool.uv]
+# Pin a single Python interpreter across the workspace.
+required-version = ">=0.5"

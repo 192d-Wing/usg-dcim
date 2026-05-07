@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+.vite/
+*.log
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data
+data/
+*.sqlite
+*.sqlite3
+collector-buffer/
+
+# Secrets
+*.pem
+*.key
+*.crt
+secrets/
+.env.local
+
+# Build artifacts
+build/
+*.tgz
