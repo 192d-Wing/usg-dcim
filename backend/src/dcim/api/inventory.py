@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..errors import NotFoundError
+from ..errors import NotFoundError, ValidationError
 from ..models.inventory import Asset, Building, Rack, Region, Room, Row, Site
 from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.inventory import (
@@ -305,6 +305,36 @@ async def update_rack(
     if obj is None:
         raise NotFoundError("rack not found")
     diff = payload.model_dump(exclude_unset=True)
+
+    # If shrinking u_height, refuse if any placed asset would fall outside the new envelope.
+    new_u = diff.get("u_height")
+    if new_u is not None and new_u < obj.u_height:
+        rows = (
+            await db.execute(
+                select(Asset.name, Asset.rack_position_u, Asset.rack_units)
+                .where(
+                    Asset.rack_id == rack_id,
+                    Asset.rack_position_u.is_not(None),
+                )
+            )
+        ).all()
+        offenders = [
+            {
+                "name": r.name,
+                "u": r.rack_position_u,
+                "size": r.rack_units or 1,
+                "top": (r.rack_position_u or 0) + (r.rack_units or 1) - 1,
+            }
+            for r in rows
+            if (r.rack_position_u or 0) + (r.rack_units or 1) - 1 > new_u
+        ]
+        if offenders:
+            raise ValidationError(
+                f"Cannot shrink rack to {new_u}U; {len(offenders)} device(s) would be orphaned. "
+                f"Move or remove them first.",
+                details={"orphans": offenders, "requested_u_height": new_u},
+            )
+
     for k, v in diff.items():
         setattr(obj, k, v)
     await audit.record(db, principal, action="rack.update", target_type="rack",

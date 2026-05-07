@@ -154,6 +154,7 @@ class RackCreate(RackBase):
 
 class RackUpdate(BaseModel):
     name: str | None = None
+    u_height: int | None = Field(default=None, ge=1, le=60)
     max_kw: float | None = None
     serial: str | None = None
 

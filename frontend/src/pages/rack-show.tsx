@@ -27,6 +27,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { RackVisualization } from '@/components/rack-visualization';
+import { RackHeightPicker } from '@/components/rack-height-picker';
 import { useStencilCatalog } from '@/components/stencil';
 import { toast } from 'sonner';
 
@@ -130,9 +131,9 @@ export function RackShowPage() {
                   <DialogHeader><DialogTitle>Edit rack</DialogTitle></DialogHeader>
                   <EditRackForm
                     rack={r}
+                    assets={assets}
                     onSaved={async () => {
                       setEditOpen(false);
-                      toast.success('Rack updated');
                       await qc.invalidateQueries({ queryKey: ['rack-detail', id] });
                     }}
                   />
@@ -194,11 +195,18 @@ export function RackShowPage() {
 // ----- Edit Rack form -----
 const editSchema = z.object({
   name: z.string().min(1),
+  u_height: z.coerce.number().min(1).max(60),
   max_kw: z.string().optional(),
   serial: z.string().optional(),
 });
 
-function EditRackForm({ rack, onSaved }: { rack: RackDetail['rack']; onSaved: () => void }) {
+function EditRackForm({
+  rack, assets, onSaved,
+}: {
+  rack: RackDetail['rack'];
+  assets: RackDetail['assets'];
+  onSaved: () => void;
+}) {
   const updateMutation = useUpdate();
   const isPending = (updateMutation as any).isPending ?? (updateMutation as any).isLoading ?? false;
   const update = updateMutation.mutate;
@@ -206,23 +214,41 @@ function EditRackForm({ rack, onSaved }: { rack: RackDetail['rack']; onSaved: ()
     resolver: zodResolver(editSchema),
     defaultValues: {
       name: rack.name,
+      u_height: rack.u_height,
       max_kw: rack.max_kw?.toString() ?? '',
       serial: rack.serial ?? '',
     },
   });
 
+  // Live preview: which placed devices would fall outside the new envelope?
+  const candidate = Number(form.watch('u_height')) || rack.u_height;
+  const orphans = assets.filter(
+    (a) => a.rack_position_u && (a.rack_position_u + Math.max(1, a.rack_units || 1) - 1) > candidate,
+  );
+
   function onSubmit(v: z.infer<typeof editSchema>) {
+    if (orphans.length > 0) {
+      toast.error(
+        `${orphans.length} device(s) would be orphaned at U${candidate}: ${orphans.slice(0, 3).map((a) => a.name).join(', ')}${orphans.length > 3 ? '…' : ''}`,
+      );
+      return;
+    }
     update(
       {
         resource: 'inventory/racks',
         id: rack.id,
         values: {
           name: v.name,
+          u_height: v.u_height,
           max_kw: v.max_kw ? Number(v.max_kw) : null,
           serial: v.serial || null,
         },
+        successNotification: false,
       },
-      { onSuccess: onSaved },
+      {
+        onSuccess: () => { toast.success('Rack updated'); onSaved(); },
+        onError: (err: any) => toast.error(err?.message ?? 'Update failed'),
+      },
     );
   }
 
@@ -232,13 +258,42 @@ function EditRackForm({ rack, onSaved }: { rack: RackDetail['rack']; onSaved: ()
         <FormField control={form.control} name="name" render={({ field }) => (
           <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />
-        <FormField control={form.control} name="max_kw" render={({ field }) => (
-          <FormItem><FormLabel>Max kW</FormLabel><FormControl><Input type="number" step="0.1" {...field} /></FormControl><FormMessage /></FormItem>
+        <FormField control={form.control} name="u_height" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Rack height</FormLabel>
+            <FormControl>
+              <RackHeightPicker value={Number(field.value) || 42} onChange={field.onChange} />
+            </FormControl>
+            <FormMessage />
+          </FormItem>
         )} />
-        <FormField control={form.control} name="serial" render={({ field }) => (
-          <FormItem><FormLabel>Serial</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={isPending}>{isPending ? 'Saving…' : 'Save'}</Button>
+        {orphans.length > 0 && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs">
+            <p className="font-medium text-destructive">
+              {orphans.length} device(s) would be orphaned at {candidate}U
+            </p>
+            <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+              {orphans.slice(0, 5).map((a) => (
+                <li key={a.id}>
+                  {a.name} (U{a.rack_position_u}{(a.rack_units || 1) > 1 ? `–U${(a.rack_position_u || 0) + (a.rack_units || 1) - 1}` : ''})
+                </li>
+              ))}
+              {orphans.length > 5 && <li>…and {orphans.length - 5} more</li>}
+            </ul>
+            <p className="mt-2 text-muted-foreground">Move them to lower U positions before shrinking the rack.</p>
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-3">
+          <FormField control={form.control} name="max_kw" render={({ field }) => (
+            <FormItem><FormLabel>Max kW</FormLabel><FormControl><Input type="number" step="0.1" {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+          <FormField control={form.control} name="serial" render={({ field }) => (
+            <FormItem><FormLabel>Serial</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+        </div>
+        <Button type="submit" disabled={isPending || orphans.length > 0}>
+          {isPending ? 'Saving…' : 'Save'}
+        </Button>
       </form>
     </Form>
   );

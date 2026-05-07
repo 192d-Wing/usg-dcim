@@ -84,15 +84,29 @@ async def seed() -> None:
                     row = Row(room_id=rm.id, name="A", code="A")
                     db.add(row)
                     await db.flush()
+                    # Mix of rack heights so the UI shows real variety: 24U cabinet,
+                    # 42U standard, 45U taller cabinet, 48U full-height.
+                    heights = [24, 42, 45, 48]
                     for ridx in range(4):
+                        u = heights[ridx]
                         rack = Rack(
                             site_id=site.id, row_id=row.id, name=f"R{ridx+1:02d}", code=f"R{ridx+1:02d}",
-                            u_height=42, max_kw=12.0,
+                            u_height=u, max_kw=12.0,
                         )
                         db.add(rack)
                         await db.flush()
-                        for kind, n in [(AssetKind.pdu, 2), (AssetKind.server, 8), (AssetKind.sensor, 1)]:
+                        # Scale device counts so smaller racks aren't overfull. Place
+                        # devices bottom-up with a running cursor so kinds don't collide.
+                        n_servers = max(2, min(8, u // 6))
+                        slot = 1
+                        for kind, n, kind_u in [
+                            (AssetKind.pdu, 2, 1),       # 1U PDU each
+                            (AssetKind.server, n_servers, 2),  # 2U servers
+                            (AssetKind.sensor, 1, 1),
+                        ]:
                             for k in range(n):
+                                if slot + kind_u - 1 > u:
+                                    break  # rack is full; remaining devices go unplaced (rack_position_u=None)
                                 db.add(
                                     Asset(
                                         site_id=site.id,
@@ -103,9 +117,11 @@ async def seed() -> None:
                                         manufacturer="Demo",
                                         model="X1",
                                         serial=str(uuid4())[:8],
-                                        rack_position_u=k + 1,
+                                        rack_position_u=slot,
+                                        rack_units=kind_u,
                                     )
                                 )
+                                slot += kind_u
                     db.add(
                         Collector(
                             site_id=site.id, name=f"{code}-collector",

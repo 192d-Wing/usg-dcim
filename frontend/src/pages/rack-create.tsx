@@ -14,6 +14,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { RackHeightPicker } from '@/components/rack-height-picker';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -169,10 +170,16 @@ export function RackCreatePage() {
                   <FormItem><FormLabel>Code</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
                 )} />
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                <FormField control={form.control} name="u_height" render={({ field }) => (
-                  <FormItem><FormLabel>U height</FormLabel><FormControl><Input type="number" min={1} max={60} {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
+              <FormField control={form.control} name="u_height" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Rack height</FormLabel>
+                  <FormControl>
+                    <RackHeightPicker value={Number(field.value) || 42} onChange={field.onChange} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <div className="grid grid-cols-2 gap-3">
                 <FormField control={form.control} name="max_kw" render={({ field }) => (
                   <FormItem><FormLabel>Max kW</FormLabel><FormControl><Input type="number" step="0.1" {...field} /></FormControl><FormMessage /></FormItem>
                 )} />
