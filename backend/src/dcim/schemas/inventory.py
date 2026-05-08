@@ -213,3 +213,35 @@ class AssetUpdate(BaseModel):
 
 class AssetOut(AssetBase, _Out):
     pass
+
+
+# --- Cable ---
+class CableBase(BaseModel):
+    site_id: UUID
+    a_asset_id: UUID
+    a_port: str | None = None
+    b_asset_id: UUID
+    b_port: str | None = None
+    medium: str | None = None  # cat6|smf|mmf|power-c13|...
+    color: str | None = None
+    length_m: float | None = None
+    label: str | None = None
+
+
+class CableCreate(CableBase):
+    pass
+
+
+class CableUpdate(BaseModel):
+    a_asset_id: UUID | None = None
+    a_port: str | None = None
+    b_asset_id: UUID | None = None
+    b_port: str | None = None
+    medium: str | None = None
+    color: str | None = None
+    length_m: float | None = None
+    label: str | None = None
+
+
+class CableOut(CableBase, _Out):
+    pass

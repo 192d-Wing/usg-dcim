@@ -26,6 +26,7 @@ def test_openapi_published() -> None:
         "/api/v1/inventory/sites",
         "/api/v1/inventory/racks",
         "/api/v1/inventory/assets",
+        "/api/v1/inventory/cables",
         "/api/v1/collectors",
         "/api/v1/ingest/telemetry",
         "/api/v1/alerts",

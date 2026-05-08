@@ -32,6 +32,7 @@ import { useStencilCatalog } from '@/components/stencil';
 import { CapacityPanel, type Capacity } from '@/components/capacity-panel';
 import { PowerChainPanel, type PduSummary, type PerAsset } from '@/components/power-chain-panel';
 import { MoveAssetDialog } from '@/components/move-asset-dialog';
+import { CablePanel } from '@/components/cable-panel';
 import { toast } from 'sonner';
 
 type RackDetail = {
@@ -176,6 +177,12 @@ export function RackShowPage() {
           }))}
         />
       )}
+
+      <CablePanel
+        rackId={id}
+        siteId={r.site_id}
+        rackAssets={assets.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
+      />
 
       <Card>
         <CardHeader><CardTitle className="text-base">Devices</CardTitle></CardHeader>

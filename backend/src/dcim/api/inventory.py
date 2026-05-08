@@ -10,7 +10,7 @@ import enum as _enum
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -20,6 +20,7 @@ from ..models.inventory import (
     AssetFace,
     AssetMount,
     Building,
+    Cable,
     Rack,
     Region,
     Room,
@@ -30,6 +31,7 @@ from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.inventory import (
     AssetCreate, AssetOut, AssetUpdate,
     BuildingCreate, BuildingOut, BuildingUpdate,
+    CableCreate, CableOut, CableUpdate,
     RackCreate, RackOut, RackUpdate,
     RegionCreate, RegionOut, RegionUpdate,
     RoomCreate, RoomOut, RoomUpdate,
@@ -569,3 +571,124 @@ async def bulk_upsert_assets(
     )
     await db.commit()
     return result
+
+
+# ----------------------- Cables -----------------------
+_CABLE_NOT_FOUND = "cable not found"
+
+
+async def _validate_cable_endpoints(
+    db: AsyncSession, a_asset_id: UUID, b_asset_id: UUID,
+) -> tuple[Asset, Asset]:
+    if a_asset_id == b_asset_id:
+        raise ValidationError("a-end and b-end must be different assets")
+    a = await db.get(Asset, a_asset_id)
+    b = await db.get(Asset, b_asset_id)
+    if a is None:
+        raise ValidationError(f"a-end asset {a_asset_id} not found")
+    if b is None:
+        raise ValidationError(f"b-end asset {b_asset_id} not found")
+    return a, b
+
+
+@router.get("/cables", response_model=Page[CableOut])
+async def list_cables(
+    params: PageParams = Depends(PageParams.from_query),
+    site_id: UUID | None = Query(None),
+    rack_id: UUID | None = Query(None),
+    asset_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """List cables. `rack_id` matches cables touching any asset in that rack."""
+    stmt = select(Cable)
+    if site_id is not None:
+        stmt = stmt.where(Cable.site_id == site_id)
+    if asset_id is not None:
+        stmt = stmt.where(or_(Cable.a_asset_id == asset_id, Cable.b_asset_id == asset_id))
+    if rack_id is not None:
+        rack_assets = select(Asset.id).where(Asset.rack_id == rack_id).scalar_subquery()
+        stmt = stmt.where(or_(Cable.a_asset_id.in_(rack_assets), Cable.b_asset_id.in_(rack_assets)))
+    return await paginate(db, stmt, model=Cable, params=params, out_model=CableOut)
+
+
+@router.get("/cables/{cable_id}", response_model=CableOut)
+async def get_cable(
+    cable_id: UUID,
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Cable, cable_id)
+    if obj is None:
+        raise NotFoundError(_CABLE_NOT_FOUND)
+    return obj
+
+
+@router.post("/cables", response_model=CableOut, status_code=201)
+async def create_cable(
+    payload: CableCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    a, _b = await _validate_cable_endpoints(db, payload.a_asset_id, payload.b_asset_id)
+    data = payload.model_dump()
+    # site_id always tracks the a-end asset's site so cross-site cables stay
+    # discoverable from one consistent owner.
+    data["site_id"] = a.site_id
+    obj = Cable(**data)
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="cable.create", target_type="cable",
+        target_id=str(obj.id), site_id=obj.site_id,
+        metadata={"a_asset_id": str(obj.a_asset_id), "b_asset_id": str(obj.b_asset_id)},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/cables/{cable_id}", response_model=CableOut)
+async def update_cable(
+    cable_id: UUID,
+    payload: CableUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Cable, cable_id)
+    if obj is None:
+        raise NotFoundError(_CABLE_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    new_a = diff.get("a_asset_id", obj.a_asset_id)
+    new_b = diff.get("b_asset_id", obj.b_asset_id)
+    if "a_asset_id" in diff or "b_asset_id" in diff:
+        a, _b = await _validate_cable_endpoints(db, new_a, new_b)
+        if "a_asset_id" in diff:
+            obj.site_id = a.site_id
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="cable.update", target_type="cable",
+        target_id=str(cable_id), site_id=obj.site_id, diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/cables/{cable_id}", status_code=204)
+async def delete_cable(
+    cable_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Cable, cable_id)
+    if obj is None:
+        raise NotFoundError(_CABLE_NOT_FOUND)
+    site_id = obj.site_id
+    await db.execute(delete(Cable).where(Cable.id == cable_id))
+    await audit.record(
+        db, principal, action="cable.delete", target_type="cable",
+        target_id=str(cable_id), site_id=site_id,
+    )
+    await db.commit()
