@@ -13,6 +13,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { FreshnessBadge } from '@/components/freshness-badge';
+import { AssetCablesPanel } from '@/components/asset-cables-panel';
 import { formatDate } from '@/lib/utils';
 
 type AssetDetail = {
@@ -126,6 +127,8 @@ export function AssetShowPage() {
       {sources.slice(0, 4).map((s) => (
         <SeriesChart key={s.metric} siteId={a.site_id} assetId={a.id} metric={s.metric} unit={s.unit} />
       ))}
+
+      <AssetCablesPanel assetId={a.id} />
 
       <Card>
         <CardHeader><CardTitle className="text-base">Recent alerts</CardTitle></CardHeader>
