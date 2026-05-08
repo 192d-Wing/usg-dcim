@@ -257,6 +257,7 @@ async def asset_detail(
             "mgmt_port": asset.mgmt_port,
             "rack_position_u": asset.rack_position_u,
             "rack_units": asset.rack_units,
+            "port_count": asset.port_count,
             "lifecycle_state": asset.lifecycle_state.value if hasattr(asset.lifecycle_state, "value") else asset.lifecycle_state,
         },
         "telemetry_sources": [

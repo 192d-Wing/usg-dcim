@@ -21,7 +21,8 @@ type AssetDetail = {
     id: string; site_id: string; rack_id: string | null; name: string; hostname: string | null;
     kind: string; manufacturer: string | null; model: string | null; serial: string | null;
     firmware: string | null; mgmt_ip: string | null; mgmt_protocol: string | null; mgmt_port: number | null;
-    rack_position_u: number | null; rack_units: number | null; lifecycle_state: string;
+    rack_position_u: number | null; rack_units: number | null;
+    port_count: number | null; lifecycle_state: string;
   };
   telemetry_sources: {
     metric: string; unit: string | null; source_system: string | null;
@@ -128,7 +129,7 @@ export function AssetShowPage() {
         <SeriesChart key={s.metric} siteId={a.site_id} assetId={a.id} metric={s.metric} unit={s.unit} />
       ))}
 
-      <AssetCablesPanel assetId={a.id} />
+      <AssetCablesPanel assetId={a.id} portCount={a.port_count} />
 
       <Card>
         <CardHeader><CardTitle className="text-base">Recent alerts</CardTitle></CardHeader>

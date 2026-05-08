@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { http } from '@/lib/http';
 
 type Cable = {
@@ -19,7 +20,12 @@ type Cable = {
 };
 type RemoteAsset = { id: string; name: string; kind: string; rack_id: string | null };
 
-export function AssetCablesPanel({ assetId }: { assetId: string }) {
+export function AssetCablesPanel({
+  assetId, portCount,
+}: {
+  assetId: string;
+  portCount?: number | null;
+}) {
   const cablesRes = useQuery({
     queryKey: ['asset-cables', assetId],
     queryFn: async () => {
@@ -57,13 +63,64 @@ export function AssetCablesPanel({ assetId }: { assetId: string }) {
     return m;
   }, [remoteRes.data]);
 
+  // For port-bearing assets (patch panels), build a port → connected cable map
+  // so the grid can show used vs free at a glance and tooltip the remote end.
+  const portUse = useMemo(() => {
+    const m = new Map<number, { remoteName: string; remotePort: string | null }>();
+    if (!portCount || portCount <= 0) return m;
+    for (const c of cables) {
+      const localIsA = c.a_asset_id === assetId;
+      const localPort = localIsA ? c.a_port : c.b_port;
+      if (!localPort) continue;
+      const n = Number(localPort);
+      if (!Number.isInteger(n) || n < 1 || n > portCount) continue;
+      const remoteId = localIsA ? c.b_asset_id : c.a_asset_id;
+      const remote = remoteById.get(remoteId);
+      m.set(n, {
+        remoteName: remote?.name ?? remoteId.slice(0, 8),
+        remotePort: localIsA ? c.b_port : c.a_port,
+      });
+    }
+    return m;
+  }, [cables, portCount, assetId, remoteById]);
+
+  const ports = portCount ?? 0;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <CableIcon className="h-4 w-4" /> Cables ({cables.length})
+          {ports > 0 && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {portUse.size} / {ports} ports in use
+            </span>
+          )}
         </CardTitle>
       </CardHeader>
+      {ports > 0 && (
+        <CardContent className="border-b py-3">
+          <div className="flex flex-wrap gap-1">
+            {Array.from({ length: ports }, (_, i) => i + 1).map((n) => {
+              const use = portUse.get(n);
+              return (
+                <div
+                  key={n}
+                  className={cn(
+                    'flex h-6 w-7 items-center justify-center rounded-sm border text-[10px] font-mono tabular-nums',
+                    use
+                      ? 'border-success/40 bg-success/15 text-success'
+                      : 'border-border bg-muted/30 text-muted-foreground',
+                  )}
+                  title={use ? `→ ${use.remoteName}${use.remotePort ? ` port ${use.remotePort}` : ''}` : 'free'}
+                >
+                  {n}
+                </div>
+              );
+            })}
+          </div>
+        </CardContent>
+      )}
       <CardContent className="p-0">
         {cablesRes.isLoading ? (
           <div className="space-y-2 p-6">
