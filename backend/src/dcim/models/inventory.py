@@ -325,3 +325,7 @@ class Cable(UUIDPrimaryKey, Timestamped, Base):
     color: Mapped[str | None] = mapped_column(String(16))
     length_m: Mapped[float | None] = mapped_column(Numeric(6, 2))
     label: Mapped[str | None] = mapped_column(String(128))
+    # Routing face: which side of the rack the cable runs on (front|rear|...).
+    # Free-form string, not the asset_face enum, so we can later extend with
+    # values like `top` (overhead cable trays) without a schema change.
+    face: Mapped[str | None] = mapped_column(String(8))

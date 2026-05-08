@@ -228,6 +228,7 @@ class CableBase(BaseModel):
     color: str | None = None
     length_m: float | None = None
     label: str | None = None
+    face: str | None = None    # front|rear|...
 
 
 class CableCreate(CableBase):
@@ -243,6 +244,7 @@ class CableUpdate(BaseModel):
     color: str | None = None
     length_m: float | None = None
     label: str | None = None
+    face: str | None = None
 
 
 class CableOut(CableBase, _Out):

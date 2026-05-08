@@ -37,6 +37,7 @@ type Cable = {
   color: string | null;
   length_m: number | null;
   label: string | null;
+  face: string | null;
 };
 type Asset = {
   id: string; name: string; kind: string; site_id: string;
@@ -56,6 +57,7 @@ const cableSchema = z.object({
   color: z.string().optional(),
   length_m: z.string().optional(),
   label: z.string().optional(),
+  face: z.string().optional(),
 }).refine((v) => v.a_asset_id !== v.b_asset_id, {
   path: ['b_asset_id'], message: 'A-end and B-end must differ',
 });
@@ -72,6 +74,7 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Cable | null>(null);
+  const [faceFilter, setFaceFilter] = useState<'all' | 'front' | 'rear' | 'unspecified'>('all');
 
   const cablesRes = useQuery({
     queryKey: ['rack-cables', rackId],
@@ -84,16 +87,21 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
     enabled: !!rackId,
   });
 
-  const cables = cablesRes.data ?? [];
+  const allCables = cablesRes.data ?? [];
+  const cables = useMemo(() => {
+    if (faceFilter === 'all') return allCables;
+    if (faceFilter === 'unspecified') return allCables.filter((c) => !c.face);
+    return allCables.filter((c) => c.face === faceFilter);
+  }, [allCables, faceFilter]);
   const otherEndIds = useMemo(() => {
     const local = new Set(rackAssets.map((a) => a.id));
     const ids = new Set<string>();
-    for (const c of cables) {
+    for (const c of allCables) {
       if (!local.has(c.a_asset_id)) ids.add(c.a_asset_id);
       if (!local.has(c.b_asset_id)) ids.add(c.b_asset_id);
     }
     return Array.from(ids);
-  }, [cables, rackAssets]);
+  }, [allCables, rackAssets]);
 
   // Hydrate names for endpoints that live outside this rack.
   const remoteRes = useQuery({
@@ -136,13 +144,24 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle className="flex items-center gap-2 text-base">
-          <CableIcon className="h-4 w-4" /> Cables ({cables.length})
+          <CableIcon className="h-4 w-4" /> Cables ({cables.length}{faceFilter === 'all' ? '' : ` of ${allCables.length}`})
         </CardTitle>
-        {canWrite && (
-          <Button size="sm" onClick={() => { setEditing(null); setDialogOpen(true); }}>
-            <Plus className="h-4 w-4" /> Add cable
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <Select value={faceFilter} onValueChange={(v) => setFaceFilter(v as typeof faceFilter)}>
+            <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All faces</SelectItem>
+              <SelectItem value="front">Front only</SelectItem>
+              <SelectItem value="rear">Rear only</SelectItem>
+              <SelectItem value="unspecified">Unspecified</SelectItem>
+            </SelectContent>
+          </Select>
+          {canWrite && (
+            <Button size="sm" onClick={() => { setEditing(null); setDialogOpen(true); }}>
+              <Plus className="h-4 w-4" /> Add cable
+            </Button>
+          )}
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {cablesRes.isLoading ? (
@@ -156,6 +175,7 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-16">Face</TableHead>
                 <TableHead>A-end</TableHead>
                 <TableHead>A port</TableHead>
                 <TableHead>B-end</TableHead>
@@ -173,6 +193,11 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
                 const b = assetById.get(c.b_asset_id);
                 return (
                   <TableRow key={c.id}>
+                    <TableCell>
+                      {c.face
+                        ? <Badge variant="outline" className="capitalize">{c.face}</Badge>
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell className="font-medium">{a?.name ?? c.a_asset_id.slice(0, 8)}</TableCell>
                     <TableCell className="font-mono text-xs">{c.a_port ?? '—'}</TableCell>
                     <TableCell className="font-medium">{b?.name ?? c.b_asset_id.slice(0, 8)}</TableCell>
@@ -241,6 +266,7 @@ function CableDialog({
       color: editing?.color ?? '',
       length_m: editing?.length_m != null ? String(editing.length_m) : '',
       label: editing?.label ?? '',
+      face: editing?.face ?? '',
     },
     values: editing
       ? {
@@ -252,6 +278,7 @@ function CableDialog({
         color: editing.color ?? '',
         length_m: editing.length_m != null ? String(editing.length_m) : '',
         label: editing.label ?? '',
+        face: editing.face ?? '',
       }
       : undefined,
   });
@@ -295,6 +322,7 @@ function CableDialog({
       color: v.color || null,
       length_m: v.length_m ? Number(v.length_m) : null,
       label: v.label || null,
+      face: v.face || null,
     };
     try {
       if (editing) {
@@ -409,13 +437,29 @@ function CableDialog({
                 </FormItem>
               )} />
             </div>
-            <FormField control={form.control} name="label" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Label (optional)</FormLabel>
-                <FormControl><Input placeholder="e.g. CAB-001" {...field} /></FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
+            <div className="grid grid-cols-[160px_1fr] gap-3">
+              <FormField control={form.control} name="face" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Routing face</FormLabel>
+                  <Select value={field.value || 'unspecified'} onValueChange={(v) => field.onChange(v === 'unspecified' ? '' : v)}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      <SelectItem value="unspecified">Unspecified</SelectItem>
+                      <SelectItem value="front">Front</SelectItem>
+                      <SelectItem value="rear">Rear</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="label" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Label (optional)</FormLabel>
+                  <FormControl><Input placeholder="e.g. CAB-001" {...field} /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
               <Button type="submit" disabled={form.formState.isSubmitting}>
