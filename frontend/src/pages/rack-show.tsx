@@ -33,6 +33,7 @@ import { CapacityPanel, type Capacity } from '@/components/capacity-panel';
 import { PowerChainPanel, type PduSummary, type PerAsset } from '@/components/power-chain-panel';
 import { MoveAssetDialog } from '@/components/move-asset-dialog';
 import { CablePanel } from '@/components/cable-panel';
+import { ForecastPanel } from '@/components/forecast-panel';
 import { toast } from 'sonner';
 
 type RackDetail = {
@@ -159,6 +160,8 @@ export function RackShowPage() {
       </div>
 
       {detail.data.capacity && <CapacityPanel capacity={detail.data.capacity} />}
+
+      <ForecastPanel rackId={id} />
 
       <Card>
         <CardContent className="p-6">

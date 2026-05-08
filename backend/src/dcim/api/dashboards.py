@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..models.alerts import Alert, AlertState, Severity
 from ..models.collectors import Collector, CollectorStatus
-from ..models.inventory import LifecycleState, Rack, Site
+from ..models.inventory import Asset, LifecycleState, Rack, Site
 from ..models.telemetry_meta import FreshnessState, TelemetrySource
 from ..security.capabilities import DASHBOARD_READ
 from ..security.deps import Principal, require_capability
@@ -285,6 +285,77 @@ async def asset_detail(
             for a in recent_alerts
         ],
     }
+
+
+@router.get("/forecast/racks")
+async def racks_forecast_batch(
+    site_id: UUID | None = Query(None),
+    limit: int = Query(200, ge=1, le=1000),
+    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Batch forecast for many racks. Used by the racks-list runway column.
+
+    Strips the per-rack history array to keep the payload tight; callers that
+    need history fetch the per-rack endpoint.
+    """
+    from ..services.forecast import compute_rack_forecast
+
+    stmt = select(Rack)
+    if site_id is not None:
+        stmt = stmt.where(Rack.site_id == site_id)
+    racks = (await db.execute(stmt.limit(limit))).scalars().all()
+    if not racks:
+        return {"racks": []}
+    rack_ids = [r.id for r in racks]
+    all_assets = (
+        await db.execute(select(Asset).where(Asset.rack_id.in_(rack_ids)))
+    ).scalars().all()
+    by_rack: dict[UUID, list[Asset]] = {}
+    for a in all_assets:
+        by_rack.setdefault(a.rack_id, []).append(a)
+    out = []
+    for r in racks:
+        f = compute_rack_forecast(r, by_rack.get(r.id, []))
+        f.pop("history", None)
+        out.append(f)
+    return {"racks": out}
+
+
+@router.get("/forecast/racks/{rack_id}")
+async def rack_forecast(
+    rack_id: UUID,
+    add_units: int = Query(0, ge=0, le=60, description="What-if: project runway after adding this many U."),
+    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-rack U-fill forecast with optional what-if delta."""
+    from ..services.forecast import compute_rack_forecast, compute_what_if
+
+    rack = await db.get(Rack, rack_id)
+    if rack is None:
+        return {"error": "not_found"}
+    assets = (
+        await db.execute(select(Asset).where(Asset.rack_id == rack_id))
+    ).scalars().all()
+    if add_units > 0:
+        return compute_what_if(rack, list(assets), add_units=add_units)
+    return compute_rack_forecast(rack, list(assets))
+
+
+@router.get("/forecast/sites/{site_id}")
+async def site_forecast(
+    site_id: UUID,
+    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Site-wide forecast rollup: U usage, worst-case rack runway, band counts."""
+    from ..services.forecast import compute_site_forecast
+
+    site = await db.get(Site, site_id)
+    if site is None:
+        return {"error": "not_found"}
+    return await compute_site_forecast(db, site_id)
 
 
 @router.get("/sites/{site_id}")

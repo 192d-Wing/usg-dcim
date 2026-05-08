@@ -10,6 +10,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { CapacityBar } from '@/components/capacity-bar';
+import { Badge } from '@/components/ui/badge';
 import { http } from '@/lib/http';
 
 type Site = { id: string; code: string; name: string };
@@ -20,6 +21,22 @@ type CapacityRow = {
   kw_current: number | null; kw_max: number | null; kw_pct: number | null;
   biggest_contiguous_free: number;
 };
+type ForecastRow = {
+  rack_id: string;
+  slope_u_per_day: number | null;
+  days_until_full: number | null;
+  runway_band: 'critical' | 'warning' | 'healthy' | 'unknown';
+};
+const BAND_VARIANT: Record<ForecastRow['runway_band'], 'critical' | 'warning' | 'success' | 'secondary'> = {
+  critical: 'critical', warning: 'warning', healthy: 'success', unknown: 'secondary',
+};
+function formatDays(d: number | null): string {
+  if (d === null) return '—';
+  if (d < 1) return '<1d';
+  if (d > 730) return `${Math.round(d / 365)}y`;
+  if (d > 60) return `${Math.round(d / 30)}mo`;
+  return `${Math.round(d)}d`;
+}
 
 export function RacksListPage() {
   const nav = useNavigate();
@@ -49,6 +66,22 @@ export function RacksListPage() {
     for (const c of capacityRes.data ?? []) m.set(c.rack_id, c);
     return m;
   }, [capacityRes.data]);
+
+  const forecastRes = useQuery({
+    queryKey: ['racks-forecast', siteId],
+    queryFn: async () => {
+      const params: Record<string, string | number> = { limit: 500 };
+      if (siteId !== 'all') params.site_id = siteId;
+      const r = await http.get<{ racks: ForecastRow[] }>('/dashboards/forecast/racks', { params });
+      return r.data.racks;
+    },
+    refetchInterval: 60_000,
+  });
+  const forecastById = useMemo(() => {
+    const m = new Map<string, ForecastRow>();
+    for (const f of forecastRes.data ?? []) m.set(f.rack_id, f);
+    return m;
+  }, [forecastRes.data]);
 
   const sites = sitesRes.result.data ?? [];
   const racks = racksRes.result.data ?? [];
@@ -127,8 +160,20 @@ export function RacksListPage() {
                       ) : (
                         <div className="text-[11px] text-muted-foreground">No kW rating</div>
                       )}
-                      <div className="text-[11px] text-muted-foreground">
-                        Largest gap: <span className="font-mono">{cap.biggest_contiguous_free}U</span>
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>Largest gap: <span className="font-mono">{cap.biggest_contiguous_free}U</span></span>
+                        {(() => {
+                          const fc = forecastById.get(r.id);
+                          if (!fc) return null;
+                          if (fc.slope_u_per_day === null) {
+                            return <Badge variant="secondary" className="text-[10px]">no trend</Badge>;
+                          }
+                          return (
+                            <Badge variant={BAND_VARIANT[fc.runway_band]} className="text-[10px]">
+                              {formatDays(fc.days_until_full)} runway
+                            </Badge>
+                          );
+                        })()}
                       </div>
                     </div>
                   ) : (
