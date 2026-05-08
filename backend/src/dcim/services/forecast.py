@@ -8,17 +8,22 @@ exact placement timeline from the audit log.
 
 Math: ordinary least squares on (days_since_first_placement, cumulative_u).
 slope_u_per_day < epsilon → "no growth" (don't project a fill date).
+
+kW forecasting (compute_rack_kw_forecast) reuses the same OLS slope but feeds
+it daily-averaged kW samples from Elasticsearch — summed across PDU assets in
+the rack. Same band semantics: critical/warning/healthy/unknown.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.inventory import Asset, AssetMount, Rack
+from ..models.inventory import Asset, AssetKind, AssetMount, Rack
+from .capacity import POWER_METRIC_KW, POWER_METRIC_W
 
 _NO_GROWTH_EPS = 1e-6
 
@@ -30,7 +35,7 @@ def _linear_slope(xs: list[float], ys: list[float]) -> float | None:
         return None
     mx = sum(xs) / n
     my = sum(ys) / n
-    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, ys, strict=False))
     den = sum((x - mx) ** 2 for x in xs)
     if den < _NO_GROWTH_EPS:
         return None
@@ -74,14 +79,14 @@ def compute_rack_forecast(rack: Rack, assets: list[Asset], *, now: datetime | No
       - days_until_full / projected_fill_date: None when slope is None or rack is already full
       - runway_band: critical|warning|healthy|unknown — UX hint for badges
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     times, cumulative = _build_timeline(assets)
     u_total = rack.u_height
     u_used = cumulative[-1] if cumulative else 0
     u_free = max(0, u_total - u_used)
     history = [
         {"ts": t.isoformat(), "u_used": u}
-        for t, u in zip(times, cumulative)
+        for t, u in zip(times, cumulative, strict=False)
     ]
 
     if len(times) < 2 or u_free == 0:
@@ -153,6 +158,182 @@ def compute_what_if(
         "what_if_days_until_full": round(days, 1),
         "what_if_runway_band": _runway_band(days),
     }
+
+
+def slope_from_buckets(
+    buckets: list[tuple[datetime, float]],
+) -> tuple[float | None, float | None]:
+    """OLS slope (units/day) and intercept for a list of (timestamp, value) samples.
+
+    Returns (None, None) when there are fewer than 2 points or no x-variance.
+    Pure function so tests don't need an ES mock.
+    """
+    if len(buckets) < 2:
+        return None, None
+    base = buckets[0][0]
+    xs = [(t - base).total_seconds() / 86400.0 for t, _ in buckets]
+    ys = [v for _, v in buckets]
+    slope = _linear_slope(xs, ys)
+    if slope is None:
+        return None, None
+    mx = sum(xs) / len(xs)
+    my = sum(ys) / len(ys)
+    intercept = my - slope * mx
+    return slope, intercept
+
+
+def _kw_runway_band(days: float | None) -> str:
+    return _runway_band(days)
+
+
+def _kw_payload(
+    *, max_kw: float | None, days: int, samples: int,
+    slope: float | None, current_kw: float | None,
+    days_until_max: float | None, projected_max_date: str | None,
+    band: str,
+) -> dict:
+    return {
+        "max_kw": max_kw,
+        "days": days,
+        "samples": samples,
+        "slope_kw_per_day": round(slope, 6) if slope is not None else None,
+        "current_kw": round(current_kw, 3) if current_kw is not None else None,
+        "days_until_max": days_until_max,
+        "projected_max_date": projected_max_date,
+        "runway_band": band,
+    }
+
+
+def _samples_from_es_buckets(day_buckets: list[dict]) -> list[tuple[datetime, float]]:
+    samples: list[tuple[datetime, float]] = []
+    for bucket in day_buckets:
+        total = 0.0
+        any_val = False
+        for m in bucket.get("by_metric", {}).get("buckets", []):
+            avg = m.get("avg_v", {}).get("value")
+            if avg is None:
+                continue
+            v = float(avg) / 1000.0 if m["key"] in POWER_METRIC_W else float(avg)
+            total += v
+            any_val = True
+        if any_val:
+            ts = datetime.fromtimestamp(bucket["key"] / 1000.0, tz=UTC)
+            samples.append((ts, total))
+    return samples
+
+
+def _project_kw(
+    samples: list[tuple[datetime, float]],
+    *, max_kw: float | None, days: int, now: datetime,
+) -> dict:
+    """Pure projection logic — given parsed samples, return the kW forecast payload."""
+    current_kw = samples[-1][1] if samples else None
+
+    if len(samples) < 2:
+        return _kw_payload(
+            max_kw=max_kw, days=days, samples=len(samples),
+            slope=None, current_kw=current_kw,
+            days_until_max=None, projected_max_date=None, band="unknown",
+        )
+
+    slope, _ = slope_from_buckets(samples)
+    no_growth = slope is None or slope < _NO_GROWTH_EPS
+    if no_growth or max_kw is None or current_kw is None:
+        return _kw_payload(
+            max_kw=max_kw, days=days, samples=len(samples),
+            slope=slope, current_kw=current_kw,
+            days_until_max=None, projected_max_date=None,
+            band="healthy" if no_growth else "unknown",
+        )
+
+    headroom = max_kw - current_kw
+    if headroom <= 0:
+        return _kw_payload(
+            max_kw=max_kw, days=days, samples=len(samples),
+            slope=slope, current_kw=current_kw,
+            days_until_max=0.0, projected_max_date=now.isoformat(), band="critical",
+        )
+    days_until = headroom / slope
+    return _kw_payload(
+        max_kw=max_kw, days=days, samples=len(samples),
+        slope=slope, current_kw=current_kw,
+        days_until_max=round(days_until, 1),
+        projected_max_date=(now + timedelta(days=days_until)).isoformat(),
+        band=_kw_runway_band(days_until),
+    )
+
+
+def _site_indices(site_id: UUID, start: datetime, end: datetime) -> list[str]:
+    from .elastic import telemetry_index
+    indices: list[str] = []
+    cur = start.replace(day=1)
+    while cur <= end:
+        indices.append(telemetry_index(str(site_id), cur))
+        cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return indices
+
+
+async def compute_rack_kw_forecast(
+    rack: Rack, rack_assets: list[Asset], *, days: int = 90,
+    now: datetime | None = None,
+) -> dict | None:
+    """Project when this rack's kW load reaches max_kw at the current growth rate.
+
+    Returns None when the rack has no PDU assets — kW forecasting requires
+    PDU telemetry. When PDUs exist but ES has no samples or is unreachable,
+    returns a payload with slope=None so the UI renders "no trend yet."
+    """
+    pdu_ids = [a.id for a in rack_assets if a.kind == AssetKind.pdu]
+    if not pdu_ids:
+        return None
+
+    now = now or datetime.now(UTC)
+    start = now - timedelta(days=days)
+    max_kw = float(rack.max_kw) if rack.max_kw else None
+
+    from .elastic import client
+
+    metrics = list(POWER_METRIC_KW | POWER_METRIC_W)
+    es = client()
+    try:
+        resp = await es.search(
+            index=",".join(_site_indices(rack.site_id, start, now)),
+            body={
+                "size": 0,
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"terms": {"asset_id": [str(p) for p in pdu_ids]}},
+                            {"terms": {"metric": metrics}},
+                            {"range": {"ts": {"gte": start.isoformat(), "lte": now.isoformat()}}},
+                        ]
+                    }
+                },
+                "aggs": {
+                    "by_day": {
+                        "date_histogram": {"field": "ts", "fixed_interval": "1d"},
+                        "aggs": {
+                            "by_metric": {
+                                "terms": {"field": "metric", "size": 20},
+                                "aggs": {"avg_v": {"avg": {"field": "value"}}},
+                            },
+                        },
+                    },
+                },
+            },
+            ignore_unavailable=True,
+        )
+    except Exception:
+        # ES unreachable / index missing — degrade so the U-only forecast still renders.
+        return _kw_payload(
+            max_kw=max_kw, days=days, samples=0,
+            slope=None, current_kw=None,
+            days_until_max=None, projected_max_date=None, band="unknown",
+        )
+
+    day_buckets = resp.get("aggregations", {}).get("by_day", {}).get("buckets", [])
+    samples = _samples_from_es_buckets(day_buckets)
+    return _project_kw(samples, max_kw=max_kw, days=days, now=now)
 
 
 async def compute_site_forecast(db: AsyncSession, site_id: UUID) -> dict:

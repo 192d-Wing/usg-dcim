@@ -8,6 +8,17 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { http } from '@/lib/http';
 
+type Band = 'critical' | 'warning' | 'healthy' | 'unknown';
+type KwForecast = {
+  max_kw: number | null;
+  days: number;
+  samples: number;
+  slope_kw_per_day: number | null;
+  current_kw: number | null;
+  days_until_max: number | null;
+  projected_max_date: string | null;
+  runway_band: Band;
+};
 type Forecast = {
   u_used: number;
   u_total: number;
@@ -15,12 +26,13 @@ type Forecast = {
   slope_u_per_day: number | null;
   days_until_full: number | null;
   projected_fill_date: string | null;
-  runway_band: 'critical' | 'warning' | 'healthy' | 'unknown';
+  runway_band: Band;
+  kw_forecast: KwForecast | null;
   what_if_add_units?: number;
   what_if_u_used?: number;
   what_if_u_free?: number;
   what_if_days_until_full?: number | null;
-  what_if_runway_band?: 'critical' | 'warning' | 'healthy' | 'unknown';
+  what_if_runway_band?: Band;
 };
 
 const BAND_VARIANT: Record<string, 'critical' | 'warning' | 'success' | 'secondary'> = {
@@ -101,6 +113,7 @@ export function ForecastPanel({ rackId }: { rackId: string }) {
                 Need at least two placements with distinct timestamps before a slope can be inferred.
               </p>
             )}
+            {f.kw_forecast && <KwSection kw={f.kw_forecast} />}
             <div className="rounded-md border bg-muted/30 p-3 space-y-2">
               <Label className="text-xs uppercase tracking-wider text-muted-foreground">
                 What-if: add U to this rack
@@ -139,6 +152,49 @@ function Field({ label, value }: { label: string; value: string }) {
     <div>
       <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-medium tabular-nums">{value}</div>
+    </div>
+  );
+}
+
+function KwSection({ kw }: { kw: KwForecast }) {
+  const slope = kw.slope_kw_per_day;
+  return (
+    <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+          kW trend ({kw.days}d window · {kw.samples} samples)
+        </Label>
+        <Badge variant={BAND_VARIANT[kw.runway_band]} className="capitalize">
+          {kw.runway_band}
+        </Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <Field
+          label="Current"
+          value={kw.current_kw === null ? '—' : `${kw.current_kw.toFixed(2)} kW`}
+        />
+        <Field
+          label="Max rated"
+          value={kw.max_kw === null ? '—' : `${kw.max_kw.toFixed(1)} kW`}
+        />
+        <Field
+          label="Growth"
+          value={slope === null ? 'no trend yet' : `${(slope * 1000).toFixed(0)} W/day`}
+        />
+        <Field
+          label="Runway to max"
+          value={
+            kw.days_until_max === null
+              ? '—'
+              : `${formatDays(kw.days_until_max)} (${formatDate(kw.projected_max_date)})`
+          }
+        />
+      </div>
+      {kw.samples < 2 && (
+        <p className="text-xs text-muted-foreground">
+          Need at least two daily kW samples from PDU telemetry before a slope can be inferred.
+        </p>
+      )}
     </div>
   );
 }

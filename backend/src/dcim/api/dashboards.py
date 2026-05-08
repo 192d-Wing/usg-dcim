@@ -326,21 +326,27 @@ async def racks_forecast_batch(
 async def rack_forecast(
     rack_id: UUID,
     add_units: int = Query(0, ge=0, le=60, description="What-if: project runway after adding this many U."),
+    kw_days: int = Query(90, ge=7, le=365, description="Window for kW-trend regression."),
     _: Principal = Depends(require_capability(DASHBOARD_READ)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Per-rack U-fill forecast with optional what-if delta."""
-    from ..services.forecast import compute_rack_forecast, compute_what_if
+    """Per-rack U-fill forecast + kW-trend forecast + optional what-if delta."""
+    from ..services.forecast import (
+        compute_rack_forecast, compute_rack_kw_forecast, compute_what_if,
+    )
 
     rack = await db.get(Rack, rack_id)
     if rack is None:
         return {"error": "not_found"}
-    assets = (
-        await db.execute(select(Asset).where(Asset.rack_id == rack_id))
-    ).scalars().all()
+    asset_list = list(
+        (await db.execute(select(Asset).where(Asset.rack_id == rack_id))).scalars().all()
+    )
     if add_units > 0:
-        return compute_what_if(rack, list(assets), add_units=add_units)
-    return compute_rack_forecast(rack, list(assets))
+        payload = compute_what_if(rack, asset_list, add_units=add_units)
+    else:
+        payload = compute_rack_forecast(rack, asset_list)
+    payload["kw_forecast"] = await compute_rack_kw_forecast(rack, asset_list, days=kw_days)
+    return payload
 
 
 @router.get("/forecast/sites/{site_id}")
