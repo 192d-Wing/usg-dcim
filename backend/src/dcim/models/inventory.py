@@ -51,6 +51,7 @@ class AssetKind(str, enum.Enum):
     storage = "storage"
     chassis = "chassis"
     blade = "blade"
+    patch_panel = "patch_panel"
     other = "other"
 
 
@@ -259,6 +260,9 @@ class Asset(UUIDPrimaryKey, Timestamped, Base):
     )
     # Devices only: how many independent PSUs the device has (for redundancy gap detection)
     psu_count: Mapped[int | None] = mapped_column(Integer)
+    # Patch panels (and any port-bearing device): structured port count drives
+    # the port pickers in the cable editor.
+    port_count: Mapped[int | None] = mapped_column(Integer)
 
     mgmt_ip: Mapped[str | None] = mapped_column(String(64))
     mgmt_protocol: Mapped[str | None] = mapped_column(String(16))  # snmp|redfish|modbus|rest|ipmi

@@ -38,7 +38,11 @@ type Cable = {
   length_m: number | null;
   label: string | null;
 };
-type Asset = { id: string; name: string; kind: string; site_id: string; rack_id: string | null };
+type Asset = {
+  id: string; name: string; kind: string; site_id: string;
+  rack_id: string | null; port_count?: number | null;
+};
+type RackAsset = { id: string; name: string; kind: string; port_count?: number | null };
 
 const COMMON_MEDIA = ['cat6', 'cat6a', 'smf', 'mmf', 'dac', 'aoc', 'power-c13', 'power-c19'];
 const COMMON_COLORS = ['blue', 'yellow', 'red', 'green', 'orange', 'white', 'black', 'gray'];
@@ -60,7 +64,7 @@ type CableForm = z.infer<typeof cableSchema>;
 type Props = {
   rackId: string;
   siteId: string;
-  rackAssets: { id: string; name: string; kind: string }[];
+  rackAssets: RackAsset[];
 };
 
 export function CablePanel({ rackId, siteId, rackAssets }: Props) {
@@ -105,9 +109,11 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
   });
 
   const assetById = useMemo(() => {
-    const m = new Map<string, { id: string; name: string; kind: string }>();
+    const m = new Map<string, RackAsset>();
     for (const a of rackAssets) m.set(a.id, a);
-    for (const a of remoteRes.data ?? []) m.set(a.id, { id: a.id, name: a.name, kind: a.kind });
+    for (const a of remoteRes.data ?? []) {
+      m.set(a.id, { id: a.id, name: a.name, kind: a.kind, port_count: a.port_count ?? null });
+    }
     return m;
   }, [rackAssets, remoteRes.data]);
 
@@ -220,7 +226,7 @@ function CableDialog({
   open: boolean;
   onOpenChange: (o: boolean) => void;
   siteId: string;
-  rackAssets: { id: string; name: string; kind: string }[];
+  rackAssets: RackAsset[];
   editing: Cable | null;
   onSaved: () => void;
 }) {
@@ -260,6 +266,22 @@ function CableDialog({
     queryOptions: { enabled: open && !!siteId },
   });
   const siteAssets = siteAssetsRes.result.data ?? [];
+
+  const portCountById = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of rackAssets) {
+      if (a.port_count && a.port_count > 0) m.set(a.id, a.port_count);
+    }
+    for (const a of siteAssets) {
+      if (a.port_count && a.port_count > 0) m.set(a.id, a.port_count);
+    }
+    return m;
+  }, [rackAssets, siteAssets]);
+
+  const aAssetId = form.watch('a_asset_id');
+  const bAssetId = form.watch('b_asset_id');
+  const aPortCount = portCountById.get(aAssetId);
+  const bPortCount = portCountById.get(bAssetId);
 
   const updateMutation = useUpdate();
 
@@ -322,7 +344,9 @@ function CableDialog({
               <FormField control={form.control} name="a_port" render={({ field }) => (
                 <FormItem>
                   <FormLabel>A port</FormLabel>
-                  <FormControl><Input placeholder="e.g. eth0, Gi0/24, port-1" {...field} /></FormControl>
+                  <FormControl>
+                    <PortPicker portCount={aPortCount} value={field.value ?? ''} onChange={field.onChange} />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -345,7 +369,9 @@ function CableDialog({
               <FormField control={form.control} name="b_port" render={({ field }) => (
                 <FormItem>
                   <FormLabel>B port</FormLabel>
-                  <FormControl><Input placeholder="e.g. Gi1/0/12" {...field} /></FormControl>
+                  <FormControl>
+                    <PortPicker portCount={bPortCount} value={field.value ?? ''} onChange={field.onChange} />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -400,6 +426,28 @@ function CableDialog({
         </Form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PortPicker({
+  portCount, value, onChange,
+}: {
+  portCount: number | undefined;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  if (!portCount || portCount <= 0) {
+    return <Input placeholder="e.g. eth0, Gi0/24" value={value} onChange={(e) => onChange(e.target.value)} />;
+  }
+  return (
+    <Select value={value || undefined} onValueChange={onChange}>
+      <SelectTrigger><SelectValue placeholder={`Pick port (1-${portCount})`} /></SelectTrigger>
+      <SelectContent>
+        {Array.from({ length: portCount }, (_, i) => String(i + 1)).map((p) => (
+          <SelectItem key={p} value={p}>{p}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

@@ -50,6 +50,7 @@ type RackDetail = {
     mount?: 'rack' | 'vertical-left' | 'vertical-right';
     pdu_side?: 'A' | 'B' | 'C' | null;
     psu_count?: number | null;
+    port_count?: number | null;
     redundancy?: 'redundant' | 'single' | 'unpowered' | 'n/a';
     lifecycle_state: string; open_alerts: number;
   }>;
@@ -181,7 +182,10 @@ export function RackShowPage() {
       <CablePanel
         rackId={id}
         siteId={r.site_id}
-        rackAssets={assets.map((a) => ({ id: a.id, name: a.name, kind: a.kind }))}
+        rackAssets={assets.map((a) => ({
+          id: a.id, name: a.name, kind: a.kind,
+          port_count: a.port_count ?? null,
+        }))}
       />
 
       <Card>
@@ -360,7 +364,7 @@ function EditRackForm({
 }
 
 // ----- New Asset form (rack-scoped) -----
-const KINDS = ['server', 'switch', 'router', 'pdu', 'ups', 'crac', 'sensor', 'storage', 'chassis', 'blade', 'other'] as const;
+const KINDS = ['server', 'switch', 'router', 'pdu', 'ups', 'crac', 'sensor', 'storage', 'chassis', 'blade', 'patch_panel', 'other'] as const;
 
 const newAssetSchema = z.object({
   name: z.string().min(1, 'Name required'),
@@ -371,6 +375,7 @@ const newAssetSchema = z.object({
   serial: z.string().optional(),
   rack_position_u: z.string().optional(),
   rack_units: z.coerce.number().min(1).max(60).default(1),
+  port_count: z.string().optional(),
 });
 
 function NewAssetForm({
@@ -427,6 +432,7 @@ function NewAssetForm({
         serial: v.serial || null,
         rack_position_u: positionU,
         rack_units: v.rack_units,
+        port_count: v.port_count ? Number(v.port_count) : null,
         lifecycle_state: 'active',
         metadata_json: {},
       });
@@ -508,6 +514,15 @@ function NewAssetForm({
             <FormItem><FormLabel>Size (U)</FormLabel><FormControl><Input type="number" min={1} max={uHeight} {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
+        {form.watch('kind') === 'patch_panel' && (
+          <FormField control={form.control} name="port_count" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Port count</FormLabel>
+              <FormControl><Input type="number" min={1} max={576} placeholder="e.g. 24, 48" {...field} /></FormControl>
+              <FormMessage />
+            </FormItem>
+          )} />
+        )}
         <FormField control={form.control} name="serial" render={({ field }) => (
           <FormItem><FormLabel>Serial (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />

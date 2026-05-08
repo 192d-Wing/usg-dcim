@@ -177,6 +177,7 @@ async def rack_detail(
                 "mount": enum_val(a.mount),
                 "pdu_side": enum_val(a.pdu_side),
                 "psu_count": a.psu_count,
+                "port_count": a.port_count,
                 "lifecycle_state": enum_val(a.lifecycle_state),
                 "open_alerts": open_alert_count.get(str(a.id), 0),
                 "freshness": by_asset_freshness.get(str(a.id), {}),

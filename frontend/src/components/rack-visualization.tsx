@@ -34,7 +34,7 @@ type StyleMode = 'block' | 'stencil';
 const KIND_COLOR: Record<string, string> = {
   server: '#3b82f6', switch: '#10b981', router: '#14b8a6', pdu: '#f97316',
   ups: '#a855f7', crac: '#06b6d4', sensor: '#facc15', storage: '#6366f1',
-  chassis: '#94a3b8', blade: '#64748b', other: '#737373',
+  chassis: '#94a3b8', blade: '#64748b', patch_panel: '#22c55e', other: '#737373',
 };
 const colorFor = (k: string) => KIND_COLOR[k] ?? KIND_COLOR.other;
 

@@ -181,6 +181,7 @@ class AssetBase(BaseModel):
     mount: str = "rack"           # asset_mount enum
     pdu_side: str | None = None   # PDUs only
     psu_count: int | None = None  # for redundancy gap detection on devices
+    port_count: int | None = None # patch panels and other port-bearing devices
     mgmt_ip: str | None = None
     mgmt_protocol: str | None = None
     mgmt_port: int | None = None
@@ -203,6 +204,7 @@ class AssetUpdate(BaseModel):
     mount: str | None = None
     pdu_side: str | None = None
     psu_count: int | None = None
+    port_count: int | None = None
     mgmt_ip: str | None = None
     mgmt_protocol: str | None = None
     mgmt_port: int | None = None
