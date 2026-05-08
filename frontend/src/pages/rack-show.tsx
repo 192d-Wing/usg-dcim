@@ -5,7 +5,7 @@ import { useUpdate } from '@refinedev/core';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { ArrowLeft, Pencil, Plus, ChevronsUpDown } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, ChevronsUpDown, MoveRight } from 'lucide-react';
 import { http } from '@/lib/http';
 import { hasCapability } from '@/lib/access-control-provider';
 import { Button } from '@/components/ui/button';
@@ -31,6 +31,7 @@ import { RackHeightPicker } from '@/components/rack-height-picker';
 import { useStencilCatalog } from '@/components/stencil';
 import { CapacityPanel, type Capacity } from '@/components/capacity-panel';
 import { PowerChainPanel, type PduSummary, type PerAsset } from '@/components/power-chain-panel';
+import { MoveAssetDialog } from '@/components/move-asset-dialog';
 import { toast } from 'sonner';
 
 type RackDetail = {
@@ -60,6 +61,8 @@ export function RackShowPage() {
   const [mode, setMode] = useState<'stencil' | 'block'>('stencil');
   const [editOpen, setEditOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [moving, setMoving] = useState<RackDetail['assets'][number] | null>(null);
+  const canWrite = hasCapability('inventory:write');
 
   const detail = useQuery({
     queryKey: ['rack-detail', id],
@@ -111,7 +114,7 @@ export function RackShowPage() {
               <TabsTrigger value="block">Block</TabsTrigger>
             </TabsList>
           </Tabs>
-          {hasCapability('inventory:write') && (
+          {canWrite && (
             <>
               <Dialog open={addOpen} onOpenChange={setAddOpen}>
                 <DialogTrigger asChild>
@@ -189,11 +192,12 @@ export function RackShowPage() {
                 <TableHead>Serial</TableHead>
                 <TableHead className="w-20">Alerts</TableHead>
                 <TableHead className="w-24">State</TableHead>
+                {canWrite && <TableHead className="w-20" />}
               </TableRow>
             </TableHeader>
             <TableBody>
               {assets.length === 0 && (
-                <TableRow><TableCell colSpan={9} className="text-muted-foreground">No devices in this rack.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={canWrite ? 10 : 9} className="text-muted-foreground">No devices in this rack.</TableCell></TableRow>
               )}
               {assets.map((a) => (
                 <TableRow key={a.id} onClick={() => nav(`/assets/${a.id}`)} className="cursor-pointer">
@@ -206,12 +210,37 @@ export function RackShowPage() {
                   <TableCell className="font-mono text-xs">{a.serial ?? '—'}</TableCell>
                   <TableCell>{a.open_alerts > 0 ? <Badge variant="critical">{a.open_alerts}</Badge> : <span className="text-muted-foreground">0</span>}</TableCell>
                   <TableCell><Badge variant={a.lifecycle_state === 'active' ? 'success' : 'warning'}>{a.lifecycle_state}</Badge></TableCell>
+                  {canWrite && (
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        size="sm" variant="ghost"
+                        onClick={() => setMoving(a)}
+                        title="Move to another rack"
+                      >
+                        <MoveRight className="h-3.5 w-3.5" /> Move
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+      <MoveAssetDialog
+        asset={moving ? {
+          id: moving.id,
+          name: moving.name,
+          site_id: r.site_id,
+          rack_id: r.id,
+          rack_position_u: moving.rack_position_u,
+          rack_units: moving.rack_units,
+          face: (moving.face ?? 'front') as 'front' | 'rear',
+        } : null}
+        open={moving !== null}
+        onOpenChange={(o) => { if (!o) setMoving(null); }}
+        onMoved={() => qc.invalidateQueries({ queryKey: ['rack-detail', id] })}
+      />
     </div>
   );
 }

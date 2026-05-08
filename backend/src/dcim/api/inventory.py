@@ -6,6 +6,7 @@ accept arrays for import flows. Every write is audited and scope-checked.
 
 from __future__ import annotations
 
+import enum as _enum
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -14,7 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import NotFoundError, ValidationError
-from ..models.inventory import Asset, Building, Rack, Region, Room, Row, Site
+from ..models.inventory import (
+    Asset,
+    AssetFace,
+    AssetMount,
+    Building,
+    Rack,
+    Region,
+    Room,
+    Row,
+    Site,
+)
 from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.inventory import (
     AssetCreate, AssetOut, AssetUpdate,
@@ -415,6 +426,82 @@ async def create_asset(
     return obj
 
 
+_PLACEMENT_KEYS = frozenset({"rack_id", "rack_position_u", "rack_units", "face", "mount"})
+
+
+def _v(v: object) -> object:
+    return v.value if isinstance(v, _enum.Enum) else v
+
+
+def _resolved_placement(obj: Asset, diff: dict) -> tuple:
+    return (
+        diff.get("rack_id", obj.rack_id),
+        diff.get("rack_position_u", obj.rack_position_u),
+        diff.get("rack_units", obj.rack_units) or 1,
+        _v(diff.get("face", obj.face)),
+        _v(diff.get("mount", obj.mount)),
+    )
+
+
+async def _check_u_grid_fit(
+    db: AsyncSession, asset_id: UUID, target_rack: Rack,
+    position_u: int, units: int, face: str,
+) -> None:
+    top = position_u + units - 1
+    if position_u < 1 or top > target_rack.u_height:
+        raise ValidationError(
+            f"Placement U{position_u}-U{top} overflows {target_rack.u_height}U rack.",
+            details={
+                "rack_u_height": target_rack.u_height,
+                "requested_u": position_u,
+                "requested_top": top,
+            },
+        )
+    others = (
+        await db.execute(
+            select(Asset.id, Asset.name, Asset.rack_position_u, Asset.rack_units)
+            .where(
+                Asset.rack_id == target_rack.id,
+                Asset.id != asset_id,
+                Asset.mount == AssetMount.rack,
+                Asset.face == AssetFace(face),
+                Asset.rack_position_u.is_not(None),
+            )
+        )
+    ).all()
+    collisions = [
+        {"id": str(o.id), "name": o.name, "u": o.rack_position_u, "size": o.rack_units or 1}
+        for o in others
+        if top >= o.rack_position_u and position_u <= o.rack_position_u + (o.rack_units or 1) - 1
+    ]
+    if collisions:
+        raise ValidationError(
+            f"Placement U{position_u}-U{top} collides with "
+            f"{len(collisions)} device(s) on the {face} face.",
+            details={"collisions": collisions, "face": face},
+        )
+
+
+async def _validate_placement_and_resolve_target(
+    db: AsyncSession, obj: Asset, diff: dict
+) -> Rack | None:
+    """Validate fit/overlap if the diff would change asset placement.
+
+    Returns the target Rack (when rack_id is set) so callers can sync derived
+    fields (e.g. site_id on cross-site moves). Raises ValidationError on
+    overflow or slot collision.
+    """
+    rack_id, position_u, units, face, mount = _resolved_placement(obj, diff)
+    if rack_id is None:
+        return None
+    target_rack = await db.get(Rack, rack_id)
+    if target_rack is None:
+        raise ValidationError(f"target rack {rack_id} not found")
+    if mount == AssetMount.rack.value and position_u is not None:
+        await _check_u_grid_fit(db, obj.id, target_rack, position_u, units, face)
+    return target_rack
+
+
 @router.patch("/assets/{asset_id}", response_model=AssetOut)
 async def update_asset(
     asset_id: UUID,
@@ -426,6 +513,18 @@ async def update_asset(
     if obj is None:
         raise NotFoundError("asset not found")
     diff = payload.model_dump(exclude_unset=True)
+
+    if _PLACEMENT_KEYS & diff.keys():
+        target_rack = await _validate_placement_and_resolve_target(db, obj, diff)
+        # Cross-site move: keep Asset.site_id in sync with the target rack so
+        # the client doesn't have to compute it on a site→rack→U pick.
+        if (
+            "rack_id" in diff
+            and target_rack is not None
+            and target_rack.site_id != obj.site_id
+        ):
+            obj.site_id = target_rack.site_id
+
     for k, v in diff.items():
         setattr(obj, k, v)
     await audit.record(db, principal, action="asset.update", target_type="asset",
