@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useGetIdentity, useLogout } from '@refinedev/core';
 import {
-  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight,
+  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight, Wrench,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ const NAV: NavItem[] = [
   { to: '/racks',      label: 'Racks',      icon: Server },
   { to: '/capacity',   label: 'Capacity',   icon: Gauge },
   { to: '/alerts',     label: 'Alerts',     icon: Bell },
+  { to: '/maintenance', label: 'Maintenance', icon: Wrench },
   { to: '/collectors', label: 'Collectors', icon: Cpu },
 ];
 

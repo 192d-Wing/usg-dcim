@@ -54,3 +54,33 @@ class AlertOut(BaseModel):
 
 class AlertAck(BaseModel):
     note: str | None = None
+
+
+class MaintenanceWindowBase(BaseModel):
+    name: str
+    site_id: UUID | None = None
+    asset_filter_json: dict = Field(default_factory=dict)
+    starts_at: datetime
+    ends_at: datetime
+    reason: str | None = None
+
+
+class MaintenanceWindowCreate(MaintenanceWindowBase):
+    pass
+
+
+class MaintenanceWindowUpdate(BaseModel):
+    name: str | None = None
+    site_id: UUID | None = None
+    asset_filter_json: dict | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    reason: str | None = None
+
+
+class MaintenanceWindowOut(MaintenanceWindowBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_by: str | None
+    created_at: datetime
+    updated_at: datetime

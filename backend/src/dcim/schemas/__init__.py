@@ -8,7 +8,10 @@ from .inventory import (
     RowCreate, RowOut, RowUpdate,
     SiteCreate, SiteOut, SiteUpdate,
 )
-from .alerts import AlertOut, AlertRuleCreate, AlertRuleOut, AlertAck
+from .alerts import (
+    AlertAck, AlertOut, AlertRuleCreate, AlertRuleOut,
+    MaintenanceWindowCreate, MaintenanceWindowOut, MaintenanceWindowUpdate,
+)
 from .collectors import CollectorEnroll, CollectorOut, CollectorHeartbeatIn
 from .telemetry import TelemetryBatch, TelemetrySample
 from .auth import LoginRequest, TokenOut, TokenIssue, ApiTokenOut
@@ -21,6 +24,7 @@ __all__ = [
     "BulkResult",
     "CollectorEnroll", "CollectorHeartbeatIn", "CollectorOut",
     "LoginRequest",
+    "MaintenanceWindowCreate", "MaintenanceWindowOut", "MaintenanceWindowUpdate",
     "Page", "PageParams",
     "RackCreate", "RackOut", "RackUpdate",
     "RegionCreate", "RegionOut", "RegionUpdate",
