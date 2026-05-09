@@ -26,6 +26,20 @@ class AlertRuleCreate(AlertRuleBase):
     pass
 
 
+class AlertRuleUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    metric: str | None = None
+    operator: str | None = None
+    threshold: float | None = None
+    duration_seconds: int | None = None
+    severity: Severity | None = None
+    site_scope_id: UUID | None = None
+    asset_filter_json: dict | None = None
+    enabled: bool | None = None
+    runbook_url: str | None = None
+
+
 class AlertRuleOut(AlertRuleBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID

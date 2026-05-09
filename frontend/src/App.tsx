@@ -22,6 +22,7 @@ import { RackShowPage } from '@/pages/rack-show';
 import { RackCreatePage } from '@/pages/rack-create';
 import { AssetShowPage } from '@/pages/asset-show';
 import { AlertsPage } from '@/pages/alerts';
+import { AlertRulesPage } from '@/pages/alert-rules';
 import { MaintenancePage } from '@/pages/maintenance';
 import { CollectorsPage } from '@/pages/collectors';
 import { CapacityPage } from '@/pages/capacity';
@@ -68,6 +69,7 @@ export function App() {
               <Route path="/assets/:id" element={<AssetShowPage />} />
               <Route path="/capacity" element={<CapacityPage />} />
               <Route path="/alerts" element={<AlertsPage />} />
+              <Route path="/alerts/rules" element={<AlertRulesPage />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
               <Route path="/collectors" element={<CollectorsPage />} />
             </Route>

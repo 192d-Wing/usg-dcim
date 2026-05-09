@@ -13,7 +13,7 @@ from ..db import get_db
 from ..errors import NotFoundError, ValidationError
 from ..models.alerts import Alert, AlertRule, AlertState, MaintenanceWindow
 from ..schemas.alerts import (
-    AlertAck, AlertOut, AlertRuleCreate, AlertRuleOut,
+    AlertAck, AlertOut, AlertRuleCreate, AlertRuleOut, AlertRuleUpdate,
     MaintenanceWindowCreate, MaintenanceWindowOut, MaintenanceWindowUpdate,
 )
 from ..schemas.common import Page, PageParams
@@ -88,6 +88,61 @@ async def create_rule(
     await db.commit()
     await db.refresh(obj)
     return obj
+
+
+_RULE_NOT_FOUND = "alert rule not found"
+
+
+@router.get("/rules/{rule_id}", response_model=AlertRuleOut)
+async def get_rule(
+    rule_id: UUID,
+    _: Principal = Depends(require_capability(ALERTS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(AlertRule, rule_id)
+    if obj is None:
+        raise NotFoundError(_RULE_NOT_FOUND)
+    return obj
+
+
+@router.patch("/rules/{rule_id}", response_model=AlertRuleOut)
+async def update_rule(
+    rule_id: UUID,
+    payload: AlertRuleUpdate,
+    principal: Principal = Depends(require_capability(ALERTS_CONFIGURE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(AlertRule, rule_id)
+    if obj is None:
+        raise NotFoundError(_RULE_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="alert_rule.update", target_type="alert_rule",
+        target_id=str(rule_id), site_id=obj.site_scope_id, diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/rules/{rule_id}", status_code=204)
+async def delete_rule(
+    rule_id: UUID,
+    principal: Principal = Depends(require_capability(ALERTS_CONFIGURE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(AlertRule, rule_id)
+    if obj is None:
+        raise NotFoundError(_RULE_NOT_FOUND)
+    site_id = obj.site_scope_id
+    await db.execute(delete(AlertRule).where(AlertRule.id == rule_id))
+    await audit.record(
+        db, principal, action="alert_rule.delete", target_type="alert_rule",
+        target_id=str(rule_id), site_id=site_id,
+    )
+    await db.commit()
 
 
 # ----------------------- Maintenance windows -----------------------

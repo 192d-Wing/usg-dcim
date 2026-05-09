@@ -9,7 +9,7 @@ from .inventory import (
     SiteCreate, SiteOut, SiteUpdate,
 )
 from .alerts import (
-    AlertAck, AlertOut, AlertRuleCreate, AlertRuleOut,
+    AlertAck, AlertOut, AlertRuleCreate, AlertRuleOut, AlertRuleUpdate,
     MaintenanceWindowCreate, MaintenanceWindowOut, MaintenanceWindowUpdate,
 )
 from .collectors import CollectorEnroll, CollectorOut, CollectorHeartbeatIn
@@ -17,7 +17,7 @@ from .telemetry import TelemetryBatch, TelemetrySample
 from .auth import LoginRequest, TokenOut, TokenIssue, ApiTokenOut
 
 __all__ = [
-    "AlertAck", "AlertOut", "AlertRuleCreate", "AlertRuleOut",
+    "AlertAck", "AlertOut", "AlertRuleCreate", "AlertRuleOut", "AlertRuleUpdate",
     "ApiTokenOut",
     "AssetCreate", "AssetOut", "AssetUpdate",
     "BuildingCreate", "BuildingOut", "BuildingUpdate",

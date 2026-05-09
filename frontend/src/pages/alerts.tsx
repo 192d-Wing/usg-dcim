@@ -1,6 +1,7 @@
 import { useTable, useGetIdentity } from '@refinedev/core';
 import { useState } from 'react';
-import { Check } from 'lucide-react';
+import { Link } from 'react-router';
+import { Check, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -55,15 +56,20 @@ export function AlertsPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Alerts</h1>
           <p className="text-sm text-muted-foreground">{total} matching</p>
         </div>
-        <Select value={state} onValueChange={(v) => { setState(v); setCurrentPage(1); }}>
-          <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="firing">Firing</SelectItem>
-            <SelectItem value="acknowledged">Acknowledged</SelectItem>
-            <SelectItem value="resolved">Resolved</SelectItem>
-            <SelectItem value="suppressed">Suppressed</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex gap-2">
+          <Button asChild variant="outline">
+            <Link to="/alerts/rules"><Settings className="h-4 w-4" /> Manage rules</Link>
+          </Button>
+          <Select value={state} onValueChange={(v) => { setState(v); setCurrentPage(1); }}>
+            <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="firing">Firing</SelectItem>
+              <SelectItem value="acknowledged">Acknowledged</SelectItem>
+              <SelectItem value="resolved">Resolved</SelectItem>
+              <SelectItem value="suppressed">Suppressed</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <Card>
