@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ArchiveX } from 'lucide-react';
 import { http } from '@/lib/http';
+import { hasCapability } from '@/lib/access-control-provider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +16,7 @@ import {
 } from '@/components/ui/table';
 import { FreshnessBadge } from '@/components/freshness-badge';
 import { AssetCablesPanel } from '@/components/asset-cables-panel';
+import { DecommissionDialog } from '@/components/decommission-dialog';
 import { formatDate } from '@/lib/utils';
 
 type AssetDetail = {
@@ -38,6 +41,9 @@ type AssetDetail = {
 export function AssetShowPage() {
   const { id = '' } = useParams<{ id: string }>();
   const nav = useNavigate();
+  const qc = useQueryClient();
+  const [decomOpen, setDecomOpen] = useState(false);
+  const canWrite = hasCapability('inventory:write');
   const detail = useQuery({
     queryKey: ['asset-detail', id],
     queryFn: async () => (await http.get<AssetDetail>(`/dashboards/assets/${id}`)).data,
@@ -79,8 +85,25 @@ export function AssetShowPage() {
             {a.mgmt_ip ? ` · ${a.mgmt_ip}` : ''}
           </p>
         </div>
-        <Badge variant={a.lifecycle_state === 'active' ? 'success' : 'warning'}>{a.lifecycle_state}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={a.lifecycle_state === 'active' ? 'success' : 'warning'}>{a.lifecycle_state}</Badge>
+          {canWrite && a.lifecycle_state !== 'decommissioned' && a.lifecycle_state !== 'retired' && (
+            <Button variant="outline" size="sm" onClick={() => setDecomOpen(true)}>
+              <ArchiveX className="h-4 w-4" /> Decommission
+            </Button>
+          )}
+        </div>
       </div>
+
+      <DecommissionDialog
+        asset={{
+          id: a.id, name: a.name, kind: a.kind,
+          serial: a.serial, lifecycle_state: a.lifecycle_state,
+        }}
+        open={decomOpen}
+        onOpenChange={setDecomOpen}
+        onDecommissioned={() => qc.invalidateQueries({ queryKey: ['asset-detail', id] })}
+      />
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <FieldCard label="Manufacturer" value={a.manufacturer ?? '—'} />

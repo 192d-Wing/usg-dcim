@@ -10,6 +10,7 @@ import enum as _enum
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,12 +22,14 @@ from ..models.inventory import (
     AssetMount,
     Building,
     Cable,
+    LifecycleState,
     Rack,
     Region,
     Room,
     Row,
     Site,
 )
+from ..models.power import Outlet, PowerConnection
 from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.inventory import (
     AssetCreate, AssetOut, AssetUpdate,
@@ -50,6 +53,8 @@ from ..security.scope import filter_sites_in_scope
 from ._pagination import paginate
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
+
+_ASSET_NOT_FOUND = "asset not found"
 
 
 # ----------------------- Regions -----------------------
@@ -394,7 +399,7 @@ async def get_asset(
 ):
     obj = await db.get(Asset, asset_id)
     if obj is None:
-        raise NotFoundError("asset not found")
+        raise NotFoundError(_ASSET_NOT_FOUND)
     return obj
 
 
@@ -513,7 +518,7 @@ async def update_asset(
 ):
     obj = await db.get(Asset, asset_id)
     if obj is None:
-        raise NotFoundError("asset not found")
+        raise NotFoundError(_ASSET_NOT_FOUND)
     diff = payload.model_dump(exclude_unset=True)
 
     if _PLACEMENT_KEYS & diff.keys():
@@ -531,6 +536,63 @@ async def update_asset(
         setattr(obj, k, v)
     await audit.record(db, principal, action="asset.update", target_type="asset",
                        target_id=str(asset_id), site_id=obj.site_id, diff=diff)
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+class _DecommissionPayload(BaseModel):
+    sanitization_note: str | None = None
+    reason: str | None = None
+
+
+@router.post("/assets/{asset_id}/decommission", response_model=AssetOut)
+async def decommission_asset(
+    asset_id: UUID,
+    payload: _DecommissionPayload,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark an asset decommissioned and drop its power connections.
+
+    Drops connections both ways: where the asset is the consumer, and where
+    it's a PDU whose outlets carry connections to other devices. The asset
+    itself stays in place so historical reports keep resolving — flip to
+    `retired` later to fully archive.
+    """
+    obj = await db.get(Asset, asset_id)
+    if obj is None:
+        raise NotFoundError(_ASSET_NOT_FOUND)
+    if obj.lifecycle_state == LifecycleState.decommissioned:
+        raise ValidationError("asset is already decommissioned")
+
+    consumer_dropped = (
+        await db.execute(
+            delete(PowerConnection).where(PowerConnection.asset_id == asset_id)
+        )
+    ).rowcount or 0
+    pdu_dropped = (
+        await db.execute(
+            delete(PowerConnection).where(
+                PowerConnection.outlet_id.in_(
+                    select(Outlet.id).where(Outlet.pdu_asset_id == asset_id).scalar_subquery()
+                )
+            )
+        )
+    ).rowcount or 0
+
+    prior_state = obj.lifecycle_state.value if hasattr(obj.lifecycle_state, "value") else obj.lifecycle_state
+    obj.lifecycle_state = LifecycleState.decommissioned
+    await audit.record(
+        db, principal, action="asset.decommission", target_type="asset",
+        target_id=str(asset_id), site_id=obj.site_id,
+        diff={"lifecycle_state": {"from": prior_state, "to": "decommissioned"}},
+        metadata={
+            "sanitization_note": payload.sanitization_note,
+            "reason": payload.reason,
+            "dropped_power_connections": int(consumer_dropped) + int(pdu_dropped),
+        },
+    )
     await db.commit()
     await db.refresh(obj)
     return obj
