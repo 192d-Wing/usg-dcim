@@ -132,8 +132,8 @@ jobs:
           cache-from: type=gha,scope=collector
           cache-to: type=gha,scope=collector,mode=max
 
-  helm-lint:
-    name: Helm chart lint
+  helm:
+    name: Helm chart lint + template
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,6 +145,27 @@ jobs:
 
       - name: helm lint
         run: helm lint infra/helm/dcim
+
+      # Render both value sets and pipe through `kubectl apply --dry-run`
+      # so we catch malformed YAML / invalid manifests before they hit
+      # a real cluster. We don't have a persistent k3d in CI; the full
+      # install drill is documented in docs/DEPLOYMENT.md.
+      - name: helm template (default values)
+        run: helm template dcim infra/helm/dcim > /tmp/dcim-default.yaml
+
+      - name: helm template (k3d values)
+        run: |
+          helm template dcim infra/helm/dcim \
+            -f infra/helm/dcim/values-k3d.yaml > /tmp/dcim-k3d.yaml
+
+      - name: kubectl client-side dry-run
+        run: |
+          # Install kubectl just for the validation step.
+          curl -sSLo /usr/local/bin/kubectl \
+            "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          chmod +x /usr/local/bin/kubectl
+          kubectl apply --dry-run=client -f /tmp/dcim-default.yaml > /dev/null
+          kubectl apply --dry-run=client -f /tmp/dcim-k3d.yaml > /dev/null
 
   migrations:
     name: Alembic up / down / up
