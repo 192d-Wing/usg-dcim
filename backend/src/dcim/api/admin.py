@@ -16,8 +16,15 @@ from ..db import get_db
 from ..errors import ConflictError, NotFoundError, ValidationError
 from ..models.auth import Role, RoleScope, ScopeType, User, UserRole
 from ..schemas.auth import (
-    AssignmentCreate, AssignmentOut, RoleCreate, RoleOut, RoleUpdate,
-    ScopeRowOut, UserCreate, UserOut, UserUpdate,
+    AssignmentCreate,
+    AssignmentOut,
+    RoleCreate,
+    RoleOut,
+    RoleUpdate,
+    ScopeRowOut,
+    UserCreate,
+    UserOut,
+    UserUpdate,
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
