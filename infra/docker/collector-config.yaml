@@ -1,5 +1,6 @@
-# Local-dev collector pointed at the dockerized API. Replace UUIDs after running `make seed`
-# and enrolling the collector via POST /api/v1/collectors/enroll.
+# Local-dev collector pointed at the dockerized API + the snmpsim service.
+# After `make seed`, enroll a collector via POST /api/v1/collectors/enroll
+# and replace the placeholder UUIDs below.
 collector_id: 00000000-0000-0000-0000-0000000000aa
 site_id: 00000000-0000-0000-0000-0000000000bb
 ingest_url: http://api:8000
@@ -8,4 +9,19 @@ buffer_path: /var/lib/dcim-collector/buffer.db
 mtls:
   enabled: false
 api_token_file: null
-devices: []
+devices:
+  # Sample SNMP device pointed at the snmpsim container. Replace asset_id
+  # with a real Asset.id after `make seed`. snmpsim ships a default
+  # SNMPv2-MIB sample under the `public` community, so sysUpTime + sysDescr
+  # come back without any extra config.
+  - asset_id: 00000000-0000-0000-0000-0000000000cc
+    kind: server
+    driver: snmp
+    poll_interval_seconds: 30
+    snmp:
+      host: snmpsim
+      port: 1161
+      community: public
+      version: "2c"
+      oids:
+        sys.uptime.ticks: 1.3.6.1.2.1.1.3.0
