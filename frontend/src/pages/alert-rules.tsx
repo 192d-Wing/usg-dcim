@@ -1,11 +1,11 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { useTable, useGetIdentity, useList } from '@refinedev/core';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
-  ArrowLeft, Plus, Pencil, Trash2, Power, ExternalLink,
+  ArrowLeft, Plus, Pencil, Trash2, Power, ExternalLink, Bell,
 } from 'lucide-react';
 import { http } from '@/lib/http';
 import { Button } from '@/components/ui/button';
@@ -117,18 +117,25 @@ export function AlertRulesPage() {
           </p>
         </div>
         {canConfigure && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> New rule</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New alert rule</DialogTitle></DialogHeader>
-              <RuleForm
-                sites={sites}
-                onSaved={async () => { setCreateOpen(false); await refresh(); }}
-              />
-            </DialogContent>
-          </Dialog>
+          <div className="flex gap-2">
+            <Button asChild variant="outline">
+              <Link to="/settings/notifications">
+                <Bell className="h-4 w-4" /> Notification channels
+              </Link>
+            </Button>
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button><Plus className="h-4 w-4" /> New rule</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>New alert rule</DialogTitle></DialogHeader>
+                <RuleForm
+                  sites={sites}
+                  onSaved={async () => { setCreateOpen(false); await refresh(); }}
+                />
+              </DialogContent>
+            </Dialog>
+          </div>
         )}
       </div>
 

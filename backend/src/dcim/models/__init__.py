@@ -21,6 +21,7 @@ from .inventory import (
     SiteGroup,
     SiteGroupMembership,
 )
+from .notifications import ChannelKind, NotificationChannel
 from .power import Outlet, PowerConnection
 from .telemetry_meta import TelemetrySource
 
@@ -34,10 +35,12 @@ __all__ = [
     "AuditLog",
     "Building",
     "Cable",
+    "ChannelKind",
     "Circuit",
     "Collector",
     "CollectorHeartbeat",
     "MaintenanceWindow",
+    "NotificationChannel",
     "Outlet",
     "PduSide",
     "Permission",

@@ -10,6 +10,7 @@ from .collectors import router as collectors_router
 from .dashboards import router as dashboards_router
 from .ingest import router as ingest_router
 from .inventory import router as inventory_router
+from .notifications import router as notifications_router
 from .power import router as power_router
 from .search import router as search_router
 from .stencils import router as stencils_router
@@ -28,3 +29,4 @@ router.include_router(stencils_router)
 router.include_router(power_router)
 router.include_router(audit_router)
 router.include_router(admin_router)
+router.include_router(notifications_router)

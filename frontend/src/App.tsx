@@ -37,6 +37,7 @@ const TokensPage      = lazy(() => import('@/pages/tokens').then((m) => ({ defau
 const AuditPage       = lazy(() => import('@/pages/audit').then((m) => ({ default: m.AuditPage })));
 const ImportPage      = lazy(() => import('@/pages/import').then((m) => ({ default: m.ImportPage })));
 const AdminPage       = lazy(() => import('@/pages/admin').then((m) => ({ default: m.AdminPage })));
+const NotificationsPage = lazy(() => import('@/pages/notifications').then((m) => ({ default: m.NotificationsPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -98,6 +99,7 @@ export function App() {
                 <Route path="/audit" element={<AuditPage />} />
                 <Route path="/import" element={<ImportPage />} />
                 <Route path="/admin" element={<AdminPage />} />
+                <Route path="/settings/notifications" element={<NotificationsPage />} />
               </Route>
             </Route>
             <Route element={

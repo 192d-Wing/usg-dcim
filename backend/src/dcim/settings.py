@@ -59,6 +59,13 @@ class Settings(BaseSettings):
     s3_access_key: str | None = None
     s3_secret_key: str | None = None
 
+    # Outbound email (notifications). Leave host unset to disable email channels.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_sender: str = "dcim-alerts@example.org"
+
 
 @lru_cache
 def get_settings() -> Settings:

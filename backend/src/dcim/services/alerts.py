@@ -25,6 +25,7 @@ from .. import metrics
 from ..models.alerts import Alert, AlertRule, AlertState, MaintenanceWindow, Severity
 from ..models.collectors import Collector, CollectorStatus
 from ..settings import get_settings
+from . import notifications as notif_svc
 from .elastic import client, telemetry_index
 
 log = structlog.get_logger("dcim.alerts")
@@ -44,6 +45,8 @@ async def evaluate_rules(db: AsyncSession) -> dict:
     rules = (await db.execute(select(AlertRule).where(AlertRule.enabled.is_(True)))).scalars().all()
     fired = 0
     resolved = 0
+    fired_alerts: list[Alert] = []
+    resolved_alerts: list[Alert] = []
     for rule in rules:
         if rule.operator not in _OPS:
             continue
@@ -98,23 +101,23 @@ async def evaluate_rules(db: AsyncSession) -> dict:
                 if existing is None:
                     if await _is_suppressed(db, rule.site_scope_id):
                         continue
-                    db.add(
-                        Alert(
-                            rule_id=rule.id,
-                            site_id=rule.site_scope_id,  # type: ignore[arg-type]
-                            asset_id=asset_id,
-                            severity=rule.severity,
-                            state=AlertState.firing,
-                            dedupe_key=key,
-                            summary=f"{rule.metric} {rule.operator} {rule.threshold} (got {value:.2f})",
-                            detail=rule.description,
-                            first_seen_at=now,
-                            last_seen_at=now,
-                            labels_json={"metric": rule.metric, "rule": rule.name},
-                        )
+                    new_alert = Alert(
+                        rule_id=rule.id,
+                        site_id=rule.site_scope_id,  # type: ignore[arg-type]
+                        asset_id=asset_id,
+                        severity=rule.severity,
+                        state=AlertState.firing,
+                        dedupe_key=key,
+                        summary=f"{rule.metric} {rule.operator} {rule.threshold} (got {value:.2f})",
+                        detail=rule.description,
+                        first_seen_at=now,
+                        last_seen_at=now,
+                        labels_json={"metric": rule.metric, "rule": rule.name},
                     )
+                    db.add(new_alert)
                     fired += 1
                     metrics.alerts_fired.labels(severity=rule.severity.value).inc()
+                    fired_alerts.append(new_alert)
                 else:
                     existing.last_seen_at = now
             elif existing is not None:
@@ -122,8 +125,15 @@ async def evaluate_rules(db: AsyncSession) -> dict:
                 existing.resolved_at = now
                 resolved += 1
                 metrics.alerts_resolved.inc()
+                resolved_alerts.append(existing)
     await db.commit()
     metrics.alert_eval_runs.labels(outcome="ok").inc()
+    # Notifications fire after the commit so we never ship a webhook for an
+    # alert that didn't actually persist.
+    for a in fired_alerts:
+        await notif_svc.dispatch_fire(db, a)
+    for a in resolved_alerts:
+        await notif_svc.dispatch_resolve(db, a)
     log.info("alerts_evaluated", fired=fired, resolved=resolved, rules=len(rules))
     return {"fired": fired, "resolved": resolved, "rules": len(rules)}
 
@@ -157,6 +167,7 @@ async def sweep_collectors(db: AsyncSession) -> dict:
         )
     ).scalars().all()
     fired = 0
+    fired_alerts: list[Alert] = []
     for c in stale:
         c.status = CollectorStatus.stale
         key = f"collector-down|{c.id}"
@@ -166,22 +177,24 @@ async def sweep_collectors(db: AsyncSession) -> dict:
             )
         ).scalar_one_or_none()
         if existing is None:
-            db.add(
-                Alert(
-                    site_id=c.site_id,
-                    collector_id=c.id,
-                    severity=Severity.major,
-                    state=AlertState.firing,
-                    dedupe_key=key,
-                    summary=f"Collector {c.name} has not reported since {c.last_seen_at:%Y-%m-%d %H:%M UTC}",
-                    first_seen_at=now,
-                    last_seen_at=now,
-                    labels_json={"kind": "collector_down", "collector": c.name},
-                )
+            new_alert = Alert(
+                site_id=c.site_id,
+                collector_id=c.id,
+                severity=Severity.major,
+                state=AlertState.firing,
+                dedupe_key=key,
+                summary=f"Collector {c.name} has not reported since {c.last_seen_at:%Y-%m-%d %H:%M UTC}",
+                first_seen_at=now,
+                last_seen_at=now,
+                labels_json={"kind": "collector_down", "collector": c.name},
             )
+            db.add(new_alert)
             fired += 1
             metrics.alerts_fired.labels(severity=Severity.major.value).inc()
+            fired_alerts.append(new_alert)
         else:
             existing.last_seen_at = now
     await db.commit()
+    for a in fired_alerts:
+        await notif_svc.dispatch_fire(db, a)
     return {"stale": len(stale), "fired": fired}
