@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 
-from . import errors, middleware
+from . import errors, metrics, middleware
 from .api import router as api_router
 from .logging_setup import configure_logging, get_logger
 from .settings import get_settings
@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     middleware.install(app)
+    metrics.install(app)
     errors.install(app)
 
     app.include_router(api_router, prefix="/api/v1")

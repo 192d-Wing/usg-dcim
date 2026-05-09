@@ -14,6 +14,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import metrics
 from ..models.telemetry_meta import FreshnessState, TelemetrySource
 from ..schemas.telemetry import TelemetryBatch, TelemetrySample
 from .elastic import client, ensure_index, telemetry_index
@@ -53,6 +54,9 @@ async def ingest(db: AsyncSession, batch: TelemetryBatch) -> dict:
 
     await _update_freshness(db, batch.samples, batch.collector_id, batch.site_id, received_at)
     await db.commit()
+
+    metrics.telemetry_samples_ingested.labels(site_id=site_id).inc(len(batch.samples))
+    metrics.telemetry_ingest_batches.observe(len(batch.samples))
 
     return {"accepted": len(batch.samples), "errors": bool(errors), "received_at": received_at.isoformat()}
 

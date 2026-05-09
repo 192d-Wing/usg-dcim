@@ -21,6 +21,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import metrics
 from ..models.alerts import Alert, AlertRule, AlertState, MaintenanceWindow, Severity
 from ..models.collectors import Collector, CollectorStatus
 from ..settings import get_settings
@@ -28,7 +29,11 @@ from .elastic import client, telemetry_index
 
 log = structlog.get_logger("dcim.alerts")
 
-_OPS = {">": operator.gt, ">=": operator.ge, "<": operator.lt, "<=": operator.le, "==": operator.eq, "!=": operator.ne}
+_OPS = {
+    ">": operator.gt, ">=": operator.ge,
+    "<": operator.lt, "<=": operator.le,
+    "==": operator.eq, "!=": operator.ne,
+}
 
 
 def dedupe_key(rule_id: str, asset_id: str, metric: str) -> str:
@@ -109,13 +114,16 @@ async def evaluate_rules(db: AsyncSession) -> dict:
                         )
                     )
                     fired += 1
+                    metrics.alerts_fired.labels(severity=rule.severity.value).inc()
                 else:
                     existing.last_seen_at = now
             elif existing is not None:
                 existing.state = AlertState.resolved
                 existing.resolved_at = now
                 resolved += 1
+                metrics.alerts_resolved.inc()
     await db.commit()
+    metrics.alert_eval_runs.labels(outcome="ok").inc()
     log.info("alerts_evaluated", fired=fired, resolved=resolved, rules=len(rules))
     return {"fired": fired, "resolved": resolved, "rules": len(rules)}
 
@@ -172,6 +180,7 @@ async def sweep_collectors(db: AsyncSession) -> dict:
                 )
             )
             fired += 1
+            metrics.alerts_fired.labels(severity=Severity.major.value).inc()
         else:
             existing.last_seen_at = now
     await db.commit()

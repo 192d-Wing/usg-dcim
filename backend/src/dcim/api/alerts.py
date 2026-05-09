@@ -13,8 +13,14 @@ from ..db import get_db
 from ..errors import NotFoundError, ValidationError
 from ..models.alerts import Alert, AlertRule, AlertState, MaintenanceWindow
 from ..schemas.alerts import (
-    AlertAck, AlertOut, AlertRuleCreate, AlertRuleOut, AlertRuleUpdate,
-    MaintenanceWindowCreate, MaintenanceWindowOut, MaintenanceWindowUpdate,
+    AlertAck,
+    AlertOut,
+    AlertRuleCreate,
+    AlertRuleOut,
+    AlertRuleUpdate,
+    MaintenanceWindowCreate,
+    MaintenanceWindowOut,
+    MaintenanceWindowUpdate,
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
