@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from .alerts import router as alerts_router
+from .audit import router as audit_router
 from .auth import router as auth_router
 from .collectors import router as collectors_router
 from .dashboards import router as dashboards_router
@@ -24,3 +25,4 @@ router.include_router(dashboards_router)
 router.include_router(search_router)
 router.include_router(stencils_router)
 router.include_router(power_router)
+router.include_router(audit_router)

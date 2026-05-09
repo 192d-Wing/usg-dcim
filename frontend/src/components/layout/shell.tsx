@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useGetIdentity, useLogout } from '@refinedev/core';
 import {
-  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight, Wrench, KeyRound,
+  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight, Wrench, KeyRound, ScrollText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { to: '/alerts',     label: 'Alerts',     icon: Bell },
   { to: '/maintenance', label: 'Maintenance', icon: Wrench },
   { to: '/collectors', label: 'Collectors', icon: Cpu },
+  { to: '/audit',      label: 'Audit log',  icon: ScrollText, cap: 'audit:read' },
 ];
 
 export function Shell() {
@@ -39,7 +40,7 @@ export function Shell() {
         </div>
         <Separator />
         <nav className="flex flex-1 flex-col gap-1 p-2">
-          {NAV.map((item) => (
+          {NAV.filter((item) => !item.cap || (identity?.capabilities ?? []).includes(item.cap)).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
