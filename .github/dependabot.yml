@@ -1,0 +1,65 @@
+version: 2
+updates:
+  # Backend (uv / pyproject.toml)
+  - package-ecosystem: "uv"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        patterns: ["fastapi", "uvicorn*", "pydantic*", "sqlalchemy*", "asyncpg", "alembic"]
+      python-observability:
+        patterns: ["structlog", "prometheus-client", "opentelemetry*"]
+      python-dev:
+        dependency-type: "development"
+
+  # Collector (uv / pyproject.toml)
+  - package-ecosystem: "uv"
+    directory: "/collector"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      python-dev:
+        dependency-type: "development"
+
+  # Frontend (npm)
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      react:
+        patterns: ["react", "react-dom", "@types/react*"]
+      refine:
+        patterns: ["@refinedev/*"]
+      radix:
+        patterns: ["@radix-ui/*"]
+      tooling:
+        dependency-type: "development"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+
+  # Container base images
+  - package-ecosystem: "docker"
+    directory: "/backend"
+    schedule:
+      interval: "monthly"
+  - package-ecosystem: "docker"
+    directory: "/frontend"
+    schedule:
+      interval: "monthly"
+  - package-ecosystem: "docker"
+    directory: "/collector"
+    schedule:
+      interval: "monthly"
