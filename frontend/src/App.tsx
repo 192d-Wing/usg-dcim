@@ -16,6 +16,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { LoginPage } from '@/pages/login';
 import { DashboardPage } from '@/pages/dashboard';
 import { SitesListPage } from '@/pages/sites';
+import { SiteShowPage } from '@/pages/site-show';
 import { RacksListPage } from '@/pages/racks-list';
 import { RackShowPage } from '@/pages/rack-show';
 import { RackCreatePage } from '@/pages/rack-create';
@@ -59,7 +60,7 @@ export function App() {
             }>
               <Route index element={<DashboardPage />} />
               <Route path="/sites" element={<SitesListPage />} />
-              <Route path="/sites/:id" element={<SitesListPage />} />
+              <Route path="/sites/:id" element={<SiteShowPage />} />
               <Route path="/racks" element={<RacksListPage />} />
               <Route path="/racks/new" element={<RackCreatePage />} />
               <Route path="/racks/:id" element={<RackShowPage />} />
