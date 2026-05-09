@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useGetIdentity, useLogout } from '@refinedev/core';
 import {
-  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight, Wrench, KeyRound, ScrollText, Upload,
+  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight, Wrench, KeyRound, ScrollText, Upload, ShieldCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,19 @@ import {
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu';
 
-type NavItem = { to: string; label: string; icon: React.ComponentType<{ className?: string }>; cap?: string };
+type NavItem = {
+  to: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** Required capability — string for one, array for any-of. */
+  cap?: string | string[];
+};
+
+function hasCap(caps: string[], cap: string | string[] | undefined): boolean {
+  if (!cap) return true;
+  if (Array.isArray(cap)) return cap.some((c) => caps.includes(c));
+  return caps.includes(cap);
+}
 
 const NAV: NavItem[] = [
   { to: '/',           label: 'Enterprise', icon: LayoutDashboard },
@@ -24,6 +36,7 @@ const NAV: NavItem[] = [
   { to: '/collectors', label: 'Collectors', icon: Cpu },
   { to: '/import',     label: 'Import',     icon: Upload, cap: 'inventory:bulk' },
   { to: '/audit',      label: 'Audit log',  icon: ScrollText, cap: 'audit:read' },
+  { to: '/admin',      label: 'Admin',      icon: ShieldCheck, cap: ['users:manage', 'roles:manage'] },
 ];
 
 export function Shell() {
@@ -41,7 +54,7 @@ export function Shell() {
         </div>
         <Separator />
         <nav className="flex flex-1 flex-col gap-1 p-2">
-          {NAV.filter((item) => !item.cap || (identity?.capabilities ?? []).includes(item.cap)).map((item) => (
+          {NAV.filter((item) => hasCap(identity?.capabilities ?? [], item.cap)).map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

@@ -29,6 +29,7 @@ import { CapacityPage } from '@/pages/capacity';
 import { TokensPage } from '@/pages/tokens';
 import { AuditPage } from '@/pages/audit';
 import { ImportPage } from '@/pages/import';
+import { AdminPage } from '@/pages/admin';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -78,6 +79,7 @@ export function App() {
               <Route path="/settings/tokens" element={<TokensPage />} />
               <Route path="/audit" element={<AuditPage />} />
               <Route path="/import" element={<ImportPage />} />
+              <Route path="/admin" element={<AdminPage />} />
             </Route>
             <Route element={
               <Authenticated key="auth-fallback" fallback={<Outlet />}>

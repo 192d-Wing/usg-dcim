@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from .admin import router as admin_router
 from .alerts import router as alerts_router
 from .audit import router as audit_router
 from .auth import router as auth_router
@@ -26,3 +27,4 @@ router.include_router(search_router)
 router.include_router(stencils_router)
 router.include_router(power_router)
 router.include_router(audit_router)
+router.include_router(admin_router)
