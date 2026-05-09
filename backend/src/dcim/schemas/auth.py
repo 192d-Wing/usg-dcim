@@ -30,6 +30,7 @@ class ApiTokenOut(BaseModel):
     name: str
     permission_codes: list[str]
     scope_json: dict
+    created_at: datetime
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
     revoked: bool

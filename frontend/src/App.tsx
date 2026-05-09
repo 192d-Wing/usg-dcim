@@ -26,6 +26,7 @@ import { AlertRulesPage } from '@/pages/alert-rules';
 import { MaintenancePage } from '@/pages/maintenance';
 import { CollectorsPage } from '@/pages/collectors';
 import { CapacityPage } from '@/pages/capacity';
+import { TokensPage } from '@/pages/tokens';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -72,6 +73,7 @@ export function App() {
               <Route path="/alerts/rules" element={<AlertRulesPage />} />
               <Route path="/maintenance" element={<MaintenancePage />} />
               <Route path="/collectors" element={<CollectorsPage />} />
+              <Route path="/settings/tokens" element={<TokensPage />} />
             </Route>
             <Route element={
               <Authenticated key="auth-fallback" fallback={<Outlet />}>

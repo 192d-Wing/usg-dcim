@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { useGetIdentity, useLogout } from '@refinedev/core';
 import {
-  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight, Wrench,
+  LayoutDashboard, Building2, Server, Bell, Cpu, Gauge, LogOut, ChevronRight, Wrench, KeyRound,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -72,6 +72,10 @@ export function Shell() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               <DropdownMenuLabel>{identity?.email}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => navigate('/settings/tokens')}>
+                <KeyRound className="h-4 w-4" /> API tokens
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => logout()}>
                 <LogOut className="h-4 w-4" /> Sign out

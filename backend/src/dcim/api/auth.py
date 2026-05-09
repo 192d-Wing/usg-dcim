@@ -73,6 +73,23 @@ async def whoami(principal: AuthenticatedUser) -> dict:
     }
 
 
+@router.get("/tokens", response_model=list[ApiTokenOut])
+async def list_tokens(
+    principal: Principal = Depends(require_capability(TOKENS_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+) -> list[ApiTokenOut]:
+    """List the caller's own API tokens. Plaintext is never returned for existing tokens."""
+    if not principal.user:
+        raise ForbiddenError("only users can list their tokens")
+    res = await db.execute(
+        select(ApiToken)
+        .where(ApiToken.owner_user_id == principal.user.id)
+        .order_by(ApiToken.created_at.desc())
+    )
+    tokens = res.scalars().all()
+    return [ApiTokenOut.model_validate(t) for t in tokens]
+
+
 @router.post("/tokens", response_model=ApiTokenOut)
 async def issue_token(
     payload: TokenIssue,
