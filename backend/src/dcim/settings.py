@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None
+    # Where the issuer should redirect after the user authenticates. Must
+    # match the client config in Keycloak/AzureAD. Optional override per
+    # request via the `redirect_uri` query param.
+    oidc_redirect_uri: str | None = None
     saml_metadata_url: str | None = None
 
     # Collector ingest

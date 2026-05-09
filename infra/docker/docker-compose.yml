@@ -34,6 +34,41 @@ services:
       interval: 5s
       retries: 10
 
+  # Keycloak — local OIDC issuer for end-to-end SSO testing.
+  # Preseeded realm `dcim` with client `dcim-spa` is imported on first start.
+  # Login at http://localhost:8080 (admin / admin) to manage users.
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    profiles: ["sso"]   # opt-in: `docker compose --profile sso up`
+    command:
+      - "start-dev"
+      - "--import-realm"
+      - "--http-port=8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+    ports: ["8080:8080"]
+    volumes:
+      - ./keycloak-realm.json:/opt/keycloak/data/import/dcim-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/realms/master || exit 1"]
+      interval: 10s
+      retries: 12
+
+  # snmpsim — synthetic SNMP agent so the collector loop has something
+  # real to poll without needing actual rack hardware.
+  snmpsim:
+    image: tandrup/snmpsim:latest
+    profiles: ["collector"]
+    ports: ["1161:1161/udp"]
+    command:
+      - "--agent-udpv4-endpoint=0.0.0.0:1161"
+      - "--data-dir=/usr/local/snmpsim/data"
+    healthcheck:
+      test: ["CMD-SHELL", "ps -ef | grep -v grep | grep snmpsim"]
+      interval: 10s
+      retries: 6
+
   api:
     build:
       context: ../../backend
@@ -46,6 +81,13 @@ services:
       DCIM_ELASTIC_URL: http://elastic:9200
       DCIM_CORS_ORIGINS: '["http://localhost:5173"]'
       DCIM_COLLECTOR_MTLS_REQUIRED: "false"
+      # Pre-pointed at the keycloak service. Inactive unless the `sso`
+      # profile is up — without keycloak the API just doesn't reach the
+      # discovery doc and /auth/oidc/login returns 400, which is fine.
+      DCIM_OIDC_ISSUER: http://keycloak:8080/realms/dcim
+      DCIM_OIDC_CLIENT_ID: dcim-spa
+      DCIM_OIDC_CLIENT_SECRET: dev-secret-change-me
+      DCIM_OIDC_REDIRECT_URI: http://localhost:5173/login/callback
     ports: ["8000:8000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -83,7 +125,9 @@ services:
     volumes:
       - ./collector-config.yaml:/etc/dcim/collector.yaml:ro
       - collector-buffer:/var/lib/dcim-collector
-    depends_on: [api]
+    depends_on:
+      api: { condition: service_started }
+      snmpsim: { condition: service_started }
 
 volumes:
   pgdata:
