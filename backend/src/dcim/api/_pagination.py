@@ -23,13 +23,12 @@ async def paginate(
     allowed_sorts: set[str] | None = None,
 ) -> Page[Any]:
     if params.sort:
+        from ..errors import ValidationError
         if allowed_sorts is not None and params.sort not in allowed_sorts:
-            from ..errors import ValidationError as _VE
-            raise _VE(f"sort field not allowed: {params.sort}")
+            raise ValidationError(f"sort field not allowed: {params.sort}")
         col = getattr(model, params.sort, None)
         if col is None:
-            from ..errors import ValidationError as _VE
-            raise _VE(f"unknown sort field: {params.sort}")
+            raise ValidationError(f"unknown sort field: {params.sort}")
         base_stmt = base_stmt.order_by(asc(col) if params.order == SortOrder.asc else desc(col))
 
     total_stmt = select(func.count()).select_from(base_stmt.order_by(None).subquery())

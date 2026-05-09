@@ -12,7 +12,12 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import (
-    Enum, ForeignKey, Index, Integer, String, UniqueConstraint,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column

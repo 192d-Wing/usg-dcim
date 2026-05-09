@@ -55,7 +55,7 @@ async def scope_for_user(db: AsyncSession, user: User) -> dict[str, Scope]:
 
     rows = (
         await db.execute(
-            select(UserRole).where(UserRole.user_id == user.id).options()  # noqa: PIE790
+            select(UserRole).where(UserRole.user_id == user.id).options()
         )
     ).scalars().all()
 

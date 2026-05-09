@@ -34,9 +34,6 @@ jobs:
           uv sync --extra dev
 
       - name: Lint (ruff)
-        # Pre-existing ~60 lint warnings are tracked under the Phase-2 "Lint
-        # cleanup" item. Run + report without gating until that lands.
-        continue-on-error: true
         run: uv run ruff check src tests
 
       - name: Tests (pytest)
@@ -148,3 +145,46 @@ jobs:
 
       - name: helm lint
         run: helm lint infra/helm/dcim
+
+  migrations:
+    name: Alembic up / down / up
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: dcim
+          POSTGRES_PASSWORD: dcim
+          POSTGRES_DB: dcim
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U dcim -d dcim"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # asyncpg driver, points at the service container.
+      DCIM_POSTGRES_DSN: postgresql+asyncpg://dcim:dcim@localhost:5432/dcim
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install Python + project deps
+        run: |
+          uv python install 3.12
+          uv sync
+
+      - name: Apply all migrations from a clean DB
+        run: uv run alembic upgrade head
+
+      - name: Step back one revision
+        run: uv run alembic downgrade -1
+
+      - name: Re-apply head — confirms downgrade is reversible
+        run: uv run alembic upgrade head

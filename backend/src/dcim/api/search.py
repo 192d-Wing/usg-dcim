@@ -29,7 +29,9 @@ async def global_search(
     ).scalars().all()
     racks = (
         await db.execute(
-            select(Rack).where(or_(Rack.name.ilike(pat), Rack.code.ilike(pat), Rack.serial.ilike(pat))).limit(limit)
+            select(Rack).where(
+                or_(Rack.name.ilike(pat), Rack.code.ilike(pat), Rack.serial.ilike(pat)),
+            ).limit(limit)
         )
     ).scalars().all()
     assets = (

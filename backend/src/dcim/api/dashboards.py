@@ -105,7 +105,8 @@ async def rack_detail(
     db: AsyncSession = Depends(get_db),
 ):
     """Rack + ordered assets + per-asset freshness summary, used by the rack visualization."""
-    from ..models.inventory import Asset, Rack as RackModel
+    from ..models.inventory import Asset
+    from ..models.inventory import Rack as RackModel
 
     rack = await db.get(RackModel, rack_id)
     if rack is None:
@@ -139,7 +140,8 @@ async def rack_detail(
     ).all() if asset_ids else []
     by_asset_freshness: dict[str, dict[str, int]] = {}
     for aid, fresh, n in fresh_rows:
-        by_asset_freshness.setdefault(str(aid), {})[fresh.value if hasattr(fresh, "value") else fresh] = int(n)
+        key = fresh.value if hasattr(fresh, "value") else fresh
+        by_asset_freshness.setdefault(str(aid), {})[key] = int(n)
 
     from ..services.capacity import compute_rack_capacity
     from ..services.power_chain import compute_power_chain
@@ -190,7 +192,10 @@ async def rack_detail(
 
 @router.get("/free-space")
 async def free_space(
-    u: int = Query(1, ge=0, le=60, description="Minimum contiguous U slots required (0 returns all racks for capacity overview)"),
+    u: int = Query(
+        1, ge=0, le=60,
+        description="Minimum contiguous U slots required (0 returns all racks for capacity overview)",
+    ),
     site_id: UUID | None = Query(None),
     region_id: UUID | None = Query(None),
     min_kw_headroom: float | None = Query(None, description="Minimum unused kW the rack must still have"),
@@ -258,7 +263,7 @@ async def asset_detail(
             "rack_position_u": asset.rack_position_u,
             "rack_units": asset.rack_units,
             "port_count": asset.port_count,
-            "lifecycle_state": asset.lifecycle_state.value if hasattr(asset.lifecycle_state, "value") else asset.lifecycle_state,
+            "lifecycle_state": _enum_val(asset.lifecycle_state),
         },
         "telemetry_sources": [
             {
@@ -332,7 +337,9 @@ async def rack_forecast(
 ):
     """Per-rack U-fill forecast + kW-trend forecast + optional what-if delta."""
     from ..services.forecast import (
-        compute_rack_forecast, compute_rack_kw_forecast, compute_what_if,
+        compute_rack_forecast,
+        compute_rack_kw_forecast,
+        compute_what_if,
     )
 
     rack = await db.get(Rack, rack_id)

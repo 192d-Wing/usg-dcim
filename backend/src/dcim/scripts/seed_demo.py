@@ -1,4 +1,8 @@
-"""Seed a small enterprise dataset for local dev: 3 regions × 2 sites × racks × assets + roles + admin user."""
+"""Seed a small enterprise dataset for local dev.
+
+3 regions x 2 sites x racks x assets, plus the built-in roles and one
+admin user so the operator can sign in immediately after `docker compose up`.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ import bcrypt
 from sqlalchemy import select
 
 from ..db import async_session
-from ..models.auth import Permission, Role, User, UserRole
+from ..models.auth import Role, User, UserRole
 from ..models.collectors import Collector, CollectorStatus
 from ..models.inventory import (
     Asset,

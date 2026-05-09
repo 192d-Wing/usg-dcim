@@ -136,9 +136,13 @@ async def find_free_space(
         cap = await compute_rack_capacity(db, r, rack_assets)
         if cap["biggest_contiguous_free"] < min_u:
             continue
-        if min_kw_headroom is not None and cap["kw_max"] is not None and cap["kw_current"] is not None:
-            if (cap["kw_max"] - cap["kw_current"]) < min_kw_headroom:
-                continue
+        if (
+            min_kw_headroom is not None
+            and cap["kw_max"] is not None
+            and cap["kw_current"] is not None
+            and (cap["kw_max"] - cap["kw_current"]) < min_kw_headroom
+        ):
+            continue
         out.append({
             "rack_id": str(r.id),
             "site_id": str(r.site_id),

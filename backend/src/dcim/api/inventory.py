@@ -32,14 +32,27 @@ from ..models.inventory import (
 from ..models.power import Outlet, PowerConnection
 from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.inventory import (
-    AssetCreate, AssetOut, AssetUpdate,
-    BuildingCreate, BuildingOut, BuildingUpdate,
-    CableCreate, CableOut, CableUpdate,
-    RackCreate, RackOut, RackUpdate,
-    RegionCreate, RegionOut, RegionUpdate,
-    RoomCreate, RoomOut, RoomUpdate,
-    RowCreate, RowOut, RowUpdate,
-    SiteCreate, SiteOut, SiteUpdate,
+    AssetCreate,
+    AssetOut,
+    AssetUpdate,
+    BuildingCreate,
+    BuildingOut,
+    CableCreate,
+    CableOut,
+    CableUpdate,
+    RackCreate,
+    RackOut,
+    RackUpdate,
+    RegionCreate,
+    RegionOut,
+    RegionUpdate,
+    RoomCreate,
+    RoomOut,
+    RowCreate,
+    RowOut,
+    SiteCreate,
+    SiteOut,
+    SiteUpdate,
 )
 from ..security import audit
 from ..security.capabilities import (
@@ -624,7 +637,7 @@ async def bulk_upsert_assets(
                 for k, v in item.model_dump().items():
                     setattr(existing, k, v)
                 result.updated += 1
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             result.failed += 1
             result.errors.append({"serial": item.serial, "error": str(e)})
     await audit.record(

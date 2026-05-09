@@ -43,4 +43,7 @@ async def record(
         metadata_json=metadata or {},
     )
     db.add(row)
-    log.info("audit", action=action, target=f"{target_type}:{target_id}", actor=principal.label, success=success)
+    log.info(
+        "audit", action=action, target=f"{target_type}:{target_id}",
+        actor=principal.label, success=success,
+    )

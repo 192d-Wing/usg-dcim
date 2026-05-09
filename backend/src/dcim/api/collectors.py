@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import secrets
 from datetime import UTC, datetime
 from uuid import UUID
-
-import secrets
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select

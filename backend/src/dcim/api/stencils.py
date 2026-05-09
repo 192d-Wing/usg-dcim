@@ -71,8 +71,10 @@ CATALOG: list[dict] = [
     # Juniper
     {"manufacturer": "Juniper", "model": "QFX5120-48Y",   "u": 1, "kind_hint": "switch", "port_count": 48},
     # APC PDUs
-    {"manufacturer": "APC", "model": "AP8941",  "u": 0, "kind_hint": "pdu", "port_count": 24, "vertical": True},
-    {"manufacturer": "APC", "model": "AP8853",  "u": 0, "kind_hint": "pdu", "port_count": 21, "vertical": True},
+    {"manufacturer": "APC", "model": "AP8941",
+     "u": 0, "kind_hint": "pdu", "port_count": 24, "vertical": True},
+    {"manufacturer": "APC", "model": "AP8853",
+     "u": 0, "kind_hint": "pdu", "port_count": 21, "vertical": True},
     {"manufacturer": "APC", "model": "AP7900",  "u": 1, "kind_hint": "pdu", "port_count": 8},
     # APC UPS
     {"manufacturer": "APC", "model": "Smart-UPS SRT 5000VA", "u": 3, "kind_hint": "ups"},

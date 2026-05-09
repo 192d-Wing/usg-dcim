@@ -48,7 +48,25 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "N", "C4", "SIM", "RUF"]
-ignore = ["S101", "B008"]
+ignore = [
+    "S101",
+    "B008",
+    # SQLAlchemy's canonical idiom is `from sqlalchemy.dialects.postgresql import UUID as PgUUID`.
+    # Pep8-naming flags the upper-case alias; we accept it project-wide.
+    "N811",
+    # `class X(str, enum.Enum)` → suggest `StrEnum`. StrEnum's __str__ returns
+    # the value not the name, which interacts subtly with SQLAlchemy enum
+    # persistence. Migrating is a separate, audited refactor.
+    "UP042",
+    # `Generic[T]` → PEP 695 type-parameter syntax. The Page[T] container is
+    # exported as a Pydantic v2 generic and Pydantic still expects the
+    # classic Generic spelling for runtime construction.
+    "UP046",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic-generated revisions — leave wide column lists alone.
+"src/dcim/migrations/versions/*.py" = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

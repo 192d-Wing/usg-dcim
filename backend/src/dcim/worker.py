@@ -10,11 +10,12 @@ Runs alongside the API in production (separate Deployment). Tasks:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import ClassVar
 
 import structlog
 from arq import cron
 from arq.connections import RedisSettings
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from .db import async_session
 from .logging_setup import configure_logging
@@ -66,8 +67,8 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(str(get_settings().redis_dsn))
     on_startup = startup
     on_shutdown = shutdown
-    functions = [evaluate_alerts, sweep_collectors, freshness_sweep]
-    cron_jobs = [
+    functions: ClassVar[list] = [evaluate_alerts, sweep_collectors, freshness_sweep]
+    cron_jobs: ClassVar[list] = [
         cron(evaluate_alerts, second={0, 30}),
         cron(sweep_collectors, second=15),
         cron(freshness_sweep, minute=set(range(0, 60, 5))),
