@@ -138,6 +138,10 @@ class SubnetCreate(SubnetBase):
 
 
 class SubnetUpdate(BaseModel):
+    # Re-parenting a subnet (moving it to a new supernet) goes through the
+    # same containment + per-VRF uniqueness checks that creation does.
+    # Used by the IPAM tree's drag-and-drop.
+    supernet_id: UUID | None = None
     site_id: UUID | None = None
     vni_id: UUID | None = None
     name: str | None = None

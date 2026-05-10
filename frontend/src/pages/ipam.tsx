@@ -1,4 +1,9 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  DndContext, DragEndEvent, DragOverEvent, DragOverlay, DragStartEvent,
+  KeyboardSensor, MouseSensor, TouchSensor,
+  useDraggable, useDroppable, useSensor, useSensors,
+} from '@dnd-kit/core';
 import { useTable, useGetIdentity, useList } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -789,6 +794,88 @@ function SupernetTreeTab({
     await qc.invalidateQueries({ queryKey: ['child-supernets'] });
   }
 
+  // --- Drag and drop: move a subnet between supernets ---
+  // Mouse activation distance avoids hijacking ordinary row clicks; touch
+  // delay does the same for tap-to-drill on touch screens.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 6 } }),
+    useSensor(KeyboardSensor),
+  );
+  // Dragged subnet for the overlay and the green/red ring on candidates.
+  const [draggingSubnet, setDraggingSubnet] = useState<Subnet | null>(null);
+  // Most-recent valid drop target — drives the optimistic highlight in
+  // SupernetNode without forcing every node to re-subscribe to onDragOver.
+  const [hoverTargetId, setHoverTargetId] = useState<string | null>(null);
+  // Auto-expand-on-hover for collapsed supernets while dragging.
+  const hoverExpandRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+
+  function clearHoverExpand() {
+    if (hoverExpandRef.current) {
+      clearTimeout(hoverExpandRef.current.timer);
+      hoverExpandRef.current = null;
+    }
+  }
+
+  function onDragStart(e: DragStartEvent) {
+    const id = String(e.active.id);
+    const subnet = (e.active.data.current as { subnet?: Subnet })?.subnet;
+    if (id.startsWith('subnet:') && subnet) setDraggingSubnet(subnet);
+  }
+
+  function onDragOver(e: DragOverEvent) {
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId || !overId.startsWith('supernet:')) {
+      setHoverTargetId(null);
+      clearHoverExpand();
+      return;
+    }
+    const target = overId.slice('supernet:'.length);
+    setHoverTargetId(target);
+
+    // After 600ms over a collapsed supernet, expand it so the user can
+    // drop into nested children. 600ms is long enough to ignore quick
+    // pass-throughs but short enough to feel responsive.
+    if (!expanded.has(target)) {
+      if (hoverExpandRef.current?.id !== target) {
+        clearHoverExpand();
+        hoverExpandRef.current = {
+          id: target,
+          timer: setTimeout(() => {
+            setExpanded((prev) => new Set(prev).add(target));
+            hoverExpandRef.current = null;
+          }, 600),
+        };
+      }
+    } else {
+      clearHoverExpand();
+    }
+  }
+
+  async function onDragEnd(e: DragEndEvent) {
+    clearHoverExpand();
+    const subnet = draggingSubnet;
+    setDraggingSubnet(null);
+    setHoverTargetId(null);
+    if (!subnet) return;
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId || !overId.startsWith('supernet:')) return;
+    const targetSupernetId = overId.slice('supernet:'.length);
+    if (targetSupernetId === subnet.supernet_id) return;
+
+    try {
+      await http.patch(`/ipam/subnets/${subnet.id}`, { supernet_id: targetSupernetId });
+      toast.success(`Moved ${subnet.prefix}`);
+      await refreshSubnets(subnet.supernet_id);
+      await refreshSubnets(targetSupernetId);
+      await qc.invalidateQueries({ queryKey: ['child-supernets'] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'move failed');
+    }
+  }
+
+  useEffect(() => clearHoverExpand, []);
+
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
@@ -813,6 +900,13 @@ function SupernetTreeTab({
         )}
       </div>
 
+      <DndContext
+        sensors={sensors}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDragEnd={onDragEnd}
+        onDragCancel={() => { setDraggingSubnet(null); setHoverTargetId(null); clearHoverExpand(); }}
+      >
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -843,6 +937,8 @@ function SupernetTreeTab({
                   onToggle={toggle}
                   sitesById={sitesById}
                   canWrite={canWrite}
+                  draggingSubnet={draggingSubnet}
+                  hoverTargetId={hoverTargetId}
                   onSelectSubnet={onSelectSubnet}
                   onAddSubnet={(s) => setCreateSubnetFor(s)}
                   onAddChildSupernet={(s) => setCreateSupernetUnder(s)}
@@ -859,6 +955,16 @@ function SupernetTreeTab({
           )}
         </CardContent>
       </Card>
+      <DragOverlay dropAnimation={{ duration: 150 }}>
+        {draggingSubnet ? (
+          <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-lg">
+            <span className="font-mono font-medium">{draggingSubnet.prefix}</span>
+            {draggingSubnet.name && <span className="ml-2 text-muted-foreground">{draggingSubnet.name}</span>}
+            <span className="ml-2 text-xs text-muted-foreground">drop on a supernet to move</span>
+          </div>
+        ) : null}
+      </DragOverlay>
+      </DndContext>
 
       <Dialog
         open={createSubnetFor !== null}
@@ -953,6 +1059,7 @@ function SupernetTreeTab({
 
 function SupernetNode({
   supernet, depth, expanded, onToggle, sitesById, canWrite,
+  draggingSubnet, hoverTargetId,
   onSelectSubnet, onAddSubnet, onAddChildSupernet, onEditSupernet, onEditSubnet,
 }: {
   supernet: Supernet;
@@ -961,6 +1068,8 @@ function SupernetNode({
   onToggle: (id: string) => void;
   sitesById: Map<string, Site>;
   canWrite: boolean;
+  draggingSubnet: Subnet | null;
+  hoverTargetId: string | null;
   onSelectSubnet: (subnetId: string) => void;
   onAddSubnet: (sn: Supernet) => void;
   onAddChildSupernet: (sn: Supernet) => void;
@@ -986,10 +1095,32 @@ function SupernetNode({
   const sitePill = supernet.site_id
     ? `site: ${sitesById.get(supernet.site_id)?.code ?? supernet.site_id.slice(0, 8) + '…'}`
     : null;
+
+  // Drop target wiring. We always register so empty supernets can accept
+  // a drag; the visual ring + accept decision use the validity check.
+  const { setNodeRef: setDropRef } = useDroppable({ id: `supernet:${supernet.id}` });
+
+  // A drop is "valid" iff the subnet would still fit and isn't already
+  // here. Purpose mismatches are surfaced by the backend (we'd need to
+  // know the whole purpose chain client-side to forecast it perfectly).
+  const isDragging = draggingSubnet !== null;
+  const isOver = hoverTargetId === supernet.id;
+  const isSelf = isDragging && draggingSubnet?.supernet_id === supernet.id;
+  const fits = isDragging && draggingSubnet
+    ? cidrContains(supernet.prefix, draggingSubnet.prefix)
+    : false;
+  const isValidTarget = isDragging && !isSelf && fits;
+
+  let ringClass = '';
+  if (isOver && isValidTarget) ringClass = 'ring-2 ring-emerald-500 ring-inset bg-emerald-500/5';
+  else if (isOver && isDragging) ringClass = 'ring-2 ring-rose-500 ring-inset bg-rose-500/5';
+  else if (isValidTarget) ringClass = 'ring-1 ring-emerald-500/40 ring-inset';
+
   return (
     <Fragment>
       <TableRow
-        className="cursor-pointer hover:bg-accent/40"
+        ref={setDropRef}
+        className={`cursor-pointer hover:bg-accent/40 ${ringClass}`}
         onClick={() => onToggle(supernet.id)}
       >
         <TableCell className="text-muted-foreground">
@@ -1038,6 +1169,8 @@ function SupernetNode({
               onToggle={onToggle}
               sitesById={sitesById}
               canWrite={canWrite}
+              draggingSubnet={draggingSubnet}
+              hoverTargetId={hoverTargetId}
               onSelectSubnet={onSelectSubnet}
               onAddSubnet={onAddSubnet}
               onAddChildSupernet={onAddChildSupernet}
@@ -1051,6 +1184,7 @@ function SupernetNode({
             parentPurpose={supernet.purpose}
             sitesById={sitesById}
             canWrite={canWrite}
+            draggingSubnetId={draggingSubnet?.id ?? null}
             onSelectSubnet={onSelectSubnet}
             onAddSubnet={() => onAddSubnet(supernet)}
             onAddChildSupernet={() => onAddChildSupernet(supernet)}
@@ -1065,6 +1199,7 @@ function SupernetNode({
 
 function SubnetBranch({
   supernetId, depth, parentPurpose, sitesById, canWrite,
+  draggingSubnetId,
   onSelectSubnet, onAddSubnet, onAddChildSupernet, onEditSubnet,
 }: {
   supernetId: string;
@@ -1072,6 +1207,9 @@ function SubnetBranch({
   parentPurpose: string | null;
   sitesById: Map<string, Site>;
   canWrite: boolean;
+  /** When a subnet is being dragged, hide its row in the source branch so
+   * the user doesn't see two copies (the original + the DragOverlay). */
+  draggingSubnetId: string | null;
   onSelectSubnet: (subnetId: string) => void;
   onAddSubnet: () => void;
   onAddChildSupernet: () => void;
@@ -1104,38 +1242,16 @@ function SubnetBranch({
   return (
     <>
       {subnets.map((s) => (
-        <TableRow
+        <SubnetRow
           key={s.id}
-          className="cursor-pointer bg-muted/20 hover:bg-accent/40"
-          onClick={() => onSelectSubnet(s.id)}
-        >
-          <TableCell />
-          <TableCell className="font-mono" style={{ paddingLeft: 16 + indent }}>
-            <span className="text-muted-foreground">└─</span> {s.prefix}
-          </TableCell>
-          <TableCell className="text-sm">
-            <div>{s.name ?? '—'}</div>
-            <div className="text-xs text-muted-foreground">
-              {s.site_id
-                ? `site: ${sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}`
-                : 'unassigned'}
-              {s.vlan_id ? ` · vlan ${s.vlan_id}` : ''}
-              {s.gateway ? ` · gw ${s.gateway}` : ''}
-              {s.vni_id ? ` · vni ${s.vni_id.slice(0, 8)}…` : ''}
-            </div>
-          </TableCell>
-          <TableCell>
-            {s.purpose ? <Badge variant="secondary">{s.purpose}</Badge> : '—'}
-          </TableCell>
-          <TableCell><SubnetUtilCell subnetId={s.id} /></TableCell>
-          {canWrite && (
-            <TableCell onClick={(e) => e.stopPropagation()}>
-              <Button size="sm" variant="ghost" onClick={() => onEditSubnet(s)} title="Edit subnet">
-                <Pencil className="h-3.5 w-3.5" />
-              </Button>
-            </TableCell>
-          )}
-        </TableRow>
+          subnet={s}
+          indent={indent}
+          canWrite={canWrite}
+          isDraggingThis={draggingSubnetId === s.id}
+          sitesById={sitesById}
+          onSelectSubnet={onSelectSubnet}
+          onEditSubnet={onEditSubnet}
+        />
       ))}
       {canWrite && (
         <TableRow className="bg-muted/20">
@@ -1152,6 +1268,66 @@ function SubnetBranch({
         </TableRow>
       )}
     </>
+  );
+}
+
+function SubnetRow({
+  subnet: s, indent, canWrite, isDraggingThis, sitesById,
+  onSelectSubnet, onEditSubnet,
+}: {
+  subnet: Subnet;
+  indent: number;
+  canWrite: boolean;
+  isDraggingThis: boolean;
+  sitesById: Map<string, Site>;
+  onSelectSubnet: (subnetId: string) => void;
+  onEditSubnet: (subnet: Subnet) => void;
+}) {
+  // useDraggable wires this row up to the page-level DndContext. We pass
+  // the subnet object via `data` so the drag handlers don't have to look
+  // it up again on drop.
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `subnet:${s.id}`,
+    data: { subnet: s },
+  });
+  // Source row stays in place; the dnd-kit DragOverlay handles the floating
+  // preview. We just dim the row so the user sees what's being moved.
+  const dragClass = isDragging || isDraggingThis ? 'opacity-30' : '';
+  return (
+    <TableRow
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      className={`cursor-pointer bg-muted/20 hover:bg-accent/40 ${dragClass}`}
+      onClick={() => onSelectSubnet(s.id)}
+    >
+      <TableCell />
+      <TableCell className="font-mono" style={{ paddingLeft: 16 + indent }}>
+        <span className="text-muted-foreground">└─</span> {s.prefix}
+      </TableCell>
+      <TableCell className="text-sm">
+        <div>{s.name ?? '—'}</div>
+        <div className="text-xs text-muted-foreground">
+          {s.site_id
+            ? `site: ${sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}`
+            : 'unassigned'}
+          {s.vlan_id ? ` · vlan ${s.vlan_id}` : ''}
+          {s.gateway ? ` · gw ${s.gateway}` : ''}
+          {s.vni_id ? ` · vni ${s.vni_id.slice(0, 8)}…` : ''}
+        </div>
+      </TableCell>
+      <TableCell>
+        {s.purpose ? <Badge variant="secondary">{s.purpose}</Badge> : '—'}
+      </TableCell>
+      <TableCell><SubnetUtilCell subnetId={s.id} /></TableCell>
+      {canWrite && (
+        <TableCell onClick={(e) => e.stopPropagation()}>
+          <Button size="sm" variant="ghost" onClick={() => onEditSubnet(s)} title="Edit subnet">
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+        </TableCell>
+      )}
+    </TableRow>
   );
 }
 
@@ -1812,6 +1988,29 @@ function ipToBigInt(addr: string, isV6: boolean): bigint {
   const groups = [...left, ...Array(missing).fill('0'), ...right];
   const hex = groups.map((g) => g.padStart(4, '0')).join('');
   return BigInt('0x' + hex);
+}
+
+// Pure CIDR containment check used by the tree's drag-and-drop to grey out
+// invalid drop targets before the request goes out. Reuses ipToBigInt so we
+// only carry one address-parser in the bundle.
+function cidrContains(parentCidr: string, childCidr: string): boolean {
+  try {
+    const [pIp, pBitsRaw] = parentCidr.split('/');
+    const [cIp, cBitsRaw] = childCidr.split('/');
+    const isV6 = pIp.includes(':');
+    if (isV6 !== cIp.includes(':')) return false;
+    const totalBits = isV6 ? 128 : 32;
+    const pBits = Number(pBitsRaw ?? totalBits);
+    const cBits = Number(cBitsRaw ?? totalBits);
+    if (cBits < pBits) return false;
+    const pn = ipToBigInt(pIp, isV6);
+    const cn = ipToBigInt(cIp, isV6);
+    if (pBits === 0) return true;
+    const mask = ((1n << BigInt(pBits)) - 1n) << BigInt(totalBits - pBits);
+    return (pn & mask) === (cn & mask);
+  } catch {
+    return false;
+  }
 }
 
 function bigIntToIp(n: bigint, isV6: boolean): string {

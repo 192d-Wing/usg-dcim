@@ -501,15 +501,36 @@ async def update_subnet(
     if obj is None:
         raise NotFoundError(_SUBNET_NOT_FOUND)
     diff = payload.model_dump(exclude_unset=True)
-    if "purpose" in diff:
-        parent = await db.get(Supernet, obj.supernet_id)
-        ipam_svc.assert_purpose_compatible(
-            supernet_purpose=parent.purpose if parent else None,
-            subnet_purpose=diff["purpose"],
+
+    # Move support: when supernet_id changes, re-validate containment +
+    # per-VRF uniqueness against the new parent and re-derive fabric/vrf
+    # from it (the subnet must mirror the parent's namespace).
+    moving = "supernet_id" in diff and diff["supernet_id"] != obj.supernet_id
+    new_parent: Supernet | None = None
+    if moving:
+        new_parent = await ipam_svc.assert_subnet_inside_supernet(
+            db, supernet_id=diff["supernet_id"], prefix=str(obj.prefix),
         )
+        await ipam_svc.assert_subnet_unique_in_vrf(
+            db, fabric_id=new_parent.fabric_id, vrf_id=new_parent.vrf_id,
+            prefix=str(obj.prefix), exclude_id=obj.id,
+        )
+        diff["fabric_id"] = new_parent.fabric_id
+        diff["vrf_id"] = new_parent.vrf_id
+
+    # Effective parent for downstream purpose/vni checks: the new one if
+    # we're moving, otherwise the existing one.
+    effective_parent = new_parent or await db.get(Supernet, obj.supernet_id)
+    if "purpose" in diff or moving:
+        ipam_svc.assert_purpose_compatible(
+            supernet_purpose=effective_parent.purpose if effective_parent else None,
+            subnet_purpose=diff.get("purpose", obj.purpose),
+        )
+    # VNI binding must live in the post-move fabric.
+    target_fabric = (new_parent.fabric_id if new_parent else obj.fabric_id)
     if "vni_id" in diff and diff["vni_id"] is not None:
         await ipam_svc.assert_subnet_vni_compatible(
-            db, vni_id=diff["vni_id"], fabric_id=obj.fabric_id,
+            db, vni_id=diff["vni_id"], fabric_id=target_fabric,
         )
     for k, v in diff.items():
         setattr(obj, k, v)
