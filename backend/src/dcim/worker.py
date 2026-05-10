@@ -4,7 +4,8 @@ Runs alongside the API in production (separate Deployment). Tasks:
   - alerts.eval         : run alert rule evaluation
   - alerts.collectors   : sweep stale collectors and fire collector-down alerts
   - telemetry.freshness : flip TelemetrySource.freshness to stale when overdue
-  - reports.run         : generate scheduled reports and store in object storage
+  - dhcp.sync           : pull every Kea Control Agent for active leases
+  - dhcp.age_out        : deprecate / delete dhcp-sourced rows whose lease lapsed
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from .db import async_session
 from .logging_setup import configure_logging
 from .models.telemetry_meta import FreshnessState, TelemetrySource
 from .services import alerts as alerts_svc
+from .services import kea as kea_svc
 from .settings import get_settings
 
 log = structlog.get_logger("dcim.worker")
@@ -54,6 +56,17 @@ async def freshness_sweep(_ctx) -> dict:
     return {"flipped": flipped}
 
 
+async def dhcp_sync(_ctx) -> dict:
+    async with async_session() as db:
+        return await kea_svc.sync_all_servers(db)
+
+
+async def dhcp_age_out(_ctx) -> dict:
+    async with async_session() as db:
+        n = await kea_svc.age_out_stale_dhcp(db)
+    return {"aged_out": n}
+
+
 async def startup(ctx) -> None:
     configure_logging()
     log.info("worker_startup")
@@ -67,9 +80,16 @@ class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(str(get_settings().redis_dsn))
     on_startup = startup
     on_shutdown = shutdown
-    functions: ClassVar[list] = [evaluate_alerts, sweep_collectors, freshness_sweep]
+    functions: ClassVar[list] = [
+        evaluate_alerts, sweep_collectors, freshness_sweep,
+        dhcp_sync, dhcp_age_out,
+    ]
     cron_jobs: ClassVar[list] = [
         cron(evaluate_alerts, second={0, 30}),
         cron(sweep_collectors, second=15),
         cron(freshness_sweep, minute=set(range(0, 60, 5))),
+        # DHCP sync every 5 minutes; aging swept hourly so deprecated +
+        # already-stale rows don't pile up.
+        cron(dhcp_sync, minute=set(range(2, 60, 5))),
+        cron(dhcp_age_out, minute={7}),
     ]

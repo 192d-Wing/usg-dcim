@@ -40,6 +40,9 @@ from ..models.ipam import (
 )
 from ..schemas.common import Page, PageParams
 from ..schemas.ipam import (
+    DhcpServerCreate,
+    DhcpServerOut,
+    DhcpServerUpdate,
     FabricCreate,
     FabricOut,
     FabricUpdate,
@@ -61,6 +64,7 @@ from ..security import audit
 from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
 from ..security.deps import Principal, require_capability
 from ..services import ipam as ipam_svc
+from ..services import kea as kea_svc
 from ._pagination import paginate
 
 router = APIRouter(prefix="/ipam", tags=["ipam"])
@@ -589,6 +593,118 @@ async def delete_address(
     await db.commit()
 
 
-# Keep DhcpServer imports re-exported here so the next commit can wire
-# the dispatcher without re-loading the module — empty marker.
-_ = DhcpServer
+# ----------------------- DHCP servers (Kea) -----------------------
+_DHCP_NOT_FOUND = "dhcp server not found"
+
+
+@router.get("/dhcp/servers", response_model=Page[DhcpServerOut])
+async def list_dhcp_servers(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(DhcpServer)
+    if fabric_id is not None:
+        stmt = stmt.where(DhcpServer.fabric_id == fabric_id)
+    return await paginate(db, stmt, model=DhcpServer, params=params, out_model=DhcpServerOut)
+
+
+@router.post("/dhcp/servers", response_model=DhcpServerOut, status_code=201)
+async def create_dhcp_server(
+    payload: DhcpServerCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    existing = (
+        await db.execute(select(DhcpServer).where(DhcpServer.name == payload.name))
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ConflictError("a dhcp server with that name already exists")
+    obj = DhcpServer(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dhcp_server.create",
+        target_type="dhcp_server", target_id=str(obj.id),
+        metadata={"kea_url": payload.kea_url, "fabric_id": str(payload.fabric_id)},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/dhcp/servers/{server_id}", response_model=DhcpServerOut)
+async def update_dhcp_server(
+    server_id: UUID,
+    payload: DhcpServerUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpServer, server_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    # Don't echo the password into the audit diff.
+    redacted = {k: ("***" if k == "auth_password" else v) for k, v in diff.items()}
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="dhcp_server.update", target_type="dhcp_server",
+        target_id=str(server_id), diff=redacted,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/dhcp/servers/{server_id}", status_code=204)
+async def delete_dhcp_server(
+    server_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpServer, server_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_NOT_FOUND)
+    await db.execute(delete(DhcpServer).where(DhcpServer.id == server_id))
+    await audit.record(
+        db, principal, action="dhcp_server.delete",
+        target_type="dhcp_server", target_id=str(server_id),
+    )
+    await db.commit()
+
+
+@router.post("/dhcp/servers/{server_id}/sync")
+async def sync_dhcp_server_now(
+    server_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Trigger an on-demand sync. The cron job runs the same code path
+    every 5 minutes; this endpoint is for the operator who just edited
+    a server config and wants to verify it works."""
+    obj = await db.get(DhcpServer, server_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_NOT_FOUND)
+    result = await kea_svc.sync_dhcp_server(db, obj)
+    await audit.record(
+        db, principal, action="dhcp_server.sync",
+        target_type="dhcp_server", target_id=str(server_id),
+        metadata={
+            "upserted": result.upserted,
+            "skipped_no_subnet": result.skipped_no_subnet,
+            "leases_seen": result.leases_seen,
+            "error": result.error,
+        },
+    )
+    return {
+        "server_id": result.server_id,
+        "upserted": result.upserted,
+        "skipped_no_subnet": result.skipped_no_subnet,
+        "leases_seen": result.leases_seen,
+        "error": result.error,
+    }
