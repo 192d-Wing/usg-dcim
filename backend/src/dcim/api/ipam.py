@@ -606,6 +606,190 @@ async def delete_address(
     await db.commit()
 
 
+# ----------------------- Free-space finders -----------------------
+
+
+@router.get("/free-space/in-subnets")
+async def free_space_in_subnets(
+    fabric_id: UUID | None = Query(None),
+    vrf_id: UUID | None = Query(None),
+    family: str | None = Query(None, regex="^(v4|v6)$"),
+    min_free: int = Query(1, ge=1, description="Minimum free addresses required."),
+    limit: int = Query(50, ge=1, le=500),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Subnets with at least `min_free` addresses available, sorted by
+    free count descending. Use this to answer "where can I place 32 more
+    hosts?" — narrow by fabric / vrf / address family.
+
+    Counting "contiguous free" exactly would require enumerating every
+    address in the prefix; for IPv4 /20 (~4k) that's fine but for IPv6
+    /64 it isn't. We return free-count (capacity - allocated) which is a
+    fast O(1) per-subnet check and is what operators actually care about
+    for capacity planning.
+    """
+    stmt = select(Subnet)
+    if fabric_id is not None:
+        stmt = stmt.where(Subnet.fabric_id == fabric_id)
+    if vrf_id is not None:
+        stmt = stmt.where(Subnet.vrf_id == vrf_id)
+    subnets = (await db.execute(stmt)).scalars().all()
+
+    out: list[dict] = []
+    for s in subnets:
+        prefix = str(s.prefix)
+        if family == "v4" and ":" in prefix:
+            continue
+        if family == "v6" and ":" not in prefix:
+            continue
+        capacity = ipam_svc.network_capacity(prefix)
+        used = await ipam_svc.used_addresses_in_subnet(db, s.id)
+        free = max(0, capacity - len(used))
+        if free < min_free:
+            continue
+        out.append({
+            "subnet_id": str(s.id),
+            "prefix": prefix,
+            "name": s.name,
+            "site_id": str(s.site_id) if s.site_id else None,
+            "fabric_id": str(s.fabric_id),
+            "vrf_id": str(s.vrf_id),
+            "purpose": s.purpose,
+            "capacity": capacity,
+            "allocated": len(used),
+            "free": free,
+            "next_available": ipam_svc.next_free_address(prefix, used),
+        })
+    out.sort(key=lambda r: -r["free"])
+    return {
+        "query": {
+            "fabric_id": str(fabric_id) if fabric_id else None,
+            "vrf_id": str(vrf_id) if vrf_id else None,
+            "family": family, "min_free": min_free,
+        },
+        "subnets": out[:limit],
+        "count": len(out[:limit]),
+    }
+
+
+def _supernet_matches_family(sn_prefix: str, family: str | None) -> bool:
+    """Cheap inline family filter — colon ⇒ v6, no colon ⇒ v4."""
+    is_v4 = ":" not in sn_prefix
+    if family == "v4":
+        return is_v4
+    if family == "v6":
+        return not is_v4
+    return True
+
+
+def _carve_supernet(
+    sn: Supernet, prefix_size: int, allocated: list[str], limit: int,
+) -> dict | None:
+    """Run the pure carver against a single supernet, return a result row
+    or None if no candidates (caller filters)."""
+    sn_prefix = str(sn.prefix)
+    max_size = 32 if ":" not in sn_prefix else 128
+    if prefix_size > max_size:
+        return None
+    candidates = ipam_svc.find_free_prefixes_in_supernet(
+        sn_prefix, prefix_size, allocated, limit=limit,
+    )
+    if not candidates:
+        return None
+    return {
+        "supernet_id": str(sn.id),
+        "supernet_prefix": sn_prefix,
+        "supernet_name": sn.name,
+        "fabric_id": str(sn.fabric_id),
+        "vrf_id": str(sn.vrf_id),
+        "purpose": sn.purpose,
+        "candidates": candidates,
+        "count": len(candidates),
+    }
+
+
+async def _allocated_prefixes_by_supernet(
+    db: AsyncSession, supernet_ids: list[UUID],
+) -> dict[UUID, list[str]]:
+    """Pull all subnet prefixes in scope in one query and group them so
+    the carver doesn't issue N+1 lookups."""
+    if not supernet_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(Subnet.supernet_id, Subnet.prefix).where(
+                Subnet.supernet_id.in_(supernet_ids)
+            )
+        )
+    ).all()
+    out: dict[UUID, list[str]] = {}
+    for sn_id, prefix in rows:
+        out.setdefault(sn_id, []).append(str(prefix))
+    return out
+
+
+@router.get("/free-space/prefixes")
+async def free_space_prefixes(
+    prefix_size: int = Query(
+        ..., ge=1, le=128,
+        description="Target prefix length, e.g. 24 for /24 or 64 for /64.",
+    ),
+    fabric_id: UUID | None = Query(None),
+    vrf_id: UUID | None = Query(None),
+    supernet_id: UUID | None = Query(None),
+    family: str | None = Query(None, regex="^(v4|v6)$"),
+    limit_per_supernet: int = Query(20, ge=1, le=200),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find unallocated CIDR blocks of a specific size inside supernets.
+
+    Use cases:
+      - "Carve a new /24 in fabric=prod": prefix_size=24, fabric_id=prod
+      - "Find a free /64 inside the IL5 v6 fabric": prefix_size=64,
+        fabric_id=il5, family=v6
+      - "Find candidates inside this exact supernet": supernet_id=...
+
+    Returns up to `limit_per_supernet` candidate prefixes per supernet,
+    grouped so the operator can pick which supernet to carve from.
+    """
+    stmt = select(Supernet)
+    if supernet_id is not None:
+        stmt = stmt.where(Supernet.id == supernet_id)
+    if fabric_id is not None:
+        stmt = stmt.where(Supernet.fabric_id == fabric_id)
+    if vrf_id is not None:
+        stmt = stmt.where(Supernet.vrf_id == vrf_id)
+    supernets = (await db.execute(stmt)).scalars().all()
+
+    subnets_by_supernet = await _allocated_prefixes_by_supernet(
+        db, [s.id for s in supernets],
+    )
+
+    out: list[dict] = []
+    for sn in supernets:
+        if not _supernet_matches_family(str(sn.prefix), family):
+            continue
+        row = _carve_supernet(
+            sn, prefix_size,
+            subnets_by_supernet.get(sn.id, []),
+            limit_per_supernet,
+        )
+        if row is not None:
+            out.append(row)
+    return {
+        "query": {
+            "prefix_size": prefix_size,
+            "fabric_id": str(fabric_id) if fabric_id else None,
+            "vrf_id": str(vrf_id) if vrf_id else None,
+            "supernet_id": str(supernet_id) if supernet_id else None,
+            "family": family,
+        },
+        "supernets": out,
+    }
+
+
 # ----------------------- DHCP servers (Kea) -----------------------
 _DHCP_NOT_FOUND = "dhcp server not found"
 

@@ -96,6 +96,58 @@ def next_free_address(network: CidrLike, used: Iterable[str]) -> str | None:
 _INT64_MAX = (1 << 63) - 1
 
 
+def find_free_prefixes_in_supernet(
+    supernet_prefix: CidrLike,
+    new_prefix_size: int,
+    allocated_prefixes: Iterable[CidrLike],
+    *,
+    limit: int = 50,
+) -> list[str]:
+    """Walk a supernet's possible sub-prefixes and return ones that don't
+    overlap any already-allocated subnet.
+
+    Used by the carving free-space finder — "find me a /24 inside
+    10.0.0.0/8 that isn't already a subnet" or "find me a /64 inside
+    2001:db8::/48 to allocate". Caller passes the existing subnet
+    prefixes for the supernet.
+
+    Bounded by `limit` so a large IPv6 search (a /48 splits into 65536
+    /64s) doesn't iterate the whole space when the operator only needs
+    a handful of candidates.
+
+    Returns CIDR strings sorted by network address ascending. Skips the
+    candidate if its prefix length doesn't fit (parent /24, asked /16),
+    if family doesn't match, or if it overlaps an existing allocation.
+    """
+    parent = parse_network(supernet_prefix)
+    if new_prefix_size <= parent.prefixlen:
+        return []
+    if (parent.version == 4 and new_prefix_size > 32) or (
+        parent.version == 6 and new_prefix_size > 128
+    ):
+        return []
+
+    occupied = []
+    for p in allocated_prefixes:
+        try:
+            occupied.append(parse_network(p))
+        except (ValueError, TypeError):
+            continue
+    # Walk parent.subnets() in order; binary-searching occupied per candidate
+    # keeps this O((C+O) log O) rather than O(C * O) when there are many
+    # existing subnets. Occupied is sorted by network address.
+    occupied.sort(key=lambda n: int(n.network_address))
+
+    out: list[str] = []
+    for cand in parent.subnets(new_prefix=new_prefix_size):
+        if any(cand.overlaps(o) for o in occupied):
+            continue
+        out.append(str(cand))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def network_capacity(network: CidrLike) -> int:
     """Number of allocatable host addresses in a network, capped at int64.
 

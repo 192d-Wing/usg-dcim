@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
   Plus, Pencil, Trash2, Network, GitBranch, ChevronRight, ChevronDown, Send,
+  LayoutGrid, List, Search,
 } from 'lucide-react';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
@@ -59,6 +60,7 @@ type Site = { id: string; code: string; name: string };
 type Asset = { id: string; name: string; site_id: string };
 
 type SubnetUtil = {
+  prefix: string;
   capacity: number; allocated: number; free: number;
   percent: number; next_available: string | null;
 };
@@ -108,6 +110,7 @@ export function IpamPage() {
       <Tabs defaultValue="hierarchy">
         <TabsList>
           <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
+          <TabsTrigger value="free-space"><Search className="h-3.5 w-3.5" /> Free space</TabsTrigger>
           <TabsTrigger value="dhcp">DHCP servers</TabsTrigger>
         </TabsList>
         <TabsContent value="hierarchy" className="pt-3">
@@ -137,10 +140,266 @@ export function IpamPage() {
             )}
           </div>
         </TabsContent>
+        <TabsContent value="free-space" className="pt-3">
+          <FreeSpaceTab onSelectSubnet={(id) => setSubnetId(id)} />
+        </TabsContent>
         <TabsContent value="dhcp" className="pt-3">
           <DhcpServersTab canWrite={!!canWrite} />
         </TabsContent>
       </Tabs>
+    </div>
+  );
+}
+
+
+// ----------------------- Free space finder -----------------------
+
+type SubnetFreeRow = {
+  subnet_id: string;
+  prefix: string;
+  name: string | null;
+  fabric_id: string;
+  vrf_id: string;
+  purpose: string | null;
+  capacity: number;
+  allocated: number;
+  free: number;
+  next_available: string | null;
+};
+
+type SupernetCandidates = {
+  supernet_id: string;
+  supernet_prefix: string;
+  supernet_name: string | null;
+  fabric_id: string;
+  vrf_id: string;
+  purpose: string | null;
+  candidates: string[];
+  count: number;
+};
+
+type FreeMode = 'in-subnets' | 'prefixes';
+
+function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void }) {
+  const [mode, setMode] = useState<FreeMode>('in-subnets');
+  const [fabricId, setFabricId] = useState<string>('');
+  const [family, setFamily] = useState<'v4' | 'v6'>('v4');
+  const [minFree, setMinFree] = useState<string>('1');
+  const [prefixSize, setPrefixSize] = useState<string>('24');
+  const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
+  const fabrics = fabricsRes.result.data ?? [];
+
+  const subnetSearch = useQuery({
+    queryKey: ['free-in-subnets', fabricId, family, minFree],
+    queryFn: async () => {
+      const params: Record<string, string | number> = {
+        family, min_free: Number(minFree) || 1, limit: 100,
+      };
+      if (fabricId) params.fabric_id = fabricId;
+      const r = await http.get<{ subnets: SubnetFreeRow[] }>(
+        '/ipam/free-space/in-subnets', { params },
+      );
+      return r.data.subnets;
+    },
+    enabled: mode === 'in-subnets',
+  });
+
+  const prefixSearch = useQuery({
+    queryKey: ['free-prefixes', fabricId, family, prefixSize],
+    queryFn: async () => {
+      const params: Record<string, string | number> = {
+        family,
+        prefix_size: Number(prefixSize) || (family === 'v4' ? 24 : 64),
+        limit_per_supernet: 10,
+      };
+      if (fabricId) params.fabric_id = fabricId;
+      const r = await http.get<{ supernets: SupernetCandidates[] }>(
+        '/ipam/free-space/prefixes', { params },
+      );
+      return r.data.supernets;
+    },
+    enabled: mode === 'prefixes',
+  });
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="grid gap-3 p-4 md:grid-cols-4">
+          <div className="space-y-1 md:col-span-2">
+            <label className="text-xs font-medium text-muted-foreground">Mode</label>
+            <Tabs value={mode} onValueChange={(v) => setMode(v as FreeMode)}>
+              <TabsList>
+                <TabsTrigger value="in-subnets">Free addresses in existing subnets</TabsTrigger>
+                <TabsTrigger value="prefixes">Free prefixes inside supernets</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Fabric</label>
+            <Select value={fabricId || '__all__'} onValueChange={(v) => setFabricId(v === '__all__' ? '' : v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">All fabrics</SelectItem>
+                {fabrics.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Family</label>
+            <Select value={family} onValueChange={(v) => setFamily(v as 'v4' | 'v6')}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="v4">IPv4</SelectItem>
+                <SelectItem value="v6">IPv6</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {mode === 'in-subnets' ? (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Min free addresses</label>
+              <Input
+                type="number" min={1}
+                value={minFree}
+                onChange={(e) => setMinFree(e.target.value)}
+              />
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Prefix size (e.g. 24 for /24, 64 for /64)
+              </label>
+              <Input
+                type="number" min={1} max={128}
+                value={prefixSize}
+                onChange={(e) => setPrefixSize(e.target.value)}
+              />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {mode === 'in-subnets' && (
+        <SubnetFreeResults
+          rows={subnetSearch.data ?? []}
+          isLoading={subnetSearch.isLoading}
+          onSelectSubnet={onSelectSubnet}
+        />
+      )}
+      {mode === 'prefixes' && (
+        <PrefixFreeResults
+          groups={prefixSearch.data ?? []}
+          isLoading={prefixSearch.isLoading}
+        />
+      )}
+    </div>
+  );
+}
+
+function SubnetFreeResults({
+  rows, isLoading, onSelectSubnet,
+}: {
+  rows: SubnetFreeRow[];
+  isLoading: boolean;
+  onSelectSubnet: (id: string) => void;
+}) {
+  return (
+    <Card>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="space-y-2 p-4">
+            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Subnet</TableHead>
+                <TableHead>Purpose</TableHead>
+                <TableHead className="w-32 text-right">Free</TableHead>
+                <TableHead className="w-32 text-right">Capacity</TableHead>
+                <TableHead>Next available</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.length === 0 && (
+                <TableRow><TableCell colSpan={5} className="text-muted-foreground">
+                  No subnets meet that filter.
+                </TableCell></TableRow>
+              )}
+              {rows.map((r) => (
+                <TableRow
+                  key={r.subnet_id}
+                  className="cursor-pointer hover:bg-accent/40"
+                  onClick={() => onSelectSubnet(r.subnet_id)}
+                >
+                  <TableCell className="font-mono">
+                    {r.prefix}{r.name && <span className="text-muted-foreground"> · {r.name}</span>}
+                  </TableCell>
+                  <TableCell>
+                    {r.purpose ? <Badge variant="secondary">{r.purpose}</Badge> : '—'}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{r.free.toLocaleString()}</TableCell>
+                  <TableCell className="text-right tabular-nums">{r.capacity.toLocaleString()}</TableCell>
+                  <TableCell className="font-mono text-xs">{r.next_available ?? '—'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PrefixFreeResults({
+  groups, isLoading,
+}: {
+  groups: SupernetCandidates[];
+  isLoading: boolean;
+}) {
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="space-y-2 p-4">
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
+        </CardContent>
+      </Card>
+    );
+  }
+  if (groups.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-4 text-sm text-muted-foreground">
+          No supernet has free space at that prefix size in this scope.
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {groups.map((g) => (
+        <Card key={g.supernet_id}>
+          <CardContent className="space-y-2 p-4">
+            <div className="flex items-baseline justify-between gap-2">
+              <div>
+                <div className="font-mono font-medium">{g.supernet_prefix}</div>
+                <div className="text-xs text-muted-foreground">
+                  {g.supernet_name ?? 'unnamed'}
+                  {g.purpose && <> · {g.purpose}</>}
+                </div>
+              </div>
+              <Badge variant="secondary">{g.count} candidates</Badge>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {g.candidates.map((c) => (
+                <Badge key={c} variant="outline" className="font-mono">{c}</Badge>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ))}
     </div>
   );
 }
@@ -1064,6 +1323,7 @@ function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: bool
   const assetsById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets]);
   const data = result.data ?? [];
   const [createOpen, setCreateOpen] = useState(false);
+  const [view, setView] = useState<'table' | 'grid'>('table');
 
   async function remove(ip: IPAddr) {
     if (!window.confirm(`Release ${ip.address}?`)) return;
@@ -1092,7 +1352,13 @@ function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: bool
           </CardContent>
         </Card>
       )}
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-2">
+        <Tabs value={view} onValueChange={(v) => setView(v as 'table' | 'grid')}>
+          <TabsList>
+            <TabsTrigger value="table"><List className="h-3.5 w-3.5" /> Table</TabsTrigger>
+            <TabsTrigger value="grid"><LayoutGrid className="h-3.5 w-3.5" /> Grid</TabsTrigger>
+          </TabsList>
+        </Tabs>
         {canWrite && (
           <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild>
@@ -1114,6 +1380,17 @@ function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: bool
           </Dialog>
         )}
       </div>
+
+      {view === 'grid' && util.data && (
+        <IpGrid
+          subnetPrefix={util.data.prefix}
+          capacity={util.data.capacity}
+          allocated={data}
+          assetsById={assetsById}
+        />
+      )}
+
+      {view === 'table' && (
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -1170,9 +1447,212 @@ function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: bool
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
+
+
+// Hard cap on grid cells. /24 (256) and /22 (1024) are reasonable; an IPv6
+// /64 is 2^64 cells which obviously can't render, and even an IPv4 /20 at
+// 4096 cells is too noisy to be useful.
+const IP_GRID_MAX_CELLS = 1024;
+
+
+function IpGrid({
+  subnetPrefix, capacity, allocated, assetsById,
+}: {
+  subnetPrefix: string;
+  capacity: number;
+  allocated: IPAddr[];
+  assetsById: Map<string, Asset>;
+}) {
+  if (capacity > IP_GRID_MAX_CELLS) {
+    return (
+      <Card>
+        <CardContent className="p-6 text-sm text-muted-foreground">
+          Grid view is hidden for prefixes larger than /22 (this subnet has{' '}
+          <span className="font-mono">{capacity.toLocaleString()}</span> addresses).
+          Use the table for now — search by address to find a specific allocation.
+        </CardContent>
+      </Card>
+    );
+  }
+  const cells = useMemo(
+    () => buildGridCells(subnetPrefix, capacity, allocated),
+    [subnetPrefix, capacity, allocated],
+  );
+  if (cells.length === 0) {
+    return (
+      <Card>
+        <CardContent className="p-4 text-sm text-muted-foreground">
+          Couldn't render this prefix as a grid (unparseable CIDR).
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <Legend swatch="bg-muted" label="free" />
+          <Legend swatch="bg-primary" label="static" />
+          <Legend swatch="bg-warning" label="dhcp" />
+          <Legend swatch="bg-secondary" label="reservation" />
+          <Legend swatch="bg-muted-foreground/30" label="deprecated" />
+        </div>
+        <div
+          className="grid gap-0.5"
+          style={{ gridTemplateColumns: 'repeat(32, minmax(0, 1fr))' }}
+        >
+          {cells.map((cell) => (
+            <IpCell key={cell.address} cell={cell} assetsById={assetsById} />
+          ))}
+        </div>
+        <p className="text-[10px] text-muted-foreground">
+          Hover a cell for details · {allocated.length} of {capacity} allocated
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function Legend({ swatch, label }: { swatch: string; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={`inline-block h-3 w-3 rounded-sm ${swatch}`} />
+      {label}
+    </span>
+  );
+}
+
+type IpCellInfo = {
+  address: string;
+  ip: IPAddr | null;
+};
+
+function buildGridCells(
+  prefix: string, capacity: number, allocated: IPAddr[],
+): IpCellInfo[] {
+  // Walk the network's hosts in numeric order and pair them with any
+  // existing allocation. Uses the same "skip network/broadcast for /30
+  // and shorter" rule as the backend so cell counts line up with capacity.
+  const slash = prefix.indexOf('/');
+  if (slash < 0) return [];
+  const isV6 = prefix.includes(':');
+  const prefixLen = Number(prefix.slice(slash + 1));
+  if (Number.isNaN(prefixLen)) return [];
+  const networkAddr = prefix.slice(0, slash);
+  const allocatedByAddress = new Map<string, IPAddr>();
+  for (const a of allocated) allocatedByAddress.set(a.address, a);
+
+  const skipEdges = isV6 ? prefixLen < 127 : prefixLen < 31;
+  let netInt: bigint;
+  try {
+    netInt = ipToBigInt(networkAddr, isV6);
+  } catch { return []; }
+  const start = skipEdges ? netInt + 1n : netInt;
+  const limit = BigInt(Math.min(capacity, IP_GRID_MAX_CELLS));
+  const cells: IpCellInfo[] = [];
+  for (let i = 0n; i < limit; i++) {
+    const a = bigIntToIp(start + i, isV6);
+    cells.push({ address: a, ip: allocatedByAddress.get(a) ?? null });
+  }
+  return cells;
+}
+
+function ipToBigInt(addr: string, isV6: boolean): bigint {
+  if (!isV6) {
+    const parts = addr.split('.').map(Number);
+    if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) throw new Error('bad v4');
+    return (BigInt(parts[0]) << 24n)
+      + (BigInt(parts[1]) << 16n)
+      + (BigInt(parts[2]) << 8n)
+      + BigInt(parts[3]);
+  }
+  // Expand `::` and pad each group, then concatenate as one big hex.
+  const sides = addr.split('::');
+  const left = sides[0] ? sides[0].split(':') : [];
+  const right = sides.length > 1 && sides[1] ? sides[1].split(':') : [];
+  const missing = 8 - left.length - right.length;
+  const groups = [...left, ...Array(missing).fill('0'), ...right];
+  const hex = groups.map((g) => g.padStart(4, '0')).join('');
+  return BigInt('0x' + hex);
+}
+
+function bigIntToIp(n: bigint, isV6: boolean): string {
+  if (!isV6) {
+    return [
+      Number((n >> 24n) & 0xffn),
+      Number((n >> 16n) & 0xffn),
+      Number((n >> 8n) & 0xffn),
+      Number(n & 0xffn),
+    ].join('.');
+  }
+  const groups: string[] = [];
+  for (let i = 7n; i >= 0n; i--) {
+    const part = Number((n >> (i * 16n)) & 0xffffn).toString(16);
+    groups.push(part);
+  }
+  // Compress the longest run of zero groups into `::` for readability.
+  return compressV6(groups);
+}
+
+function compressV6(groups: string[]): string {
+  let bestStart = -1, bestLen = 0;
+  let curStart = -1, curLen = 0;
+  for (let i = 0; i < groups.length; i++) {
+    if (groups[i] === '0') {
+      if (curStart < 0) { curStart = i; curLen = 1; }
+      else curLen++;
+      if (curLen > bestLen) { bestStart = curStart; bestLen = curLen; }
+    } else {
+      curStart = -1; curLen = 0;
+    }
+  }
+  if (bestLen < 2) return groups.join(':');
+  return [
+    groups.slice(0, bestStart).join(':'),
+    groups.slice(bestStart + bestLen).join(':'),
+  ].join('::');
+}
+
+
+function IpCell({
+  cell, assetsById,
+}: {
+  cell: IpCellInfo;
+  assetsById: Map<string, Asset>;
+}) {
+  const ip = cell.ip;
+  const tone = cellTone(ip);
+  const asset = ip?.asset_id ? assetsById.get(ip.asset_id) : null;
+  const tooltip = ip
+    ? [
+        ip.address,
+        `source: ${ip.source}`,
+        `status: ${ip.status}`,
+        `role: ${ip.role}`,
+        asset ? `asset: ${asset.name}` : null,
+        ip.dns_name ? `dns: ${ip.dns_name}` : null,
+      ].filter(Boolean).join(' · ')
+    : `${cell.address} · free`;
+  return (
+    <span
+      title={tooltip}
+      className={`aspect-square rounded-sm ${tone}`}
+    />
+  );
+}
+
+function cellTone(ip: IPAddr | null): string {
+  if (!ip) return 'bg-muted hover:bg-muted-foreground/20';
+  if (ip.status === 'deprecated') return 'bg-muted-foreground/30';
+  if (ip.source === 'dhcp') return 'bg-warning hover:bg-warning/80';
+  if (ip.source === 'reservation') return 'bg-secondary hover:bg-secondary/80';
+  return 'bg-primary hover:bg-primary/80';
+}
+
 
 function IpForm({
   subnetId, suggestedAddress, assets, onSaved,

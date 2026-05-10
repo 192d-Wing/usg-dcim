@@ -14,6 +14,7 @@ from dcim.services.ipam import (
     assert_purpose_compatible,
     cidr_contains,
     cidrs_overlap,
+    find_free_prefixes_in_supernet,
     network_capacity,
     next_free_address,
 )
@@ -187,3 +188,66 @@ def test_network_capacity_caps_at_int64_for_huge_v6():
     assert network_capacity("2001:db8::/64") == (1 << 63) - 1
     # /65 is the widest prefix where 2^63-2 fits unclamped.
     assert network_capacity("2001:db8::/65") == (1 << 63) - 2
+
+
+# ---------- find_free_prefixes_in_supernet ----------
+
+def test_free_prefixes_empty_supernet_returns_first_block():
+    out = find_free_prefixes_in_supernet("10.0.0.0/16", 24, [], limit=3)
+    assert out == ["10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"]
+
+
+def test_free_prefixes_skips_overlapping_existing_subnets():
+    """If 10.0.5.0/24 is taken, the carver shouldn't return it. The
+    /23 supernet 10.0.4.0/23 fully covers two /24s, so a 10.0.4.0/23
+    allocation should also block both."""
+    out = find_free_prefixes_in_supernet(
+        "10.0.0.0/16", 24,
+        ["10.0.5.0/24", "10.0.4.0/23"],
+        limit=10,
+    )
+    assert "10.0.4.0/24" not in out
+    assert "10.0.5.0/24" not in out
+    assert "10.0.0.0/24" in out
+    assert "10.0.6.0/24" in out
+
+
+def test_free_prefixes_returns_ipv6_64s_inside_a_48():
+    out = find_free_prefixes_in_supernet("2001:db8::/48", 64, [], limit=3)
+    assert out == ["2001:db8::/64", "2001:db8:0:1::/64", "2001:db8:0:2::/64"]
+
+
+def test_free_prefixes_skips_taken_v6_blocks():
+    out = find_free_prefixes_in_supernet(
+        "2001:db8::/48", 64,
+        ["2001:db8:0:1::/64"],
+        limit=3,
+    )
+    assert "2001:db8:0:1::/64" not in out
+    assert out[:2] == ["2001:db8::/64", "2001:db8:0:2::/64"]
+
+
+def test_free_prefixes_caps_at_limit():
+    out = find_free_prefixes_in_supernet("10.0.0.0/16", 24, [], limit=5)
+    assert len(out) == 5
+
+
+def test_free_prefixes_returns_empty_when_target_wider_than_parent():
+    """Asking for a /16 inside a /24 is incoherent — return empty."""
+    assert find_free_prefixes_in_supernet("10.0.0.0/24", 16, []) == []
+
+
+def test_free_prefixes_returns_empty_for_invalid_prefix_size():
+    assert find_free_prefixes_in_supernet("10.0.0.0/16", 33, []) == []
+    assert find_free_prefixes_in_supernet("2001:db8::/48", 129, []) == []
+
+
+def test_free_prefixes_silently_skips_unparseable_allocated_entries():
+    """Bad rows in the DB shouldn't break the carver for the rest."""
+    out = find_free_prefixes_in_supernet(
+        "10.0.0.0/16", 24,
+        ["not-a-cidr", "10.0.5.0/24"],
+        limit=3,
+    )
+    assert "10.0.5.0/24" not in out
+    assert "10.0.0.0/24" in out
