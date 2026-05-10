@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useTable, useGetIdentity, useList } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
-  Plus, Trash2, Network, GitBranch, ChevronRight, Send,
+  Plus, Trash2, Network, GitBranch, ChevronRight, ChevronDown, Send,
 } from 'lucide-react';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
@@ -77,10 +77,11 @@ export function IpamPage() {
   const canRead = identity?.capabilities.includes('inventory:read');
   const canWrite = identity?.capabilities.includes('inventory:write');
 
-  // Drill-down state — one selection per layer.
+  // Drill-down state. Supernets + Subnets share one view (the tree),
+  // so we don't track a selected supernet — clicking a subnet inside the
+  // tree drills directly to the addresses view.
   const [fabricId, setFabricId] = useState<string | null>(null);
   const [vrfId, setVrfId] = useState<string | null>(null);
-  const [supernetId, setSupernetId] = useState<string | null>(null);
   const [subnetId, setSubnetId] = useState<string | null>(null);
 
   if (!canRead) {
@@ -111,12 +112,11 @@ export function IpamPage() {
         </TabsList>
         <TabsContent value="hierarchy" className="pt-3">
           <Breadcrumbs
-            fabricId={fabricId} vrfId={vrfId} supernetId={supernetId} subnetId={subnetId}
+            fabricId={fabricId} vrfId={vrfId} subnetId={subnetId}
             onJump={(level) => {
-              if (level === 'fabrics') { setFabricId(null); setVrfId(null); setSupernetId(null); setSubnetId(null); }
-              if (level === 'vrfs') { setVrfId(null); setSupernetId(null); setSubnetId(null); }
-              if (level === 'supernets') { setSupernetId(null); setSubnetId(null); }
-              if (level === 'subnets') { setSubnetId(null); }
+              if (level === 'fabrics') { setFabricId(null); setVrfId(null); setSubnetId(null); }
+              if (level === 'vrfs') { setVrfId(null); setSubnetId(null); }
+              if (level === 'networks') { setSubnetId(null); }
             }}
           />
           <div className="mt-3">
@@ -126,14 +126,11 @@ export function IpamPage() {
             {fabricId && !vrfId && (
               <VrfsTab fabricId={fabricId} onSelect={setVrfId} canWrite={!!canWrite} />
             )}
-            {fabricId && vrfId && !supernetId && (
-              <SupernetsTab
+            {fabricId && vrfId && !subnetId && (
+              <SupernetTreeTab
                 fabricId={fabricId} vrfId={vrfId}
-                onSelect={setSupernetId} canWrite={!!canWrite}
+                onSelectSubnet={setSubnetId} canWrite={!!canWrite}
               />
-            )}
-            {supernetId && !subnetId && (
-              <SubnetsTab supernetId={supernetId} onSelect={setSubnetId} canWrite={!!canWrite} />
             )}
             {subnetId && (
               <AddressesTab subnetId={subnetId} canWrite={!!canWrite} />
@@ -149,13 +146,12 @@ export function IpamPage() {
 }
 
 function Breadcrumbs({
-  fabricId, vrfId, supernetId, subnetId, onJump,
+  fabricId, vrfId, subnetId, onJump,
 }: {
   fabricId: string | null;
   vrfId: string | null;
-  supernetId: string | null;
   subnetId: string | null;
-  onJump: (level: 'fabrics' | 'vrfs' | 'supernets' | 'subnets') => void;
+  onJump: (level: 'fabrics' | 'vrfs' | 'networks') => void;
 }) {
   return (
     <div className="flex items-center gap-1 text-sm">
@@ -183,22 +179,10 @@ function Breadcrumbs({
           <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           <button
             type="button"
-            onClick={() => onJump('supernets')}
+            onClick={() => onJump('networks')}
             className="text-muted-foreground hover:text-foreground"
           >
-            Supernets
-          </button>
-        </>
-      )}
-      {supernetId && (
-        <>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          <button
-            type="button"
-            onClick={() => onJump('subnets')}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            Subnets
+            Networks
           </button>
         </>
       )}
@@ -460,12 +444,12 @@ const supernetSchema = z.object({
   description: z.string().optional(),
 });
 
-function SupernetsTab({
-  fabricId, vrfId, onSelect, canWrite,
+function SupernetTreeTab({
+  fabricId, vrfId, onSelectSubnet, canWrite,
 }: {
   fabricId: string;
   vrfId: string;
-  onSelect: (id: string) => void;
+  onSelectSubnet: (subnetId: string) => void;
   canWrite: boolean;
 }) {
   const qc = useQueryClient();
@@ -478,14 +462,36 @@ function SupernetsTab({
     ] },
     sorters: { initial: [{ field: 'prefix', order: 'asc' }] },
   });
+  const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
+  const sites = sitesRes.result.data ?? [];
+  const sitesById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
   const data = result.data ?? [];
-  const [createOpen, setCreateOpen] = useState(false);
+
+  // Track expansion + dialog state per-supernet. Two separate sets so the
+  // "+ subnet" dialog doesn't get tied to the chevron toggle.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [createSupernetOpen, setCreateSupernetOpen] = useState(false);
+  const [createSubnetFor, setCreateSubnetFor] = useState<string | null>(null);
+
+  function toggle(id: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function refreshSubnets(supernetId: string) {
+    await qc.invalidateQueries({ queryKey: ['subnets-for-supernet', supernetId] });
+    await qc.invalidateQueries({ queryKey: ['supernet-util', supernetId] });
+  }
 
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
         {canWrite && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <Dialog open={createSupernetOpen} onOpenChange={setCreateSupernetOpen}>
             <DialogTrigger asChild>
               <Button><Plus className="h-4 w-4" /> New supernet</Button>
             </DialogTrigger>
@@ -493,37 +499,65 @@ function SupernetsTab({
               <DialogHeader><DialogTitle>New supernet</DialogTitle></DialogHeader>
               <SupernetForm
                 fabricId={fabricId} vrfId={vrfId}
-                onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); await qc.invalidateQueries({ queryKey: ['supernet-util'] }); }}
+                onSaved={async () => {
+                  setCreateSupernetOpen(false);
+                  await tableQuery.refetch();
+                  await qc.invalidateQueries({ queryKey: ['supernet-util'] });
+                }}
               />
             </DialogContent>
           </Dialog>
         )}
       </div>
+
       <Card>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-8" />
                 <TableHead>Prefix</TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Purpose</TableHead>
-                <TableHead className="w-64">Subnet utilization</TableHead>
+                <TableHead className="w-64">Utilization</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {data.length === 0 && (
-                <TableRow><TableCell colSpan={4} className="text-muted-foreground">No supernets yet.</TableCell></TableRow>
-              )}
-              {data.map((s) => (
-                <TableRow
-                  key={s.id} className="cursor-pointer hover:bg-accent/40"
-                  onClick={() => onSelect(s.id)}
-                >
-                  <TableCell className="font-mono">{s.prefix}</TableCell>
-                  <TableCell>{s.name ?? '—'}</TableCell>
-                  <TableCell>{s.purpose ? <Badge variant="secondary">{s.purpose}</Badge> : '—'}</TableCell>
-                  <TableCell><SupernetUtilCell supernetId={s.id} /></TableCell>
+                <TableRow>
+                  <TableCell colSpan={5} className="text-muted-foreground">
+                    No supernets yet.
+                  </TableCell>
                 </TableRow>
+              )}
+              {data.map((sn) => (
+                <Fragment key={sn.id}>
+                  <TableRow
+                    className="cursor-pointer hover:bg-accent/40"
+                    onClick={() => toggle(sn.id)}
+                  >
+                    <TableCell className="text-muted-foreground">
+                      {expanded.has(sn.id)
+                        ? <ChevronDown className="h-4 w-4" />
+                        : <ChevronRight className="h-4 w-4" />}
+                    </TableCell>
+                    <TableCell className="font-mono font-medium">{sn.prefix}</TableCell>
+                    <TableCell>{sn.name ?? '—'}</TableCell>
+                    <TableCell>
+                      {sn.purpose ? <Badge variant="secondary">{sn.purpose}</Badge> : '—'}
+                    </TableCell>
+                    <TableCell><SupernetUtilCell supernetId={sn.id} /></TableCell>
+                  </TableRow>
+                  {expanded.has(sn.id) && (
+                    <SubnetBranch
+                      supernetId={sn.id}
+                      sitesById={sitesById}
+                      canWrite={canWrite}
+                      onSelectSubnet={onSelectSubnet}
+                      onAddSubnet={() => setCreateSubnetFor(sn.id)}
+                    />
+                  )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>
@@ -534,7 +568,113 @@ function SupernetsTab({
           )}
         </CardContent>
       </Card>
+
+      <Dialog
+        open={createSubnetFor !== null}
+        onOpenChange={(o) => { if (!o) setCreateSubnetFor(null); }}
+      >
+        <DialogContent>
+          <DialogHeader><DialogTitle>New subnet</DialogTitle></DialogHeader>
+          {createSubnetFor && (
+            <SubnetForm
+              supernetId={createSubnetFor} sites={sites}
+              onSaved={async () => {
+                const id = createSubnetFor;
+                setCreateSubnetFor(null);
+                if (id) await refreshSubnets(id);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
+  );
+}
+
+
+function SubnetBranch({
+  supernetId, sitesById, canWrite, onSelectSubnet, onAddSubnet,
+}: {
+  supernetId: string;
+  sitesById: Map<string, Site>;
+  canWrite: boolean;
+  onSelectSubnet: (subnetId: string) => void;
+  onAddSubnet: () => void;
+}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['subnets-for-supernet', supernetId],
+    queryFn: async () => (
+      await http.get<{ items: Subnet[] }>(`/ipam/subnets?supernet_id=${supernetId}&page_size=200`)
+    ).data.items ?? [],
+  });
+
+  if (isLoading) {
+    return (
+      <TableRow>
+        <TableCell />
+        <TableCell colSpan={4}>
+          <Skeleton className="h-6 w-full" />
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  const subnets = data ?? [];
+  if (subnets.length === 0) {
+    return (
+      <TableRow className="bg-muted/20">
+        <TableCell />
+        <TableCell colSpan={4} className="text-xs text-muted-foreground">
+          No subnets carved from this supernet.
+          {canWrite && (
+            <Button size="sm" variant="ghost" className="ml-2" onClick={onAddSubnet}>
+              <Plus className="h-3.5 w-3.5" /> Add subnet
+            </Button>
+          )}
+        </TableCell>
+      </TableRow>
+    );
+  }
+
+  return (
+    <>
+      {subnets.map((s) => (
+        <TableRow
+          key={s.id}
+          className="cursor-pointer bg-muted/20 hover:bg-accent/40"
+          onClick={() => onSelectSubnet(s.id)}
+        >
+          <TableCell />
+          <TableCell className="font-mono pl-8">
+            <span className="text-muted-foreground">└─</span> {s.prefix}
+          </TableCell>
+          <TableCell className="text-sm">
+            <div>{s.name ?? '—'}</div>
+            <div className="text-xs text-muted-foreground">
+              {s.site_id
+                ? `site: ${sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}`
+                : 'unassigned'}
+              {s.vlan_id ? ` · vlan ${s.vlan_id}` : ''}
+              {s.gateway ? ` · gw ${s.gateway}` : ''}
+            </div>
+          </TableCell>
+          <TableCell>
+            {s.purpose ? <Badge variant="secondary">{s.purpose}</Badge> : '—'}
+          </TableCell>
+          <TableCell><SubnetUtilCell subnetId={s.id} /></TableCell>
+        </TableRow>
+      ))}
+      {canWrite && (
+        <TableRow className="bg-muted/20">
+          <TableCell />
+          <TableCell colSpan={4} className="pl-8">
+            <Button size="sm" variant="ghost" onClick={onAddSubnet}>
+              <Plus className="h-3.5 w-3.5" /> Add subnet here
+            </Button>
+          </TableCell>
+        </TableRow>
+      )}
+    </>
   );
 }
 
@@ -627,86 +767,6 @@ const subnetSchema = z.object({
   vlan_id: z.string().optional(),
   gateway: z.string().optional(),
 });
-
-function SubnetsTab({
-  supernetId, onSelect, canWrite,
-}: {
-  supernetId: string;
-  onSelect: (id: string) => void;
-  canWrite: boolean;
-}) {
-  const { tableQuery, result } = useTable<Subnet>({
-    resource: 'ipam/subnets',
-    pagination: { pageSize: 200 },
-    filters: { permanent: [{ field: 'supernet_id', operator: 'eq', value: supernetId }] },
-    sorters: { initial: [{ field: 'prefix', order: 'asc' }] },
-  });
-  const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
-  const sites = sitesRes.result.data ?? [];
-  const sitesById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
-  const data = result.data ?? [];
-  const [createOpen, setCreateOpen] = useState(false);
-
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        {canWrite && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> New subnet</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New subnet</DialogTitle></DialogHeader>
-              <SubnetForm
-                supernetId={supernetId} sites={sites}
-                onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }}
-              />
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Prefix</TableHead>
-                <TableHead>Site</TableHead>
-                <TableHead>VLAN</TableHead>
-                <TableHead>Gateway</TableHead>
-                <TableHead className="w-64">Allocation</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-muted-foreground">No subnets yet.</TableCell></TableRow>
-              )}
-              {data.map((s) => (
-                <TableRow
-                  key={s.id} className="cursor-pointer hover:bg-accent/40"
-                  onClick={() => onSelect(s.id)}
-                >
-                  <TableCell className="font-mono">{s.prefix}</TableCell>
-                  <TableCell className="text-sm">
-                    {s.site_id ? (sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…') : '—'}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{s.vlan_id ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs">{s.gateway ?? '—'}</TableCell>
-                  <TableCell><SubnetUtilCell subnetId={s.id} /></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {tableQuery.isLoading && (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 2 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 function SubnetUtilCell({ subnetId }: { subnetId: string }) {
   const { data } = useQuery({
