@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import enum
+from datetime import UTC, date, datetime
+from typing import Any
 from uuid import UUID
 
 import structlog
@@ -12,6 +14,28 @@ from ..models.audit import AuditLog
 from .deps import Principal
 
 log = structlog.get_logger("dcim.audit")
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce values into types the JSON column can store.
+
+    Pydantic's `model_dump(exclude_unset=True)` returns Python objects —
+    UUIDs are still UUID instances, datetimes are still datetime, enums
+    are still enum members. The JSON column tries to serialize the dict
+    via the stdlib encoder which doesn't know any of those types and
+    blows up at write time. Normalize once here so every audit caller
+    can hand us whatever shape comes out of model_dump."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, enum.Enum):
+        return value.value
+    return value
 
 
 async def record(
@@ -39,8 +63,8 @@ async def record(
         site_id=site_id,
         request_id=request_id,
         success=success,
-        diff_json=diff or {},
-        metadata_json=metadata or {},
+        diff_json=_json_safe(diff or {}),
+        metadata_json=_json_safe(metadata or {}),
     )
     db.add(row)
     log.info(
