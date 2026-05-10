@@ -32,6 +32,24 @@ Shipped through commit `5478494`:
 - Audit log on every write.
 - docker compose for local dev. Helm chart skeleton for k8s (untested on a real cluster).
 - Public repo at <https://github.com/192d-Wing/usg-dcim>.
+- IPAM: Fabric → VRF → Supernet (nestable) → Subnet → IPAddress with per-VRF
+  uniqueness, purpose inheritance, IPv6, free-space finder, IP grid, global
+  IP search. Kea DHCP lease ingest. VXLAN/GENEVE overlay tracking
+  (Overlay → VNI → VTEP), subnet→L2-VNI binding. Drag-and-drop subnet
+  reparenting in the supernet tree.
+
+---
+
+## Near-term IPAM polish
+
+Small follow-ups to the IPAM/overlay work that's already shipped. None of
+these unblock anything else; they close obvious operator gaps.
+
+| Item | Why it matters | Notes |
+|---|---|---|
+| **VTEP ↔ VNI memberships UI** | The backend `/ipam/vtep-memberships` endpoint exists, but the Overlays tab lists VTEPs and VNIs as separate tables with no way to wire them together. An operator can't currently say "leaf-01 advertises VNI 10010" from the UI. | Add a "VNIs advertised" column to the VTEP table and an "Advertised by" column to the VNI table, both with add/remove. Server-side already enforces same-overlay. |
+| **Supernet drag-and-drop reparent** | We ship subnet drag-and-drop but not supernet → supernet moves. Symmetric with the existing UX. | PATCH already supports `parent_supernet_id`; mostly a frontend wiring + cycle-prevention check. |
+| **CSV bulk import for subnets / IPs** | Mirrors the existing asset CSV importer. Easiest path to bootstrap from a spreadsheet of existing allocations. | Backend bulk endpoints + a drop-CSV-then-preview UI in the IPAM tree. |
 
 ---
 
@@ -185,4 +203,4 @@ These come up but we're not chasing them:
 
 ---
 
-*Last updated: 2026-05-07. Edit me as plans change.*
+*Last updated: 2026-05-10. Edit me as plans change.*
