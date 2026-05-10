@@ -27,11 +27,12 @@ import {
 } from '@/components/ui/select';
 import { toast } from 'sonner';
 
-type Severity = 'info' | 'warning' | 'minor' | 'major' | 'critical';
-type Operator = '>' | '<' | '>=' | '<=' | '==' | '!=';
-
-const SEVERITIES: Severity[] = ['info', 'warning', 'minor', 'major', 'critical'];
-const OPERATORS: Operator[] = ['>', '<', '>=', '<=', '==', '!='];
+// `as const` keeps these as readonly tuples so z.enum can infer the literal
+// union — without it TS widens to string[] and zod's overloads don't match.
+const SEVERITIES = ['info', 'warning', 'minor', 'major', 'critical'] as const;
+const OPERATORS = ['>', '<', '>=', '<=', '==', '!='] as const;
+type Severity = typeof SEVERITIES[number];
+type Operator = typeof OPERATORS[number];
 
 type Site = { id: string; code: string; name: string };
 type Rule = {

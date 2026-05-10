@@ -3,11 +3,25 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from ..models.ipam import IpAddressRole, IpAddressSource, IpAddressStatus
+
+
+def _to_str(v: Any) -> Any:
+    """asyncpg returns CIDR/INET columns as ipaddress.IPv*Network/Address
+    objects. The Out schemas want strings — coerce on the way out while
+    still accepting plain strings on the way in."""
+    if v is None or isinstance(v, str):
+        return v
+    return str(v)
+
+
+CidrStr = Annotated[str, BeforeValidator(_to_str)]
+InetStrOpt = Annotated[str | None, BeforeValidator(_to_str)]
 
 # ---------- Fabric ----------
 
@@ -71,7 +85,7 @@ class VrfOut(VrfBase):
 class SupernetBase(BaseModel):
     fabric_id: UUID
     vrf_id: UUID
-    prefix: str
+    prefix: CidrStr
     name: str | None = None
     description: str | None = None
     purpose: str | None = None
@@ -99,12 +113,12 @@ class SupernetOut(SupernetBase):
 class SubnetBase(BaseModel):
     supernet_id: UUID
     site_id: UUID | None = None
-    prefix: str
+    prefix: CidrStr
     name: str | None = None
     description: str | None = None
     purpose: str | None = None
     vlan_id: int | None = None
-    gateway: str | None = None
+    gateway: InetStrOpt = None
 
 
 class SubnetCreate(SubnetBase):
@@ -127,19 +141,19 @@ class SubnetOut(BaseModel):
     fabric_id: UUID
     vrf_id: UUID
     site_id: UUID | None
-    prefix: str
+    prefix: CidrStr
     name: str | None
     description: str | None
     purpose: str | None
     vlan_id: int | None
-    gateway: str | None
+    gateway: InetStrOpt
     created_at: datetime
     updated_at: datetime
 
 
 class SubnetUtilization(BaseModel):
     subnet_id: UUID
-    prefix: str
+    prefix: CidrStr
     capacity: int
     allocated: int
     free: int
@@ -152,7 +166,7 @@ class SubnetUtilization(BaseModel):
 class IPAddressBase(BaseModel):
     subnet_id: UUID
     asset_id: UUID | None = None
-    address: str
+    address: CidrStr
     role: IpAddressRole = IpAddressRole.data
     status: IpAddressStatus = IpAddressStatus.active
     source: IpAddressSource = IpAddressSource.static

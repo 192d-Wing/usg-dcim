@@ -4,6 +4,10 @@ Adds Fabric → VRF → Supernet → Subnet → IPAddress, plus DhcpServer for
 the Kea sync. CIDR / INET use the native Postgres types so containment
 + overlap checks are index-backed rather than string comparisons.
 
+asyncpg's executor refuses multi-statement prepared SQL, so each DDL
+statement (CREATE TYPE, CREATE TABLE, CREATE INDEX) gets its own
+op.execute() call rather than being grouped.
+
 Revision ID: 20260510_0007
 Revises: 20260509_0006
 Create Date: 2026-05-10
@@ -28,10 +32,18 @@ def upgrade() -> None:
             CREATE TYPE ip_role AS ENUM ('mgmt','data','ipmi','vip','storage','other');
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$;
+        """
+    )
+    op.execute(
+        """
         DO $$ BEGIN
             CREATE TYPE ip_status AS ENUM ('active','reserved','deprecated');
         EXCEPTION WHEN duplicate_object THEN NULL;
         END $$;
+        """
+    )
+    op.execute(
+        """
         DO $$ BEGIN
             CREATE TYPE ip_source AS ENUM ('static','dhcp','reservation');
         EXCEPTION WHEN duplicate_object THEN NULL;
@@ -50,10 +62,10 @@ def upgrade() -> None:
             classification VARCHAR(32),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS ix_fabrics_slug ON fabrics (slug);
+        )
         """
     )
+    op.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_fabrics_slug ON fabrics (slug)")
 
     op.execute(
         """
@@ -68,10 +80,10 @@ def upgrade() -> None:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT uq_vrf_fabric_name UNIQUE (fabric_id, name),
             CONSTRAINT uq_vrf_fabric_rd UNIQUE (fabric_id, rd)
-        );
-        CREATE INDEX IF NOT EXISTS ix_vrfs_fabric ON vrfs (fabric_id);
+        )
         """
     )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_vrfs_fabric ON vrfs (fabric_id)")
 
     op.execute(
         """
@@ -85,10 +97,10 @@ def upgrade() -> None:
             purpose VARCHAR(32),
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS ix_supernets_fabric_vrf ON supernets (fabric_id, vrf_id);
+        )
         """
     )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_supernets_fabric_vrf ON supernets (fabric_id, vrf_id)")
 
     op.execute(
         """
@@ -106,12 +118,12 @@ def upgrade() -> None:
             gateway INET,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS ix_subnets_supernet ON subnets (supernet_id);
-        CREATE INDEX IF NOT EXISTS ix_subnets_site ON subnets (site_id);
-        CREATE INDEX IF NOT EXISTS ix_subnets_vrf ON subnets (vrf_id);
+        )
         """
     )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_subnets_supernet ON subnets (supernet_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_subnets_site ON subnets (site_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_subnets_vrf ON subnets (vrf_id)")
 
     op.execute(
         """
@@ -130,12 +142,12 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT uq_ip_subnet_address UNIQUE (subnet_id, address)
-        );
-        CREATE INDEX IF NOT EXISTS ix_ip_subnet ON ip_addresses (subnet_id);
-        CREATE INDEX IF NOT EXISTS ix_ip_asset ON ip_addresses (asset_id);
-        CREATE INDEX IF NOT EXISTS ix_ip_address ON ip_addresses (address);
+        )
         """
     )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_ip_subnet ON ip_addresses (subnet_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_ip_asset ON ip_addresses (asset_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_ip_address ON ip_addresses (address)")
 
     op.execute(
         """
@@ -154,10 +166,10 @@ def upgrade() -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CONSTRAINT uq_dhcp_server_name UNIQUE (name)
-        );
-        CREATE INDEX IF NOT EXISTS ix_dhcp_servers_fabric ON dhcp_servers (fabric_id);
+        )
         """
     )
+    op.execute("CREATE INDEX IF NOT EXISTS ix_dhcp_servers_fabric ON dhcp_servers (fabric_id)")
 
 
 def downgrade() -> None:
