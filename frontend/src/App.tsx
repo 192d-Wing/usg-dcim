@@ -38,6 +38,7 @@ const AuditPage       = lazy(() => import('@/pages/audit').then((m) => ({ defaul
 const ImportPage      = lazy(() => import('@/pages/import').then((m) => ({ default: m.ImportPage })));
 const AdminPage       = lazy(() => import('@/pages/admin').then((m) => ({ default: m.AdminPage })));
 const NotificationsPage = lazy(() => import('@/pages/notifications').then((m) => ({ default: m.NotificationsPage })));
+const IpamPage          = lazy(() => import('@/pages/ipam').then((m) => ({ default: m.IpamPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -100,6 +101,7 @@ export function App() {
                 <Route path="/import" element={<ImportPage />} />
                 <Route path="/admin" element={<AdminPage />} />
                 <Route path="/settings/notifications" element={<NotificationsPage />} />
+                <Route path="/ipam" element={<IpamPage />} />
               </Route>
             </Route>
             <Route element={

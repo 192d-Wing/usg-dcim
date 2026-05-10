@@ -32,6 +32,12 @@ type AssetDetail = {
     freshness: string; last_value: number | null; last_reading_at: string | null;
     last_success_at: string | null; poll_interval_seconds: number;
   }[];
+  ip_addresses: {
+    id: string; subnet_id: string; address: string;
+    role: string; status: string; source: string;
+    dns_name: string | null; description: string | null;
+    dhcp_lease_expires_at: string | null;
+  }[];
   recent_alerts: {
     id: string; severity: string; state: string; summary: string;
     first_seen_at: string; last_seen_at: string;
@@ -65,6 +71,7 @@ export function AssetShowPage() {
   const a = detail.data.asset;
   const sources = detail.data.telemetry_sources ?? [];
   const alerts = detail.data.recent_alerts ?? [];
+  const ips = detail.data.ip_addresses ?? [];
 
   return (
     <div className="space-y-6">
@@ -151,6 +158,52 @@ export function AssetShowPage() {
       {sources.slice(0, 4).map((s) => (
         <SeriesChart key={s.metric} siteId={a.site_id} assetId={a.id} metric={s.metric} unit={s.unit} />
       ))}
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">IP addresses</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          {ips.length === 0 ? (
+            <p className="p-4 text-sm text-muted-foreground">
+              No IP allocations bound to this asset.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Address</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Source</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>DNS</TableHead>
+                  <TableHead>DHCP lease ends</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {ips.map((ip) => (
+                  <TableRow key={ip.id}>
+                    <TableCell className="font-mono text-xs">{ip.address}</TableCell>
+                    <TableCell><Badge variant="secondary">{ip.role}</Badge></TableCell>
+                    <TableCell>
+                      <Badge variant={ip.source === 'dhcp' ? 'warning' : 'outline'}>
+                        {ip.source}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={ip.status === 'active' ? 'success' : 'secondary'}>
+                        {ip.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{ip.dns_name ?? '—'}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {ip.dhcp_lease_expires_at ? formatDate(ip.dhcp_lease_expires_at) : '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
 
       <AssetCablesPanel assetId={a.id} portCount={a.port_count} />
 
