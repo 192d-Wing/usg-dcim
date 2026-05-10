@@ -106,7 +106,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build backend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./backend
           push: false
@@ -115,7 +115,7 @@ jobs:
           cache-to: type=gha,scope=backend,mode=max
 
       - name: Build frontend image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./frontend
           push: false
@@ -124,7 +124,7 @@ jobs:
           cache-to: type=gha,scope=frontend,mode=max
 
       - name: Build collector image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./collector
           push: false
