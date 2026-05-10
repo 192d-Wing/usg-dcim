@@ -20,19 +20,18 @@ export default defineConfig({
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
-        // Pull the heaviest deps into named chunks. Recharts only loads on
-        // pages with charts; Refine is shared across all auth'd pages so
-        // splitting it shrinks the initial bundle for /login.
+        // Pull the heaviest deps into named chunks. Anything that imports
+        // from `react` / `react-dom` lives in the same chunk so there's
+        // exactly one React module instance per page — splitting Radix
+        // off from React triggered
+        // "Cannot read properties of undefined (reading '__SECRET_INTERNALS_*')"
+        // because Radix evaluated before React finished initializing.
         manualChunks: {
-          'react-vendor': ['react', 'react-dom', 'react-router'],
-          'refine-vendor': [
-            '@refinedev/core',
-            '@refinedev/react-router',
-            '@refinedev/simple-rest',
-            '@refinedev/react-hook-form',
-          ],
-          recharts: ['recharts'],
-          radix: [
+          'react-vendor': [
+            'react',
+            'react-dom',
+            'react-router',
+            'scheduler',
             '@radix-ui/react-dialog',
             '@radix-ui/react-dropdown-menu',
             '@radix-ui/react-label',
@@ -46,6 +45,13 @@ export default defineConfig({
             '@radix-ui/react-toast',
             '@radix-ui/react-tooltip',
           ],
+          'refine-vendor': [
+            '@refinedev/core',
+            '@refinedev/react-router',
+            '@refinedev/simple-rest',
+            '@refinedev/react-hook-form',
+          ],
+          recharts: ['recharts'],
         },
       },
     },

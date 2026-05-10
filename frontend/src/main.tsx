@@ -42,7 +42,13 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+// The boot-error handler in index.html may have written diagnostics into
+// #root if a top-level module load failed earlier. We're past that now, so
+// clear it before mounting React.
+const rootEl = document.getElementById('root')!;
+rootEl.innerHTML = '';
+
+ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
     <RootErrorBoundary>
       <App />
