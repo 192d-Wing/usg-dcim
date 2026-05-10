@@ -313,6 +313,10 @@ async def update_supernet(
     if obj is None:
         raise NotFoundError(_SUPERNET_NOT_FOUND)
     diff = payload.model_dump(exclude_unset=True)
+    if "purpose" in diff:
+        await ipam_svc.assert_supernet_purpose_change_safe(
+            db, supernet_id=supernet_id, new_purpose=diff["purpose"],
+        )
     for k, v in diff.items():
         setattr(obj, k, v)
     await audit.record(
@@ -408,6 +412,9 @@ async def create_subnet(
     await ipam_svc.assert_subnet_unique_in_vrf(
         db, fabric_id=parent.fabric_id, vrf_id=parent.vrf_id, prefix=payload.prefix,
     )
+    ipam_svc.assert_purpose_compatible(
+        supernet_purpose=parent.purpose, subnet_purpose=payload.purpose,
+    )
     data = payload.model_dump()
     data["fabric_id"] = parent.fabric_id
     data["vrf_id"] = parent.vrf_id
@@ -435,6 +442,12 @@ async def update_subnet(
     if obj is None:
         raise NotFoundError(_SUBNET_NOT_FOUND)
     diff = payload.model_dump(exclude_unset=True)
+    if "purpose" in diff:
+        parent = await db.get(Supernet, obj.supernet_id)
+        ipam_svc.assert_purpose_compatible(
+            supernet_purpose=parent.purpose if parent else None,
+            subnet_purpose=diff["purpose"],
+        )
     for k, v in diff.items():
         setattr(obj, k, v)
     await audit.record(

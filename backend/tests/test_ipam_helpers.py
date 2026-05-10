@@ -8,8 +8,10 @@ so future refactors can't silently regress the invariants.
 
 import pytest
 
+from dcim.errors import ValidationError
 from dcim.services.ipam import (
     address_in_network,
+    assert_purpose_compatible,
     cidr_contains,
     cidrs_overlap,
     network_capacity,
@@ -141,3 +143,47 @@ def test_next_free_address_strips_used_prefix_lengths():
 ])
 def test_network_capacity(prefix, expected):
     assert network_capacity(prefix) == expected
+
+
+# ---------- assert_purpose_compatible ----------
+
+def test_purpose_unset_supernet_imposes_no_constraint():
+    """A generic supernet with no purpose should let any subnet purpose through."""
+    assert_purpose_compatible(supernet_purpose=None, subnet_purpose="data")
+    assert_purpose_compatible(supernet_purpose=None, subnet_purpose="mgmt")
+    assert_purpose_compatible(supernet_purpose=None, subnet_purpose=None)
+
+
+def test_purpose_unset_subnet_under_purposed_supernet_is_allowed():
+    """An unlabeled subnet under a data supernet is fine — the operator
+    just hasn't tagged it yet, and lookups still find it via the
+    supernet's purpose."""
+    assert_purpose_compatible(supernet_purpose="data", subnet_purpose=None)
+
+
+def test_purpose_match_passes():
+    assert_purpose_compatible(supernet_purpose="data", subnet_purpose="data")
+
+
+def test_purpose_mismatch_raises():
+    with pytest.raises(ValidationError) as exc:
+        assert_purpose_compatible(supernet_purpose="data", subnet_purpose="mgmt")
+    assert "doesn't match" in str(exc.value)
+    assert exc.value.details["supernet_purpose"] == "data"
+    assert exc.value.details["subnet_purpose"] == "mgmt"
+
+
+# ---------- network_capacity int64 cap ----------
+
+def test_network_capacity_caps_at_int64_for_huge_v6():
+    """A /48 has 2^80 hosts, way past Postgres BIGINT and orjson's int64
+    encoder. We clamp to int64 max so utilization responses serialize.
+    Operators care about utilization percentage, not the exact count
+    for prefixes that wide."""
+    cap_48 = network_capacity("2001:db8::/48")
+    assert cap_48 == (1 << 63) - 1
+    # /64 (the typical assigned IPv6 subnet) also clamps — 2^64-2 still
+    # exceeds int64 max.
+    assert network_capacity("2001:db8::/64") == (1 << 63) - 1
+    # /65 is the widest prefix where 2^63-2 fits unclamped.
+    assert network_capacity("2001:db8::/65") == (1 << 63) - 2

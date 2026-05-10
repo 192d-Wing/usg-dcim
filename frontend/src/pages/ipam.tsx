@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
-  Plus, Trash2, Network, GitBranch, ChevronRight, ChevronDown, Send,
+  Plus, Pencil, Trash2, Network, GitBranch, ChevronRight, ChevronDown, Send,
 } from 'lucide-react';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
@@ -467,11 +467,13 @@ function SupernetTreeTab({
   const sitesById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
   const data = result.data ?? [];
 
-  // Track expansion + dialog state per-supernet. Two separate sets so the
-  // "+ subnet" dialog doesn't get tied to the chevron toggle.
+  // Track expansion + dialog state per-supernet. Separate sets so the
+  // "+ subnet" / edit dialogs don't get tied to the chevron toggle.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [createSupernetOpen, setCreateSupernetOpen] = useState(false);
-  const [createSubnetFor, setCreateSubnetFor] = useState<string | null>(null);
+  const [createSubnetFor, setCreateSubnetFor] = useState<Supernet | null>(null);
+  const [editSupernet, setEditSupernet] = useState<Supernet | null>(null);
+  const [editSubnet, setEditSubnet] = useState<{ subnet: Subnet; parentPurpose: string | null } | null>(null);
 
   function toggle(id: string) {
     setExpanded((prev) => {
@@ -485,6 +487,11 @@ function SupernetTreeTab({
   async function refreshSubnets(supernetId: string) {
     await qc.invalidateQueries({ queryKey: ['subnets-for-supernet', supernetId] });
     await qc.invalidateQueries({ queryKey: ['supernet-util', supernetId] });
+  }
+
+  async function refreshSupernets() {
+    await tableQuery.refetch();
+    await qc.invalidateQueries({ queryKey: ['supernet-util'] });
   }
 
   return (
@@ -520,12 +527,13 @@ function SupernetTreeTab({
                 <TableHead>Name</TableHead>
                 <TableHead>Purpose</TableHead>
                 <TableHead className="w-64">Utilization</TableHead>
+                {canWrite && <TableHead className="w-12" />}
               </TableRow>
             </TableHeader>
             <TableBody>
               {data.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-muted-foreground">
+                  <TableCell colSpan={canWrite ? 6 : 5} className="text-muted-foreground">
                     No supernets yet.
                   </TableCell>
                 </TableRow>
@@ -547,14 +555,23 @@ function SupernetTreeTab({
                       {sn.purpose ? <Badge variant="secondary">{sn.purpose}</Badge> : '—'}
                     </TableCell>
                     <TableCell><SupernetUtilCell supernetId={sn.id} /></TableCell>
+                    {canWrite && (
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Button size="sm" variant="ghost" onClick={() => setEditSupernet(sn)} title="Edit supernet">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    )}
                   </TableRow>
                   {expanded.has(sn.id) && (
                     <SubnetBranch
                       supernetId={sn.id}
+                      parentPurpose={sn.purpose}
                       sitesById={sitesById}
                       canWrite={canWrite}
                       onSelectSubnet={onSelectSubnet}
-                      onAddSubnet={() => setCreateSubnetFor(sn.id)}
+                      onAddSubnet={() => setCreateSubnetFor(sn)}
+                      onEditSubnet={(s) => setEditSubnet({ subnet: s, parentPurpose: sn.purpose })}
                     />
                   )}
                 </Fragment>
@@ -577,11 +594,50 @@ function SupernetTreeTab({
           <DialogHeader><DialogTitle>New subnet</DialogTitle></DialogHeader>
           {createSubnetFor && (
             <SubnetForm
-              supernetId={createSubnetFor} sites={sites}
+              supernetId={createSubnetFor.id}
+              sites={sites}
+              parentPurpose={createSubnetFor.purpose}
               onSaved={async () => {
-                const id = createSubnetFor;
+                const sn = createSubnetFor;
                 setCreateSubnetFor(null);
-                if (id) await refreshSubnets(id);
+                if (sn) await refreshSubnets(sn.id);
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editSupernet !== null}
+        onOpenChange={(o) => { if (!o) setEditSupernet(null); }}
+      >
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit supernet</DialogTitle></DialogHeader>
+          {editSupernet && (
+            <SupernetForm
+              fabricId={fabricId} vrfId={vrfId} supernet={editSupernet}
+              onSaved={async () => { setEditSupernet(null); await refreshSupernets(); }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={editSubnet !== null}
+        onOpenChange={(o) => { if (!o) setEditSubnet(null); }}
+      >
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit subnet</DialogTitle></DialogHeader>
+          {editSubnet && (
+            <SubnetForm
+              supernetId={editSubnet.subnet.supernet_id}
+              sites={sites}
+              subnet={editSubnet.subnet}
+              parentPurpose={editSubnet.parentPurpose}
+              onSaved={async () => {
+                const sid = editSubnet.subnet.supernet_id;
+                setEditSubnet(null);
+                await refreshSubnets(sid);
               }}
             />
           )}
@@ -593,13 +649,16 @@ function SupernetTreeTab({
 
 
 function SubnetBranch({
-  supernetId, sitesById, canWrite, onSelectSubnet, onAddSubnet,
+  supernetId, parentPurpose, sitesById, canWrite,
+  onSelectSubnet, onAddSubnet, onEditSubnet,
 }: {
   supernetId: string;
+  parentPurpose: string | null;
   sitesById: Map<string, Site>;
   canWrite: boolean;
   onSelectSubnet: (subnetId: string) => void;
   onAddSubnet: () => void;
+  onEditSubnet: (subnet: Subnet) => void;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['subnets-for-supernet', supernetId],
@@ -608,11 +667,15 @@ function SubnetBranch({
     ).data.items ?? [],
   });
 
+  // The branch's column count matches the parent table — chevron, prefix,
+  // name, purpose, utilization, and the edit-button column when canWrite.
+  const branchSpan = canWrite ? 5 : 4;
+
   if (isLoading) {
     return (
       <TableRow>
         <TableCell />
-        <TableCell colSpan={4}>
+        <TableCell colSpan={branchSpan}>
           <Skeleton className="h-6 w-full" />
         </TableCell>
       </TableRow>
@@ -624,11 +687,12 @@ function SubnetBranch({
     return (
       <TableRow className="bg-muted/20">
         <TableCell />
-        <TableCell colSpan={4} className="text-xs text-muted-foreground">
+        <TableCell colSpan={branchSpan} className="text-xs text-muted-foreground">
           No subnets carved from this supernet.
           {canWrite && (
             <Button size="sm" variant="ghost" className="ml-2" onClick={onAddSubnet}>
               <Plus className="h-3.5 w-3.5" /> Add subnet
+              {parentPurpose && <span className="ml-1 text-[10px]">({parentPurpose})</span>}
             </Button>
           )}
         </TableCell>
@@ -662,14 +726,22 @@ function SubnetBranch({
             {s.purpose ? <Badge variant="secondary">{s.purpose}</Badge> : '—'}
           </TableCell>
           <TableCell><SubnetUtilCell subnetId={s.id} /></TableCell>
+          {canWrite && (
+            <TableCell onClick={(e) => e.stopPropagation()}>
+              <Button size="sm" variant="ghost" onClick={() => onEditSubnet(s)} title="Edit subnet">
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            </TableCell>
+          )}
         </TableRow>
       ))}
       {canWrite && (
         <TableRow className="bg-muted/20">
           <TableCell />
-          <TableCell colSpan={4} className="pl-8">
+          <TableCell colSpan={branchSpan} className="pl-8">
             <Button size="sm" variant="ghost" onClick={onAddSubnet}>
               <Plus className="h-3.5 w-3.5" /> Add subnet here
+              {parentPurpose && <span className="ml-1 text-[10px] text-muted-foreground">({parentPurpose})</span>}
             </Button>
           </TableCell>
         </TableRow>
@@ -694,28 +766,51 @@ function SupernetUtilCell({ supernetId }: { supernetId: string }) {
   );
 }
 
+const PURPOSE_NONE = '__none__';
+
+
 function SupernetForm({
-  fabricId, vrfId, onSaved,
+  fabricId, vrfId, supernet, onSaved,
 }: {
   fabricId: string;
   vrfId: string;
+  supernet?: Supernet;
   onSaved: () => void;
 }) {
+  const editing = !!supernet;
   const form = useForm<z.infer<typeof supernetSchema>>({
     resolver: zodResolver(supernetSchema),
-    defaultValues: { prefix: '', name: '', purpose: '', description: '' },
+    defaultValues: {
+      prefix: supernet?.prefix ?? '',
+      name: supernet?.name ?? '',
+      purpose: supernet?.purpose ?? PURPOSE_NONE,
+      description: supernet?.description ?? '',
+    },
   });
   async function onSubmit(v: z.infer<typeof supernetSchema>) {
+    const purpose = v.purpose && v.purpose !== PURPOSE_NONE ? v.purpose : null;
     try {
-      await http.post('/ipam/supernets', {
-        fabric_id: fabricId,
-        vrf_id: vrfId,
-        prefix: v.prefix,
-        name: v.name || null,
-        purpose: v.purpose || null,
-        description: v.description || null,
-      });
-      toast.success('Supernet created');
+      if (editing && supernet) {
+        // PATCH only the fields the operator can edit. Prefix is intentionally
+        // immutable — changing CIDR after subnets exist is a containment-
+        // invariant landmine, easier to delete + recreate.
+        await http.patch(`/ipam/supernets/${supernet.id}`, {
+          name: v.name || null,
+          purpose,
+          description: v.description || null,
+        });
+        toast.success('Supernet updated');
+      } else {
+        await http.post('/ipam/supernets', {
+          fabric_id: fabricId,
+          vrf_id: vrfId,
+          prefix: v.prefix,
+          name: v.name || null,
+          purpose,
+          description: v.description || null,
+        });
+        toast.success('Supernet created');
+      }
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
@@ -725,7 +820,19 @@ function SupernetForm({
         <FormField control={form.control} name="prefix" render={({ field }) => (
           <FormItem>
             <FormLabel>Prefix (CIDR)</FormLabel>
-            <FormControl><Input placeholder="e.g. 10.0.0.0/8 or 2001:db8::/32" className="font-mono" {...field} /></FormControl>
+            <FormControl>
+              <Input
+                placeholder="e.g. 10.0.0.0/8 or 2001:db8::/32"
+                className="font-mono"
+                disabled={editing}
+                {...field}
+              />
+            </FormControl>
+            {editing && (
+              <p className="text-xs text-muted-foreground">
+                Prefix is immutable after creation. Delete + recreate to change it.
+              </p>
+            )}
             <FormMessage />
           </FormItem>
         )} />
@@ -739,9 +846,15 @@ function SupernetForm({
               <Select value={field.value} onValueChange={field.onChange}>
                 <FormControl><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger></FormControl>
                 <SelectContent>
+                  <SelectItem value={PURPOSE_NONE}>(unset)</SelectItem>
                   {PURPOSES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {editing && (
+                <p className="text-xs text-muted-foreground">
+                  Setting a purpose locks every subnet under this supernet to the same purpose.
+                </p>
+              )}
               <FormMessage />
             </FormItem>
           )} />
@@ -750,7 +863,7 @@ function SupernetForm({
           <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />
         <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
         </Button>
       </form>
     </Form>
@@ -783,39 +896,84 @@ function SubnetUtilCell({ subnetId }: { subnetId: string }) {
 }
 
 function SubnetForm({
-  supernetId, sites, onSaved,
+  supernetId, sites, subnet, parentPurpose, onSaved,
 }: {
   supernetId: string;
   sites: Site[];
+  /** Existing subnet to edit. When omitted the form creates a new one. */
+  subnet?: Subnet;
+  /** Parent supernet's purpose, if any. When set, the subnet must adopt it
+   * — the field is locked in the UI and the backend re-checks. */
+  parentPurpose: string | null;
   onSaved: () => void;
 }) {
   const NONE = '__none__';
+  const editing = !!subnet;
+  // If the parent supernet has a purpose, the new subnet must adopt it.
+  // Pre-fill + lock the field so the operator can't even attempt a value
+  // the backend will reject.
+  const initialPurpose =
+    subnet?.purpose
+    ?? parentPurpose
+    ?? PURPOSE_NONE;
   const form = useForm<z.infer<typeof subnetSchema>>({
     resolver: zodResolver(subnetSchema),
-    defaultValues: { prefix: '', site_id: NONE, name: '', purpose: '', vlan_id: '', gateway: '' },
+    defaultValues: {
+      prefix: subnet?.prefix ?? '',
+      site_id: subnet?.site_id ?? NONE,
+      name: subnet?.name ?? '',
+      purpose: initialPurpose,
+      vlan_id: subnet?.vlan_id != null ? String(subnet.vlan_id) : '',
+      gateway: subnet?.gateway ?? '',
+    },
   });
   async function onSubmit(v: z.infer<typeof subnetSchema>) {
+    const purpose = v.purpose && v.purpose !== PURPOSE_NONE ? v.purpose : null;
     try {
-      await http.post('/ipam/subnets', {
-        supernet_id: supernetId,
-        site_id: v.site_id === NONE ? null : v.site_id,
-        prefix: v.prefix,
-        name: v.name || null,
-        purpose: v.purpose || null,
-        vlan_id: v.vlan_id ? Number(v.vlan_id) : null,
-        gateway: v.gateway || null,
-      });
-      toast.success('Subnet created');
+      if (editing && subnet) {
+        await http.patch(`/ipam/subnets/${subnet.id}`, {
+          site_id: v.site_id === NONE ? null : v.site_id,
+          name: v.name || null,
+          purpose,
+          vlan_id: v.vlan_id ? Number(v.vlan_id) : null,
+          gateway: v.gateway || null,
+        });
+        toast.success('Subnet updated');
+      } else {
+        await http.post('/ipam/subnets', {
+          supernet_id: supernetId,
+          site_id: v.site_id === NONE ? null : v.site_id,
+          prefix: v.prefix,
+          name: v.name || null,
+          purpose,
+          vlan_id: v.vlan_id ? Number(v.vlan_id) : null,
+          gateway: v.gateway || null,
+        });
+        toast.success('Subnet created');
+      }
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
+  const purposeLocked = !!parentPurpose;
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <FormField control={form.control} name="prefix" render={({ field }) => (
           <FormItem>
             <FormLabel>Prefix (CIDR, must be inside the supernet)</FormLabel>
-            <FormControl><Input placeholder="e.g. 10.0.5.0/24" className="font-mono" {...field} /></FormControl>
+            <FormControl>
+              <Input
+                placeholder="e.g. 10.0.5.0/24 or 2001:db8:1::/48"
+                className="font-mono"
+                disabled={editing}
+                {...field}
+              />
+            </FormControl>
+            {editing && (
+              <p className="text-xs text-muted-foreground">
+                Prefix is immutable after creation. Delete + recreate to change it.
+              </p>
+            )}
             <FormMessage />
           </FormItem>
         )} />
@@ -838,12 +996,22 @@ function SubnetForm({
           <FormField control={form.control} name="purpose" render={({ field }) => (
             <FormItem>
               <FormLabel>Purpose</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select
+                value={field.value}
+                onValueChange={field.onChange}
+                disabled={purposeLocked}
+              >
                 <FormControl><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger></FormControl>
                 <SelectContent>
+                  <SelectItem value={PURPOSE_NONE}>(unset)</SelectItem>
                   {PURPOSES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {purposeLocked && (
+                <p className="text-xs text-muted-foreground">
+                  Locked to <span className="font-mono">{parentPurpose}</span> — parent supernet's purpose.
+                </p>
+              )}
               <FormMessage />
             </FormItem>
           )} />
@@ -860,7 +1028,7 @@ function SubnetForm({
           <FormItem><FormLabel>Name (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />
         <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
         </Button>
       </form>
     </Form>

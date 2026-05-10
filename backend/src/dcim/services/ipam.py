@@ -89,13 +89,26 @@ def next_free_address(network: CidrLike, used: Iterable[str]) -> str | None:
     return None
 
 
+# Postgres BIGINT (and orjson, and most JSON consumers) cap at 2^63 - 1.
+# IPv6 prefixes wider than ~/65 blow past that — a /48 has 2^80 hosts.
+# Past this number the exact count is operationally meaningless anyway,
+# so we cap and let the UI show "huge" / 0% utilization.
+_INT64_MAX = (1 << 63) - 1
+
+
 def network_capacity(network: CidrLike) -> int:
-    """Number of allocatable host addresses in a network. Mirrors the
-    semantics of next_free_address — small prefixes get the full count."""
+    """Number of allocatable host addresses in a network, capped at int64.
+
+    Small prefixes get the full count (mirrors next_free_address — /31
+    and /127 are point-to-point so we count both addresses; /32 and /128
+    return 1). Very wide IPv6 prefixes get clamped at 2^63-1 so the
+    response can be JSON-encoded without overflow."""
     net = parse_network(network)
     if (net.version == 4 and net.prefixlen >= 31) or (net.version == 6 and net.prefixlen >= 127):
-        return net.num_addresses
-    return max(0, net.num_addresses - 2)
+        raw = net.num_addresses
+    else:
+        raw = max(0, net.num_addresses - 2)
+    return min(raw, _INT64_MAX)
 
 
 # ---------- DB-backed validation ----------
@@ -155,6 +168,54 @@ async def assert_subnet_unique_in_vrf(
                 f"subnet {prefix} overlaps existing subnet {r.prefix} in this VRF",
                 details={"conflicting_subnet_id": str(r.id), "conflicting_prefix": str(r.prefix)},
             )
+
+
+def assert_purpose_compatible(
+    *, supernet_purpose: str | None, subnet_purpose: str | None,
+) -> None:
+    """Subnet purpose must match its parent supernet's purpose (or stay unset).
+
+    A supernet without a purpose set imposes no constraint on its subnets —
+    that's how operators run a generic /8 with mixed-purpose subnets carved
+    out. As soon as the parent picks a purpose ("data"), every subnet under
+    it has to either match or stay unlabeled."""
+    if supernet_purpose is None or subnet_purpose is None:
+        return
+    if subnet_purpose != supernet_purpose:
+        raise ValidationError(
+            f"subnet purpose {subnet_purpose!r} doesn't match parent supernet "
+            f"purpose {supernet_purpose!r}",
+            details={
+                "supernet_purpose": supernet_purpose,
+                "subnet_purpose": subnet_purpose,
+            },
+        )
+
+
+async def assert_supernet_purpose_change_safe(
+    db: AsyncSession, *, supernet_id: UUID, new_purpose: str | None,
+) -> None:
+    """When a supernet's purpose changes, refuse if any existing subnet under
+    it would no longer match. Operators have to either reset the conflicting
+    subnets first or unset the supernet's purpose."""
+    if new_purpose is None:
+        return
+    rows = (
+        await db.execute(select(Subnet).where(Subnet.supernet_id == supernet_id))
+    ).scalars().all()
+    bad = [s for s in rows if s.purpose is not None and s.purpose != new_purpose]
+    if bad:
+        raise ConflictError(
+            f"cannot set supernet purpose to {new_purpose!r}: "
+            f"{len(bad)} child subnet(s) have a different purpose",
+            details={
+                "new_purpose": new_purpose,
+                "conflicts": [
+                    {"subnet_id": str(s.id), "prefix": str(s.prefix), "purpose": s.purpose}
+                    for s in bad[:10]
+                ],
+            },
+        )
 
 
 async def assert_address_in_subnet(
