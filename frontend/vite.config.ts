@@ -15,46 +15,18 @@ export default defineConfig({
     },
   },
   build: {
-    // Surface > 600 KB chunks so we notice if a future feature reverses the
-    // route-split work below.
+    // Surface > 600 KB chunks so we notice if a future feature reverses
+    // the route-split work below.
     chunkSizeWarningLimit: 600,
-    rollupOptions: {
-      output: {
-        // Pull the heaviest deps into named chunks. Anything that imports
-        // from `react` / `react-dom` lives in the same chunk so there's
-        // exactly one React module instance per page — splitting Radix
-        // off from React triggered
-        // "Cannot read properties of undefined (reading '__SECRET_INTERNALS_*')"
-        // because Radix evaluated before React finished initializing.
-        manualChunks: {
-          'react-vendor': [
-            'react',
-            'react-dom',
-            'react-router',
-            'scheduler',
-            '@radix-ui/react-dialog',
-            '@radix-ui/react-dropdown-menu',
-            '@radix-ui/react-label',
-            '@radix-ui/react-popover',
-            '@radix-ui/react-scroll-area',
-            '@radix-ui/react-select',
-            '@radix-ui/react-separator',
-            '@radix-ui/react-slot',
-            '@radix-ui/react-switch',
-            '@radix-ui/react-tabs',
-            '@radix-ui/react-toast',
-            '@radix-ui/react-tooltip',
-          ],
-          'refine-vendor': [
-            '@refinedev/core',
-            '@refinedev/react-router',
-            '@refinedev/simple-rest',
-            '@refinedev/react-hook-form',
-          ],
-          recharts: ['recharts'],
-        },
-      },
-    },
+    // No manualChunks. Earlier attempts to group react + react-dom + radix
+    // into a single vendor chunk hit Rollup's intra-chunk evaluation order
+    // bug where react-dom (or a Radix package importing react-dom internals)
+    // ran before react finished initializing and threw
+    //   "Cannot read properties of undefined
+    //    (reading '__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED')".
+    // Letting Vite emit per-route chunks naturally avoids it; recharts and
+    // refine-vendor end up in their own chunks via the dependency graph
+    // because they're heavy and only some routes touch them.
   },
   test: {
     environment: 'node',
