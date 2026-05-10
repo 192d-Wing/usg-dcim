@@ -5,7 +5,7 @@ COPY pyproject.toml ./
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv uv venv && uv pip install ".[all]"
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 ENV PYTHONUNBUFFERED=1 PATH="/app/.venv/bin:$PATH"
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
