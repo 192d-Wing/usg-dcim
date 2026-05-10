@@ -28,9 +28,16 @@ from .ipam import (
     IpAddressRole,
     IpAddressSource,
     IpAddressStatus,
+    Overlay,
+    OverlayKind,
     Subnet,
     Supernet,
+    Vni,
+    VniKind,
     Vrf,
+    Vtep,
+    VtepRole,
+    VtepVniMembership,
 )
 from .notifications import ChannelKind, NotificationChannel
 from .power import Outlet, PowerConnection
@@ -59,6 +66,8 @@ __all__ = [
     "MaintenanceWindow",
     "NotificationChannel",
     "Outlet",
+    "Overlay",
+    "OverlayKind",
     "PduSide",
     "Permission",
     "PowerConnection",
@@ -77,5 +86,10 @@ __all__ = [
     "TelemetrySource",
     "User",
     "UserRole",
+    "Vni",
+    "VniKind",
     "Vrf",
+    "Vtep",
+    "VtepRole",
+    "VtepVniMembership",
 ]

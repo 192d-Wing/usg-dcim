@@ -41,14 +41,36 @@ type Vrf = {
 };
 type Supernet = {
   id: string; fabric_id: string; vrf_id: string;
+  parent_supernet_id: string | null;
+  site_id: string | null;
   prefix: string; name: string | null; description: string | null;
   purpose: string | null;
 };
 type Subnet = {
   id: string; supernet_id: string; fabric_id: string; vrf_id: string;
-  site_id: string | null; prefix: string; name: string | null;
+  site_id: string | null; vni_id: string | null;
+  prefix: string; name: string | null;
   description: string | null; purpose: string | null;
   vlan_id: number | null; gateway: string | null;
+};
+type Overlay = {
+  id: string; fabric_id: string; name: string;
+  kind: 'vxlan' | 'geneve'; udp_port: number;
+  mtu: number | null; underlay_vrf_id: string | null;
+  description: string | null;
+};
+type Vni = {
+  id: string; overlay_id: string; vni: number;
+  kind: 'l2' | 'l3'; name: string | null;
+  description: string | null;
+  vlan_id: number | null; evpn_route_target: string | null;
+  vrf_id: string | null;
+};
+type Vtep = {
+  id: string; overlay_id: string; asset_id: string;
+  loopback_ip: string | null;
+  role: 'leaf' | 'spine' | 'border' | 'other';
+  description: string | null;
 };
 type IPAddr = {
   id: string; subnet_id: string; asset_id: string | null;
@@ -111,6 +133,7 @@ export function IpamPage() {
         <TabsList>
           <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
           <TabsTrigger value="free-space"><Search className="h-3.5 w-3.5" /> Free space</TabsTrigger>
+          <TabsTrigger value="overlays">Overlays / VNI</TabsTrigger>
           <TabsTrigger value="dhcp">DHCP servers</TabsTrigger>
         </TabsList>
         <TabsContent value="hierarchy" className="pt-3">
@@ -142,6 +165,9 @@ export function IpamPage() {
         </TabsContent>
         <TabsContent value="free-space" className="pt-3">
           <FreeSpaceTab onSelectSubnet={(id) => setSubnetId(id)} />
+        </TabsContent>
+        <TabsContent value="overlays" className="pt-3">
+          <OverlaysTab canWrite={!!canWrite} />
         </TabsContent>
         <TabsContent value="dhcp" className="pt-3">
           <DhcpServersTab canWrite={!!canWrite} />
@@ -699,6 +725,7 @@ function VrfForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void 
 const supernetSchema = z.object({
   prefix: z.string().min(1),
   name: z.string().optional(),
+  site_id: z.string().optional(),
   purpose: z.string().optional(),
   description: z.string().optional(),
 });
@@ -712,12 +739,15 @@ function SupernetTreeTab({
   canWrite: boolean;
 }) {
   const qc = useQueryClient();
+  // Top-level supernets only — nested children are loaded lazily by
+  // SupernetNode when the user expands a row.
   const { tableQuery, result } = useTable<Supernet>({
     resource: 'ipam/supernets',
     pagination: { pageSize: 200 },
     filters: { permanent: [
       { field: 'fabric_id', operator: 'eq', value: fabricId },
       { field: 'vrf_id', operator: 'eq', value: vrfId },
+      { field: 'top_level', operator: 'eq', value: true },
     ] },
     sorters: { initial: [{ field: 'prefix', order: 'asc' }] },
   });
@@ -730,6 +760,7 @@ function SupernetTreeTab({
   // "+ subnet" / edit dialogs don't get tied to the chevron toggle.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [createSupernetOpen, setCreateSupernetOpen] = useState(false);
+  const [createSupernetUnder, setCreateSupernetUnder] = useState<Supernet | null>(null);
   const [createSubnetFor, setCreateSubnetFor] = useState<Supernet | null>(null);
   const [editSupernet, setEditSupernet] = useState<Supernet | null>(null);
   const [editSubnet, setEditSubnet] = useState<{ subnet: Subnet; parentPurpose: string | null } | null>(null);
@@ -748,9 +779,14 @@ function SupernetTreeTab({
     await qc.invalidateQueries({ queryKey: ['supernet-util', supernetId] });
   }
 
+  async function refreshChildren(parentId: string | null) {
+    await qc.invalidateQueries({ queryKey: ['child-supernets', parentId] });
+  }
+
   async function refreshSupernets() {
     await tableQuery.refetch();
     await qc.invalidateQueries({ queryKey: ['supernet-util'] });
+    await qc.invalidateQueries({ queryKey: ['child-supernets'] });
   }
 
   return (
@@ -765,6 +801,7 @@ function SupernetTreeTab({
               <DialogHeader><DialogTitle>New supernet</DialogTitle></DialogHeader>
               <SupernetForm
                 fabricId={fabricId} vrfId={vrfId}
+                sites={sites}
                 onSaved={async () => {
                   setCreateSupernetOpen(false);
                   await tableQuery.refetch();
@@ -798,42 +835,20 @@ function SupernetTreeTab({
                 </TableRow>
               )}
               {data.map((sn) => (
-                <Fragment key={sn.id}>
-                  <TableRow
-                    className="cursor-pointer hover:bg-accent/40"
-                    onClick={() => toggle(sn.id)}
-                  >
-                    <TableCell className="text-muted-foreground">
-                      {expanded.has(sn.id)
-                        ? <ChevronDown className="h-4 w-4" />
-                        : <ChevronRight className="h-4 w-4" />}
-                    </TableCell>
-                    <TableCell className="font-mono font-medium">{sn.prefix}</TableCell>
-                    <TableCell>{sn.name ?? '—'}</TableCell>
-                    <TableCell>
-                      {sn.purpose ? <Badge variant="secondary">{sn.purpose}</Badge> : '—'}
-                    </TableCell>
-                    <TableCell><SupernetUtilCell supernetId={sn.id} /></TableCell>
-                    {canWrite && (
-                      <TableCell onClick={(e) => e.stopPropagation()}>
-                        <Button size="sm" variant="ghost" onClick={() => setEditSupernet(sn)} title="Edit supernet">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                  {expanded.has(sn.id) && (
-                    <SubnetBranch
-                      supernetId={sn.id}
-                      parentPurpose={sn.purpose}
-                      sitesById={sitesById}
-                      canWrite={canWrite}
-                      onSelectSubnet={onSelectSubnet}
-                      onAddSubnet={() => setCreateSubnetFor(sn)}
-                      onEditSubnet={(s) => setEditSubnet({ subnet: s, parentPurpose: sn.purpose })}
-                    />
-                  )}
-                </Fragment>
+                <SupernetNode
+                  key={sn.id}
+                  supernet={sn}
+                  depth={0}
+                  expanded={expanded}
+                  onToggle={toggle}
+                  sitesById={sitesById}
+                  canWrite={canWrite}
+                  onSelectSubnet={onSelectSubnet}
+                  onAddSubnet={(s) => setCreateSubnetFor(s)}
+                  onAddChildSupernet={(s) => setCreateSupernetUnder(s)}
+                  onEditSupernet={(s) => setEditSupernet(s)}
+                  onEditSubnet={(s, parentPurpose) => setEditSubnet({ subnet: s, parentPurpose })}
+                />
               ))}
             </TableBody>
           </Table>
@@ -854,6 +869,7 @@ function SupernetTreeTab({
           {createSubnetFor && (
             <SubnetForm
               supernetId={createSubnetFor.id}
+              fabricId={fabricId}
               sites={sites}
               parentPurpose={createSubnetFor.purpose}
               onSaved={async () => {
@@ -875,7 +891,34 @@ function SupernetTreeTab({
           {editSupernet && (
             <SupernetForm
               fabricId={fabricId} vrfId={vrfId} supernet={editSupernet}
+              sites={sites}
               onSaved={async () => { setEditSupernet(null); await refreshSupernets(); }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={createSupernetUnder !== null}
+        onOpenChange={(o) => { if (!o) setCreateSupernetUnder(null); }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              New supernet inside {createSupernetUnder?.prefix}
+            </DialogTitle>
+          </DialogHeader>
+          {createSupernetUnder && (
+            <SupernetForm
+              fabricId={fabricId} vrfId={vrfId}
+              parent={createSupernetUnder}
+              sites={sites}
+              onSaved={async () => {
+                const parent = createSupernetUnder;
+                setCreateSupernetUnder(null);
+                await refreshChildren(parent?.id ?? null);
+                await tableQuery.refetch();
+              }}
             />
           )}
         </DialogContent>
@@ -890,6 +933,7 @@ function SupernetTreeTab({
           {editSubnet && (
             <SubnetForm
               supernetId={editSubnet.subnet.supernet_id}
+              fabricId={fabricId}
               sites={sites}
               subnet={editSubnet.subnet}
               parentPurpose={editSubnet.parentPurpose}
@@ -907,16 +951,130 @@ function SupernetTreeTab({
 }
 
 
+function SupernetNode({
+  supernet, depth, expanded, onToggle, sitesById, canWrite,
+  onSelectSubnet, onAddSubnet, onAddChildSupernet, onEditSupernet, onEditSubnet,
+}: {
+  supernet: Supernet;
+  depth: number;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  sitesById: Map<string, Site>;
+  canWrite: boolean;
+  onSelectSubnet: (subnetId: string) => void;
+  onAddSubnet: (sn: Supernet) => void;
+  onAddChildSupernet: (sn: Supernet) => void;
+  onEditSupernet: (sn: Supernet) => void;
+  onEditSubnet: (subnet: Subnet, parentPurpose: string | null) => void;
+}) {
+  const isOpen = expanded.has(supernet.id);
+  // Lazy-load child supernets only once the row is expanded — keeps the
+  // initial page render to a single query and avoids fanning out into
+  // every nested supernet on mount.
+  const childrenQ = useQuery({
+    enabled: isOpen,
+    queryKey: ['child-supernets', supernet.id],
+    queryFn: async () => (
+      await http.get<{ items: Supernet[] }>(
+        `/ipam/supernets?parent_supernet_id=${supernet.id}&page_size=200`,
+      )
+    ).data.items ?? [],
+  });
+  const children = childrenQ.data ?? [];
+  const branchSpan = canWrite ? 5 : 4;
+  const indent = depth * 16;
+  const sitePill = supernet.site_id
+    ? `site: ${sitesById.get(supernet.site_id)?.code ?? supernet.site_id.slice(0, 8) + '…'}`
+    : null;
+  return (
+    <Fragment>
+      <TableRow
+        className="cursor-pointer hover:bg-accent/40"
+        onClick={() => onToggle(supernet.id)}
+      >
+        <TableCell className="text-muted-foreground">
+          {isOpen
+            ? <ChevronDown className="h-4 w-4" />
+            : <ChevronRight className="h-4 w-4" />}
+        </TableCell>
+        <TableCell className="font-mono font-medium" style={{ paddingLeft: 16 + indent }}>
+          {depth > 0 && <span className="text-muted-foreground">└─ </span>}
+          {supernet.prefix}
+        </TableCell>
+        <TableCell>
+          <div>{supernet.name ?? '—'}</div>
+          {sitePill && (
+            <div className="text-xs text-muted-foreground">{sitePill}</div>
+          )}
+        </TableCell>
+        <TableCell>
+          {supernet.purpose ? <Badge variant="secondary">{supernet.purpose}</Badge> : '—'}
+        </TableCell>
+        <TableCell><SupernetUtilCell supernetId={supernet.id} /></TableCell>
+        {canWrite && (
+          <TableCell onClick={(e) => e.stopPropagation()}>
+            <Button size="sm" variant="ghost" onClick={() => onEditSupernet(supernet)} title="Edit supernet">
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+          </TableCell>
+        )}
+      </TableRow>
+      {isOpen && (
+        <>
+          {childrenQ.isLoading && (
+            <TableRow>
+              <TableCell />
+              <TableCell colSpan={branchSpan} style={{ paddingLeft: 24 + indent }}>
+                <Skeleton className="h-6 w-full" />
+              </TableCell>
+            </TableRow>
+          )}
+          {children.map((child) => (
+            <SupernetNode
+              key={child.id}
+              supernet={child}
+              depth={depth + 1}
+              expanded={expanded}
+              onToggle={onToggle}
+              sitesById={sitesById}
+              canWrite={canWrite}
+              onSelectSubnet={onSelectSubnet}
+              onAddSubnet={onAddSubnet}
+              onAddChildSupernet={onAddChildSupernet}
+              onEditSupernet={onEditSupernet}
+              onEditSubnet={onEditSubnet}
+            />
+          ))}
+          <SubnetBranch
+            supernetId={supernet.id}
+            depth={depth + 1}
+            parentPurpose={supernet.purpose}
+            sitesById={sitesById}
+            canWrite={canWrite}
+            onSelectSubnet={onSelectSubnet}
+            onAddSubnet={() => onAddSubnet(supernet)}
+            onAddChildSupernet={() => onAddChildSupernet(supernet)}
+            onEditSubnet={(s) => onEditSubnet(s, supernet.purpose)}
+          />
+        </>
+      )}
+    </Fragment>
+  );
+}
+
+
 function SubnetBranch({
-  supernetId, parentPurpose, sitesById, canWrite,
-  onSelectSubnet, onAddSubnet, onEditSubnet,
+  supernetId, depth, parentPurpose, sitesById, canWrite,
+  onSelectSubnet, onAddSubnet, onAddChildSupernet, onEditSubnet,
 }: {
   supernetId: string;
+  depth: number;
   parentPurpose: string | null;
   sitesById: Map<string, Site>;
   canWrite: boolean;
   onSelectSubnet: (subnetId: string) => void;
   onAddSubnet: () => void;
+  onAddChildSupernet: () => void;
   onEditSubnet: (subnet: Subnet) => void;
 }) {
   const { data, isLoading } = useQuery({
@@ -929,12 +1087,13 @@ function SubnetBranch({
   // The branch's column count matches the parent table — chevron, prefix,
   // name, purpose, utilization, and the edit-button column when canWrite.
   const branchSpan = canWrite ? 5 : 4;
+  const indent = depth * 16;
 
   if (isLoading) {
     return (
       <TableRow>
         <TableCell />
-        <TableCell colSpan={branchSpan}>
+        <TableCell colSpan={branchSpan} style={{ paddingLeft: 16 + indent }}>
           <Skeleton className="h-6 w-full" />
         </TableCell>
       </TableRow>
@@ -942,23 +1101,6 @@ function SubnetBranch({
   }
 
   const subnets = data ?? [];
-  if (subnets.length === 0) {
-    return (
-      <TableRow className="bg-muted/20">
-        <TableCell />
-        <TableCell colSpan={branchSpan} className="text-xs text-muted-foreground">
-          No subnets carved from this supernet.
-          {canWrite && (
-            <Button size="sm" variant="ghost" className="ml-2" onClick={onAddSubnet}>
-              <Plus className="h-3.5 w-3.5" /> Add subnet
-              {parentPurpose && <span className="ml-1 text-[10px]">({parentPurpose})</span>}
-            </Button>
-          )}
-        </TableCell>
-      </TableRow>
-    );
-  }
-
   return (
     <>
       {subnets.map((s) => (
@@ -968,7 +1110,7 @@ function SubnetBranch({
           onClick={() => onSelectSubnet(s.id)}
         >
           <TableCell />
-          <TableCell className="font-mono pl-8">
+          <TableCell className="font-mono" style={{ paddingLeft: 16 + indent }}>
             <span className="text-muted-foreground">└─</span> {s.prefix}
           </TableCell>
           <TableCell className="text-sm">
@@ -979,6 +1121,7 @@ function SubnetBranch({
                 : 'unassigned'}
               {s.vlan_id ? ` · vlan ${s.vlan_id}` : ''}
               {s.gateway ? ` · gw ${s.gateway}` : ''}
+              {s.vni_id ? ` · vni ${s.vni_id.slice(0, 8)}…` : ''}
             </div>
           </TableCell>
           <TableCell>
@@ -997,10 +1140,13 @@ function SubnetBranch({
       {canWrite && (
         <TableRow className="bg-muted/20">
           <TableCell />
-          <TableCell colSpan={branchSpan} className="pl-8">
+          <TableCell colSpan={branchSpan} style={{ paddingLeft: 16 + indent }}>
             <Button size="sm" variant="ghost" onClick={onAddSubnet}>
               <Plus className="h-3.5 w-3.5" /> Add subnet here
               {parentPurpose && <span className="ml-1 text-[10px] text-muted-foreground">({parentPurpose})</span>}
+            </Button>
+            <Button size="sm" variant="ghost" className="ml-2" onClick={onAddChildSupernet}>
+              <Plus className="h-3.5 w-3.5" /> Add child supernet
             </Button>
           </TableCell>
         </TableRow>
@@ -1029,25 +1175,38 @@ const PURPOSE_NONE = '__none__';
 
 
 function SupernetForm({
-  fabricId, vrfId, supernet, onSaved,
+  fabricId, vrfId, supernet, parent, sites, onSaved,
 }: {
   fabricId: string;
   vrfId: string;
   supernet?: Supernet;
+  /** When set, the new supernet is created underneath this one. The form
+   * locks the purpose to the parent's purpose (same inheritance rule we
+   * apply to subnets, applied one level up). */
+  parent?: Supernet | null;
+  sites: Site[];
   onSaved: () => void;
 }) {
+  const NONE = '__none__';
   const editing = !!supernet;
+  // Purpose: editing → existing; creating under a parent → parent's; new → unset.
+  const initialPurpose =
+    supernet?.purpose
+    ?? parent?.purpose
+    ?? PURPOSE_NONE;
   const form = useForm<z.infer<typeof supernetSchema>>({
     resolver: zodResolver(supernetSchema),
     defaultValues: {
       prefix: supernet?.prefix ?? '',
       name: supernet?.name ?? '',
-      purpose: supernet?.purpose ?? PURPOSE_NONE,
+      site_id: supernet?.site_id ?? NONE,
+      purpose: initialPurpose,
       description: supernet?.description ?? '',
     },
   });
   async function onSubmit(v: z.infer<typeof supernetSchema>) {
     const purpose = v.purpose && v.purpose !== PURPOSE_NONE ? v.purpose : null;
+    const siteId = v.site_id && v.site_id !== NONE ? v.site_id : null;
     try {
       if (editing && supernet) {
         // PATCH only the fields the operator can edit. Prefix is intentionally
@@ -1055,6 +1214,7 @@ function SupernetForm({
         // invariant landmine, easier to delete + recreate.
         await http.patch(`/ipam/supernets/${supernet.id}`, {
           name: v.name || null,
+          site_id: siteId,
           purpose,
           description: v.description || null,
         });
@@ -1063,6 +1223,8 @@ function SupernetForm({
         await http.post('/ipam/supernets', {
           fabric_id: fabricId,
           vrf_id: vrfId,
+          parent_supernet_id: parent?.id ?? null,
+          site_id: siteId,
           prefix: v.prefix,
           name: v.name || null,
           purpose,
@@ -1073,9 +1235,16 @@ function SupernetForm({
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
+  const purposeLocked = !!parent?.purpose && !editing;
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        {parent && !editing && (
+          <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            Carving inside <span className="font-mono">{parent.prefix}</span>.
+            Prefix must fit inside the parent.
+          </p>
+        )}
         <FormField control={form.control} name="prefix" render={({ field }) => (
           <FormItem>
             <FormLabel>Prefix (CIDR)</FormLabel>
@@ -1099,17 +1268,43 @@ function SupernetForm({
           <FormField control={form.control} name="name" render={({ field }) => (
             <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
           )} />
+          <FormField control={form.control} name="site_id" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Site (optional)</FormLabel>
+              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
+                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                <SelectContent>
+                  <SelectItem value={NONE}>(unassigned)</SelectItem>
+                  {sites.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <FormField control={form.control} name="purpose" render={({ field }) => (
             <FormItem>
               <FormLabel>Purpose</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select
+                value={field.value}
+                onValueChange={field.onChange}
+                disabled={purposeLocked}
+              >
                 <FormControl><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger></FormControl>
                 <SelectContent>
                   <SelectItem value={PURPOSE_NONE}>(unset)</SelectItem>
                   {PURPOSES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {editing && (
+              {purposeLocked && (
+                <p className="text-xs text-muted-foreground">
+                  Locked to <span className="font-mono">{parent?.purpose}</span> — parent's purpose.
+                </p>
+              )}
+              {editing && !purposeLocked && (
                 <p className="text-xs text-muted-foreground">
                   Setting a purpose locks every subnet under this supernet to the same purpose.
                 </p>
@@ -1117,10 +1312,10 @@ function SupernetForm({
               <FormMessage />
             </FormItem>
           )} />
+          <FormField control={form.control} name="description" render={({ field }) => (
+            <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
         </div>
-        <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
         <Button type="submit" disabled={form.formState.isSubmitting}>
           {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
         </Button>
@@ -1134,6 +1329,7 @@ function SupernetForm({
 const subnetSchema = z.object({
   prefix: z.string().min(1),
   site_id: z.string(),
+  vni_id: z.string().optional(),
   name: z.string().optional(),
   purpose: z.string().optional(),
   vlan_id: z.string().optional(),
@@ -1155,9 +1351,10 @@ function SubnetUtilCell({ subnetId }: { subnetId: string }) {
 }
 
 function SubnetForm({
-  supernetId, sites, subnet, parentPurpose, onSaved,
+  supernetId, fabricId, sites, subnet, parentPurpose, onSaved,
 }: {
   supernetId: string;
+  fabricId: string;
   sites: Site[];
   /** Existing subnet to edit. When omitted the form creates a new one. */
   subnet?: Subnet;
@@ -1168,6 +1365,17 @@ function SubnetForm({
 }) {
   const NONE = '__none__';
   const editing = !!subnet;
+  // L2 VNIs in this fabric — only L2 can be bound to a subnet (the
+  // backend enforces this; we filter here so the dropdown stays honest).
+  const vnisQ = useQuery({
+    queryKey: ['vnis-for-fabric', fabricId, 'l2'],
+    queryFn: async () => (
+      await http.get<{ items: Vni[] }>(
+        `/ipam/vnis?fabric_id=${fabricId}&kind=l2&page_size=200`,
+      )
+    ).data.items ?? [],
+  });
+  const l2Vnis = vnisQ.data ?? [];
   // If the parent supernet has a purpose, the new subnet must adopt it.
   // Pre-fill + lock the field so the operator can't even attempt a value
   // the backend will reject.
@@ -1180,6 +1388,7 @@ function SubnetForm({
     defaultValues: {
       prefix: subnet?.prefix ?? '',
       site_id: subnet?.site_id ?? NONE,
+      vni_id: subnet?.vni_id ?? NONE,
       name: subnet?.name ?? '',
       purpose: initialPurpose,
       vlan_id: subnet?.vlan_id != null ? String(subnet.vlan_id) : '',
@@ -1188,10 +1397,12 @@ function SubnetForm({
   });
   async function onSubmit(v: z.infer<typeof subnetSchema>) {
     const purpose = v.purpose && v.purpose !== PURPOSE_NONE ? v.purpose : null;
+    const vniId = v.vni_id && v.vni_id !== NONE ? v.vni_id : null;
     try {
       if (editing && subnet) {
         await http.patch(`/ipam/subnets/${subnet.id}`, {
           site_id: v.site_id === NONE ? null : v.site_id,
+          vni_id: vniId,
           name: v.name || null,
           purpose,
           vlan_id: v.vlan_id ? Number(v.vlan_id) : null,
@@ -1202,6 +1413,7 @@ function SubnetForm({
         await http.post('/ipam/subnets', {
           supernet_id: supernetId,
           site_id: v.site_id === NONE ? null : v.site_id,
+          vni_id: vniId,
           prefix: v.prefix,
           name: v.name || null,
           purpose,
@@ -1283,6 +1495,28 @@ function SubnetForm({
             <FormItem><FormLabel>Gateway (optional)</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
           )} />
         </div>
+        <FormField control={form.control} name="vni_id" render={({ field }) => (
+          <FormItem>
+            <FormLabel>L2 VNI (optional)</FormLabel>
+            <Select value={field.value ?? NONE} onValueChange={field.onChange}>
+              <FormControl><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger></FormControl>
+              <SelectContent>
+                <SelectItem value={NONE}>(none)</SelectItem>
+                {l2Vnis.map((v) => (
+                  <SelectItem key={v.id} value={v.id}>
+                    {v.vni}{v.name ? ` · ${v.name}` : ''}
+                    {v.vlan_id ? ` · vlan ${v.vlan_id}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Bind this subnet to an L2 VNI to track which broadcast domain it rides.
+              Only L2 VNIs in this fabric are eligible.
+            </p>
+            <FormMessage />
+          </FormItem>
+        )} />
         <FormField control={form.control} name="name" render={({ field }) => (
           <FormItem><FormLabel>Name (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
         )} />
@@ -1960,3 +2194,547 @@ function DhcpForm({ fabrics, onSaved }: { fabrics: Fabric[]; onSaved: () => void
   );
 }
 
+
+
+// ----------------------- Overlays / VNI / VTEP -----------------------
+
+const overlaySchema = z.object({
+  fabric_id: z.string().min(1),
+  name: z.string().min(1),
+  kind: z.enum(['vxlan', 'geneve']),
+  udp_port: z.string().min(1),
+  mtu: z.string().optional(),
+  underlay_vrf_id: z.string().optional(),
+  description: z.string().optional(),
+});
+
+const vniSchema = z.object({
+  vni: z.string().min(1),
+  kind: z.enum(['l2', 'l3']),
+  name: z.string().optional(),
+  vlan_id: z.string().optional(),
+  evpn_route_target: z.string().optional(),
+  vrf_id: z.string().optional(),
+  description: z.string().optional(),
+});
+
+const vtepSchema = z.object({
+  asset_id: z.string().min(1),
+  loopback_ip: z.string().optional(),
+  role: z.enum(['leaf', 'spine', 'border', 'other']),
+  description: z.string().optional(),
+});
+
+function OverlaysTab({ canWrite }: { canWrite: boolean }) {
+  const qc = useQueryClient();
+  const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
+  const fabrics = fabricsRes.result.data ?? [];
+  const [fabricId, setFabricId] = useState<string>('');
+  const [overlayId, setOverlayId] = useState<string | null>(null);
+  const [createOverlayOpen, setCreateOverlayOpen] = useState(false);
+
+  // First fabric becomes the default once fabrics arrive — saves a click.
+  if (!fabricId && fabrics.length > 0) {
+    setFabricId(fabrics[0].id);
+  }
+
+  const overlaysQ = useQuery({
+    enabled: !!fabricId,
+    queryKey: ['overlays-for-fabric', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: Overlay[] }>(`/ipam/overlays?fabric_id=${fabricId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const overlays = overlaysQ.data ?? [];
+
+  async function refreshOverlays() {
+    await qc.invalidateQueries({ queryKey: ['overlays-for-fabric', fabricId] });
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fabric</p>
+          <Select value={fabricId} onValueChange={(v) => { setFabricId(v); setOverlayId(null); }}>
+            <SelectTrigger className="w-[260px]"><SelectValue placeholder="Pick a fabric" /></SelectTrigger>
+            <SelectContent>
+              {fabrics.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        {canWrite && fabricId && (
+          <Dialog open={createOverlayOpen} onOpenChange={setCreateOverlayOpen}>
+            <DialogTrigger asChild>
+              <Button><Plus className="h-4 w-4" /> New overlay</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>New overlay</DialogTitle></DialogHeader>
+              <OverlayForm
+                fabricId={fabricId}
+                onSaved={async () => { setCreateOverlayOpen(false); await refreshOverlays(); }}
+              />
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Kind</TableHead>
+                <TableHead>UDP port</TableHead>
+                <TableHead>MTU</TableHead>
+                <TableHead className="w-32" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {overlays.length === 0 && !overlaysQ.isLoading && (
+                <TableRow><TableCell colSpan={5} className="text-muted-foreground">
+                  No overlays in this fabric yet.
+                </TableCell></TableRow>
+              )}
+              {overlays.map((o) => (
+                <TableRow
+                  key={o.id}
+                  className={'cursor-pointer hover:bg-accent/40 ' + (overlayId === o.id ? 'bg-accent/30' : '')}
+                  onClick={() => setOverlayId(o.id === overlayId ? null : o.id)}
+                >
+                  <TableCell className="font-medium">{o.name}</TableCell>
+                  <TableCell><Badge variant="secondary">{o.kind}</Badge></TableCell>
+                  <TableCell className="font-mono">{o.udp_port}</TableCell>
+                  <TableCell>{o.mtu ?? '—'}</TableCell>
+                  <TableCell className="text-right text-xs text-muted-foreground">
+                    {overlayId === o.id ? 'selected' : 'click to drill'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {overlayId && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          <VnisPanel overlayId={overlayId} canWrite={canWrite} />
+          <VtepsPanel overlayId={overlayId} canWrite={canWrite} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverlayForm({
+  fabricId, onSaved,
+}: { fabricId: string; onSaved: () => void }) {
+  const NONE = '__none__';
+  const vrfsQ = useList<Vrf>({
+    resource: 'ipam/vrfs',
+    filters: [{ field: 'fabric_id', operator: 'eq', value: fabricId }],
+    pagination: { pageSize: 200 },
+  });
+  const vrfs = vrfsQ.result.data ?? [];
+  const form = useForm<z.infer<typeof overlaySchema>>({
+    resolver: zodResolver(overlaySchema),
+    defaultValues: {
+      fabric_id: fabricId,
+      name: '',
+      kind: 'vxlan',
+      udp_port: '4789',
+      mtu: '',
+      underlay_vrf_id: NONE,
+      description: '',
+    },
+  });
+  const kind = form.watch('kind');
+  // Snap the default UDP port when the operator flips kind so they don't
+  // have to remember 4789 vs 6081 — they can still override it.
+  function syncPort(next: 'vxlan' | 'geneve') {
+    form.setValue('kind', next);
+    form.setValue('udp_port', next === 'vxlan' ? '4789' : '6081');
+  }
+  async function onSubmit(v: z.infer<typeof overlaySchema>) {
+    try {
+      await http.post('/ipam/overlays', {
+        fabric_id: v.fabric_id,
+        name: v.name,
+        kind: v.kind,
+        udp_port: Number(v.udp_port),
+        mtu: v.mtu ? Number(v.mtu) : null,
+        underlay_vrf_id: v.underlay_vrf_id && v.underlay_vrf_id !== NONE ? v.underlay_vrf_id : null,
+        description: v.description || null,
+      });
+      toast.success('Overlay created');
+      onSaved();
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <FormField control={form.control} name="name" render={({ field }) => (
+          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. evpn-fabric-east" {...field} /></FormControl><FormMessage /></FormItem>
+        )} />
+        <div className="grid grid-cols-2 gap-3">
+          <FormItem>
+            <FormLabel>Kind</FormLabel>
+            <Select value={kind} onValueChange={(v) => syncPort(v as 'vxlan' | 'geneve')}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="vxlan">VXLAN</SelectItem>
+                <SelectItem value="geneve">GENEVE</SelectItem>
+              </SelectContent>
+            </Select>
+          </FormItem>
+          <FormField control={form.control} name="udp_port" render={({ field }) => (
+            <FormItem><FormLabel>UDP port</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <FormField control={form.control} name="mtu" render={({ field }) => (
+            <FormItem><FormLabel>MTU (optional)</FormLabel><FormControl><Input type="number" placeholder="9000" {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+          <FormField control={form.control} name="underlay_vrf_id" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Underlay VRF (optional)</FormLabel>
+              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
+                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                <SelectContent>
+                  <SelectItem value={NONE}>(none)</SelectItem>
+                  {vrfs.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </div>
+        <FormField control={form.control} name="description" render={({ field }) => (
+          <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+        )} />
+        <Button type="submit" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+        </Button>
+      </form>
+    </Form>
+  );
+}
+
+function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const vnisQ = useQuery({
+    queryKey: ['vnis-for-overlay', overlayId],
+    queryFn: async () => (
+      await http.get<{ items: Vni[] }>(`/ipam/vnis?overlay_id=${overlayId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const vnis = vnisQ.data ?? [];
+  const [createOpen, setCreateOpen] = useState(false);
+
+  async function remove(v: Vni) {
+    if (!window.confirm(`Delete VNI ${v.vni}?`)) return;
+    try {
+      await http.delete(`/ipam/vnis/${v.id}`);
+      await qc.invalidateQueries({ queryKey: ['vnis-for-overlay', overlayId] });
+      toast.success('VNI removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-center justify-between border-b p-3">
+          <h3 className="text-sm font-semibold">VNIs</h3>
+          {canWrite && (
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add VNI</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>New VNI</DialogTitle></DialogHeader>
+                <VniForm
+                  overlayId={overlayId}
+                  onSaved={async () => {
+                    setCreateOpen(false);
+                    await qc.invalidateQueries({ queryKey: ['vnis-for-overlay', overlayId] });
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>VNI</TableHead>
+              <TableHead>Kind</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>VLAN / RT</TableHead>
+              {canWrite && <TableHead className="w-12" />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {vnis.length === 0 && !vnisQ.isLoading && (
+              <TableRow><TableCell colSpan={canWrite ? 5 : 4} className="text-muted-foreground">No VNIs yet.</TableCell></TableRow>
+            )}
+            {vnis.map((v) => (
+              <TableRow key={v.id}>
+                <TableCell className="font-mono">{v.vni}</TableCell>
+                <TableCell><Badge variant={v.kind === 'l3' ? 'default' : 'secondary'}>{v.kind}</Badge></TableCell>
+                <TableCell>{v.name ?? '—'}</TableCell>
+                <TableCell className="text-xs text-muted-foreground">
+                  {v.vlan_id ? `vlan ${v.vlan_id}` : ''}
+                  {v.evpn_route_target ? ` · rt ${v.evpn_route_target}` : ''}
+                  {v.vrf_id ? ` · vrf bound` : ''}
+                </TableCell>
+                {canWrite && (
+                  <TableCell>
+                    <Button size="sm" variant="ghost" onClick={() => remove(v)} title="Delete VNI">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function VniForm({ overlayId, onSaved }: { overlayId: string; onSaved: () => void }) {
+  const NONE = '__none__';
+  // VNI VRF dropdown — populated from ALL VRFs for now since we don't
+  // know the overlay's fabric here without an extra fetch. Backend rechecks
+  // that the chosen VRF lives in the overlay's fabric.
+  const vrfsQ = useList<Vrf>({ resource: 'ipam/vrfs', pagination: { pageSize: 500 } });
+  const vrfs = vrfsQ.result.data ?? [];
+  const form = useForm<z.infer<typeof vniSchema>>({
+    resolver: zodResolver(vniSchema),
+    defaultValues: {
+      vni: '', kind: 'l2', name: '',
+      vlan_id: '', evpn_route_target: '', vrf_id: NONE, description: '',
+    },
+  });
+  const kind = form.watch('kind');
+  async function onSubmit(v: z.infer<typeof vniSchema>) {
+    try {
+      await http.post('/ipam/vnis', {
+        overlay_id: overlayId,
+        vni: Number(v.vni),
+        kind: v.kind,
+        name: v.name || null,
+        vlan_id: v.kind === 'l2' && v.vlan_id ? Number(v.vlan_id) : null,
+        evpn_route_target: v.kind === 'l2' ? (v.evpn_route_target || null) : null,
+        vrf_id: v.kind === 'l3' && v.vrf_id && v.vrf_id !== NONE ? v.vrf_id : null,
+        description: v.description || null,
+      });
+      toast.success('VNI created');
+      onSaved();
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <FormField control={form.control} name="vni" render={({ field }) => (
+            <FormItem><FormLabel>VNI (1..16777214)</FormLabel><FormControl><Input type="number" min={1} max={16777214} {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+          <FormField control={form.control} name="kind" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Kind</FormLabel>
+              <Select value={field.value} onValueChange={field.onChange}>
+                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                <SelectContent>
+                  <SelectItem value="l2">L2 (broadcast domain)</SelectItem>
+                  <SelectItem value="l3">L3 (tenant VRF)</SelectItem>
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )} />
+        </div>
+        <FormField control={form.control} name="name" render={({ field }) => (
+          <FormItem><FormLabel>Name (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+        )} />
+        {kind === 'l2' && (
+          <div className="grid grid-cols-2 gap-3">
+            <FormField control={form.control} name="vlan_id" render={({ field }) => (
+              <FormItem><FormLabel>Mapped VLAN (optional)</FormLabel><FormControl><Input type="number" min={1} max={4094} {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+            <FormField control={form.control} name="evpn_route_target" render={({ field }) => (
+              <FormItem><FormLabel>EVPN RT (optional)</FormLabel><FormControl><Input placeholder="65000:10010" className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
+            )} />
+          </div>
+        )}
+        {kind === 'l3' && (
+          <FormField control={form.control} name="vrf_id" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tenant VRF</FormLabel>
+              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
+                <FormControl><SelectTrigger><SelectValue placeholder="Pick a VRF" /></SelectTrigger></FormControl>
+                <SelectContent>
+                  <SelectItem value={NONE}>(unset)</SelectItem>
+                  {vrfs.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">L3 VNIs map a tenant VRF — required.</p>
+              <FormMessage />
+            </FormItem>
+          )} />
+        )}
+        <Button type="submit" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+        </Button>
+      </form>
+    </Form>
+  );
+}
+
+function VtepsPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const vtepsQ = useQuery({
+    queryKey: ['vteps-for-overlay', overlayId],
+    queryFn: async () => (
+      await http.get<{ items: Vtep[] }>(`/ipam/vteps?overlay_id=${overlayId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const vteps = vtepsQ.data ?? [];
+  const assetsRes = useList<Asset>({ resource: 'inventory/assets', pagination: { pageSize: 500 } });
+  const assets = assetsRes.result.data ?? [];
+  const assetsById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets]);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  async function remove(v: Vtep) {
+    if (!window.confirm('Delete this VTEP and all its VNI memberships?')) return;
+    try {
+      await http.delete(`/ipam/vteps/${v.id}`);
+      await qc.invalidateQueries({ queryKey: ['vteps-for-overlay', overlayId] });
+      toast.success('VTEP removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-center justify-between border-b p-3">
+          <h3 className="text-sm font-semibold">VTEPs</h3>
+          {canWrite && (
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add VTEP</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>New VTEP</DialogTitle></DialogHeader>
+                <VtepForm
+                  overlayId={overlayId}
+                  assets={assets}
+                  onSaved={async () => {
+                    setCreateOpen(false);
+                    await qc.invalidateQueries({ queryKey: ['vteps-for-overlay', overlayId] });
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Asset</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Loopback</TableHead>
+              {canWrite && <TableHead className="w-12" />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {vteps.length === 0 && !vtepsQ.isLoading && (
+              <TableRow><TableCell colSpan={canWrite ? 4 : 3} className="text-muted-foreground">No VTEPs yet.</TableCell></TableRow>
+            )}
+            {vteps.map((v) => (
+              <TableRow key={v.id}>
+                <TableCell>{assetsById.get(v.asset_id)?.name ?? v.asset_id.slice(0, 8) + '…'}</TableCell>
+                <TableCell><Badge variant="secondary">{v.role}</Badge></TableCell>
+                <TableCell className="font-mono">{v.loopback_ip ?? '—'}</TableCell>
+                {canWrite && (
+                  <TableCell>
+                    <Button size="sm" variant="ghost" onClick={() => remove(v)} title="Delete VTEP">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TableCell>
+                )}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function VtepForm({
+  overlayId, assets, onSaved,
+}: { overlayId: string; assets: Asset[]; onSaved: () => void }) {
+  const form = useForm<z.infer<typeof vtepSchema>>({
+    resolver: zodResolver(vtepSchema),
+    defaultValues: { asset_id: '', loopback_ip: '', role: 'leaf', description: '' },
+  });
+  async function onSubmit(v: z.infer<typeof vtepSchema>) {
+    try {
+      await http.post('/ipam/vteps', {
+        overlay_id: overlayId,
+        asset_id: v.asset_id,
+        loopback_ip: v.loopback_ip || null,
+        role: v.role,
+        description: v.description || null,
+      });
+      toast.success('VTEP created');
+      onSaved();
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+  return (
+    <Form {...form}>
+      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+        <FormField control={form.control} name="asset_id" render={({ field }) => (
+          <FormItem>
+            <FormLabel>Asset</FormLabel>
+            <Select value={field.value} onValueChange={field.onChange}>
+              <FormControl><SelectTrigger><SelectValue placeholder="Pick an asset" /></SelectTrigger></FormControl>
+              <SelectContent>
+                {assets.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <FormMessage />
+          </FormItem>
+        )} />
+        <div className="grid grid-cols-2 gap-3">
+          <FormField control={form.control} name="role" render={({ field }) => (
+            <FormItem>
+              <FormLabel>Role</FormLabel>
+              <Select value={field.value} onValueChange={field.onChange}>
+                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                <SelectContent>
+                  {(['leaf', 'spine', 'border', 'other'] as const).map((r) => (
+                    <SelectItem key={r} value={r}>{r}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )} />
+          <FormField control={form.control} name="loopback_ip" render={({ field }) => (
+            <FormItem><FormLabel>Loopback IP (optional)</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
+          )} />
+        </div>
+        <FormField control={form.control} name="description" render={({ field }) => (
+          <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+        )} />
+        <Button type="submit" disabled={form.formState.isSubmitting}>
+          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+        </Button>
+      </form>
+    </Form>
+  );
+}

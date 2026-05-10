@@ -59,6 +59,26 @@ class IpAddressRole(str, enum.Enum):
     other = "other"
 
 
+class OverlayKind(str, enum.Enum):
+    vxlan = "vxlan"
+    geneve = "geneve"
+
+
+class VniKind(str, enum.Enum):
+    """L2 VNIs map to a broadcast domain (replaces a VLAN); L3 VNIs map to a
+    tenant routing instance (a VRF). EVPN deployments use both."""
+
+    l2 = "l2"
+    l3 = "l3"
+
+
+class VtepRole(str, enum.Enum):
+    leaf = "leaf"
+    spine = "spine"
+    border = "border"
+    other = "other"
+
+
 class Fabric(UUIDPrimaryKey, Timestamped, Base):
     """Top-level network namespace. Maps roughly to an enclave."""
 
@@ -102,11 +122,15 @@ class Vrf(UUIDPrimaryKey, Timestamped, Base):
 
 
 class Supernet(UUIDPrimaryKey, Timestamped, Base):
-    """Aggregate prefix. Containment for child subnets is enforced at write time."""
+    """Aggregate prefix. Can nest under another supernet so operators can
+    model 10.0.0.0/8 → 10.0.0.0/20 (site/role aggregate) → 10.0.0.0/24
+    (allocatable subnet). Containment for the parent and for child subnets
+    is enforced at write time."""
 
     __tablename__ = "supernets"
     __table_args__ = (
         Index("ix_supernets_fabric_vrf", "fabric_id", "vrf_id"),
+        Index("ix_supernets_parent", "parent_supernet_id"),
     )
 
     fabric_id: Mapped[UUID] = mapped_column(
@@ -114,6 +138,16 @@ class Supernet(UUIDPrimaryKey, Timestamped, Base):
     )
     vrf_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("vrfs.id"), nullable=False,
+    )
+    # Self-FK for nested supernets. Top-level supernets leave this null.
+    parent_supernet_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("supernets.id"),
+    )
+    # Optional site assignment for sub-supernets that represent a per-site
+    # carve-out of a larger aggregate. Top-level supernets are typically
+    # site-agnostic and leave this null.
+    site_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("sites.id"),
     )
     prefix: Mapped[str] = mapped_column(CIDR, nullable=False)
     name: Mapped[str | None] = mapped_column(String(128))
@@ -129,6 +163,7 @@ class Subnet(UUIDPrimaryKey, Timestamped, Base):
         Index("ix_subnets_supernet", "supernet_id"),
         Index("ix_subnets_site", "site_id"),
         Index("ix_subnets_vrf", "vrf_id"),
+        Index("ix_subnets_vni", "vni_id"),
     )
 
     supernet_id: Mapped[UUID] = mapped_column(
@@ -151,6 +186,11 @@ class Subnet(UUIDPrimaryKey, Timestamped, Base):
     purpose: Mapped[str | None] = mapped_column(String(32))  # mgmt|data|storage|oob|other
     vlan_id: Mapped[int | None] = mapped_column(Integer)
     gateway: Mapped[str | None] = mapped_column(INET)
+    # Overlay-aware tenant subnets reference an L2 VNI. The validator on the
+    # API layer enforces that the VNI's kind is l2 and lives in the same fabric.
+    vni_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vnis.id"),
+    )
 
 
 class IPAddress(UUIDPrimaryKey, Timestamped, Base):
@@ -187,6 +227,122 @@ class IPAddress(UUIDPrimaryKey, Timestamped, Base):
     # ages out IPs whose lease has lapsed without churning static rows.
     dhcp_lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dhcp_mac: Mapped[str | None] = mapped_column(String(32))
+
+
+class Overlay(UUIDPrimaryKey, Timestamped, Base):
+    """A VXLAN/GENEVE overlay anchored in a fabric.
+
+    The underlay VRF is the routing instance that carries VTEP-to-VTEP
+    traffic (loopbacks, BGP-EVPN sessions). Tenant VNIs ride on top.
+    """
+
+    __tablename__ = "overlays"
+    __table_args__ = (
+        UniqueConstraint("fabric_id", "name", name="uq_overlay_fabric_name"),
+        Index("ix_overlays_fabric", "fabric_id"),
+    )
+
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[OverlayKind] = mapped_column(
+        Enum(OverlayKind, name="overlay_kind", values_callable=lambda x: [e.value for e in x]),
+        default=OverlayKind.vxlan, nullable=False,
+    )
+    # Default UDP ports: VXLAN 4789, GENEVE 6081. Stored explicitly so an
+    # operator can pin a non-standard port without us second-guessing the
+    # data plane.
+    udp_port: Mapped[int] = mapped_column(Integer, default=4789, nullable=False)
+    mtu: Mapped[int | None] = mapped_column(Integer)
+    underlay_vrf_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vrfs.id"),
+    )
+    description: Mapped[str | None] = mapped_column(String(512))
+
+
+class Vni(UUIDPrimaryKey, Timestamped, Base):
+    """A 24-bit VNI inside an overlay.
+
+    L2 VNIs replace a VLAN broadcast domain; they typically map to one
+    VLAN ID on the access side and an EVPN route-target for the control
+    plane. L3 VNIs map to a tenant VRF (the EVPN "L3-VNI"); they require
+    `vrf_id` and reject `vlan_id`.
+    """
+
+    __tablename__ = "vnis"
+    __table_args__ = (
+        UniqueConstraint("overlay_id", "vni", name="uq_vni_overlay_vni"),
+        Index("ix_vnis_overlay", "overlay_id"),
+        Index("ix_vnis_vrf", "vrf_id"),
+    )
+
+    overlay_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("overlays.id"), nullable=False,
+    )
+    vni: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[VniKind] = mapped_column(
+        Enum(VniKind, name="vni_kind", values_callable=lambda x: [e.value for e in x]),
+        default=VniKind.l2, nullable=False,
+    )
+    name: Mapped[str | None] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(String(512))
+    # L2 VNI fields. Both optional even for L2 — some deployments don't
+    # bother with the access VLAN map (pure overlay) and EVPN RT may live
+    # in the control plane config.
+    vlan_id: Mapped[int | None] = mapped_column(Integer)
+    evpn_route_target: Mapped[str | None] = mapped_column(String(64))
+    # L3 VNI field — points at the tenant VRF that this L3-VNI carries.
+    vrf_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vrfs.id"),
+    )
+
+
+class Vtep(UUIDPrimaryKey, Timestamped, Base):
+    """A device acting as a VXLAN/GENEVE tunnel endpoint."""
+
+    __tablename__ = "vteps"
+    __table_args__ = (
+        UniqueConstraint("overlay_id", "asset_id", name="uq_vtep_overlay_asset"),
+        Index("ix_vteps_overlay", "overlay_id"),
+        Index("ix_vteps_asset", "asset_id"),
+    )
+
+    overlay_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("overlays.id"), nullable=False,
+    )
+    asset_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("assets.id"), nullable=False,
+    )
+    loopback_ip: Mapped[str | None] = mapped_column(INET)
+    role: Mapped[VtepRole] = mapped_column(
+        Enum(VtepRole, name="vtep_role", values_callable=lambda x: [e.value for e in x]),
+        default=VtepRole.leaf, nullable=False,
+    )
+    description: Mapped[str | None] = mapped_column(String(512))
+
+
+class VtepVniMembership(UUIDPrimaryKey, Timestamped, Base):
+    """Many-to-many: which VNIs each VTEP carries.
+
+    Modeled as a row (rather than a plain association table) so the
+    membership itself can be audited and timestamped — useful for
+    answering "when did this VTEP start advertising VNI 10010?".
+    """
+
+    __tablename__ = "vtep_vni_memberships"
+    __table_args__ = (
+        UniqueConstraint("vtep_id", "vni_id", name="uq_vtep_vni_membership"),
+        Index("ix_vtep_vni_memberships_vtep", "vtep_id"),
+        Index("ix_vtep_vni_memberships_vni", "vni_id"),
+    )
+
+    vtep_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vteps.id"), nullable=False,
+    )
+    vni_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vnis.id"), nullable=False,
+    )
 
 
 class DhcpServer(UUIDPrimaryKey, Timestamped, Base):

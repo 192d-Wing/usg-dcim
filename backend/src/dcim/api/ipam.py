@@ -34,9 +34,13 @@ from ..models.ipam import (
     DhcpServer,
     Fabric,
     IPAddress,
+    Overlay,
     Subnet,
     Supernet,
+    Vni,
     Vrf,
+    Vtep,
+    VtepVniMembership,
 )
 from ..schemas.common import Page, PageParams
 from ..schemas.ipam import (
@@ -49,6 +53,9 @@ from ..schemas.ipam import (
     IPAddressCreate,
     IPAddressOut,
     IPAddressUpdate,
+    OverlayCreate,
+    OverlayOut,
+    OverlayUpdate,
     SubnetCreate,
     SubnetOut,
     SubnetUpdate,
@@ -56,9 +63,17 @@ from ..schemas.ipam import (
     SupernetCreate,
     SupernetOut,
     SupernetUpdate,
+    VniCreate,
+    VniOut,
+    VniUpdate,
     VrfCreate,
     VrfOut,
     VrfUpdate,
+    VtepCreate,
+    VtepOut,
+    VtepUpdate,
+    VtepVniMembershipCreate,
+    VtepVniMembershipOut,
 )
 from ..security import audit
 from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
@@ -266,6 +281,10 @@ async def list_supernets(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
     vrf_id: UUID | None = Query(None),
+    parent_supernet_id: UUID | None = Query(
+        None, description="Filter by parent. Pass the literal string 'null' to fetch top-level supernets only.",
+    ),
+    top_level: bool = Query(False, description="Shortcut for parent_supernet_id IS NULL."),
     _: Principal = Depends(require_capability(INVENTORY_READ)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -274,6 +293,10 @@ async def list_supernets(
         stmt = stmt.where(Supernet.fabric_id == fabric_id)
     if vrf_id is not None:
         stmt = stmt.where(Supernet.vrf_id == vrf_id)
+    if top_level:
+        stmt = stmt.where(Supernet.parent_supernet_id.is_(None))
+    elif parent_supernet_id is not None:
+        stmt = stmt.where(Supernet.parent_supernet_id == parent_supernet_id)
     return await paginate(db, stmt, model=Supernet, params=params, out_model=SupernetOut)
 
 
@@ -286,8 +309,21 @@ async def create_supernet(
     vrf = await db.get(Vrf, payload.vrf_id)
     if vrf is None or vrf.fabric_id != payload.fabric_id:
         raise ValidationError("vrf does not belong to that fabric")
+    parent_purpose: str | None = None
+    if payload.parent_supernet_id is not None:
+        parent = await ipam_svc.assert_supernet_inside_parent(
+            db, parent_supernet_id=payload.parent_supernet_id, prefix=payload.prefix,
+            fabric_id=payload.fabric_id, vrf_id=payload.vrf_id,
+        )
+        parent_purpose = parent.purpose
+    # Sibling-overlap check at this level (top-level or under a shared parent).
     await ipam_svc.assert_supernet_unique_in_vrf(
         db, fabric_id=payload.fabric_id, vrf_id=payload.vrf_id, prefix=payload.prefix,
+        parent_supernet_id=payload.parent_supernet_id,
+    )
+    # Same purpose-inheritance rule we apply to subnets, applied one level up.
+    ipam_svc.assert_purpose_compatible(
+        supernet_purpose=parent_purpose, subnet_purpose=payload.purpose,
     )
     obj = Supernet(**payload.model_dump())
     db.add(obj)
@@ -295,7 +331,7 @@ async def create_supernet(
     await audit.record(
         db, principal, action="supernet.create",
         target_type="supernet", target_id=str(obj.id),
-        metadata={"prefix": payload.prefix},
+        site_id=obj.site_id, metadata={"prefix": payload.prefix},
     )
     await db.commit()
     await db.refresh(obj)
@@ -313,6 +349,18 @@ async def update_supernet(
     if obj is None:
         raise NotFoundError(_SUPERNET_NOT_FOUND)
     diff = payload.model_dump(exclude_unset=True)
+    if "parent_supernet_id" in diff and diff["parent_supernet_id"] is not None:
+        if diff["parent_supernet_id"] == supernet_id:
+            raise ValidationError("a supernet cannot be its own parent")
+        new_parent = await ipam_svc.assert_supernet_inside_parent(
+            db, parent_supernet_id=diff["parent_supernet_id"], prefix=str(obj.prefix),
+            fabric_id=obj.fabric_id, vrf_id=obj.vrf_id,
+        )
+        # Inherit/check purpose against the new parent before applying.
+        ipam_svc.assert_purpose_compatible(
+            supernet_purpose=new_parent.purpose,
+            subnet_purpose=diff.get("purpose", obj.purpose),
+        )
     if "purpose" in diff:
         await ipam_svc.assert_supernet_purpose_change_safe(
             db, supernet_id=supernet_id, new_purpose=diff["purpose"],
@@ -321,7 +369,7 @@ async def update_supernet(
         setattr(obj, k, v)
     await audit.record(
         db, principal, action="supernet.update", target_type="supernet",
-        target_id=str(supernet_id), diff=diff,
+        target_id=str(supernet_id), site_id=obj.site_id, diff=diff,
     )
     await db.commit()
     await db.refresh(obj)
@@ -342,6 +390,13 @@ async def delete_supernet(
     ).scalar_one_or_none()
     if in_use is not None:
         raise ConflictError("supernet still has subnets; remove them first")
+    child_supernet = (
+        await db.execute(
+            select(Supernet.id).where(Supernet.parent_supernet_id == supernet_id).limit(1)
+        )
+    ).scalar_one_or_none()
+    if child_supernet is not None:
+        raise ConflictError("supernet still has child supernets; remove them first")
     await db.execute(delete(Supernet).where(Supernet.id == supernet_id))
     await audit.record(
         db, principal, action="supernet.delete",
@@ -415,6 +470,10 @@ async def create_subnet(
     ipam_svc.assert_purpose_compatible(
         supernet_purpose=parent.purpose, subnet_purpose=payload.purpose,
     )
+    if payload.vni_id is not None:
+        await ipam_svc.assert_subnet_vni_compatible(
+            db, vni_id=payload.vni_id, fabric_id=parent.fabric_id,
+        )
     data = payload.model_dump()
     data["fabric_id"] = parent.fabric_id
     data["vrf_id"] = parent.vrf_id
@@ -447,6 +506,10 @@ async def update_subnet(
         ipam_svc.assert_purpose_compatible(
             supernet_purpose=parent.purpose if parent else None,
             subnet_purpose=diff["purpose"],
+        )
+    if "vni_id" in diff and diff["vni_id"] is not None:
+        await ipam_svc.assert_subnet_vni_compatible(
+            db, vni_id=diff["vni_id"], fabric_id=obj.fabric_id,
         )
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -788,6 +851,388 @@ async def free_space_prefixes(
         },
         "supernets": out,
     }
+
+
+# ----------------------- Overlays / VNIs / VTEPs -----------------------
+_OVERLAY_NOT_FOUND = "overlay not found"
+_VNI_NOT_FOUND = "vni not found"
+_VTEP_NOT_FOUND = "vtep not found"
+_MEMBERSHIP_NOT_FOUND = "vtep/vni membership not found"
+
+
+@router.get("/overlays", response_model=Page[OverlayOut])
+async def list_overlays(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Overlay)
+    if fabric_id is not None:
+        stmt = stmt.where(Overlay.fabric_id == fabric_id)
+    return await paginate(db, stmt, model=Overlay, params=params, out_model=OverlayOut)
+
+
+@router.post("/overlays", response_model=OverlayOut, status_code=201)
+async def create_overlay(
+    payload: OverlayCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    if payload.underlay_vrf_id is not None:
+        vrf = await db.get(Vrf, payload.underlay_vrf_id)
+        if vrf is None or vrf.fabric_id != payload.fabric_id:
+            raise ValidationError("underlay vrf must live in the same fabric")
+    obj = Overlay(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="overlay.create",
+        target_type="overlay", target_id=str(obj.id),
+        metadata={"name": payload.name, "kind": payload.kind.value},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/overlays/{overlay_id}", response_model=OverlayOut)
+async def update_overlay(
+    overlay_id: UUID,
+    payload: OverlayUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Overlay, overlay_id)
+    if obj is None:
+        raise NotFoundError(_OVERLAY_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    if "underlay_vrf_id" in diff and diff["underlay_vrf_id"] is not None:
+        vrf = await db.get(Vrf, diff["underlay_vrf_id"])
+        if vrf is None or vrf.fabric_id != obj.fabric_id:
+            raise ValidationError("underlay vrf must live in the same fabric")
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="overlay.update", target_type="overlay",
+        target_id=str(overlay_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/overlays/{overlay_id}", status_code=204)
+async def delete_overlay(
+    overlay_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Overlay, overlay_id)
+    if obj is None:
+        raise NotFoundError(_OVERLAY_NOT_FOUND)
+    blocked = (
+        await db.execute(select(Vni.id).where(Vni.overlay_id == overlay_id).limit(1))
+    ).scalar_one_or_none()
+    if blocked is not None:
+        raise ConflictError("overlay still has VNIs; remove them first")
+    blocked_vtep = (
+        await db.execute(select(Vtep.id).where(Vtep.overlay_id == overlay_id).limit(1))
+    ).scalar_one_or_none()
+    if blocked_vtep is not None:
+        raise ConflictError("overlay still has VTEPs; remove them first")
+    await db.execute(delete(Overlay).where(Overlay.id == overlay_id))
+    await audit.record(
+        db, principal, action="overlay.delete",
+        target_type="overlay", target_id=str(overlay_id),
+    )
+    await db.commit()
+
+
+@router.get("/vnis", response_model=Page[VniOut])
+async def list_vnis(
+    params: PageParams = Depends(PageParams.from_query),
+    overlay_id: UUID | None = Query(None),
+    fabric_id: UUID | None = Query(None),
+    kind: str | None = Query(None, regex="^(l2|l3)$"),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Vni)
+    if overlay_id is not None:
+        stmt = stmt.where(Vni.overlay_id == overlay_id)
+    if fabric_id is not None:
+        stmt = stmt.where(Vni.overlay_id.in_(
+            select(Overlay.id).where(Overlay.fabric_id == fabric_id)
+        ))
+    if kind is not None:
+        stmt = stmt.where(Vni.kind == kind)
+    return await paginate(db, stmt, model=Vni, params=params, out_model=VniOut)
+
+
+@router.post("/vnis", response_model=VniOut, status_code=201)
+async def create_vni(
+    payload: VniCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    overlay = await db.get(Overlay, payload.overlay_id)
+    if overlay is None:
+        raise ValidationError(f"overlay {payload.overlay_id} not found")
+    ipam_svc.assert_vni_in_range(payload.vni)
+    ipam_svc.assert_vni_kind_consistent(
+        kind=payload.kind, vlan_id=payload.vlan_id, vrf_id=payload.vrf_id,
+    )
+    if payload.vrf_id is not None:
+        vrf = await db.get(Vrf, payload.vrf_id)
+        if vrf is None or vrf.fabric_id != overlay.fabric_id:
+            raise ValidationError("vni vrf must live in the overlay's fabric")
+    existing = (
+        await db.execute(
+            select(Vni).where(Vni.overlay_id == payload.overlay_id, Vni.vni == payload.vni)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ConflictError(
+            f"vni {payload.vni} already exists in this overlay",
+            details={"existing_id": str(existing.id)},
+        )
+    obj = Vni(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="vni.create",
+        target_type="vni", target_id=str(obj.id),
+        metadata={"vni": payload.vni, "kind": payload.kind.value},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/vnis/{vni_id}", response_model=VniOut)
+async def update_vni(
+    vni_id: UUID,
+    payload: VniUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Vni, vni_id)
+    if obj is None:
+        raise NotFoundError(_VNI_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    new_kind = diff.get("kind", obj.kind)
+    new_vlan = diff.get("vlan_id", obj.vlan_id)
+    new_vrf = diff.get("vrf_id", obj.vrf_id)
+    ipam_svc.assert_vni_kind_consistent(kind=new_kind, vlan_id=new_vlan, vrf_id=new_vrf)
+    if "vrf_id" in diff and diff["vrf_id"] is not None:
+        overlay = await db.get(Overlay, obj.overlay_id)
+        vrf = await db.get(Vrf, diff["vrf_id"])
+        if vrf is None or (overlay and vrf.fabric_id != overlay.fabric_id):
+            raise ValidationError("vni vrf must live in the overlay's fabric")
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="vni.update", target_type="vni",
+        target_id=str(vni_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/vnis/{vni_id}", status_code=204)
+async def delete_vni(
+    vni_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Vni, vni_id)
+    if obj is None:
+        raise NotFoundError(_VNI_NOT_FOUND)
+    bound_subnet = (
+        await db.execute(select(Subnet.id).where(Subnet.vni_id == vni_id).limit(1))
+    ).scalar_one_or_none()
+    if bound_subnet is not None:
+        raise ConflictError("vni is still bound to one or more subnets; unbind first")
+    membership = (
+        await db.execute(
+            select(VtepVniMembership.id).where(VtepVniMembership.vni_id == vni_id).limit(1)
+        )
+    ).scalar_one_or_none()
+    if membership is not None:
+        raise ConflictError("vni is still advertised by one or more VTEPs; remove memberships first")
+    await db.execute(delete(Vni).where(Vni.id == vni_id))
+    await audit.record(
+        db, principal, action="vni.delete", target_type="vni", target_id=str(vni_id),
+    )
+    await db.commit()
+
+
+@router.get("/vteps", response_model=Page[VtepOut])
+async def list_vteps(
+    params: PageParams = Depends(PageParams.from_query),
+    overlay_id: UUID | None = Query(None),
+    asset_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(Vtep)
+    if overlay_id is not None:
+        stmt = stmt.where(Vtep.overlay_id == overlay_id)
+    if asset_id is not None:
+        stmt = stmt.where(Vtep.asset_id == asset_id)
+    return await paginate(db, stmt, model=Vtep, params=params, out_model=VtepOut)
+
+
+@router.post("/vteps", response_model=VtepOut, status_code=201)
+async def create_vtep(
+    payload: VtepCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    overlay = await db.get(Overlay, payload.overlay_id)
+    if overlay is None:
+        raise ValidationError(f"overlay {payload.overlay_id} not found")
+    existing = (
+        await db.execute(
+            select(Vtep).where(
+                Vtep.overlay_id == payload.overlay_id, Vtep.asset_id == payload.asset_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ConflictError("asset is already registered as a VTEP in this overlay")
+    obj = Vtep(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="vtep.create",
+        target_type="vtep", target_id=str(obj.id),
+        metadata={"asset_id": str(payload.asset_id), "role": payload.role.value},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/vteps/{vtep_id}", response_model=VtepOut)
+async def update_vtep(
+    vtep_id: UUID,
+    payload: VtepUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Vtep, vtep_id)
+    if obj is None:
+        raise NotFoundError(_VTEP_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="vtep.update", target_type="vtep",
+        target_id=str(vtep_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/vteps/{vtep_id}", status_code=204)
+async def delete_vtep(
+    vtep_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Vtep, vtep_id)
+    if obj is None:
+        raise NotFoundError(_VTEP_NOT_FOUND)
+    # Memberships cascade away cleanly because the VTEP is going.
+    await db.execute(delete(VtepVniMembership).where(VtepVniMembership.vtep_id == vtep_id))
+    await db.execute(delete(Vtep).where(Vtep.id == vtep_id))
+    await audit.record(
+        db, principal, action="vtep.delete", target_type="vtep", target_id=str(vtep_id),
+    )
+    await db.commit()
+
+
+@router.get("/vtep-memberships", response_model=Page[VtepVniMembershipOut])
+async def list_vtep_memberships(
+    params: PageParams = Depends(PageParams.from_query),
+    vtep_id: UUID | None = Query(None),
+    vni_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(VtepVniMembership)
+    if vtep_id is not None:
+        stmt = stmt.where(VtepVniMembership.vtep_id == vtep_id)
+    if vni_id is not None:
+        stmt = stmt.where(VtepVniMembership.vni_id == vni_id)
+    return await paginate(
+        db, stmt, model=VtepVniMembership, params=params, out_model=VtepVniMembershipOut,
+    )
+
+
+@router.post(
+    "/vtep-memberships", response_model=VtepVniMembershipOut, status_code=201,
+)
+async def create_vtep_membership(
+    payload: VtepVniMembershipCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    vtep = await db.get(Vtep, payload.vtep_id)
+    vni = await db.get(Vni, payload.vni_id)
+    if vtep is None:
+        raise ValidationError(f"vtep {payload.vtep_id} not found")
+    if vni is None:
+        raise ValidationError(f"vni {payload.vni_id} not found")
+    # A VTEP can only advertise VNIs from its own overlay — otherwise the
+    # row asserts something the data plane can't honor.
+    if vtep.overlay_id != vni.overlay_id:
+        raise ValidationError("vtep and vni must belong to the same overlay")
+    existing = (
+        await db.execute(
+            select(VtepVniMembership).where(
+                VtepVniMembership.vtep_id == payload.vtep_id,
+                VtepVniMembership.vni_id == payload.vni_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ConflictError("vtep already advertises this vni")
+    obj = VtepVniMembership(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="vtep_vni_membership.create",
+        target_type="vtep_vni_membership", target_id=str(obj.id),
+        metadata={"vtep_id": str(payload.vtep_id), "vni_id": str(payload.vni_id)},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/vtep-memberships/{membership_id}", status_code=204)
+async def delete_vtep_membership(
+    membership_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(VtepVniMembership, membership_id)
+    if obj is None:
+        raise NotFoundError(_MEMBERSHIP_NOT_FOUND)
+    await db.execute(delete(VtepVniMembership).where(VtepVniMembership.id == membership_id))
+    await audit.record(
+        db, principal, action="vtep_vni_membership.delete",
+        target_type="vtep_vni_membership", target_id=str(membership_id),
+    )
+    await db.commit()
 
 
 # ----------------------- DHCP servers (Kea) -----------------------

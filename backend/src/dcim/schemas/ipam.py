@@ -8,7 +8,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
-from ..models.ipam import IpAddressRole, IpAddressSource, IpAddressStatus
+from ..models.ipam import (
+    IpAddressRole,
+    IpAddressSource,
+    IpAddressStatus,
+    OverlayKind,
+    VniKind,
+    VtepRole,
+)
 
 
 def _to_str(v: Any) -> Any:
@@ -85,6 +92,8 @@ class VrfOut(VrfBase):
 class SupernetBase(BaseModel):
     fabric_id: UUID
     vrf_id: UUID
+    parent_supernet_id: UUID | None = None
+    site_id: UUID | None = None
     prefix: CidrStr
     name: str | None = None
     description: str | None = None
@@ -96,6 +105,8 @@ class SupernetCreate(SupernetBase):
 
 
 class SupernetUpdate(BaseModel):
+    parent_supernet_id: UUID | None = None
+    site_id: UUID | None = None
     name: str | None = None
     description: str | None = None
     purpose: str | None = None
@@ -113,6 +124,7 @@ class SupernetOut(SupernetBase):
 class SubnetBase(BaseModel):
     supernet_id: UUID
     site_id: UUID | None = None
+    vni_id: UUID | None = None
     prefix: CidrStr
     name: str | None = None
     description: str | None = None
@@ -127,6 +139,7 @@ class SubnetCreate(SubnetBase):
 
 class SubnetUpdate(BaseModel):
     site_id: UUID | None = None
+    vni_id: UUID | None = None
     name: str | None = None
     description: str | None = None
     purpose: str | None = None
@@ -141,6 +154,7 @@ class SubnetOut(BaseModel):
     fabric_id: UUID
     vrf_id: UUID
     site_id: UUID | None
+    vni_id: UUID | None
     prefix: CidrStr
     name: str | None
     description: str | None
@@ -224,5 +238,115 @@ class DhcpServerOut(DhcpServerBase):
     last_sync_status: str | None
     last_sync_error: str | None
     last_sync_lease_count: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- Overlay ----------
+
+class OverlayBase(BaseModel):
+    fabric_id: UUID
+    name: str
+    kind: OverlayKind = OverlayKind.vxlan
+    udp_port: int = 4789
+    mtu: int | None = None
+    underlay_vrf_id: UUID | None = None
+    description: str | None = None
+
+
+class OverlayCreate(OverlayBase):
+    pass
+
+
+class OverlayUpdate(BaseModel):
+    name: str | None = None
+    kind: OverlayKind | None = None
+    udp_port: int | None = None
+    mtu: int | None = None
+    underlay_vrf_id: UUID | None = None
+    description: str | None = None
+
+
+class OverlayOut(OverlayBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- VNI ----------
+
+class VniBase(BaseModel):
+    overlay_id: UUID
+    vni: int
+    kind: VniKind = VniKind.l2
+    name: str | None = None
+    description: str | None = None
+    vlan_id: int | None = None
+    evpn_route_target: str | None = None
+    vrf_id: UUID | None = None
+
+
+class VniCreate(VniBase):
+    pass
+
+
+class VniUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    vlan_id: int | None = None
+    evpn_route_target: str | None = None
+    # kind/vrf changes can break existing subnet bindings, so they're
+    # accepted but re-validated server-side just like a create.
+    kind: VniKind | None = None
+    vrf_id: UUID | None = None
+
+
+class VniOut(VniBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- VTEP ----------
+
+class VtepBase(BaseModel):
+    overlay_id: UUID
+    asset_id: UUID
+    loopback_ip: InetStrOpt = None
+    role: VtepRole = VtepRole.leaf
+    description: str | None = None
+
+
+class VtepCreate(VtepBase):
+    pass
+
+
+class VtepUpdate(BaseModel):
+    loopback_ip: str | None = None
+    role: VtepRole | None = None
+    description: str | None = None
+
+
+class VtepOut(VtepBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- VTEP ↔ VNI membership ----------
+
+class VtepVniMembershipCreate(BaseModel):
+    vtep_id: UUID
+    vni_id: UUID
+
+
+class VtepVniMembershipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    vtep_id: UUID
+    vni_id: UUID
     created_at: datetime
     updated_at: datetime

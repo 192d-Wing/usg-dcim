@@ -23,7 +23,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..errors import ConflictError, ValidationError
-from ..models.ipam import IPAddress, Subnet, Supernet
+from ..models.ipam import IPAddress, Subnet, Supernet, Vni, VniKind
+
+# 24-bit VXLAN/GENEVE VNI space minus the reserved 0 and 16777215.
+VNI_MIN = 1
+VNI_MAX = (1 << 24) - 2
 
 # ---------- pure CIDR helpers ----------
 
@@ -168,13 +172,25 @@ def network_capacity(network: CidrLike) -> int:
 
 async def assert_supernet_unique_in_vrf(
     db: AsyncSession, *, fabric_id: UUID, vrf_id: UUID, prefix: str,
+    parent_supernet_id: UUID | None = None,
     exclude_id: UUID | None = None,
 ) -> None:
-    """Refuse if any existing Supernet in the same (fabric, vrf) overlaps."""
+    """Refuse if any existing Supernet at the same level in the same
+    (fabric, vrf) overlaps.
+
+    "Same level" = same parent_supernet_id. Two siblings under the same
+    parent must not overlap; a supernet may still overlap one of its
+    own ancestors or descendants, since the hierarchy is the whole
+    point — 10.0.0.0/8, 10.0.0.0/20, and 10.0.0.0/24 all coexist when
+    chained as parent→child.
+    """
     rows = (
         await db.execute(
             select(Supernet).where(
                 Supernet.fabric_id == fabric_id, Supernet.vrf_id == vrf_id,
+                Supernet.parent_supernet_id.is_(parent_supernet_id)
+                if parent_supernet_id is None
+                else Supernet.parent_supernet_id == parent_supernet_id,
             )
         )
     ).scalars().all()
@@ -183,9 +199,36 @@ async def assert_supernet_unique_in_vrf(
             continue
         if cidrs_overlap(r.prefix, prefix):
             raise ConflictError(
-                f"supernet {prefix} overlaps existing supernet {r.prefix} in this VRF",
+                f"supernet {prefix} overlaps existing supernet {r.prefix} at this level",
                 details={"conflicting_supernet_id": str(r.id), "conflicting_prefix": str(r.prefix)},
             )
+
+
+async def assert_supernet_inside_parent(
+    db: AsyncSession, *, parent_supernet_id: UUID, prefix: str,
+    fabric_id: UUID, vrf_id: UUID,
+) -> Supernet:
+    """When a child supernet declares a parent, the parent must exist in
+    the same (fabric, vrf) and the child's prefix must sit inside the
+    parent's prefix. Same logic as assert_subnet_inside_supernet, just
+    one level up."""
+    parent = await db.get(Supernet, parent_supernet_id)
+    if parent is None:
+        raise ValidationError(f"parent supernet {parent_supernet_id} not found")
+    if parent.fabric_id != fabric_id or parent.vrf_id != vrf_id:
+        raise ValidationError(
+            "parent supernet must be in the same fabric and VRF",
+            details={
+                "parent_fabric_id": str(parent.fabric_id),
+                "parent_vrf_id": str(parent.vrf_id),
+            },
+        )
+    if not cidr_contains(parent.prefix, prefix):
+        raise ValidationError(
+            f"supernet {prefix} is not contained in parent supernet {parent.prefix}",
+            details={"parent_prefix": str(parent.prefix), "child_prefix": str(prefix)},
+        )
+    return parent
 
 
 async def assert_subnet_inside_supernet(
@@ -289,3 +332,64 @@ async def used_addresses_in_subnet(db: AsyncSession, subnet_id: UUID) -> list[st
         await db.execute(select(IPAddress.address).where(IPAddress.subnet_id == subnet_id))
     ).scalars().all()
     return [str(a).split("/", 1)[0] for a in rows]
+
+
+# ---------- VXLAN/GENEVE overlay helpers ----------
+
+
+def assert_vni_in_range(vni: int) -> None:
+    """24-bit VNI space minus the reserved 0 and all-ones values."""
+    if vni < VNI_MIN or vni > VNI_MAX:
+        raise ValidationError(
+            f"vni must be between {VNI_MIN} and {VNI_MAX} (24-bit space)",
+            details={"vni": vni},
+        )
+
+
+def assert_vni_kind_consistent(
+    *, kind: VniKind | str, vlan_id: int | None, vrf_id: UUID | None,
+) -> None:
+    """L2 VNIs may carry vlan_id; L3 VNIs require vrf_id and must not
+    set vlan_id. Keeps the EVPN intent unambiguous so downstream code
+    (and the operator reading the row later) can tell at a glance which
+    plane a VNI lives on."""
+    k = kind.value if isinstance(kind, VniKind) else kind
+    if k == VniKind.l3.value:
+        if vrf_id is None:
+            raise ValidationError("L3 VNI requires vrf_id")
+        if vlan_id is not None:
+            raise ValidationError("L3 VNI must not set vlan_id (no broadcast domain)")
+    elif k == VniKind.l2.value and vrf_id is not None:
+        raise ValidationError(
+            "L2 VNI must not set vrf_id (use an L3 VNI for tenant VRF mapping)"
+        )
+
+
+async def assert_subnet_vni_compatible(
+    db: AsyncSession, *, vni_id: UUID, fabric_id: UUID,
+) -> Vni:
+    """Subnets that ride an overlay must point at an L2 VNI in the same
+    fabric. L3 VNIs don't have subnets — they map a VRF, not a broadcast
+    domain — so binding a subnet to one is a structural error."""
+    vni = await db.get(Vni, vni_id)
+    if vni is None:
+        raise ValidationError(f"vni {vni_id} not found")
+    # Resolve overlay → fabric in one extra round-trip; cheaper than a
+    # join and runs only when the operator opts into VNI binding.
+    from ..models.ipam import Overlay  # local import avoids circular at module load
+    overlay = await db.get(Overlay, vni.overlay_id)
+    if overlay is None or overlay.fabric_id != fabric_id:
+        raise ValidationError(
+            "vni's overlay must live in the same fabric as the subnet",
+            details={
+                "vni_fabric_id": str(overlay.fabric_id) if overlay else None,
+                "subnet_fabric_id": str(fabric_id),
+            },
+        )
+    kind = vni.kind.value if isinstance(vni.kind, VniKind) else vni.kind
+    if kind != VniKind.l2.value:
+        raise ValidationError(
+            "subnet may only bind to an L2 VNI (L3 VNIs map a VRF, not a broadcast domain)",
+            details={"vni_kind": kind},
+        )
+    return vni
