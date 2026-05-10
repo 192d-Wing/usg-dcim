@@ -221,8 +221,9 @@ async def asset_detail(
     _: Principal = Depends(require_capability(DASHBOARD_READ)),
     db: AsyncSession = Depends(get_db),
 ):
-    """Asset health: identity, telemetry sources with last value/freshness, recent alerts."""
+    """Asset health: identity, telemetry sources, bound IPs, recent alerts."""
     from ..models.inventory import Asset
+    from ..models.ipam import IPAddress
 
     asset = await db.get(Asset, asset_id)
     if asset is None:
@@ -233,6 +234,14 @@ async def asset_detail(
             select(TelemetrySource)
             .where(TelemetrySource.asset_id == asset_id)
             .order_by(TelemetrySource.metric.asc())
+        )
+    ).scalars().all()
+
+    ip_rows = (
+        await db.execute(
+            select(IPAddress)
+            .where(IPAddress.asset_id == asset_id)
+            .order_by(IPAddress.role.asc(), IPAddress.address.asc())
         )
     ).scalars().all()
 
@@ -277,6 +286,22 @@ async def asset_detail(
                 "poll_interval_seconds": s.poll_interval_seconds,
             }
             for s in sources
+        ],
+        "ip_addresses": [
+            {
+                "id": str(ip.id),
+                "subnet_id": str(ip.subnet_id),
+                "address": str(ip.address).split("/", 1)[0],
+                "role": _enum_val(ip.role),
+                "status": _enum_val(ip.status),
+                "source": _enum_val(ip.source),
+                "dns_name": ip.dns_name,
+                "description": ip.description,
+                "dhcp_lease_expires_at": (
+                    ip.dhcp_lease_expires_at.isoformat() if ip.dhcp_lease_expires_at else None
+                ),
+            }
+            for ip in ip_rows
         ],
         "recent_alerts": [
             {

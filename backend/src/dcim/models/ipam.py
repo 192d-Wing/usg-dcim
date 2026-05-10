@@ -1,0 +1,214 @@
+"""IPAM hierarchy: Fabric → VRF → Supernet → Subnet → IPAddress.
+
+A Fabric is a network namespace (typically lining up with an enclave or
+classification level — "Production", "Lab", "IL5-SIPR"). VRFs inside a
+fabric give isolated routing domains so the same RFC1918 range can
+appear in multiple VRFs without colliding. Every fabric ships with a
+default VRF auto-created on insert so flat networks don't have to deal
+with VRFs explicitly.
+
+Supernets are aggregates (e.g. 10.0.0.0/8). Subnets are allocatable
+prefixes inside a supernet (e.g. 10.0.5.0/24). IPAddress rows are
+single allocations inside a subnet, optionally bound to an asset and
+flagged by source: hand-allocated (`static`), learned from a Kea DHCP
+sync (`dhcp`), or held back as a `reservation` (gateway, future use).
+"""
+
+from __future__ import annotations
+
+import enum
+from datetime import datetime
+from uuid import UUID
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import CIDR, INET
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from ..db import Base
+from ._mixins import Timestamped, UUIDPrimaryKey
+
+
+class IpAddressSource(str, enum.Enum):
+    static = "static"
+    dhcp = "dhcp"
+    reservation = "reservation"
+
+
+class IpAddressStatus(str, enum.Enum):
+    active = "active"
+    reserved = "reserved"
+    deprecated = "deprecated"
+
+
+class IpAddressRole(str, enum.Enum):
+    mgmt = "mgmt"
+    data = "data"
+    ipmi = "ipmi"
+    vip = "vip"
+    storage = "storage"
+    other = "other"
+
+
+class Fabric(UUIDPrimaryKey, Timestamped, Base):
+    """Top-level network namespace. Maps roughly to an enclave."""
+
+    __tablename__ = "fabrics"
+    __table_args__ = (
+        Index("ix_fabrics_slug", "slug", unique=True),
+    )
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512))
+    # Cross-reference to Site.enclave so the IPAM page can filter sites
+    # belonging to this fabric without a separate join.
+    enclave: Mapped[str | None] = mapped_column(String(64))
+    classification: Mapped[str | None] = mapped_column(String(32))
+
+    vrfs: Mapped[list[Vrf]] = relationship(back_populates="fabric")
+
+
+class Vrf(UUIDPrimaryKey, Timestamped, Base):
+    """Isolated routing domain inside a fabric. Same address space can
+    appear in multiple VRFs; Subnet uniqueness is per-VRF."""
+
+    __tablename__ = "vrfs"
+    __table_args__ = (
+        UniqueConstraint("fabric_id", "name", name="uq_vrf_fabric_name"),
+        UniqueConstraint("fabric_id", "rd", name="uq_vrf_fabric_rd"),
+        Index("ix_vrfs_fabric", "fabric_id"),
+    )
+
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Route Distinguisher e.g. "65000:100". Optional; `default` VRF has none.
+    rd: Mapped[str | None] = mapped_column(String(32))
+    description: Mapped[str | None] = mapped_column(String(512))
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    fabric: Mapped[Fabric] = relationship(back_populates="vrfs")
+
+
+class Supernet(UUIDPrimaryKey, Timestamped, Base):
+    """Aggregate prefix. Containment for child subnets is enforced at write time."""
+
+    __tablename__ = "supernets"
+    __table_args__ = (
+        Index("ix_supernets_fabric_vrf", "fabric_id", "vrf_id"),
+    )
+
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
+    )
+    vrf_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vrfs.id"), nullable=False,
+    )
+    prefix: Mapped[str] = mapped_column(CIDR, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(String(512))
+    purpose: Mapped[str | None] = mapped_column(String(32))
+
+
+class Subnet(UUIDPrimaryKey, Timestamped, Base):
+    """Allocatable prefix. Lives inside a Supernet; ip rows live inside it."""
+
+    __tablename__ = "subnets"
+    __table_args__ = (
+        Index("ix_subnets_supernet", "supernet_id"),
+        Index("ix_subnets_site", "site_id"),
+        Index("ix_subnets_vrf", "vrf_id"),
+    )
+
+    supernet_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("supernets.id"), nullable=False,
+    )
+    # Denormalized for fast filtering — also lets us validate same-VRF
+    # uniqueness without joining through Supernet on every write.
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
+    )
+    vrf_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vrfs.id"), nullable=False,
+    )
+    site_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("sites.id"),
+    )
+    prefix: Mapped[str] = mapped_column(CIDR, nullable=False)
+    name: Mapped[str | None] = mapped_column(String(128))
+    description: Mapped[str | None] = mapped_column(String(512))
+    purpose: Mapped[str | None] = mapped_column(String(32))  # mgmt|data|storage|oob|other
+    vlan_id: Mapped[int | None] = mapped_column(Integer)
+    gateway: Mapped[str | None] = mapped_column(INET)
+
+
+class IPAddress(UUIDPrimaryKey, Timestamped, Base):
+    __tablename__ = "ip_addresses"
+    __table_args__ = (
+        UniqueConstraint("subnet_id", "address", name="uq_ip_subnet_address"),
+        Index("ix_ip_subnet", "subnet_id"),
+        Index("ix_ip_asset", "asset_id"),
+        Index("ix_ip_address", "address"),
+    )
+
+    subnet_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("subnets.id"), nullable=False,
+    )
+    asset_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("assets.id"),
+    )
+    address: Mapped[str] = mapped_column(INET, nullable=False)
+    role: Mapped[IpAddressRole] = mapped_column(
+        Enum(IpAddressRole, name="ip_role", values_callable=lambda x: [e.value for e in x]),
+        default=IpAddressRole.data, nullable=False,
+    )
+    status: Mapped[IpAddressStatus] = mapped_column(
+        Enum(IpAddressStatus, name="ip_status", values_callable=lambda x: [e.value for e in x]),
+        default=IpAddressStatus.active, nullable=False,
+    )
+    source: Mapped[IpAddressSource] = mapped_column(
+        Enum(IpAddressSource, name="ip_source", values_callable=lambda x: [e.value for e in x]),
+        default=IpAddressSource.static, nullable=False,
+    )
+    dns_name: Mapped[str | None] = mapped_column(String(255))
+    description: Mapped[str | None] = mapped_column(String(512))
+    # When source=dhcp, this is the lease expiry from Kea; the sync job
+    # ages out IPs whose lease has lapsed without churning static rows.
+    dhcp_lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dhcp_mac: Mapped[str | None] = mapped_column(String(32))
+
+
+class DhcpServer(UUIDPrimaryKey, Timestamped, Base):
+    """Registered Kea DHCP server we ingest leases from."""
+
+    __tablename__ = "dhcp_servers"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_dhcp_server_name"),
+        Index("ix_dhcp_servers_fabric", "fabric_id"),
+    )
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
+    )
+    # Kea Control Agent endpoint, e.g. http://kea-ctrl-agent:8000
+    kea_url: Mapped[str] = mapped_column(String(512), nullable=False)
+    # Optional basic-auth for the Control Agent.
+    auth_username: Mapped[str | None] = mapped_column(String(128))
+    auth_password: Mapped[str | None] = mapped_column(String(512))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_sync_status: Mapped[str | None] = mapped_column(String(32))   # ok|error
+    last_sync_error: Mapped[str | None] = mapped_column(String(2048))
+    last_sync_lease_count: Mapped[int | None] = mapped_column(Integer)

@@ -21,6 +21,17 @@ from .inventory import (
     SiteGroup,
     SiteGroupMembership,
 )
+from .ipam import (
+    DhcpServer,
+    Fabric,
+    IPAddress,
+    IpAddressRole,
+    IpAddressSource,
+    IpAddressStatus,
+    Subnet,
+    Supernet,
+    Vrf,
+)
 from .notifications import ChannelKind, NotificationChannel
 from .power import Outlet, PowerConnection
 from .telemetry_meta import TelemetrySource
@@ -39,6 +50,12 @@ __all__ = [
     "Circuit",
     "Collector",
     "CollectorHeartbeat",
+    "DhcpServer",
+    "Fabric",
+    "IPAddress",
+    "IpAddressRole",
+    "IpAddressSource",
+    "IpAddressStatus",
     "MaintenanceWindow",
     "NotificationChannel",
     "Outlet",
@@ -55,7 +72,10 @@ __all__ = [
     "Site",
     "SiteGroup",
     "SiteGroupMembership",
+    "Subnet",
+    "Supernet",
     "TelemetrySource",
     "User",
     "UserRole",
+    "Vrf",
 ]
