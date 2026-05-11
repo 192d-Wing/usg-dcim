@@ -472,6 +472,112 @@ async def list_ds_records(
     return dns_svc.render_ds_records(zone, keys)
 
 
+@router.post(
+    "/zones/{zone_id}/rotate-key/{role}",
+    response_model=list[DnsKeyOut],
+)
+async def rotate_zone_key(
+    zone_id: UUID,
+    role: DnsKeyRole,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a fresh KSK or ZSK and mark the existing active key of
+    that role as retired (retired_at = NOW()). Retired keys stay in
+    the table so the renderer can keep them in the DNSKEY rrset
+    through the cache-expiry grace window; operators delete them via
+    DELETE /dns/keys/{key_id} once they're sure no validator is still
+    cached.
+
+    KSK rotation requires the operator to upload the new DS record to
+    the parent zone's operator before the old DS can be retired —
+    the UI surfaces a reminder on this path. Returns the full key
+    roster (active + retired) so the caller can re-render the panel."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    if not zone.signed:
+        raise ValidationError("zone is not signed — enable DNSSEC first")
+    active_keys = list((
+        await db.execute(
+            select(DnsKey).where(
+                DnsKey.zone_id == zone_id,
+                DnsKey.role == role,
+                DnsKey.retired_at.is_(None),
+            )
+        )
+    ).scalars().all())
+    now = datetime.now(UTC)
+    # Inherit the algorithm of the most-recently-active key of this
+    # role; falls back to ECDSAP256 if nothing's been generated yet
+    # (shouldn't happen on a signed zone, but defensive).
+    prior_alg = active_keys[0].algorithm if active_keys else None
+    material = dns_svc.generate_dnssec_keypair(
+        zone.name, role,
+        algorithm=prior_alg or dns_svc.DnsKeyAlgorithm.ecdsap256sha256,
+    )
+    new_key = DnsKey(
+        zone_id=zone_id,
+        role=material["role"],
+        algorithm=material["algorithm"],
+        private_pem=material["private_pem"],
+        public_key_b64=material["public_key_b64"],
+        key_tag=material["key_tag"],
+        active_from=now,
+    )
+    db.add(new_key)
+    for k in active_keys:
+        k.retired_at = now
+    await _touch_zone(db, zone_id)
+    await db.flush()
+    await audit.record(
+        db, principal, action=f"dns_zone.rotate_{role.value}",
+        target_type="dns_zone", target_id=str(zone_id),
+        metadata={
+            "new_key_tag": new_key.key_tag,
+            "retired_key_tags": [k.key_tag for k in active_keys],
+        },
+    )
+    await db.commit()
+    rows = (
+        await db.execute(
+            select(DnsKey).where(DnsKey.zone_id == zone_id)
+            .order_by(DnsKey.role.asc(), DnsKey.active_from.desc()),
+        )
+    ).scalars().all()
+    return rows
+
+
+@router.delete("/keys/{key_id}", status_code=204)
+async def delete_dns_key(
+    key_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Purge a retired key. Refuses to delete an active key — operators
+    rotate first so a successor exists before removal."""
+    obj = await db.get(DnsKey, key_id)
+    if obj is None:
+        raise NotFoundError("dns key not found")
+    if obj.retired_at is None:
+        raise ValidationError(
+            "active key can't be deleted; rotate it first so the new "
+            "key takes over",
+        )
+    snapshot = {
+        "zone_id": str(obj.zone_id),
+        "role": obj.role.value,
+        "key_tag": obj.key_tag,
+    }
+    await db.execute(delete(DnsKey).where(DnsKey.id == key_id))
+    await audit.record(
+        db, principal, action="dns_key.delete",
+        target_type="dns_zone", target_id=str(obj.zone_id),
+        metadata=snapshot,
+    )
+    await db.commit()
+
+
 # ----------------------- Records -----------------------
 @router.get("/records", response_model=Page[DnsRecordOut])
 async def list_records(

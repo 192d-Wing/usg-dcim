@@ -1093,6 +1093,34 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
     }
   }
 
+  async function rotate(role: 'ksk' | 'zsk') {
+    const warning = role === 'ksk'
+      ? `Rotate the KSK for ${zone.name}?\n\nIMPORTANT: after rotating you must upload the *new* DS record to the parent zone's operator. The previous DS stays valid only until cached copies expire.`
+      : `Rotate the ZSK for ${zone.name}?\n\nThe new ZSK takes over signing; the previous ZSK is retained as retired until you delete it (keep it around for the cache-expiry window).`;
+    if (!window.confirm(warning)) return;
+    setBusy(true);
+    try {
+      await http.post(`/dns/zones/${zone.id}/rotate-key/${role}`, {});
+      toast.success(`${role.toUpperCase()} rotated`);
+      await qc.invalidateQueries({ queryKey: ['dns-keys', zone.id] });
+      await qc.invalidateQueries({ queryKey: ['dns-ds', zone.id] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'rotate failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function purge(keyId: string) {
+    if (!window.confirm('Permanently delete this retired key? Make sure cached validators have expired (typically SOA expire, default 30 minutes).')) return;
+    try {
+      await http.delete(`/dns/keys/${keyId}`);
+      toast.success('Key deleted');
+      await qc.invalidateQueries({ queryKey: ['dns-keys', zone.id] });
+      await qc.invalidateQueries({ queryKey: ['dns-ds', zone.id] });
+    } catch (err: any) { toast.error(err?.message ?? 'delete failed'); }
+  }
+
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -1160,7 +1188,30 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
         loadingText="Loading keys…"
         items={keys}
         trackBy="id"
-        header={<Header counter={`(${keys.length})`}>Keys</Header>}
+        header={
+          <Header
+            counter={`(${keys.length})`}
+            actions={canWrite && (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="refresh" loading={busy}
+                  onClick={() => rotate('ksk')}
+                >
+                  Rotate KSK
+                </Button>
+                <Button
+                  iconName="refresh" loading={busy}
+                  onClick={() => rotate('zsk')}
+                >
+                  Rotate ZSK
+                </Button>
+              </SpaceBetween>
+            )}
+            description="Rotation generates a fresh key and retires the previous one. Retired keys hang around until you purge them so cached validators keep verifying."
+          >
+            Keys
+          </Header>
+        }
         columnDefinitions={[
           {
             id: 'role', header: 'Role',
@@ -1170,11 +1221,18 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
             width: 90,
           },
           {
+            id: 'status', header: 'Status',
+            cell: (k) => k.retired_at
+              ? <StatusIndicator type="stopped">Retired</StatusIndicator>
+              : <StatusIndicator type="success">Active</StatusIndicator>,
+            width: 110,
+          },
+          {
             id: 'tag', header: 'Key tag',
             cell: (k) => <span style={MONO}>{k.key_tag}</span>,
             width: 110,
           },
-          { id: 'alg', header: 'Algorithm', cell: (k) => k.algorithm, width: 200 },
+          { id: 'alg', header: 'Algorithm', cell: (k) => k.algorithm, width: 180 },
           {
             id: 'active_from', header: 'Active from (UTC)',
             cell: (k) => (
@@ -1185,11 +1243,24 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
             width: 220,
           },
           {
-            id: 'retired_at', header: 'Retired',
+            id: 'retired_at', header: 'Retired (UTC)',
             cell: (k) => k.retired_at
               ? <span style={MONO}>{new Date(k.retired_at).toISOString().replace(/\.\d{3}Z$/, 'Z')}</span>
               : <Box color="text-status-inactive">—</Box>,
           },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (k: DnssecKey) => k.retired_at
+              ? (
+                <Button
+                  iconName="remove" variant="inline-icon"
+                  ariaLabel={`Delete retired ${k.role} (tag ${k.key_tag})`}
+                  onClick={() => purge(k.id)}
+                />
+              )
+              : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+            width: 60,
+          }] : []),
         ]}
         empty={
           <Box textAlign="center" color="text-status-inactive" padding="m">
