@@ -43,7 +43,7 @@ from ..models.dns import (
     DnsZone,
     DnsZoneKind,
 )
-from ..models.ipam import IPAddress, Subnet
+from ..models.ipam import IPAddress, IpAddressSource, Subnet
 from ..settings import get_settings
 from .ipam import parse_address, parse_network
 
@@ -623,14 +623,16 @@ async def _get_or_create_reverse_zone(
 async def _drop_ipam_records_for_site(
     db: AsyncSession, forward_zone: DnsZone, reverse_zones: list[DnsZone],
 ) -> int:
-    """Delete every `source=ipam` record in the forward zone + each
-    reverse zone, in two queries. Returns the total row count removed."""
+    """Delete every projector-owned record (source=ipam or =ddns) in
+    the forward zone + each reverse zone. Manual records stay put."""
     zone_ids = [forward_zone.id, *(z.id for z in reverse_zones)]
     existing = (
         await db.execute(
             select(DnsRecord).where(
                 DnsRecord.zone_id.in_(zone_ids),
-                DnsRecord.source == DnsRecordSource.ipam,
+                DnsRecord.source.in_(
+                    (DnsRecordSource.ipam, DnsRecordSource.ddns),
+                ),
             )
         )
     ).scalars().all()
@@ -678,12 +680,20 @@ async def _emit_forward_and_reverse(
     except ValueError:
         return None
     rtype = DnsRecordType.AAAA if isinstance(a, ipaddress.IPv6Address) else DnsRecordType.A
+    # DHCP-sourced IP rows turn into DDNS-marked DNS records; static
+    # IPAM allocations stay source=ipam. This lets the UI tell
+    # operators which records will vanish on lease expiry.
+    record_source = (
+        DnsRecordSource.ddns
+        if ip.source == IpAddressSource.dhcp
+        else DnsRecordSource.ipam
+    )
     db.add(DnsRecord(
         zone_id=forward_zone.id,
         name=_forward_label_for(ip.dns_name, forward_zone.name),
         type=rtype,
         data={"target": addr_str},
-        source=DnsRecordSource.ipam,
+        source=record_source,
         ipam_address_id=ip.id,
     ))
     rev_origin = reverse_zone_name(addr_str)
@@ -698,7 +708,7 @@ async def _emit_forward_and_reverse(
     db.add(DnsRecord(
         zone_id=rev_zone.id, name=ptr_label, type=DnsRecordType.PTR,
         data={"target": _ptr_target_for(ip, forward_zone)},
-        source=DnsRecordSource.ipam,
+        source=record_source,
         ipam_address_id=ip.id,
     ))
     return rev_zone.id

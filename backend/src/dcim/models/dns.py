@@ -76,8 +76,17 @@ class DnsRecordType(str, enum.Enum):
 
 
 class DnsRecordSource(str, enum.Enum):
-    ipam = "ipam"
+    # Operator-managed records — A, CNAME, MX, TXT, etc. that
+    # operators add through the UI or API. Survive all sync passes.
     manual = "manual"
+    # Statically-allocated IPAddress rows whose dns_name field is set.
+    # Replaced on every projector cycle.
+    ipam = "ipam"
+    # DHCP-driven projections — the parent IPAddress has source=dhcp,
+    # so the DNS record's lifetime tracks the lease. Operators can't
+    # delete these directly; clearing the lease (or its hostname)
+    # makes them disappear on the next sync.
+    ddns = "ddns"
 
 
 class AnycastService(str, enum.Enum):

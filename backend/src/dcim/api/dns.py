@@ -444,10 +444,10 @@ async def update_record(
     obj = await db.get(DnsRecord, record_id)
     if obj is None:
         raise NotFoundError(_RECORD_NOT_FOUND)
-    if obj.source == DnsRecordSource.ipam:
+    if obj.source != DnsRecordSource.manual:
         raise ValidationError(
-            "ipam-projected records are managed by the sync job; "
-            "set the dns_name on the IPAddress instead",
+            "projector-owned records are managed by the IPAM/DHCP sync; "
+            "edit the underlying IPAddress instead",
         )
     diff = payload.model_dump(exclude_unset=True)
     if "data" in diff and diff["data"] is not None:
@@ -479,10 +479,11 @@ async def delete_record(
     obj = await db.get(DnsRecord, record_id)
     if obj is None:
         raise NotFoundError(_RECORD_NOT_FOUND)
-    if obj.source == DnsRecordSource.ipam:
+    if obj.source != DnsRecordSource.manual:
         raise ValidationError(
-            "ipam-projected records can't be deleted directly; "
-            "clear the dns_name on the IPAddress and re-sync",
+            "projector-owned records can't be deleted directly; "
+            "clear the dns_name on the IPAddress (or release the lease) "
+            "and re-sync",
         )
     # Snapshot the rdata + identity before the row goes away — the
     # audit entry needs to stand on its own once the record is gone.

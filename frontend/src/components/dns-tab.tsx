@@ -58,6 +58,8 @@ type DnsZone = {
   serial: number;
 };
 
+type DnsRecordSource = 'manual' | 'ipam' | 'ddns';
+
 type DnsRecord = {
   id: string;
   zone_id: string;
@@ -65,7 +67,7 @@ type DnsRecord = {
   type: 'A' | 'AAAA' | 'CNAME' | 'MX' | 'TXT' | 'SRV' | 'NS' | 'CAA' | 'PTR';
   ttl: number | null;
   data: Record<string, any>;
-  source: 'ipam' | 'manual';
+  source: DnsRecordSource;
   ipam_address_id: string | null;
 };
 
@@ -502,17 +504,17 @@ function ZoneDetailView({
   }
 
   async function removeSelected() {
-    const deletable = selected.filter((r) => r.source !== 'ipam');
+    const deletable = selected.filter((r) => r.source === 'manual');
     const skipped = selected.length - deletable.length;
     if (deletable.length === 0) {
-      toast.error('IPAM-projected records are managed by clearing dns_name on the IPAddress');
+      toast.error('Projector-owned records (IPAM / DDNS) are managed via the underlying IPAddress');
       return;
     }
     if (!window.confirm(`Delete ${deletable.length} record(s)?`)) return;
     try {
       await Promise.all(deletable.map((r) => http.delete(`/dns/records/${r.id}`)));
       toast.success(skipped > 0
-        ? `Removed ${deletable.length}; skipped ${skipped} IPAM row(s)`
+        ? `Removed ${deletable.length}; skipped ${skipped} projector row(s)`
         : 'Records removed');
       await refresh();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
@@ -703,12 +705,10 @@ function ZoneDetailView({
           {
             id: 'source', header: 'Source',
             cell: (r) => {
-              if (r.id.startsWith('soa-')) {
-                return <Badge>Zone</Badge>;
-              }
-              return r.source === 'ipam'
-                ? <Badge color="blue">From IPAM</Badge>
-                : <Box color="text-status-inactive" fontSize="body-s">Manual</Box>;
+              if (r.id.startsWith('soa-')) return <Badge>Zone</Badge>;
+              if (r.source === 'ipam') return <Badge color="blue">IPAM</Badge>;
+              if (r.source === 'ddns') return <Badge color="severity-medium">DDNS</Badge>;
+              return <Box color="text-status-inactive" fontSize="body-s">Manual</Box>;
             },
             width: 110,
           },
