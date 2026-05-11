@@ -58,6 +58,7 @@ import CsContainer from '@cloudscape-design/components/container';
 import CsColumnLayout from '@cloudscape-design/components/column-layout';
 import CsSegmentedControl from '@cloudscape-design/components/segmented-control';
 import CsBadge from '@cloudscape-design/components/badge';
+import CsBreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
 
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
@@ -480,46 +481,26 @@ function Breadcrumbs({
   subnetId: string | null;
   onJump: (level: 'fabrics' | 'vrfs' | 'networks') => void;
 }) {
+  // Cloudscape BreadcrumbGroup. Don't render anything at the root —
+  // a lone "Fabrics" crumb is redundant with the page header / tab
+  // label and looked like a stray text artifact above the table.
+  if (!fabricId) return null;
+  type Crumb = { text: string; href: string; level: 'fabrics' | 'vrfs' | 'networks' | null };
+  const items: Crumb[] = [
+    { text: 'Fabrics', href: '#fabrics', level: 'fabrics' },
+    { text: 'VRFs', href: '#vrfs', level: 'vrfs' },
+  ];
+  if (vrfId) items.push({ text: 'Networks', href: '#networks', level: 'networks' });
+  if (subnetId) items.push({ text: 'Addresses', href: '#addresses', level: null });
   return (
-    <div className="flex items-center gap-1 text-sm">
-      <button
-        type="button"
-        onClick={() => onJump('fabrics')}
-        className="text-muted-foreground hover:text-foreground"
-      >
-        Fabrics
-      </button>
-      {fabricId && (
-        <>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          <button
-            type="button"
-            onClick={() => onJump('vrfs')}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            VRFs
-          </button>
-        </>
-      )}
-      {vrfId && (
-        <>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          <button
-            type="button"
-            onClick={() => onJump('networks')}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            Networks
-          </button>
-        </>
-      )}
-      {subnetId && (
-        <>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          <span className="font-medium">Addresses</span>
-        </>
-      )}
-    </div>
+    <CsBreadcrumbGroup
+      items={items}
+      onFollow={(e) => {
+        e.preventDefault();
+        const i = items.find((c) => c.href === e.detail.href);
+        if (i?.level) onJump(i.level);
+      }}
+    />
   );
 }
 
