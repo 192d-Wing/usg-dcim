@@ -77,6 +77,7 @@ type DnsRecord = {
   source: DnsRecordSource;
   ipam_address_id: string | null;
   view_id: string | null;
+  health_check_id: string | null;
 };
 
 type DnsView = {
@@ -86,6 +87,22 @@ type DnsView = {
   match_cidrs: string[];
   priority: number;
   description: string | null;
+};
+
+type DnsHealthCheck = {
+  id: string;
+  name: string;
+  fabric_id: string;
+  target_ip: string;
+  protocol: 'tcp' | 'http' | 'https' | 'icmp';
+  port: number | null;
+  path: string;
+  interval_seconds: number;
+  timeout_seconds: number;
+  enabled: boolean;
+  status: 'unknown' | 'healthy' | 'unhealthy';
+  last_checked_at: string | null;
+  last_error: string | null;
 };
 
 type DnsServer = {
@@ -233,6 +250,11 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
             id: 'views',
             label: 'Views',
             content: <ViewsPanel fabricId={fabricId} canWrite={canWrite} />,
+          },
+          {
+            id: 'health-checks',
+            label: 'Health checks',
+            content: <HealthChecksPanel fabricId={fabricId} canWrite={canWrite} />,
           },
         ]}
       />
@@ -574,6 +596,7 @@ function ZoneDetailView({
     source: 'manual',
     ipam_address_id: null,
     view_id: null,
+    health_check_id: null,
   } : null, [zone]);
 
   const filtered = useMemo(() => {
@@ -1969,8 +1992,30 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
   const [flags, setFlags] = useState('');
   const [tag, setTag] = useState('issue');
   const [value, setValue] = useState('');
+  const [healthCheckOpt, setHealthCheckOpt] = useState<SelectProps.Option>({ value: '', label: 'None — always render' });
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Pull the fabric's health checks so the operator can gate this
+  // record on a probe. Only meaningful for A/AAAA records — the
+  // renderer filters by health regardless of type, but operators
+  // rarely gate CNAME/TXT/etc.
+  const checksQ = useQuery({
+    queryKey: ['dns-health-checks', zone.fabric_id],
+    queryFn: async () => (
+      await http.get<{ items: DnsHealthCheck[] }>(
+        `/dns/health-checks?fabric_id=${zone.fabric_id}&page_size=200`,
+      )
+    ).data.items ?? [],
+  });
+  const checks = checksQ.data ?? [];
+  const checkOptions: SelectProps.Option[] = [
+    { value: '', label: 'None — always render' },
+    ...checks.map((h) => ({
+      value: h.id,
+      label: `${h.name} (${h.protocol}://${h.target_ip}${h.port ? `:${h.port}` : ''})`,
+    })),
+  ];
 
   const type = typeOpt.value as RecordType;
 
@@ -2028,6 +2073,7 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
         type,
         ttl: ttl ? Number(ttl) : null,
         data: buildData(),
+        health_check_id: healthCheckOpt.value || null,
       });
       toast.success('Record created');
       onSaved();
@@ -2090,6 +2136,22 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
               />
             </FormField>
           </ColumnLayout>
+
+          <FormField
+            label="Health check (optional)"
+            description="Bind this record to a health check — when the probe is unhealthy, the renderer drops the record so resolvers fail over to siblings."
+          >
+            <Select
+              selectedOption={healthCheckOpt}
+              onChange={({ detail }) => {
+                if (detail.selectedOption.value !== undefined) {
+                  setHealthCheckOpt(detail.selectedOption);
+                }
+              }}
+              options={checkOptions}
+              expandToViewport
+            />
+          </FormField>
 
           {(['A', 'AAAA', 'CNAME', 'NS', 'PTR'] as RecordType[]).includes(type) && (
             <FormField
@@ -3240,6 +3302,293 @@ function ViewForm({
           <FormField label="Description (optional)">
             <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
           </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
+  );
+}
+
+// ----------------------- Health checks -----------------------
+
+function HealthChecksPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const checksQ = useQuery({
+    queryKey: ['dns-health-checks', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: DnsHealthCheck[] }>(`/dns/health-checks?fabric_id=${fabricId}&page_size=200`)
+    ).data.items ?? [],
+    // Worker probes update status every 30s — keep the UI fresh.
+    refetchInterval: 15_000,
+  });
+  const checks = checksQ.data ?? [];
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editCheck, setEditCheck] = useState<DnsHealthCheck | null>(null);
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-health-checks', fabricId] });
+  }
+
+  async function remove(h: DnsHealthCheck) {
+    if (!window.confirm(`Delete health check ${h.name}? Records bound to it stop being gated and render unconditionally.`)) return;
+    try {
+      await http.delete(`/dns/health-checks/${h.id}`);
+      await refresh();
+      toast.success('Health check removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <>
+      <Table<DnsHealthCheck>
+        variant="container"
+        loading={checksQ.isLoading}
+        loadingText="Loading health checks…"
+        items={checks}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${checks.length})`}
+            actions={canWrite && (
+              <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                Create health check
+              </Button>
+            )}
+            description="Probe targets bound to DNS records. Records gated by an unhealthy check are dropped from the rendered zone until the probe recovers."
+          >
+            Health checks
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (h) => h.name },
+          {
+            id: 'status', header: 'Status',
+            cell: (h) => {
+              if (h.status === 'healthy') return <StatusIndicator type="success">Healthy</StatusIndicator>;
+              if (h.status === 'unhealthy') {
+                return (
+                  <span title={h.last_error ?? ''}>
+                    <StatusIndicator type="error">Unhealthy</StatusIndicator>
+                  </span>
+                );
+              }
+              return <StatusIndicator type="pending">Unknown</StatusIndicator>;
+            },
+            width: 130,
+          },
+          {
+            id: 'target', header: 'Target',
+            cell: (h) => (
+              <span style={MONO}>
+                {h.protocol}://{h.target_ip}{h.port ? `:${h.port}` : ''}{['http', 'https'].includes(h.protocol) ? h.path : ''}
+              </span>
+            ),
+          },
+          {
+            id: 'cadence', header: 'Interval / Timeout',
+            cell: (h) => <span style={MONO}>{h.interval_seconds}s / {h.timeout_seconds}s</span>,
+            width: 180,
+          },
+          {
+            id: 'last_checked', header: 'Last checked (UTC)',
+            cell: (h) => h.last_checked_at
+              ? <span style={MONO}>{new Date(h.last_checked_at).toISOString().replace(/\.\d{3}Z$/, 'Z')}</span>
+              : <Box color="text-status-inactive">—</Box>,
+            width: 220,
+          },
+          {
+            id: 'enabled', header: 'Enabled',
+            cell: (h) => h.enabled
+              ? <Badge color="green">On</Badge>
+              : <Badge>Off</Badge>,
+            width: 90,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (h: DnsHealthCheck) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditCheck(h)} ariaLabel={`Edit ${h.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(h)} ariaLabel={`Delete ${h.name}`} />
+              </SpaceBetween>
+            ),
+            width: 110,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" padding="l">
+            <SpaceBetween size="xs">
+              <b>No health checks</b>
+              <Box color="text-status-inactive" fontSize="body-s">
+                Create a probe (TCP / HTTP / HTTPS) and bind it to one
+                or more A/AAAA records. Records whose probe goes
+                unhealthy drop out of the rendered zone until they
+                recover.
+              </Box>
+              {canWrite && (
+                <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                  Create health check
+                </Button>
+              )}
+            </SpaceBetween>
+          </Box>
+        }
+      />
+      {canWrite && (
+        <>
+          <Modal
+            visible={createOpen}
+            onDismiss={() => setCreateOpen(false)}
+            header="New health check"
+            size="medium"
+          >
+            <HealthCheckForm
+              fabricId={fabricId}
+              onSaved={async () => { setCreateOpen(false); await refresh(); }}
+            />
+          </Modal>
+          <Modal
+            visible={editCheck !== null}
+            onDismiss={() => setEditCheck(null)}
+            header="Edit health check"
+            size="medium"
+          >
+            {editCheck && (
+              <HealthCheckForm
+                fabricId={fabricId}
+                check={editCheck}
+                onSaved={async () => { setEditCheck(null); await refresh(); }}
+              />
+            )}
+          </Modal>
+        </>
+      )}
+    </>
+  );
+}
+
+function HealthCheckForm({
+  fabricId, check, onSaved,
+}: {
+  fabricId: string;
+  check?: DnsHealthCheck;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(check?.name ?? '');
+  const [target, setTarget] = useState(check?.target_ip ?? '');
+  const [protoOpt, setProtoOpt] = useState<SelectProps.Option>({
+    value: check?.protocol ?? 'tcp',
+    label: (check?.protocol ?? 'tcp').toUpperCase(),
+  });
+  const [port, setPort] = useState(check?.port != null ? String(check.port) : '');
+  const [path, setPath] = useState(check?.path ?? '/');
+  const [interval, setInterval] = useState(String(check?.interval_seconds ?? 30));
+  const [timeout, setTimeout] = useState(String(check?.timeout_seconds ?? 5));
+  const [enabled, setEnabled] = useState(check?.enabled ?? true);
+  const [busy, setBusy] = useState(false);
+
+  const proto = protoOpt.value as 'tcp' | 'http' | 'https' | 'icmp';
+  const needsPort = proto === 'tcp' || proto === 'http' || proto === 'https';
+  const needsPath = proto === 'http' || proto === 'https';
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim() || !target.trim()) {
+      toast.error('Name and target IP are required');
+      return;
+    }
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = {
+        name: name.trim(),
+        target_ip: target.trim(),
+        protocol: proto,
+        port: needsPort && port ? Number(port) : null,
+        path: needsPath ? (path || '/') : '/',
+        interval_seconds: Math.max(5, Number(interval) || 30),
+        timeout_seconds: Math.max(1, Number(timeout) || 5),
+        enabled,
+      };
+      if (check) {
+        await http.patch(`/dns/health-checks/${check.id}`, body);
+        toast.success('Health check updated');
+      } else {
+        body.fabric_id = fabricId;
+        await http.post('/dns/health-checks', body);
+        toast.success('Health check created');
+      }
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={busy}>
+            {busy ? 'Saving…' : check ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <ColumnLayout columns={2}>
+            <FormField label="Name">
+              <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="api-public" />
+            </FormField>
+            <FormField label="Target IP">
+              <Input value={target} onChange={({ detail }) => setTarget(detail.value)} placeholder="10.0.0.5" />
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={3}>
+            <FormField label="Protocol">
+              <Select
+                selectedOption={protoOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setProtoOpt(detail.selectedOption);
+                }}
+                options={[
+                  { value: 'tcp', label: 'TCP' },
+                  { value: 'http', label: 'HTTP' },
+                  { value: 'https', label: 'HTTPS' },
+                  { value: 'icmp', label: 'ICMP (not supported)' },
+                ]}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="Port" description={needsPort ? '' : 'Not used for ICMP'}>
+              <Input
+                type="number" value={port}
+                onChange={({ detail }) => setPort(detail.value)}
+                disabled={!needsPort}
+                placeholder={proto === 'https' ? '443' : proto === 'http' ? '80' : '443'}
+              />
+            </FormField>
+            <FormField label="Path" description={needsPath ? '' : 'HTTP/HTTPS only'}>
+              <Input
+                value={path}
+                onChange={({ detail }) => setPath(detail.value)}
+                disabled={!needsPath}
+                placeholder="/health"
+              />
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={3}>
+            <FormField label="Interval (seconds)">
+              <Input type="number" value={interval} onChange={({ detail }) => setInterval(detail.value)} />
+            </FormField>
+            <FormField label="Timeout (seconds)">
+              <Input type="number" value={timeout} onChange={({ detail }) => setTimeout(detail.value)} />
+            </FormField>
+            <FormField label="Enabled">
+              <input
+                type="checkbox"
+                checked={enabled}
+                onChange={(e) => setEnabled(e.target.checked)}
+              />
+            </FormField>
+          </ColumnLayout>
         </SpaceBetween>
       </Form>
     </form>
