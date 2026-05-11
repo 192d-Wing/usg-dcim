@@ -17,6 +17,10 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
 
+import {
+  colorBackgroundInputDisabled, colorTextStatusInfo,
+} from '@cloudscape-design/design-tokens';
+
 import { http } from '@/lib/http';
 import { hasCapability } from '@/lib/access-control-provider';
 
@@ -188,12 +192,12 @@ function PduStrip({ pdus }: Readonly<{ pdus: PduSummary[] }>) {
               </Box>
               <div style={{
                 height: 4, overflow: 'hidden', borderRadius: 999,
-                background: 'var(--color-background-input-disabled, #eaeded)',
+                background: colorBackgroundInputDisabled,
               }}>
                 <div style={{
                   height: '100%',
                   width: `${pct}%`,
-                  background: 'var(--color-text-status-info, #0972d3)',
+                  background: colorTextStatusInfo,
                 }} />
               </div>
             </SpaceBetween>

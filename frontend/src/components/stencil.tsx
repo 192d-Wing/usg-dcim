@@ -3,6 +3,7 @@
 // either the entry's `image_url` or a stylized SVG using the vendor palette
 // and kind-specific front-panel art.
 import { useQuery } from '@tanstack/react-query';
+import { colorTextStatusError } from '@cloudscape-design/design-tokens';
 import { http } from '@/lib/http';
 
 export type StencilEntry = {
@@ -84,7 +85,7 @@ export function Stencil({ asset, width, height, palette, entry, alertCount = 0 }
             position: 'absolute', right: 4, top: 4,
             padding: '0 6px', borderRadius: 999,
             fontSize: 10, fontWeight: 600,
-            background: 'var(--color-text-status-error, #d91515)',
+            background: `${colorTextStatusError}`,
             color: '#fff',
           }}>
             {alertCount}

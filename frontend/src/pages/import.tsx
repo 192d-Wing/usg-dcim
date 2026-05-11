@@ -17,6 +17,9 @@ import Select, { SelectProps } from '@cloudscape-design/components/select';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
+import {
+  colorBackgroundInputDisabled, colorBorderDividerDefault,
+} from '@cloudscape-design/design-tokens';
 
 import { http } from '@/lib/http';
 import { parseCsv } from '@/lib/csv';
@@ -188,8 +191,8 @@ export function ImportPage() {
               cursor: 'pointer',
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               gap: 8, padding: 48, borderRadius: 12,
-              border: '2px dashed var(--color-border-divider-default, #555)',
-              background: dragOver ? 'var(--color-background-input-disabled, #2a2a2a)' : 'transparent',
+              border: `2px dashed ${colorBorderDividerDefault}`,
+              background: dragOver ? `${colorBackgroundInputDisabled}` : 'transparent',
               textAlign: 'center',
             }}
           >

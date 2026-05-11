@@ -18,6 +18,7 @@ import Select, { SelectProps } from '@cloudscape-design/components/select';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator, { StatusIndicatorProps } from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
+import { colorBorderInputDefault } from '@cloudscape-design/design-tokens';
 
 import { http } from '@/lib/http';
 import { formatDate, relativeTime } from '@/lib/utils';
@@ -333,7 +334,7 @@ function WindowForm({
               onChange={(e) => setStartsAt(e.target.value)}
               style={{
                 width: '100%', padding: '6px 10px', borderRadius: 8,
-                border: '1px solid var(--color-border-input-default, #aab)',
+                border: `1px solid ${colorBorderInputDefault}`,
                 background: 'inherit', color: 'inherit',
               }}
             />
@@ -345,7 +346,7 @@ function WindowForm({
               onChange={(e) => setEndsAt(e.target.value)}
               style={{
                 width: '100%', padding: '6px 10px', borderRadius: 8,
-                border: '1px solid var(--color-border-input-default, #aab)',
+                border: `1px solid ${colorBorderInputDefault}`,
                 background: 'inherit', color: 'inherit',
               }}
             />

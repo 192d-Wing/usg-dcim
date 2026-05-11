@@ -11,6 +11,12 @@ import { toast } from 'sonner';
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
+import {
+  colorBackgroundContainerContent, colorBackgroundContainerHeader,
+  colorBorderDividerDefault, colorTextStatusError,
+  colorTextStatusInactive, colorTextStatusInfo,
+  colorTextStatusSuccess, colorTextStatusWarning,
+} from '@cloudscape-design/design-tokens';
 
 import { resolveStencil, Stencil, useStencilCatalog } from './stencil';
 import { hasCapability } from '@/lib/access-control-provider';
@@ -52,9 +58,9 @@ const VERT_W = 22;
 const RACK_BODY_W = 240;
 
 function ringColorFor(r: VizAsset['redundancy']): string | null {
-  if (r === 'redundant') return 'var(--color-text-status-success, #037f0c)';
-  if (r === 'single') return 'var(--color-text-status-warning, #b25b00)';
-  if (r === 'unpowered') return 'var(--color-text-status-error, #d91515)';
+  if (r === 'redundant') return colorTextStatusSuccess;
+  if (r === 'single') return colorTextStatusWarning;
+  if (r === 'unpowered') return colorTextStatusError;
   return null;
 }
 
@@ -206,9 +212,9 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
                 position: 'absolute',
                 left: VERT_W + 4, top: 0, width: RACK_BODY_W, height: totalH,
                 borderRadius: 6,
-                border: '2px solid var(--color-border-divider-default, #e9ebed)',
-                background: 'var(--color-background-container-content, #fafafa)',
-                boxShadow: 'inset 0 0 0 4px var(--color-background-container-header, #fff)',
+                border: `2px solid ${colorBorderDividerDefault}`,
+                background: colorBackgroundContainerContent,
+                boxShadow: `inset 0 0 0 4px ${colorBackgroundContainerHeader}`,
               }}
             >
               {Array.from({ length: uHeight }, (_, i) => uHeight - i).map((u) => (
@@ -218,7 +224,7 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
                     position: 'absolute',
                     left: -28, width: 24, textAlign: 'right',
                     fontSize: 10,
-                    color: 'var(--color-text-status-inactive, #757575)',
+                    color: colorTextStatusInactive,
                     bottom: (u - 1) * uPx, height: uPx, lineHeight: `${uPx}px`,
                   }}
                 >
@@ -331,13 +337,13 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
                       onClick={() => navigate(`/assets/${a.id}`)}
                       style={{
                         background: 'transparent', border: 'none', padding: 0,
-                        color: 'var(--color-text-link-default, #0972d3)',
+                        color: colorTextStatusInfo,
                         textDecoration: 'underline', cursor: 'pointer',
                       }}
                     >
                       {a.name}
                     </button>{' '}
-                    <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>· {a.kind}</span>
+                    <span style={{ color: colorTextStatusInactive }}>· {a.kind}</span>
                   </li>
                 ))}
               </ul>
@@ -373,7 +379,7 @@ function VerticalPduStrip({
           position: 'absolute',
           left: x, top: 0, width, height,
           borderRadius: 2,
-          border: '1px dashed var(--color-border-divider-default, #e9ebed)',
+          border: `1px dashed ${colorBorderDividerDefault}`,
           background: 'transparent',
         }}
         title="No vertical PDU on this side"
@@ -537,7 +543,7 @@ function DraggableAsset({
         left: 4, right: 4, bottom, height: blockH,
         background: bg, opacity, cursor,
         border: asset.open_alerts > 0
-          ? '2px solid var(--color-text-status-error, #d91515)'
+          ? `2px solid ${colorTextStatusError}`
           : '1px solid rgba(0,0,0,0.2)',
         outline: ring ? `2px solid ${ring}` : undefined,
         outlineOffset: ring ? -2 : undefined,
@@ -589,7 +595,7 @@ function DragGhost({
         width: blockW, height: blockH,
         background: bg, opacity: 0.92, transform: 'rotate(0.5deg)',
         border: asset.open_alerts > 0
-          ? '2px solid var(--color-text-status-error, #d91515)'
+          ? `2px solid ${colorTextStatusError}`
           : '1px solid rgba(0,0,0,0.2)',
       }}
     >

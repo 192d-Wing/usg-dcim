@@ -15,6 +15,7 @@ import Modal from '@cloudscape-design/components/modal';
 import Select, { SelectProps } from '@cloudscape-design/components/select';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Table from '@cloudscape-design/components/table';
+import { colorBorderDividerDefault } from '@cloudscape-design/design-tokens';
 
 import { http } from '@/lib/http';
 import { hasCapability } from '@/lib/access-control-provider';
@@ -198,7 +199,7 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
               <SpaceBetween size="xxs" direction="horizontal">
                 <span style={{
                   display: 'inline-block', width: 12, height: 12, borderRadius: 2,
-                  background: c.color, border: '1px solid var(--color-border-divider-default, #e9ebed)',
+                  background: c.color, border: `1px solid ${colorBorderDividerDefault}`,
                 }} />
                 <Box fontSize="body-s">{c.color}</Box>
               </SpaceBetween>

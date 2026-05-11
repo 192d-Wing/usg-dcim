@@ -26,6 +26,9 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Spinner from '@cloudscape-design/components/spinner';
 import Table from '@cloudscape-design/components/table';
+import {
+  colorBackgroundContainerContent, colorBorderDividerDefault,
+} from '@cloudscape-design/design-tokens';
 
 type Fabric = { id: string; name: string };
 type Site = { id: string; code: string; name: string };
@@ -327,8 +330,8 @@ function ZonePreview({ zoneId }: { zoneId: string }) {
       <pre style={{
         maxHeight: '60vh', overflow: 'auto', padding: '12px',
         fontSize: '12px', fontFamily: 'ui-monospace, monospace',
-        background: 'var(--color-background-container-content, #fafafa)',
-        border: '1px solid var(--color-border-divider-default, #e9ebed)',
+        background: colorBackgroundContainerContent,
+        border: `1px solid ${colorBorderDividerDefault}`,
         borderRadius: '8px',
       }}>
         {data?.text}

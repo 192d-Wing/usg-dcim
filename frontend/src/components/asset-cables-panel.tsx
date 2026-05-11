@@ -9,6 +9,11 @@ import Header from '@cloudscape-design/components/header';
 import Link from '@cloudscape-design/components/link';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Table from '@cloudscape-design/components/table';
+import {
+  colorBackgroundCellShaded, colorBackgroundInputDisabled,
+  colorBorderDividerDefault, colorTextStatusInactive,
+  colorTextStatusSuccess,
+} from '@cloudscape-design/design-tokens';
 
 import { http } from '@/lib/http';
 
@@ -32,14 +37,14 @@ function portStyle(used: boolean): React.CSSProperties {
     fontSize: 10, fontFamily: 'ui-monospace, monospace',
     border: '1px solid',
     borderColor: used
-      ? 'var(--color-text-status-success, #037f0c)'
-      : 'var(--color-border-divider-default, #e9ebed)',
+      ? colorTextStatusSuccess
+      : colorBorderDividerDefault,
     background: used
-      ? 'var(--color-background-status-success, #effff1)'
-      : 'var(--color-background-input-disabled, #eaeded)',
+      ? colorBackgroundCellShaded
+      : colorBackgroundInputDisabled,
     color: used
-      ? 'var(--color-text-status-success, #037f0c)'
-      : 'var(--color-text-status-inactive, #757575)',
+      ? colorTextStatusSuccess
+      : colorTextStatusInactive,
   };
 }
 
@@ -195,7 +200,7 @@ export function AssetCablesPanel({
                 <SpaceBetween size="xxs" direction="horizontal">
                   <span style={{
                     display: 'inline-block', width: 12, height: 12, borderRadius: 2,
-                    background: c.color, border: '1px solid var(--color-border-divider-default, #e9ebed)',
+                    background: c.color, border: `1px solid ${colorBorderDividerDefault}`,
                   }} />
                   <Box fontSize="body-s">{c.color}</Box>
                 </SpaceBetween>

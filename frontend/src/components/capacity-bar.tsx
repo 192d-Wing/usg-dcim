@@ -1,3 +1,8 @@
+import {
+  colorBackgroundInputDisabled, colorTextStatusError,
+  colorTextStatusInactive, colorTextStatusSuccess, colorTextStatusWarning,
+} from '@cloudscape-design/design-tokens';
+
 type Props = Readonly<{
   used: number;
   total: number;
@@ -10,10 +15,10 @@ type Props = Readonly<{
 }>;
 
 function toneColor(pct: number, warnAt: number, critAt: number, unknown?: boolean): string {
-  if (unknown) return 'var(--color-background-input-disabled, #eaeded)';
-  if (pct >= critAt) return 'var(--color-text-status-error, #d91515)';
-  if (pct >= warnAt) return 'var(--color-text-status-warning, #b25b00)';
-  return 'var(--color-text-status-success, #037f0c)';
+  if (unknown) return colorBackgroundInputDisabled;
+  if (pct >= critAt) return colorTextStatusError;
+  if (pct >= warnAt) return colorTextStatusWarning;
+  return colorTextStatusSuccess;
 }
 
 export function CapacityBar({
@@ -29,7 +34,7 @@ export function CapacityBar({
       <div style={{
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
         fontSize: labelFontSize,
-        color: 'var(--color-text-status-inactive, #757575)',
+        color: colorTextStatusInactive,
       }}>
         <span>{leftLabel ?? `${used} / ${total}`}</span>
         <span style={{ fontVariantNumeric: 'tabular-nums' }}>
@@ -38,7 +43,7 @@ export function CapacityBar({
       </div>
       <div style={{
         height: trackH, width: '100%', overflow: 'hidden', borderRadius: 999,
-        background: 'var(--color-background-input-disabled, #eaeded)',
+        background: colorBackgroundInputDisabled,
       }}>
         <div
           style={{
@@ -50,7 +55,7 @@ export function CapacityBar({
         />
       </div>
       {rightLabel && !compact && (
-        <div style={{ fontSize: 11, color: 'var(--color-text-status-inactive, #757575)' }}>
+        <div style={{ fontSize: 11, color: colorTextStatusInactive }}>
           {rightLabel}
         </div>
       )}

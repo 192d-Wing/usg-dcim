@@ -3,6 +3,11 @@ import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import Icon from '@cloudscape-design/components/icon';
 import Input from '@cloudscape-design/components/input';
+import {
+  colorBackgroundContainerContent, colorBackgroundItemSelected,
+  colorBorderDividerDefault, colorTextStatusInactive,
+} from '@cloudscape-design/design-tokens';
+
 import { http } from '@/lib/http';
 
 type IpHit = {
@@ -44,8 +49,8 @@ const popoverStyle: React.CSSProperties = {
   maxHeight: '60vh',
   overflowY: 'auto',
   padding: 8,
-  background: 'var(--color-background-container-content, #fff)',
-  border: '1px solid var(--color-border-divider-default, #e9ebed)',
+  background: colorBackgroundContainerContent,
+  border: `1px solid ${colorBorderDividerDefault}`,
   borderRadius: 8,
   boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
 };
@@ -71,7 +76,7 @@ const sectionLabelStyle: React.CSSProperties = {
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: '0.05em',
-  color: 'var(--color-text-status-inactive, #757575)',
+  color: colorTextStatusInactive,
 };
 
 export function GlobalSearch({ onSelect }: Readonly<{ onSelect: (href: string) => void }>) {
@@ -139,11 +144,11 @@ export function GlobalSearch({ onSelect }: Readonly<{ onSelect: (href: string) =
                       type="button"
                       onMouseDown={(e) => { e.preventDefault(); pick(href); }}
                       style={rowBaseStyle}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-background-item-selected, #f2f8fd)'; }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = colorBackgroundItemSelected; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                     >
                       <span style={{ fontWeight: 500 }}>{it.name}</span>
-                      <span style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+                      <span style={{ fontSize: 12, color: colorTextStatusInactive }}>
                         {it.code ?? it.hostname ?? it.serial ?? ''}{kind === 'assets' ? ` · ${it.kind}` : ''}
                       </span>
                     </button>
@@ -186,7 +191,7 @@ function IpSection({
               type="button"
               onMouseDown={(e) => { e.preventDefault(); onPick(href); }}
               style={rowBaseStyle}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-background-item-selected, #f2f8fd)'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = colorBackgroundItemSelected; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
             >
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -195,7 +200,7 @@ function IpSection({
                 <Badge>{ip.role}</Badge>
                 <Badge color={ip.source === 'dhcp' ? 'severity-medium' : 'grey'}>{ip.source}</Badge>
               </span>
-              <span style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+              <span style={{ fontSize: 12, color: colorTextStatusInactive }}>
                 {ip.subnet_prefix && <span style={{ fontFamily: 'ui-monospace, monospace' }}>{ip.subnet_prefix}</span>}
                 {ip.fabric_name && <> · {ip.fabric_name}</>}
                 {ip.vrf_name && <> · vrf {ip.vrf_name}</>}

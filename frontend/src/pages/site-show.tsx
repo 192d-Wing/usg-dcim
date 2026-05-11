@@ -16,6 +16,11 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 
+import {
+  colorBackgroundContainerContent, colorBorderDividerDefault,
+  colorTextStatusInactive,
+} from '@cloudscape-design/design-tokens';
+
 import { http } from '@/lib/http';
 import { CapacityBar } from '@/components/capacity-bar';
 
@@ -326,16 +331,16 @@ function RoomBlock({
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 8,
       padding: 12, borderRadius: 8,
-      border: '1px solid var(--color-border-divider-default, #e9ebed)',
-      background: 'var(--color-background-container-content, #fff)',
+      border: `1px solid ${colorBorderDividerDefault}`,
+      background: colorBackgroundContainerContent,
     }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, fontSize: 14 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>▸</span>
+          <span style={{ color: colorTextStatusInactive }}>▸</span>
           <span style={{ fontWeight: 500 }}>{room.code}</span>
-          <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>{room.name}</span>
+          <span style={{ color: colorTextStatusInactive }}>{room.name}</span>
         </div>
-        <span style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+        <span style={{ fontSize: 12, color: colorTextStatusInactive }}>
           {room.design_kw ? `${room.design_kw} kW design · ` : ''}{rackCount} rack{rackCount === 1 ? '' : 's'}
         </span>
       </div>
@@ -344,7 +349,7 @@ function RoomBlock({
       )}
       {room.rows.map((rw) => (
         <div key={rw.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 16 }}>
-          <div style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+          <div style={{ fontSize: 12, color: colorTextStatusInactive }}>
             Row <span style={{ fontFamily: 'ui-monospace, monospace' }}>{rw.code}</span> · {rw.name} · {rw.racks.length} rack{rw.racks.length === 1 ? '' : 's'}
           </div>
           {rw.racks.length > 0 && (
@@ -374,8 +379,8 @@ function RackTile({
         display: 'flex', flexDirection: 'column', gap: 6,
         padding: 10, borderRadius: 8,
         textAlign: 'left',
-        border: '1px solid var(--color-border-divider-default, #e9ebed)',
-        background: 'var(--color-background-container-content, #fff)',
+        border: `1px solid ${colorBorderDividerDefault}`,
+        background: colorBackgroundContainerContent,
         cursor: 'pointer',
       }}
     >
@@ -383,13 +388,13 @@ function RackTile({
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, fontWeight: 500 }}>{rack.code}</span>
           <span style={{
-            fontSize: 12, color: 'var(--color-text-status-inactive, #757575)',
+            fontSize: 12, color: colorTextStatusInactive,
             whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
           }}>
             {rack.name}
           </span>
         </div>
-        <span style={{ fontSize: 11, color: 'var(--color-text-status-inactive, #757575)' }}>
+        <span style={{ fontSize: 11, color: colorTextStatusInactive }}>
           {rack.asset_count}d
         </span>
       </div>

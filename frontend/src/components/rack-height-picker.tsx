@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Input from '@cloudscape-design/components/input';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import SpaceBetween from '@cloudscape-design/components/space-between';
+import { colorTextStatusInactive } from '@cloudscape-design/design-tokens';
 
 const COMMON_HEIGHTS = [12, 24, 42, 45, 48] as const;
 const CUSTOM_ID = 'custom';
@@ -46,7 +47,7 @@ export function RackHeightPicker({ value, onChange, min = 1, max = 60 }: Props) 
               }}
             />
           </div>
-          <span style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+          <span style={{ fontSize: 12, color: colorTextStatusInactive }}>
             Range: {min}–{max}U
           </span>
         </SpaceBetween>
