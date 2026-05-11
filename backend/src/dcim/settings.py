@@ -86,6 +86,13 @@ class Settings(BaseSettings):
     # time). Existing plaintext rows are lazily re-encrypted on next use.
     dns_dnssec_secret: str | None = None
 
+    # How long to keep CoreDNS metric samples in
+    # dns_server_metrics_samples. The retention cron walks every hour
+    # and drops anything older than this window. Default 14 days
+    # balances chart depth against table size — a busy stack with
+    # 60-second scrapes and 5 servers produces ~36k rows per fortnight.
+    dns_metrics_retention_days: int = 14
+
 
 @lru_cache
 def get_settings() -> Settings:

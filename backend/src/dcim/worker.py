@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from .db import async_session
 from .logging_setup import configure_logging
-from .models.dns import DnsHealthCheck, DnsZone, DnsZoneKind
+from .models.dns import DnsHealthCheck, DnsServerMetricsSample, DnsZone, DnsZoneKind
 from .models.telemetry_meta import FreshnessState, TelemetrySource
 from .services import alerts as alerts_svc
 from .services import dns as dns_svc
@@ -87,6 +87,24 @@ async def dns_sync_from_ipam(_ctx) -> dict:
     return {"added": total_added, "removed": total_removed, "zones": len(zones)}
 
 
+async def dns_purge_metrics(_ctx) -> dict:
+    """Drop dns_server_metrics_samples older than
+    settings.dns_metrics_retention_days. The table grows unbounded
+    otherwise — every scrape inserts a fresh row."""
+    from sqlalchemy import delete  # local import keeps cold-path light
+    settings = get_settings()
+    cutoff = datetime.now(UTC) - timedelta(days=settings.dns_metrics_retention_days)
+    async with async_session() as db:
+        result = await db.execute(
+            delete(DnsServerMetricsSample)
+            .where(DnsServerMetricsSample.observed_at < cutoff)
+        )
+        await db.commit()
+        deleted = result.rowcount or 0
+    log.info("dns_purge_metrics", deleted=deleted, cutoff=cutoff.isoformat())
+    return {"deleted": deleted, "retention_days": settings.dns_metrics_retention_days}
+
+
 async def dns_rotate_zsks(_ctx) -> dict:
     """Rotate ZSKs for signed zones whose zsk_rotation_days policy has
     elapsed. KSKs are intentionally skipped here — the parent-zone DS
@@ -136,7 +154,7 @@ class WorkerSettings:
     functions: ClassVar[list] = [
         evaluate_alerts, sweep_collectors, freshness_sweep,
         dhcp_sync, dhcp_age_out, dns_sync_from_ipam, dns_health_checks,
-        dns_rotate_zsks,
+        dns_rotate_zsks, dns_purge_metrics,
     ]
     cron_jobs: ClassVar[list] = [
         cron(evaluate_alerts, second={0, 30}),
@@ -157,4 +175,7 @@ class WorkerSettings:
         # whose policy hasn't elapsed, so a daily wakeup is cheap and
         # avoids tight loops near boundary seconds.
         cron(dns_rotate_zsks, hour={3}, minute={17}),
+        # Metrics retention runs hourly at :23 — far enough from the
+        # other DNS cron jobs that worker bursts don't pile up.
+        cron(dns_purge_metrics, minute={23}),
     ]
