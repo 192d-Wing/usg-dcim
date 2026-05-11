@@ -1,27 +1,29 @@
+// API tokens — Cloudscape table with issue Modal + plaintext-reveal
+// Modal. Capabilities are picked from a checkbox list bounded by the
+// caller's own capabilities (you can't grant what you don't hold).
+
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useGetIdentity } from '@refinedev/core';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Plus, Trash2, Copy, Check, KeyRound } from 'lucide-react';
+import { toast } from 'sonner';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import Checkbox from '@cloudscape-design/components/checkbox';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Container from '@cloudscape-design/components/container';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import { toast } from 'sonner';
 
 type Token = {
   id: string;
@@ -65,221 +67,237 @@ export function TokensPage() {
 
   if (!canManage) {
     return (
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">API tokens</h1>
-        <p className="text-sm text-muted-foreground">
-          You don't have the <code className="font-mono">tokens:manage</code> capability. Ask an admin
-          to grant a role that includes it (e.g. RegionalAdmin, EnterpriseAdmin).
-        </p>
-      </div>
+      <ContentLayout header={<Header variant="h1">API tokens</Header>}>
+        <Box color="text-status-inactive">
+          You don't have the <code style={{ fontFamily: 'ui-monospace, monospace' }}>tokens:manage</code>{' '}
+          capability. Ask an admin to grant a role that includes it (e.g. RegionalAdmin,
+          EnterpriseAdmin).
+        </Box>
+      </ContentLayout>
     );
   }
 
   const data = tokens.data ?? [];
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">API tokens</h1>
-          <p className="text-sm text-muted-foreground">
-            Tokens issued to <span className="font-mono">{identity?.email}</span> · plaintext shown once at creation
-          </p>
-        </div>
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4" /> Issue token</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Issue API token</DialogTitle></DialogHeader>
-            <IssueForm
-              myCapabilities={myCaps}
-              onIssued={async (t) => {
-                setCreateOpen(false);
-                setIssued(t);
-                await qc.invalidateQueries({ queryKey: ['tokens'] });
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-      </div>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          description={`Tokens issued to ${identity?.email ?? ''} · plaintext shown once at creation`}
+        >
+          API tokens
+        </Header>
+      }
+    >
+      <Table<Token>
+        variant="container"
+        loading={tokens.isLoading}
+        loadingText="Loading tokens…"
+        items={data}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${data.length})`}
+            actions={
+              <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                Issue token
+              </Button>
+            }
+          >
+            Tokens
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (t) => <span style={{ fontWeight: 500 }}>{t.name}</span> },
+          {
+            id: 'capabilities', header: 'Capabilities',
+            cell: (t) => t.permission_codes.length === 0
+              ? <Box variant="span" color="text-status-inactive" fontSize="body-s">none</Box>
+              : (
+                <SpaceBetween size="xxs" direction="horizontal">
+                  {t.permission_codes.map((c) => <Badge key={c}>{c}</Badge>)}
+                </SpaceBetween>
+              ),
+          },
+          {
+            id: 'created', header: 'Created',
+            cell: (t) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{formatDate(t.created_at)}</Box>,
+            width: 180,
+          },
+          {
+            id: 'expires', header: 'Expires',
+            cell: (t) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{t.expires_at ? formatDate(t.expires_at) : 'never'}</Box>,
+            width: 180,
+          },
+          {
+            id: 'last_used', header: 'Last used',
+            cell: (t) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{t.last_used_at ? formatDate(t.last_used_at) : 'never'}</Box>,
+            width: 180,
+          },
+          {
+            id: 'status', header: 'Status',
+            cell: (t) => t.revoked
+              ? <StatusIndicator type="stopped">revoked</StatusIndicator>
+              : <StatusIndicator type="success">active</StatusIndicator>,
+            width: 120,
+          },
+          {
+            id: 'actions', header: '',
+            cell: (t) => t.revoked
+              ? null
+              : <Button iconName="remove" variant="inline-icon" onClick={() => revoke(t)} ariaLabel={`Revoke ${t.name}`} />,
+            width: 60,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No tokens issued yet. Create one to authenticate scripts or integrations.
+          </Box>
+        }
+      />
 
-      <Card>
-        <CardContent className="p-0">
-          {tokens.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Capabilities</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Last used</TableHead>
-                  <TableHead className="w-24">Status</TableHead>
-                  <TableHead className="w-12" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-muted-foreground">
-                      No tokens issued yet. Create one to authenticate scripts or integrations.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {data.map((t) => (
-                  <TableRow key={t.id}>
-                    <TableCell className="font-medium">{t.name}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {t.permission_codes.length === 0 && (
-                          <span className="text-xs text-muted-foreground">none</span>
-                        )}
-                        {t.permission_codes.map((c) => (
-                          <Badge key={c} variant="secondary" className="font-mono text-[10px]">{c}</Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDate(t.created_at)}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {t.expires_at ? formatDate(t.expires_at) : 'never'}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {t.last_used_at ? formatDate(t.last_used_at) : 'never'}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={t.revoked ? 'secondary' : 'success'}>
-                        {t.revoked ? 'revoked' : 'active'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      {!t.revoked && (
-                        <Button size="sm" variant="ghost" onClick={() => revoke(t)} title="Revoke">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      <Modal
+        visible={createOpen}
+        onDismiss={() => setCreateOpen(false)}
+        header="Issue API token"
+        size="medium"
+      >
+        <IssueForm
+          myCapabilities={myCaps}
+          onIssued={async (t) => {
+            setCreateOpen(false);
+            setIssued(t);
+            await qc.invalidateQueries({ queryKey: ['tokens'] });
+          }}
+        />
+      </Modal>
 
-      <Dialog open={issued !== null} onOpenChange={(o) => { if (!o) setIssued(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4" /> Token created — copy it now
-            </DialogTitle>
-          </DialogHeader>
-          {issued && <PlaintextReveal token={issued} />}
-        </DialogContent>
-      </Dialog>
-    </div>
+      <Modal
+        visible={issued !== null}
+        onDismiss={() => setIssued(null)}
+        header="Token created — copy it now"
+        size="large"
+      >
+        {issued && <PlaintextReveal token={issued} />}
+      </Modal>
+    </ContentLayout>
   );
 }
 
-const issueSchema = z.object({
-  name: z.string().min(1, 'Name required'),
-  permission_codes: z.array(z.string()).min(1, 'Pick at least one capability'),
-  expires_at: z.string().optional(),
-});
-
 function IssueForm({
   myCapabilities, onIssued,
-}: {
+}: Readonly<{
   myCapabilities: string[];
   onIssued: (token: Token) => void;
-}) {
-  const form = useForm<z.infer<typeof issueSchema>>({
-    resolver: zodResolver(issueSchema),
-    defaultValues: { name: '', permission_codes: [], expires_at: '' },
-  });
+}>) {
+  const [name, setName] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [expiresAt, setExpiresAt] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [nameErr, setNameErr] = useState<string | undefined>();
+  const [capsErr, setCapsErr] = useState<string | undefined>();
 
-  function toggleCap(code: string, checked: boolean) {
-    const cur = form.getValues('permission_codes');
-    if (checked) form.setValue('permission_codes', [...cur, code], { shouldValidate: true });
-    else form.setValue('permission_codes', cur.filter((c) => c !== code), { shouldValidate: true });
+  function toggle(code: string, checked: boolean) {
+    setSelected((cur) => checked ? [...cur, code] : cur.filter((c) => c !== code));
   }
-  const selected = form.watch('permission_codes');
 
-  async function onSubmit(v: z.infer<typeof issueSchema>) {
-    const body = {
-      name: v.name,
-      permission_codes: v.permission_codes,
-      scope_json: {},
-      expires_at: v.expires_at ? new Date(v.expires_at).toISOString() : null,
-    };
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const nameOk = name.trim().length > 0;
+    const capsOk = selected.length > 0;
+    setNameErr(nameOk ? undefined : 'Name required');
+    setCapsErr(capsOk ? undefined : 'Pick at least one capability');
+    if (!nameOk || !capsOk) return;
+    setSubmitting(true);
     try {
-      const r = await http.post<Token>('/auth/tokens', body);
+      const r = await http.post<Token>('/auth/tokens', {
+        name,
+        permission_codes: selected,
+        scope_json: {},
+        expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      });
       toast.success('Token issued');
       onIssued(r.data);
     } catch (err: any) {
       toast.error(err?.message ?? 'failed to issue token');
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Name</FormLabel>
-            <FormControl><Input placeholder="e.g. ansible-collector-bootstrap" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="permission_codes" render={() => (
-          <FormItem>
-            <FormLabel>Capabilities</FormLabel>
-            <p className="text-xs text-muted-foreground">
-              You can only grant capabilities you hold. Pick the smallest set the token needs.
-            </p>
-            <div className="grid max-h-48 grid-cols-2 gap-1.5 overflow-y-auto rounded-md border bg-muted/30 p-3">
-              {myCapabilities.length === 0 && (
-                <p className="col-span-2 text-xs text-muted-foreground">
-                  Your account has no capabilities to delegate.
-                </p>
-              )}
-              {myCapabilities.map((c) => (
-                <label key={c} className="flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5"
-                    checked={selected.includes(c)}
-                    onChange={(e) => toggleCap(c, e.target.checked)}
-                  />
-                  <span className="font-mono">{c}</span>
-                </label>
-              ))}
-            </div>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="expires_at" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Expires (optional)</FormLabel>
-            <FormControl><Input type="datetime-local" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Issuing…' : 'Issue token'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Issuing…' : 'Issue token'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={nameErr}>
+            <Input
+              value={name}
+              onChange={({ detail }) => setName(detail.value)}
+              placeholder="e.g. ansible-collector-bootstrap"
+            />
+          </FormField>
+          <FormField
+            label="Capabilities"
+            description="You can only grant capabilities you hold. Pick the smallest set the token needs."
+            errorText={capsErr}
+          >
+            {/* Two-column scrollable list of the caller's capabilities.
+                Cloudscape doesn't ship a native multi-select for this
+                kind of list, so we render Checkboxes in a Box-bounded
+                grid. */}
+            {myCapabilities.length === 0 ? (
+              <Box color="text-status-inactive" fontSize="body-s">
+                Your account has no capabilities to delegate.
+              </Box>
+            ) : (
+              <Box
+                padding="s"
+                // Style props on Cloudscape Box don't take arbitrary
+                // CSS, so the grid layout uses an inline style.
+              >
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6,
+                  maxHeight: 200, overflowY: 'auto',
+                }}>
+                  {myCapabilities.map((c) => (
+                    <Checkbox
+                      key={c}
+                      checked={selected.includes(c)}
+                      onChange={({ detail }) => toggle(c, detail.checked)}
+                    >
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{c}</span>
+                    </Checkbox>
+                  ))}
+                </div>
+              </Box>
+            )}
+          </FormField>
+          <FormField label="Expires (optional)">
+            <Input
+              type="text"
+              placeholder="YYYY-MM-DDTHH:MM"
+              value={expiresAt}
+              onChange={({ detail }) => setExpiresAt(detail.value)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
-function PlaintextReveal({ token }: { token: Token }) {
+function PlaintextReveal({ token }: Readonly<{ token: Token }>) {
   const [copied, setCopied] = useState(false);
-  if (!token.plaintext) return <p className="text-sm text-muted-foreground">Plaintext not available.</p>;
+  if (!token.plaintext) {
+    return <Box color="text-status-inactive">Plaintext not available.</Box>;
+  }
   async function copy() {
     if (!token.plaintext) return;
     await navigator.clipboard.writeText(token.plaintext);
@@ -287,26 +305,29 @@ function PlaintextReveal({ token }: { token: Token }) {
     setTimeout(() => setCopied(false), 1500);
   }
   return (
-    <div className="space-y-3">
-      <p className="text-sm">
-        Copy the token now — it cannot be displayed again.
-      </p>
-      <div className="flex items-center gap-2 rounded-md border bg-muted/30 p-2">
-        <code className="flex-1 break-all font-mono text-xs">{token.plaintext}</code>
-        <Button size="sm" variant="outline" onClick={copy}>
-          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-          {copied ? 'Copied' : 'Copy'}
-        </Button>
-      </div>
-      <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-xs">Use it</CardTitle></CardHeader>
-        <CardContent className="pt-0">
-          <code className="block whitespace-pre-wrap break-all font-mono text-[11px] text-muted-foreground">
-            curl -H "Authorization: Bearer {token.plaintext}" \
-            {'\n  '}https://your-dcim/api/v1/auth/me
-          </code>
-        </CardContent>
-      </Card>
-    </div>
+    <SpaceBetween size="m">
+      <Box>Copy the token now — it cannot be displayed again.</Box>
+      <Container>
+        <SpaceBetween size="xs" direction="horizontal">
+          <Box variant="span">
+            <code style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, wordBreak: 'break-all' }}>
+              {token.plaintext}
+            </code>
+          </Box>
+          <Button onClick={copy} iconName={copied ? 'status-positive' : 'copy'}>
+            {copied ? 'Copied' : 'Copy'}
+          </Button>
+        </SpaceBetween>
+      </Container>
+      <Container header={<Header variant="h3">Use it</Header>}>
+        <pre style={{
+          fontFamily: 'ui-monospace, monospace', fontSize: 11,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0,
+        }}>
+{`curl -H "Authorization: Bearer ${token.plaintext}" \\
+  https://your-dcim/api/v1/auth/me`}
+        </pre>
+      </Container>
+    </SpaceBetween>
   );
 }

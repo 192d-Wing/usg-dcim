@@ -1,30 +1,26 @@
+// Maintenance windows — Cloudscape table + create/edit Modals.
+
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { useTable, useGetIdentity, useList } from '@refinedev/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, Wrench } from 'lucide-react';
-import { http } from '@/lib/http';
-import { cn, formatDate, relativeTime } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 import { toast } from 'sonner';
+
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import Pagination from '@cloudscape-design/components/pagination';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator, { StatusIndicatorProps } from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
+import { http } from '@/lib/http';
+import { formatDate, relativeTime } from '@/lib/utils';
 
 type Site = { id: string; code: string; name: string };
 type Window = {
@@ -46,11 +42,25 @@ function statusOf(w: Window, now = Date.now()): WindowStatus {
   return 'active';
 }
 
-const STATUS_VARIANT: Record<WindowStatus, 'critical' | 'warning' | 'secondary'> = {
-  active: 'critical',
+const STATUS_TYPE: Record<WindowStatus, StatusIndicatorProps.Type> = {
+  active: 'error',
   upcoming: 'warning',
-  past: 'secondary',
+  past: 'stopped',
 };
+
+const ALL_SITES_OPT: SelectProps.Option = { value: '__all__', label: 'All sites' };
+
+function toLocalInput(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function fromLocalInput(local: string): string {
+  return new Date(local).toISOString();
+}
 
 export function MaintenancePage() {
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<Window>({
@@ -88,191 +98,192 @@ export function MaintenancePage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Maintenance windows</h1>
-          <p className="text-sm text-muted-foreground">
-            {total} total · suppress alerts during planned work
-          </p>
-        </div>
-        {canConfigure && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> New window</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New maintenance window</DialogTitle></DialogHeader>
-              <WindowForm
-                sites={sites}
-                onSaved={async () => { setCreateOpen(false); await refresh(); }}
-              />
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          counter={`(${total})`}
+          description="Suppress alerts during planned work."
+        >
+          Maintenance windows
+        </Header>
+      }
+    >
+      <Table<Window>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading windows…"
+        items={data}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${data.length})`}
+            actions={canConfigure && (
+              <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                New window
+              </Button>
+            )}
+          >
+            Windows
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'status', header: 'Status',
+            cell: (w) => {
+              const s = statusOf(w);
+              return <StatusIndicator type={STATUS_TYPE[s]}>{s}</StatusIndicator>;
+            },
+            width: 120,
+          },
+          { id: 'name', header: 'Name', cell: (w) => <span style={{ fontWeight: 500 }}>{w.name}</span> },
+          {
+            id: 'scope', header: 'Scope',
+            cell: (w) => {
+              const site = w.site_id ? sitesById.get(w.site_id) : null;
+              if (site) return `${site.code} · ${site.name}`;
+              if (w.site_id) return `site ${w.site_id.slice(0, 8)}…`;
+              return <Box variant="span" color="text-status-inactive">all sites</Box>;
+            },
+          },
+          {
+            id: 'starts', header: 'Starts',
+            cell: (w) => (
+              <SpaceBetween size="xxxs">
+                <span>{formatDate(w.starts_at)}</span>
+                <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                  {relativeTime(w.starts_at)}
+                </Box>
+              </SpaceBetween>
+            ),
+          },
+          {
+            id: 'ends', header: 'Ends',
+            cell: (w) => (
+              <SpaceBetween size="xxxs">
+                <span>{formatDate(w.ends_at)}</span>
+                <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                  {relativeTime(w.ends_at)}
+                </Box>
+              </SpaceBetween>
+            ),
+          },
+          {
+            id: 'reason', header: 'Reason',
+            cell: (w) => (
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                {w.reason ?? '—'}
+              </Box>
+            ),
+          },
+          {
+            id: 'createdBy', header: 'Created by',
+            cell: (w) => (
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                {w.created_by ?? '—'}
+              </Box>
+            ),
+          },
+          ...(canConfigure ? [{
+            id: 'actions', header: '',
+            cell: (w: Window) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditing(w)} ariaLabel={`Edit ${w.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(w)} ariaLabel={`Delete ${w.name}`} />
+              </SpaceBetween>
+            ),
+            width: 120,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No maintenance windows configured.
+          </Box>
+        }
+        pagination={
+          pageCount > 1 ? (
+            <Pagination
+              currentPageIndex={currentPage}
+              pagesCount={pageCount}
+              onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+            />
+          ) : undefined
+        }
+      />
 
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-24">Status</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Scope</TableHead>
-                  <TableHead>Starts</TableHead>
-                  <TableHead>Ends</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead>Created by</TableHead>
-                  {canConfigure && <TableHead className="w-28" />}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={canConfigure ? 8 : 7} className="text-muted-foreground">
-                      No maintenance windows configured.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {data.map((w) => {
-                  const status = statusOf(w);
-                  const site = w.site_id ? sitesById.get(w.site_id) : null;
-                  const scope = site
-                    ? `${site.code} · ${site.name}`
-                    : w.site_id
-                      ? `site ${w.site_id.slice(0, 8)}…`
-                      : 'all sites';
-                  return (
-                    <TableRow key={w.id}>
-                      <TableCell>
-                        <Badge variant={STATUS_VARIANT[status]}>{status}</Badge>
-                      </TableCell>
-                      <TableCell className="font-medium">{w.name}</TableCell>
-                      <TableCell className={cn('text-sm', !w.site_id && 'text-muted-foreground')}>
-                        {scope}
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        <div>{formatDate(w.starts_at)}</div>
-                        <div className="text-xs text-muted-foreground">{relativeTime(w.starts_at)}</div>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        <div>{formatDate(w.ends_at)}</div>
-                        <div className="text-xs text-muted-foreground">{relativeTime(w.ends_at)}</div>
-                      </TableCell>
-                      <TableCell className="max-w-xs truncate text-sm text-muted-foreground">
-                        {w.reason ?? '—'}
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {w.created_by ?? '—'}
-                      </TableCell>
-                      {canConfigure && (
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <Button size="sm" variant="ghost" onClick={() => setEditing(w)}>
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={() => remove(w)}>
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      )}
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage <= 1}>Prev</Button>
-          <span>page {currentPage} of {pageCount}</span>
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage >= pageCount}>Next</Button>
-        </div>
+      {canConfigure && (
+        <Modal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New maintenance window"
+          size="medium"
+        >
+          <WindowForm
+            sites={sites}
+            onSaved={async () => { setCreateOpen(false); await refresh(); }}
+          />
+        </Modal>
       )}
 
-      <Dialog open={editing !== null} onOpenChange={(o) => { if (!o) setEditing(null); }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Wrench className="h-4 w-4" /> Edit maintenance window
-            </DialogTitle>
-          </DialogHeader>
-          {editing && (
-            <WindowForm
-              sites={sites}
-              window={editing}
-              onSaved={async () => { setEditing(null); await refresh(); }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+      <Modal
+        visible={editing !== null}
+        onDismiss={() => setEditing(null)}
+        header="Edit maintenance window"
+        size="medium"
+      >
+        {editing && (
+          <WindowForm
+            sites={sites}
+            window={editing}
+            onSaved={async () => { setEditing(null); await refresh(); }}
+          />
+        )}
+      </Modal>
+    </ContentLayout>
   );
-}
-
-const formSchema = z.object({
-  name: z.string().min(1, 'Name required'),
-  site_id: z.string(),
-  starts_at: z.string().min(1, 'Start required'),
-  ends_at: z.string().min(1, 'End required'),
-  reason: z.string().optional(),
-}).refine(
-  (v) => new Date(v.ends_at) > new Date(v.starts_at),
-  { message: 'End must be after start', path: ['ends_at'] },
-);
-
-const ALL_SITES = '__all__';
-
-function toLocalInput(iso: string | undefined): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  // datetime-local needs YYYY-MM-DDTHH:mm in the browser's local TZ
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function fromLocalInput(local: string): string {
-  // The browser parses "YYYY-MM-DDTHH:mm" as local time; toISOString shifts to UTC for the API.
-  return new Date(local).toISOString();
 }
 
 function WindowForm({
   sites, window: existing, onSaved,
-}: {
+}: Readonly<{
   sites: Site[];
   window?: Window;
   onSaved: () => void;
-}) {
+}>) {
   const editing = !!existing;
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      name: existing?.name ?? '',
-      site_id: existing?.site_id ?? ALL_SITES,
-      starts_at: toLocalInput(existing?.starts_at),
-      ends_at: toLocalInput(existing?.ends_at),
-      reason: existing?.reason ?? '',
-    },
-  });
+  const siteOptions: SelectProps.Option[] = [
+    ALL_SITES_OPT,
+    ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
+  ];
 
-  async function onSubmit(v: z.infer<typeof formSchema>) {
+  const [name, setName] = useState(existing?.name ?? '');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option>(
+    siteOptions.find((o) => o.value === existing?.site_id) ?? ALL_SITES_OPT,
+  );
+  const [startsAt, setStartsAt] = useState(toLocalInput(existing?.starts_at));
+  const [endsAt, setEndsAt] = useState(toLocalInput(existing?.ends_at));
+  const [reason, setReason] = useState(existing?.reason ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Name required';
+    if (!startsAt) errs.starts = 'Start required';
+    if (!endsAt) errs.ends = 'End required';
+    if (startsAt && endsAt && new Date(endsAt) <= new Date(startsAt)) {
+      errs.ends = 'End must be after start';
+    }
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     const body = {
-      name: v.name,
-      site_id: v.site_id === ALL_SITES ? null : v.site_id,
-      starts_at: fromLocalInput(v.starts_at),
-      ends_at: fromLocalInput(v.ends_at),
-      reason: v.reason || null,
+      name,
+      site_id: siteOpt.value === ALL_SITES_OPT.value ? null : siteOpt.value,
+      starts_at: fromLocalInput(startsAt),
+      ends_at: fromLocalInput(endsAt),
+      reason: reason || null,
       asset_filter_json: existing?.asset_filter_json ?? {},
     };
     try {
@@ -286,63 +297,64 @@ function WindowForm({
       onSaved();
     } catch (err: any) {
       toast.error(err?.message ?? 'save failed');
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Name</FormLabel>
-            <FormControl><Input placeholder="e.g. Q3 power maintenance" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="site_id" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Scope</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange}>
-              <FormControl>
-                <SelectTrigger><SelectValue placeholder="All sites" /></SelectTrigger>
-              </FormControl>
-              <SelectContent>
-                <SelectItem value={ALL_SITES}>All sites</SelectItem>
-                {sites.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="starts_at" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Starts at</FormLabel>
-              <FormControl><Input type="datetime-local" {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="ends_at" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Ends at</FormLabel>
-              <FormControl><Input type="datetime-local" {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="reason" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Reason (optional)</FormLabel>
-            <FormControl><Input placeholder="e.g. PDU firmware upgrade" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save changes' : 'Create window'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : editing ? 'Save changes' : 'Create window'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. Q3 power maintenance" />
+          </FormField>
+          <FormField label="Scope">
+            <Select
+              selectedOption={siteOpt}
+              onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+              options={siteOptions}
+              expandToViewport
+            />
+          </FormField>
+          <FormField label="Starts at" errorText={errors.starts}>
+            {/* datetime-local is a vanilla HTML input; Cloudscape's
+                Input doesn't expose all the variants and a native input
+                is fine here. */}
+            <input
+              type="datetime-local"
+              value={startsAt}
+              onChange={(e) => setStartsAt(e.target.value)}
+              style={{
+                width: '100%', padding: '6px 10px', borderRadius: 8,
+                border: '1px solid var(--color-border-input-default, #aab)',
+                background: 'inherit', color: 'inherit',
+              }}
+            />
+          </FormField>
+          <FormField label="Ends at" errorText={errors.ends}>
+            <input
+              type="datetime-local"
+              value={endsAt}
+              onChange={(e) => setEndsAt(e.target.value)}
+              style={{
+                width: '100%', padding: '6px 10px', borderRadius: 8,
+                border: '1px solid var(--color-border-input-default, #aab)',
+                background: 'inherit', color: 'inherit',
+              }}
+            />
+          </FormField>
+          <FormField label="Reason (optional)">
+            <Input value={reason ?? ''} onChange={({ detail }) => setReason(detail.value)} placeholder="e.g. PDU firmware upgrade" />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }

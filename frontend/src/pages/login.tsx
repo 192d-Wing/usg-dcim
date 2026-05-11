@@ -1,77 +1,79 @@
+// Login — single-card centered form. Uses Cloudscape primitives so
+// there's no Tailwind dependency once we remove it.
+
+import { useState } from 'react';
 import { useLogin } from '@refinedev/core';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { LogIn } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
 
-const schema = z.object({
-  email: z.string().email('Enter a valid email'),
-  password: z.string().min(1, 'Password required'),
-});
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import Container from '@cloudscape-design/components/container';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import SpaceBetween from '@cloudscape-design/components/space-between';
 
-type Values = z.infer<typeof schema>;
+type Values = { email: string; password: string };
 
 export function LoginPage() {
   const { mutate: login, isPending } = useLogin<Values>();
+  const [email, setEmail] = useState('admin@dcim.local');
+  const [password, setPassword] = useState('changeme');
+  const [emailErr, setEmailErr] = useState<string | undefined>();
+  const [passwordErr, setPasswordErr] = useState<string | undefined>();
 
-  const form = useForm<Values>({
-    resolver: zodResolver(schema),
-    defaultValues: { email: 'admin@dcim.local', password: 'changeme' },
-  });
-
-  function onSubmit(values: Values) {
-    login(values);
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const emailOk = email.length > 0 && /^.+@.+\..+$/.test(email);
+    const passwordOk = password.length > 0;
+    setEmailErr(emailOk ? undefined : 'Enter a valid email');
+    setPasswordErr(passwordOk ? undefined : 'Password required');
+    if (emailOk && passwordOk) login({ email, password });
   }
 
   return (
-    <div className="grid min-h-screen place-items-center p-6">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LogIn className="h-5 w-5" /> USG DCIM
-          </CardTitle>
-          <CardDescription>
-            Sign in to continue. Production deployments use OIDC/SAML; local dev accepts the seeded admin.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl><Input type="email" autoComplete="username" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="password"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Password</FormLabel>
-                    <FormControl><Input type="password" autoComplete="current-password" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" className="w-full" disabled={isPending}>
-                {isPending ? 'Signing in…' : 'Sign in'}
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
-    </div>
+    <Box padding="xxl" textAlign="center">
+      <div style={{ display: 'inline-block', minWidth: 380, textAlign: 'left', marginTop: '12vh' }}>
+        <Container
+          header={
+            <Header
+              variant="h1"
+              description="Sign in to continue. Production deployments use OIDC/SAML; local dev accepts the seeded admin."
+            >
+              USG DCIM
+            </Header>
+          }
+        >
+          <form onSubmit={onSubmit}>
+            <Form
+              actions={
+                <Button variant="primary" formAction="submit" loading={isPending}>
+                  {isPending ? 'Signing in…' : 'Sign in'}
+                </Button>
+              }
+            >
+              <SpaceBetween size="m">
+                <FormField label="Email" errorText={emailErr}>
+                  <Input
+                    type="email"
+                    autoComplete="username"
+                    value={email}
+                    onChange={({ detail }) => setEmail(detail.value)}
+                  />
+                </FormField>
+                <FormField label="Password" errorText={passwordErr}>
+                  <Input
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={({ detail }) => setPassword(detail.value)}
+                  />
+                </FormField>
+              </SpaceBetween>
+            </Form>
+          </form>
+        </Container>
+      </div>
+    </Box>
   );
 }
