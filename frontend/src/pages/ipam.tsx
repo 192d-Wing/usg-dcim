@@ -10,7 +10,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
-  Plus, Pencil, Trash2, Network, GitBranch, ChevronRight, ChevronDown, Send,
+  Plus, Pencil, Trash2, GitBranch, ChevronRight, ChevronDown, Send,
   LayoutGrid, List, Search,
 } from 'lucide-react';
 import { http } from '@/lib/http';
@@ -36,6 +36,13 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { DnsTab } from '@/components/dns-tab';
+// Aliased so the inner FreeSpaceTab + AddressesTab can keep using
+// shadcn Tabs (their grid/table + in-subnets/prefixes mode toggles
+// migrate later) while the outer IPAM chrome runs on Cloudscape.
+import CsTabs from '@cloudscape-design/components/tabs';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import CsHeader from '@cloudscape-design/components/header';
+import CsBox from '@cloudscape-design/components/box';
 
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
@@ -116,74 +123,74 @@ export function IpamPage() {
 
   if (!canRead) {
     return (
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">IPAM</h1>
-        <p className="text-sm text-muted-foreground">
-          You don't have <code className="font-mono">inventory:read</code>.
-        </p>
-      </div>
+      <ContentLayout header={<CsHeader variant="h1">IPAM</CsHeader>}>
+        <CsBox color="text-status-inactive">
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>inventory:read</code>.
+        </CsBox>
+      </ContentLayout>
     );
   }
 
-  return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <Network className="h-5 w-5" /> IPAM
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Fabric → VRF → Supernet → Subnet → IP — DHCP leases ingested from Kea
-        </p>
-      </div>
-      <Tabs defaultValue="hierarchy">
-        <TabsList>
-          <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
-          <TabsTrigger value="free-space"><Search className="h-3.5 w-3.5" /> Free space</TabsTrigger>
-          <TabsTrigger value="overlays">Overlays / VNI</TabsTrigger>
-          <TabsTrigger value="dns">DNS</TabsTrigger>
-          <TabsTrigger value="dhcp">DHCP servers</TabsTrigger>
-        </TabsList>
-        <TabsContent value="hierarchy" className="pt-3">
-          <Breadcrumbs
-            fabricId={fabricId} vrfId={vrfId} subnetId={subnetId}
-            onJump={(level) => {
-              if (level === 'fabrics') { setFabricId(null); setVrfId(null); setSubnetId(null); }
-              if (level === 'vrfs') { setVrfId(null); setSubnetId(null); }
-              if (level === 'networks') { setSubnetId(null); }
-            }}
+  // Hierarchy tab content keeps the existing drill-down chain: the
+  // breadcrumb hands navigation between fabric / vrf / subnet, and each
+  // level swaps in a different inner panel. The inner FabricsTab,
+  // VrfsTab, SupernetTreeTab, and AddressesTab still render shadcn
+  // primitives — they migrate in their own commits.
+  const hierarchyContent = (
+    <>
+      <Breadcrumbs
+        fabricId={fabricId} vrfId={vrfId} subnetId={subnetId}
+        onJump={(level) => {
+          if (level === 'fabrics') { setFabricId(null); setVrfId(null); setSubnetId(null); }
+          if (level === 'vrfs') { setVrfId(null); setSubnetId(null); }
+          if (level === 'networks') { setSubnetId(null); }
+        }}
+      />
+      <div className="mt-3">
+        {!fabricId && (
+          <FabricsTab onSelect={setFabricId} canWrite={!!canWrite} />
+        )}
+        {fabricId && !vrfId && (
+          <VrfsTab fabricId={fabricId} onSelect={setVrfId} canWrite={!!canWrite} />
+        )}
+        {fabricId && vrfId && !subnetId && (
+          <SupernetTreeTab
+            fabricId={fabricId} vrfId={vrfId}
+            onSelectSubnet={setSubnetId} canWrite={!!canWrite}
           />
-          <div className="mt-3">
-            {!fabricId && (
-              <FabricsTab onSelect={setFabricId} canWrite={!!canWrite} />
-            )}
-            {fabricId && !vrfId && (
-              <VrfsTab fabricId={fabricId} onSelect={setVrfId} canWrite={!!canWrite} />
-            )}
-            {fabricId && vrfId && !subnetId && (
-              <SupernetTreeTab
-                fabricId={fabricId} vrfId={vrfId}
-                onSelectSubnet={setSubnetId} canWrite={!!canWrite}
-              />
-            )}
-            {subnetId && (
-              <AddressesTab subnetId={subnetId} canWrite={!!canWrite} />
-            )}
-          </div>
-        </TabsContent>
-        <TabsContent value="free-space" className="pt-3">
-          <FreeSpaceTab onSelectSubnet={(id) => setSubnetId(id)} />
-        </TabsContent>
-        <TabsContent value="overlays" className="pt-3">
-          <OverlaysTab canWrite={!!canWrite} />
-        </TabsContent>
-        <TabsContent value="dns" className="pt-3">
-          <DnsTab canWrite={!!canWrite} />
-        </TabsContent>
-        <TabsContent value="dhcp" className="pt-3">
-          <DhcpServersTab canWrite={!!canWrite} />
-        </TabsContent>
-      </Tabs>
-    </div>
+        )}
+        {subnetId && (
+          <AddressesTab subnetId={subnetId} canWrite={!!canWrite} />
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <ContentLayout
+      header={
+        <CsHeader
+          variant="h1"
+          description="Fabric → VRF → Supernet → Subnet → IP — DHCP leases ingested from Kea"
+        >
+          IPAM
+        </CsHeader>
+      }
+    >
+      <CsTabs
+        tabs={[
+          { id: 'hierarchy', label: 'Hierarchy', content: hierarchyContent },
+          {
+            id: 'free-space',
+            label: 'Free space',
+            content: <FreeSpaceTab onSelectSubnet={(id) => setSubnetId(id)} />,
+          },
+          { id: 'overlays', label: 'Overlays / VNI', content: <OverlaysTab canWrite={!!canWrite} /> },
+          { id: 'dns', label: 'DNS', content: <DnsTab canWrite={!!canWrite} /> },
+          { id: 'dhcp', label: 'DHCP servers', content: <DhcpServersTab canWrite={!!canWrite} /> },
+        ]}
+      />
+    </ContentLayout>
   );
 }
 
