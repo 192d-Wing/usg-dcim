@@ -1,9 +1,12 @@
 // Enterprise overview — Cloudscape ContentLayout with KPI tiles and a
 // "sites at risk" table. Refetches every 30s.
 
+import { useMemo } from 'react';
+import { useList } from '@refinedev/core';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 
+import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
@@ -12,7 +15,6 @@ import Header from '@cloudscape-design/components/header';
 import Link from '@cloudscape-design/components/link';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Spinner from '@cloudscape-design/components/spinner';
-import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
 
 import { http } from '@/lib/http';
@@ -43,6 +45,15 @@ export function DashboardPage() {
     queryFn: async () => (await http.get('/dashboards/sites/at-risk')).data.sites as AtRiskSite[],
     refetchInterval: 30_000,
   });
+  // Look up site name + code so the table doesn't show raw UUID prefixes.
+  // Same lookup pattern as audit.tsx.
+  const sitesRes = useList<{ id: string; code: string; name: string }>({
+    resource: 'inventory/sites', pagination: { pageSize: 500 },
+  });
+  const sitesById = useMemo(
+    () => new Map((sitesRes.result.data ?? []).map((s) => [s.id, s])),
+    [sitesRes.result.data],
+  );
 
   return (
     <ContentLayout
@@ -107,22 +118,29 @@ export function DashboardPage() {
             {
               id: 'site',
               header: 'Site',
-              cell: (s) => (
-                <Link
-                  href={`/sites/${s.site_id}`}
-                  onFollow={(e) => { e.preventDefault(); navigate(`/sites/${s.site_id}`); }}
-                >
-                  <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
-                    {s.site_id.slice(0, 8)}…
-                  </span>
-                </Link>
-              ),
+              cell: (s) => {
+                const site = sitesById.get(s.site_id);
+                return (
+                  <Link
+                    href={`/sites/${s.site_id}`}
+                    onFollow={(e) => { e.preventDefault(); navigate(`/sites/${s.site_id}`); }}
+                  >
+                    {site
+                      ? `${site.code} · ${site.name}`
+                      : `${s.site_id.slice(0, 8)}…`}
+                  </Link>
+                );
+              },
             },
             {
               id: 'alerts',
               header: 'Open alerts',
-              cell: (s) => <StatusIndicator type="error">{s.alert_count}</StatusIndicator>,
-              width: 140,
+              // Badge with the raw count is the right primitive — a
+              // StatusIndicator with a number reads as "icon: 3" rather
+              // than "3 alerts" and looks visually noisy. `red` ties to
+              // the same severity color the alerts page uses.
+              cell: (s) => <Badge color="red">{String(s.alert_count)}</Badge>,
+              width: 120,
             },
           ]}
           empty={
