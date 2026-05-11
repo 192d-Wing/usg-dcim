@@ -4,13 +4,14 @@ import { App } from './App';
 // Cloudscape global stylesheet must load before our own utility CSS so
 // our Tailwind utilities can still override it where they need to (the
 // app shell is Cloudscape; page bodies still mix shadcn during the
-// migration). applyDensity sets compact mode globally — DCIM tables are
-// dense and the comfortable defaults waste vertical space.
+// migration). Density stays at Comfortable (Cloudscape's default) —
+// the Compact density we tried first cramped table rows hard enough to
+// look broken; dense data still reads fine at standard row heights.
 import '@cloudscape-design/global-styles/index.css';
 import { applyDensity, applyMode, Density, Mode } from '@cloudscape-design/global-styles';
 import './globals.css';
 
-applyDensity(Density.Compact);
+applyDensity(Density.Comfortable);
 // Match Cloudscape's mode to Tailwind's. Our index.html ships with
 // `class="dark"` on <html>, so the page background is dark; without
 // this call, Cloudscape components render in light mode and look like
