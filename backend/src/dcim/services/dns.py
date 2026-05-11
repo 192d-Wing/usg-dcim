@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.dns import (
@@ -525,5 +525,12 @@ async def sync_ipam_records_for_zone(
             ipam_address_id=ip.id,
         ))
         added += 1
+    if added > 0 or removed > 0:
+        # SOA serial moves with zone.updated_at — touch it whenever
+        # this sync changed anything so the bundle etag flips and
+        # downstream resolvers see the new view.
+        await db.execute(
+            update(DnsZone).where(DnsZone.id == zone.id).values(updated_at=func.now()),
+        )
     await db.flush()
     return (added, removed)

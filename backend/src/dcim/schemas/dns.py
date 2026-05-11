@@ -37,11 +37,15 @@ class DnsZoneBase(BaseModel):
     description: str | None = None
     soa_mname: str = "ns1"
     soa_rname: str = "hostmaster"
-    soa_refresh: int = 3600
-    soa_retry: int = 600
-    soa_expire: int = 604800
-    soa_minimum: int = 300
-    default_ttl: int = 300
+    # Short timers throughout: in a DCIM context the zone is push-driven
+    # from central rather than pulled via AXFR/IXFR, so the standard
+    # BIND timers don't apply. 900/900/1800/60 lets a stale slave catch
+    # up quickly and keeps the negative-cache window short.
+    soa_refresh: int = 900
+    soa_retry: int = 900
+    soa_expire: int = 1800
+    soa_minimum: int = 60
+    default_ttl: int = 60
 
 
 class DnsZoneCreate(DnsZoneBase):

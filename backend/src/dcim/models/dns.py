@@ -113,11 +113,11 @@ class DnsZone(UUIDPrimaryKey, Timestamped, Base):
     # demands different timers.
     soa_mname: Mapped[str] = mapped_column(String(253), nullable=False, default="ns1")
     soa_rname: Mapped[str] = mapped_column(String(253), nullable=False, default="hostmaster")
-    soa_refresh: Mapped[int] = mapped_column(Integer, nullable=False, default=3600)
-    soa_retry: Mapped[int] = mapped_column(Integer, nullable=False, default=600)
-    soa_expire: Mapped[int] = mapped_column(Integer, nullable=False, default=604800)
-    soa_minimum: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
-    default_ttl: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    soa_refresh: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
+    soa_retry: Mapped[int] = mapped_column(Integer, nullable=False, default=900)
+    soa_expire: Mapped[int] = mapped_column(Integer, nullable=False, default=1800)
+    soa_minimum: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    default_ttl: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
 
 
 class DnsRecord(UUIDPrimaryKey, Timestamped, Base):

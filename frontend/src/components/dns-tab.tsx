@@ -46,6 +46,12 @@ type DnsZone = {
   site_id: string | null;
   description: string | null;
   default_ttl: number;
+  soa_mname: string;
+  soa_rname: string;
+  soa_refresh: number;
+  soa_retry: number;
+  soa_expire: number;
+  soa_minimum: number;
 };
 
 type DnsRecord = {
@@ -104,7 +110,9 @@ type BgpPeer = {
 type Asn = { id: string; asn: number; name: string };
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'NS', 'CAA', 'PTR'] as const;
-type RecordType = (typeof RECORD_TYPES)[number];
+// SOA is rendered as a virtual row but never selected via the type
+// dropdown — keep the create-form's set narrow.
+type RecordType = (typeof RECORD_TYPES)[number] | 'SOA';
 const RECORD_TYPE_OPTS: SelectProps.Option[] = RECORD_TYPES.map((t) => ({ value: t, label: t }));
 
 const MONO = { fontFamily: 'ui-monospace, monospace' } as const;
@@ -189,6 +197,7 @@ const RECORD_TYPE_COLOR: Record<RecordType, 'blue' | 'green' | 'grey' | 'red' | 
   MX: 'severity-medium', SRV: 'severity-medium',
   NS: 'severity-low', CAA: 'severity-low',
   TXT: 'grey', PTR: 'grey',
+  SOA: 'severity-neutral',
 };
 
 function RecordTypeChip({ type }: { type: RecordType }) {
@@ -402,20 +411,47 @@ function ZoneDetailView({
   const records = recordsQ.data ?? [];
   const [createOpen, setCreateOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [soaOpen, setSoaOpen] = useState(false);
   const [selected, setSelected] = useState<DnsRecord[]>([]);
   const [filterText, setFilterText] = useState('');
 
+  // Inject the zone's SOA as a synthetic row at the top of the records
+  // table. It's not a DnsRecord row in the DB — the SOA lives on the
+  // DnsZone — but operators expect to see it alongside the records
+  // they manage (matches Route 53's behavior). The row is non-
+  // selectable and non-deletable; the "@" label is a Link that opens
+  // the edit modal.
+  const soaRow: DnsRecord | null = useMemo(() => zone ? {
+    id: `soa-${zone.id}`,
+    zone_id: zone.id,
+    name: '@',
+    type: 'SOA' as any,
+    ttl: zone.default_ttl,
+    data: {
+      mname: `${zone.soa_mname}.${zone.name}.`,
+      rname: `${zone.soa_rname}.${zone.name}.`,
+      refresh: zone.soa_refresh,
+      retry: zone.soa_retry,
+      expire: zone.soa_expire,
+      minimum: zone.soa_minimum,
+    },
+    source: 'manual',
+    ipam_address_id: null,
+  } : null, [zone]);
+
   const filtered = useMemo(() => {
     const q = filterText.trim().toLowerCase();
-    if (!q) return records;
-    return records.filter((r) => {
+    const base = soaRow ? [soaRow, ...records] : records;
+    if (!q) return base;
+    return base.filter((r) => {
       const name = (r.name || '@').toLowerCase();
       const data = formatRdata(r).toLowerCase();
       return name.includes(q) || data.includes(q) || r.type.toLowerCase().includes(q);
     });
-  }, [records, filterText]);
+  }, [records, filterText, soaRow]);
 
   async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-zone', zoneId] });
     await qc.invalidateQueries({ queryKey: ['dns-records', zoneId] });
     await qc.invalidateQueries({ queryKey: ['dns-zone-preview', zoneId] });
     setSelected([]);
@@ -530,6 +566,10 @@ function ZoneDetailView({
         selectionType={canWrite ? 'multi' : undefined}
         selectedItems={selected}
         onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
+        // SOA is a virtual row backed by zone metadata, not a deletable
+        // record; block selection so the bulk-delete button can't fire
+        // against it.
+        isItemDisabled={(item) => item.id.startsWith('soa-')}
         ariaLabels={{
           selectionGroupLabel: 'Record selection',
           itemSelectionLabel: (_d, item) => `Select ${item.name || '@'} ${item.type}`,
@@ -577,13 +617,29 @@ function ZoneDetailView({
         columnDefinitions={[
           {
             id: 'name', header: 'Record name',
-            cell: (r) => <span style={MONO}>{fqdn(r.name, zone.name)}</span>,
+            cell: (r) => {
+              const fq = fqdn(r.name, zone.name);
+              // SOA row links to its edit modal — the only way to
+              // mutate SOA fields, since they're not first-class
+              // records.
+              if (r.id.startsWith('soa-') && canWrite) {
+                return (
+                  <Link
+                    href={`#soa-${zone.id}`}
+                    onFollow={(e) => { e.preventDefault(); setSoaOpen(true); }}
+                  >
+                    <span style={MONO}>{fq}</span>
+                  </Link>
+                );
+              }
+              return <span style={MONO}>{fq}</span>;
+            },
             sortingField: 'name',
             minWidth: 240,
           },
           {
             id: 'type', header: 'Type',
-            cell: (r) => <RecordTypeChip type={r.type} />,
+            cell: (r) => <RecordTypeChip type={r.type as RecordType} />,
             width: 90,
           },
           {
@@ -602,9 +658,14 @@ function ZoneDetailView({
           },
           {
             id: 'source', header: 'Source',
-            cell: (r) => r.source === 'ipam'
-              ? <Badge color="blue">From IPAM</Badge>
-              : <Box color="text-status-inactive" fontSize="body-s">Manual</Box>,
+            cell: (r) => {
+              if (r.id.startsWith('soa-')) {
+                return <Badge>Zone</Badge>;
+              }
+              return r.source === 'ipam'
+                ? <Badge color="blue">From IPAM</Badge>
+                : <Box color="text-status-inactive" fontSize="body-s">Manual</Box>;
+            },
             width: 110,
           },
         ]}
@@ -659,6 +720,19 @@ function ZoneDetailView({
           <RecordForm
             zone={zone}
             onSaved={async () => { setCreateOpen(false); await refresh(); }}
+          />
+        </Modal>
+      )}
+      {canWrite && (
+        <Modal
+          visible={soaOpen}
+          onDismiss={() => setSoaOpen(false)}
+          header={<span>Edit SOA: <span style={MONO}>{zone.name}</span></span>}
+          size="medium"
+        >
+          <SoaEditForm
+            zone={zone}
+            onSaved={async () => { setSoaOpen(false); await refresh(); }}
           />
         </Modal>
       )}
@@ -1002,7 +1076,7 @@ function ZoneForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void
 
 function formatRdata(r: DnsRecord): string {
   const d = r.data ?? {};
-  switch (r.type) {
+  switch (r.type as RecordType) {
     case 'A':
     case 'AAAA':
     case 'CNAME':
@@ -1013,9 +1087,109 @@ function formatRdata(r: DnsRecord): string {
     case 'TXT': return `"${d.text ?? ''}"`;
     case 'SRV': return `${d.priority ?? 0} ${d.weight ?? 0} ${d.port ?? 0} ${d.target ?? ''}`;
     case 'CAA': return `${d.flags ?? 0} ${d.tag ?? ''} "${d.value ?? ''}"`;
+    case 'SOA':
+      // BIND-style one-line summary: mname rname refresh retry expire min
+      return `${d.mname ?? ''} ${d.rname ?? ''} ${d.refresh ?? 0} ${d.retry ?? 0} ${d.expire ?? 0} ${d.minimum ?? 0}`;
     default: return JSON.stringify(d);
   }
 }
+
+// SOA fields live on the DnsZone row. This is a slim editor that
+// PATCHes the zone — the backend's existing DnsZoneUpdate schema
+// already accepts the SOA fields, so no new endpoint is needed.
+function SoaEditForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
+  const [mname, setMname] = useState(zone.soa_mname);
+  const [rname, setRname] = useState(zone.soa_rname);
+  const [refresh, setRefresh] = useState(String(zone.soa_refresh));
+  const [retry, setRetry] = useState(String(zone.soa_retry));
+  const [expire, setExpire] = useState(String(zone.soa_expire));
+  const [minimum, setMinimum] = useState(String(zone.soa_minimum));
+  const [defaultTtl, setDefaultTtl] = useState(String(zone.default_ttl));
+  const [submitting, setSubmitting] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await http.patch(`/dns/zones/${zone.id}`, {
+        soa_mname: mname.trim() || zone.soa_mname,
+        soa_rname: rname.trim() || zone.soa_rname,
+        soa_refresh: Number(refresh) || zone.soa_refresh,
+        soa_retry: Number(retry) || zone.soa_retry,
+        soa_expire: Number(expire) || zone.soa_expire,
+        soa_minimum: Number(minimum) || zone.soa_minimum,
+        default_ttl: Number(defaultTtl) || zone.default_ttl,
+      });
+      toast.success('SOA updated');
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Save'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <ColumnLayout columns={2}>
+            <FormField
+              label="Primary nameserver (MNAME)"
+              description="Label only — zone suffix is appended automatically."
+            >
+              <Input value={mname} onChange={({ detail }) => setMname(detail.value)} />
+            </FormField>
+            <FormField
+              label="Responsible person (RNAME)"
+              description="Mailbox label (e.g. hostmaster); zone suffix is appended."
+            >
+              <Input value={rname} onChange={({ detail }) => setRname(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={4}>
+            <FormField label="Refresh (s)">
+              <Input type="number" value={refresh} onChange={({ detail }) => setRefresh(detail.value)} />
+            </FormField>
+            <FormField label="Retry (s)">
+              <Input type="number" value={retry} onChange={({ detail }) => setRetry(detail.value)} />
+            </FormField>
+            <FormField label="Expire (s)">
+              <Input type="number" value={expire} onChange={({ detail }) => setExpire(detail.value)} />
+            </FormField>
+            <FormField
+              label="Negative TTL (s)"
+              description="Caching TTL for NXDOMAIN."
+            >
+              <Input type="number" value={minimum} onChange={({ detail }) => setMinimum(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <FormField
+            label="Zone default TTL (s)"
+            description="Fallback TTL for records that don't set their own."
+          >
+            <Input
+              type="number" value={defaultTtl}
+              onChange={({ detail }) => setDefaultTtl(detail.value)}
+            />
+          </FormField>
+          <Box color="text-status-inactive" fontSize="body-s">
+            The SOA serial is derived from the zone's last-modified
+            timestamp — any record add/edit/delete bumps it automatically,
+            so you don't manage it by hand.
+          </Box>
+        </SpaceBetween>
+      </Form>
+    </form>
+  );
+}
+
 
 function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
   const [name, setName] = useState('');
@@ -1059,6 +1233,11 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
           tag: tag || 'issue',
           value,
         };
+      case 'SOA':
+        // SOA isn't a creatable record type — it's edited via the
+        // SoaEditForm modal — but the type union includes it so this
+        // branch keeps the switch exhaustive.
+        return {};
     }
   }
 

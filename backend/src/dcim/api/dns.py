@@ -27,7 +27,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import ValidationError as PydanticValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -88,6 +88,16 @@ _ANYCAST_NOT_FOUND = "anycast group not found"
 _BGP_NOT_FOUND = "bgp peer not found"
 _BIND_NOT_FOUND = "anycast/bgp binding not found"
 _FORWARDER_NOT_FOUND = "dns forwarder not found"
+
+
+async def _touch_zone(db: AsyncSession, zone_id: UUID) -> None:
+    """Bump the zone's `updated_at` to NOW(). The SOA serial renderer
+    derives the serial from this timestamp, so any record change must
+    move it forward — otherwise downstream resolvers won't see the new
+    zone and the bundle etag won't change."""
+    await db.execute(
+        update(DnsZone).where(DnsZone.id == zone_id).values(updated_at=func.now())
+    )
 
 
 # ----------------------- Zones -----------------------
@@ -291,6 +301,7 @@ async def create_record(
     )
     db.add(obj)
     await db.flush()
+    await _touch_zone(db, payload.zone_id)
     await audit.record(
         db, principal, action="dns_record.create",
         target_type="dns_record", target_id=str(obj.id),
@@ -337,6 +348,7 @@ async def update_record(
             ) from None
     for k, v in diff.items():
         setattr(obj, k, v)
+    await _touch_zone(db, obj.zone_id)
     await audit.record(
         db, principal, action="dns_record.update",
         target_type="dns_record", target_id=str(record_id), diff=diff,
@@ -370,6 +382,7 @@ async def delete_record(
         "data": obj.data,
     }
     await db.execute(delete(DnsRecord).where(DnsRecord.id == record_id))
+    await _touch_zone(db, obj.zone_id)
     await audit.record(
         db, principal, action="dns_record.delete",
         target_type="dns_record", target_id=str(record_id),
