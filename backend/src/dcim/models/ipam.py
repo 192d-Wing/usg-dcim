@@ -93,6 +93,15 @@ class BgpAddressFamily(str, enum.Enum):
     evpn = "evpn"
 
 
+class RecursiveDnsEngine(str, enum.Enum):
+    """Which DNS engine the recursive pod renders for. Authoritative
+    pods always render to CoreDNS — see hickory-migration plan for why
+    the auth side intentionally doesn't move."""
+
+    coredns = "coredns"
+    hickory = "hickory"
+
+
 class Fabric(UUIDPrimaryKey, Timestamped, Base):
     """Top-level network namespace. Maps roughly to an enclave."""
 
@@ -114,6 +123,17 @@ class Fabric(UUIDPrimaryKey, Timestamped, Base):
     # Lets multi-tenant installs point each fabric at its own
     # internal resolver estate without a setting-per-fabric.
     dns_recursive_upstreams: Mapped[list[str] | None] = mapped_column(JSON)
+    # Recursive DNS engine for this fabric — CoreDNS (default) or
+    # Hickory. Authoritative pods always use CoreDNS; only the
+    # recursive side moves. Switch is reversible per-fabric.
+    recursive_engine: Mapped[RecursiveDnsEngine] = mapped_column(
+        Enum(
+            RecursiveDnsEngine, name="recursive_dns_engine",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=RecursiveDnsEngine.coredns,
+        nullable=False,
+    )
 
     vrfs: Mapped[list[Vrf]] = relationship(back_populates="fabric")
 
