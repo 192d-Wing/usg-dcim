@@ -43,6 +43,21 @@ import CsTabs from '@cloudscape-design/components/tabs';
 import ContentLayout from '@cloudscape-design/components/content-layout';
 import CsHeader from '@cloudscape-design/components/header';
 import CsBox from '@cloudscape-design/components/box';
+// Tab-body Cloudscape primitives. Aliased so they don't collide with
+// the shadcn Button/Table/Badge/Modal-equivalents still in use by the
+// other tabs.
+import CsTable from '@cloudscape-design/components/table';
+import CsButton from '@cloudscape-design/components/button';
+import CsStatusIndicator from '@cloudscape-design/components/status-indicator';
+import CsModal from '@cloudscape-design/components/modal';
+import CsSpaceBetween from '@cloudscape-design/components/space-between';
+import CsSelect, { SelectProps as CsSelectProps } from '@cloudscape-design/components/select';
+import CsInput from '@cloudscape-design/components/input';
+import CsFormField from '@cloudscape-design/components/form-field';
+import CsContainer from '@cloudscape-design/components/container';
+import CsColumnLayout from '@cloudscape-design/components/column-layout';
+import CsSegmentedControl from '@cloudscape-design/components/segmented-control';
+import CsBadge from '@cloudscape-design/components/badge';
 
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
@@ -223,14 +238,22 @@ type SupernetCandidates = {
 
 type FreeMode = 'in-subnets' | 'prefixes';
 
+const ALL_FABRICS_OPT: CsSelectProps.Option = { value: '__all__', label: 'All fabrics' };
+const FAMILY_OPTS: CsSelectProps.Option[] = [
+  { value: 'v4', label: 'IPv4' },
+  { value: 'v6', label: 'IPv6' },
+];
+
 function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void }) {
   const [mode, setMode] = useState<FreeMode>('in-subnets');
-  const [fabricId, setFabricId] = useState<string>('');
-  const [family, setFamily] = useState<'v4' | 'v6'>('v4');
+  const [fabricOpt, setFabricOpt] = useState<CsSelectProps.Option>(ALL_FABRICS_OPT);
+  const [familyOpt, setFamilyOpt] = useState<CsSelectProps.Option>(FAMILY_OPTS[0]);
   const [minFree, setMinFree] = useState<string>('1');
   const [prefixSize, setPrefixSize] = useState<string>('24');
   const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
   const fabrics = fabricsRes.result.data ?? [];
+  const fabricId = fabricOpt.value === ALL_FABRICS_OPT.value ? '' : fabricOpt.value!;
+  const family = (familyOpt.value as 'v4' | 'v6');
 
   const subnetSearch = useQuery({
     queryKey: ['free-in-subnets', fabricId, family, minFree],
@@ -264,64 +287,65 @@ function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void
     enabled: mode === 'prefixes',
   });
 
+  const fabricOptions: CsSelectProps.Option[] = [
+    ALL_FABRICS_OPT,
+    ...fabrics.map((f) => ({ value: f.id, label: f.name })),
+  ];
+
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardContent className="grid gap-3 p-4 md:grid-cols-4">
-          <div className="space-y-1 md:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground">Mode</label>
-            <Tabs value={mode} onValueChange={(v) => setMode(v as FreeMode)}>
-              <TabsList>
-                <TabsTrigger value="in-subnets">Free addresses in existing subnets</TabsTrigger>
-                <TabsTrigger value="prefixes">Free prefixes inside supernets</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Fabric</label>
-            <Select value={fabricId || '__all__'} onValueChange={(v) => setFabricId(v === '__all__' ? '' : v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All fabrics</SelectItem>
-                {fabrics.map((f) => (
-                  <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Family</label>
-            <Select value={family} onValueChange={(v) => setFamily(v as 'v4' | 'v6')}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="v4">IPv4</SelectItem>
-                <SelectItem value="v6">IPv6</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {mode === 'in-subnets' ? (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">Min free addresses</label>
-              <Input
-                type="number" min={1}
-                value={minFree}
-                onChange={(e) => setMinFree(e.target.value)}
+    <CsSpaceBetween size="l">
+      <CsContainer header={<CsHeader variant="h2">Search</CsHeader>}>
+        <CsSpaceBetween size="m">
+          <CsFormField label="Mode">
+            <CsSegmentedControl
+              selectedId={mode}
+              onChange={({ detail }) => setMode(detail.selectedId as FreeMode)}
+              options={[
+                { id: 'in-subnets', text: 'Free addresses in existing subnets' },
+                { id: 'prefixes', text: 'Free prefixes inside supernets' },
+              ]}
+            />
+          </CsFormField>
+          <CsColumnLayout columns={3}>
+            <CsFormField label="Fabric">
+              <CsSelect
+                selectedOption={fabricOpt}
+                onChange={({ detail }) => setFabricOpt(detail.selectedOption)}
+                options={fabricOptions}
+                expandToViewport
               />
-            </div>
-          ) : (
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground">
-                Prefix size (e.g. 24 for /24, 64 for /64)
-              </label>
-              <Input
-                type="number" min={1} max={128}
-                value={prefixSize}
-                onChange={(e) => setPrefixSize(e.target.value)}
+            </CsFormField>
+            <CsFormField label="Family">
+              <CsSelect
+                selectedOption={familyOpt}
+                onChange={({ detail }) => setFamilyOpt(detail.selectedOption)}
+                options={FAMILY_OPTS}
+                expandToViewport
               />
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CsFormField>
+            {mode === 'in-subnets' ? (
+              <CsFormField label="Min free addresses">
+                <CsInput
+                  type="number"
+                  value={minFree}
+                  onChange={({ detail }) => setMinFree(detail.value)}
+                />
+              </CsFormField>
+            ) : (
+              <CsFormField
+                label="Prefix size"
+                description="e.g. 24 for /24, 64 for /64"
+              >
+                <CsInput
+                  type="number"
+                  value={prefixSize}
+                  onChange={({ detail }) => setPrefixSize(detail.value)}
+                />
+              </CsFormField>
+            )}
+          </CsColumnLayout>
+        </CsSpaceBetween>
+      </CsContainer>
 
       {mode === 'in-subnets' && (
         <SubnetFreeResults
@@ -336,7 +360,7 @@ function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void
           isLoading={prefixSearch.isLoading}
         />
       )}
-    </div>
+    </CsSpaceBetween>
   );
 }
 
@@ -348,51 +372,52 @@ function SubnetFreeResults({
   onSelectSubnet: (id: string) => void;
 }) {
   return (
-    <Card>
-      <CardContent className="p-0">
-        {isLoading ? (
-          <div className="space-y-2 p-4">
-            {Array.from({ length: 3 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-          </div>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Subnet</TableHead>
-                <TableHead>Purpose</TableHead>
-                <TableHead className="w-32 text-right">Free</TableHead>
-                <TableHead className="w-32 text-right">Capacity</TableHead>
-                <TableHead>Next available</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.length === 0 && (
-                <TableRow><TableCell colSpan={5} className="text-muted-foreground">
-                  No subnets meet that filter.
-                </TableCell></TableRow>
+    <CsTable<SubnetFreeRow>
+      variant="container"
+      loading={isLoading}
+      loadingText="Searching subnets…"
+      items={rows}
+      trackBy="subnet_id"
+      header={<CsHeader counter={`(${rows.length})`}>Subnets with free space</CsHeader>}
+      onRowClick={({ detail }) => onSelectSubnet(detail.item.subnet_id)}
+      columnDefinitions={[
+        {
+          id: 'subnet', header: 'Subnet',
+          cell: (r) => (
+            <span style={{ fontFamily: 'ui-monospace, monospace' }}>
+              {r.prefix}
+              {r.name && (
+                <CsBox variant="span" color="text-status-inactive"> · {r.name}</CsBox>
               )}
-              {rows.map((r) => (
-                <TableRow
-                  key={r.subnet_id}
-                  className="cursor-pointer hover:bg-accent/40"
-                  onClick={() => onSelectSubnet(r.subnet_id)}
-                >
-                  <TableCell className="font-mono">
-                    {r.prefix}{r.name && <span className="text-muted-foreground"> · {r.name}</span>}
-                  </TableCell>
-                  <TableCell>
-                    {r.purpose ? <Badge variant="secondary">{r.purpose}</Badge> : '—'}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">{r.free.toLocaleString()}</TableCell>
-                  <TableCell className="text-right tabular-nums">{r.capacity.toLocaleString()}</TableCell>
-                  <TableCell className="font-mono text-xs">{r.next_available ?? '—'}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+            </span>
+          ),
+        },
+        {
+          id: 'purpose', header: 'Purpose',
+          cell: (r) => r.purpose ? <CsBadge>{r.purpose}</CsBadge> : '—',
+          width: 120,
+        },
+        {
+          id: 'free', header: 'Free',
+          cell: (r) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{r.free.toLocaleString()}</span>,
+          width: 120,
+        },
+        {
+          id: 'capacity', header: 'Capacity',
+          cell: (r) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{r.capacity.toLocaleString()}</span>,
+          width: 120,
+        },
+        {
+          id: 'next', header: 'Next available',
+          cell: (r) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{r.next_available ?? '—'}</span>,
+        },
+      ]}
+      empty={
+        <CsBox textAlign="center" color="inherit" padding="m">
+          No subnets meet that filter.
+        </CsBox>
+      }
+    />
   );
 }
 
@@ -404,46 +429,46 @@ function PrefixFreeResults({
 }) {
   if (isLoading) {
     return (
-      <Card>
-        <CardContent className="space-y-2 p-4">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-        </CardContent>
-      </Card>
+      <CsContainer><CsBox padding="m">Searching supernets…</CsBox></CsContainer>
     );
   }
   if (groups.length === 0) {
     return (
-      <Card>
-        <CardContent className="p-4 text-sm text-muted-foreground">
+      <CsContainer>
+        <CsBox padding="m" color="text-status-inactive">
           No supernet has free space at that prefix size in this scope.
-        </CardContent>
-      </Card>
+        </CsBox>
+      </CsContainer>
     );
   }
+  // One Container per supernet, each with its prefix + a flat list of
+  // candidate Badges. Container's header carries the supernet identity
+  // and a counter of candidates.
   return (
-    <div className="space-y-3">
+    <CsSpaceBetween size="s">
       {groups.map((g) => (
-        <Card key={g.supernet_id}>
-          <CardContent className="space-y-2 p-4">
-            <div className="flex items-baseline justify-between gap-2">
-              <div>
-                <div className="font-mono font-medium">{g.supernet_prefix}</div>
-                <div className="text-xs text-muted-foreground">
-                  {g.supernet_name ?? 'unnamed'}
-                  {g.purpose && <> · {g.purpose}</>}
-                </div>
-              </div>
-              <Badge variant="secondary">{g.count} candidates</Badge>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {g.candidates.map((c) => (
-                <Badge key={c} variant="outline" className="font-mono">{c}</Badge>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+        <CsContainer
+          key={g.supernet_id}
+          header={
+            <CsHeader
+              variant="h3"
+              counter={`(${g.count})`}
+              description={
+                [g.supernet_name ?? 'unnamed', g.purpose].filter(Boolean).join(' · ')
+              }
+            >
+              <span style={{ fontFamily: 'ui-monospace, monospace' }}>{g.supernet_prefix}</span>
+            </CsHeader>
+          }
+        >
+          <div className="flex flex-wrap gap-1.5">
+            {g.candidates.map((c) => (
+              <CsBadge key={c}>{c}</CsBadge>
+            ))}
+          </div>
+        </CsContainer>
       ))}
-    </div>
+    </CsSpaceBetween>
   );
 }
 
@@ -2257,79 +2282,105 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        {canWrite && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> Add Kea server</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Register Kea DHCP server</DialogTitle></DialogHeader>
-              <DhcpForm fabrics={fabrics} onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Fabric</TableHead>
-                <TableHead>Control Agent URL</TableHead>
-                <TableHead>Last sync</TableHead>
-                <TableHead>Leases</TableHead>
-                <TableHead>Status</TableHead>
-                {canWrite && <TableHead className="w-32" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.length === 0 && (
-                <TableRow><TableCell colSpan={canWrite ? 7 : 6} className="text-muted-foreground">No Kea servers registered.</TableCell></TableRow>
-              )}
-              {data.map((s) => (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell className="text-sm">
-                    {fabricsById.get(s.fabric_id)?.name ?? s.fabric_id.slice(0, 8) + '…'}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs">{s.kea_url}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {s.last_sync_at ? formatDate(s.last_sync_at) : 'never'}
-                  </TableCell>
-                  <TableCell className="tabular-nums">{s.last_sync_lease_count ?? '—'}</TableCell>
-                  <TableCell>
-                    {s.last_sync_status === 'ok' && <Badge variant="success">ok</Badge>}
-                    {s.last_sync_status === 'error' && <Badge variant="critical">error</Badge>}
-                    {!s.last_sync_status && <Badge variant="secondary">pending</Badge>}
-                    {!s.enabled && <Badge variant="secondary" className="ml-1">disabled</Badge>}
-                  </TableCell>
-                  {canWrite && (
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => syncNow(s)} title="Sync now">
-                          <Send className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => remove(s)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {tableQuery.isLoading && (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 2 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <>
+      <CsTable<DhcpServer>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading DHCP servers…"
+        items={data}
+        trackBy="id"
+        header={
+          <CsHeader
+            counter={`(${data.length})`}
+            actions={
+              canWrite && (
+                <CsButton
+                  variant="primary"
+                  iconName="add-plus"
+                  onClick={() => setCreateOpen(true)}
+                >
+                  Add Kea server
+                </CsButton>
+              )
+            }
+          >
+            DHCP servers
+          </CsHeader>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (s) => <span style={{ fontWeight: 500 }}>{s.name}</span> },
+          {
+            id: 'fabric', header: 'Fabric',
+            cell: (s) => fabricsById.get(s.fabric_id)?.name ?? s.fabric_id.slice(0, 8) + '…',
+          },
+          {
+            id: 'kea_url', header: 'Control Agent URL',
+            cell: (s) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{s.kea_url}</span>,
+          },
+          {
+            id: 'last_sync', header: 'Last sync',
+            cell: (s) => (
+              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+                {s.last_sync_at ? formatDate(s.last_sync_at) : 'never'}
+              </CsBox>
+            ),
+            width: 200,
+          },
+          {
+            id: 'leases', header: 'Leases',
+            cell: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{s.last_sync_lease_count ?? '—'}</span>,
+            width: 100,
+          },
+          {
+            id: 'status', header: 'Status',
+            cell: (s) => (
+              <CsSpaceBetween size="xxs" direction="horizontal">
+                {s.last_sync_status === 'ok' && <CsStatusIndicator type="success">ok</CsStatusIndicator>}
+                {s.last_sync_status === 'error' && <CsStatusIndicator type="error">error</CsStatusIndicator>}
+                {!s.last_sync_status && <CsStatusIndicator type="pending">pending</CsStatusIndicator>}
+                {!s.enabled && <CsStatusIndicator type="stopped">disabled</CsStatusIndicator>}
+              </CsSpaceBetween>
+            ),
+            width: 180,
+          },
+          ...(canWrite ? [{
+            id: 'actions',
+            header: '',
+            // Inline row actions: sync triggers a synchronous /sync call
+            // and refreshes; delete confirms then removes.
+            cell: (s: DhcpServer) => (
+              <CsSpaceBetween size="xxs" direction="horizontal">
+                <CsButton iconName="upload" variant="inline-icon" onClick={() => syncNow(s)} ariaLabel={`Sync ${s.name}`} />
+                <CsButton iconName="remove" variant="inline-icon" onClick={() => remove(s)} ariaLabel={`Delete ${s.name}`} />
+              </CsSpaceBetween>
+            ),
+            width: 120,
+          }] : []),
+        ]}
+        empty={
+          <CsBox textAlign="center" color="inherit" padding="m">
+            No Kea servers registered.
+          </CsBox>
+        }
+      />
+      {/* Cloudscape Modal for the create flow. The form inside still
+          uses shadcn react-hook-form primitives — Cloudscape doesn't
+          ship a react-hook-form integration and rewriting every form
+          input is out of scope for this commit. */}
+      {canWrite && (
+        <CsModal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="Register Kea DHCP server"
+          size="medium"
+        >
+          <DhcpForm
+            fabrics={fabrics}
+            onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }}
+          />
+        </CsModal>
+      )}
+    </>
   );
 }
 
