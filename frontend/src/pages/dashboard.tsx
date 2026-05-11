@@ -54,6 +54,7 @@ export function DashboardPage() {
     () => new Map((sitesRes.result.data ?? []).map((s) => [s.id, s])),
     [sitesRes.result.data],
   );
+  const atRiskRows = atRisk.data ?? [];
 
   return (
     <ContentLayout
@@ -104,11 +105,11 @@ export function DashboardPage() {
           variant="container"
           loading={atRisk.isLoading}
           loadingText="Loading at-risk sites…"
-          items={atRisk.data ?? []}
+          items={atRiskRows}
           trackBy="site_id"
           header={
             <Header
-              variant="h2"
+              counter={`(${atRiskRows.length})`}
               description="Sites with major or worse alerts firing"
             >
               Sites at risk
@@ -140,7 +141,7 @@ export function DashboardPage() {
               // than "3 alerts" and looks visually noisy. `red` ties to
               // the same severity color the alerts page uses.
               cell: (s) => <Badge color="red">{String(s.alert_count)}</Badge>,
-              width: 120,
+              width: 140,
             },
           ]}
           empty={
