@@ -542,59 +542,59 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        {canWrite && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> New fabric</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New fabric</DialogTitle></DialogHeader>
-              <FabricForm onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Slug</TableHead>
-                  <TableHead>Enclave</TableHead>
-                  <TableHead>Classification</TableHead>
-                  <TableHead>Description</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 && (
-                  <TableRow><TableCell colSpan={5} className="text-muted-foreground">No fabrics yet.</TableCell></TableRow>
-                )}
-                {data.map((f) => (
-                  <TableRow
-                    key={f.id} className="cursor-pointer hover:bg-accent/40"
-                    onClick={() => onSelect(f.id)}
-                  >
-                    <TableCell className="font-medium">{f.name}</TableCell>
-                    <TableCell className="font-mono text-xs">{f.slug}</TableCell>
-                    <TableCell>{f.enclave ?? '—'}</TableCell>
-                    <TableCell>{f.classification ?? '—'}</TableCell>
-                    <TableCell className="max-w-md truncate text-sm text-muted-foreground">{f.description ?? '—'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <>
+      <CsTable<Fabric>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading fabrics…"
+        items={data}
+        trackBy="id"
+        onRowClick={({ detail }) => onSelect(detail.item.id)}
+        header={
+          <CsHeader
+            counter={`(${data.length})`}
+            actions={
+              canWrite && (
+                <CsButton variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                  New fabric
+                </CsButton>
+              )
+            }
+          >
+            Fabrics
+          </CsHeader>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (f) => <span style={{ fontWeight: 500 }}>{f.name}</span> },
+          {
+            id: 'slug', header: 'Slug',
+            cell: (f) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{f.slug}</span>,
+            width: 140,
+          },
+          { id: 'enclave', header: 'Enclave', cell: (f) => f.enclave ?? '—', width: 140 },
+          { id: 'classification', header: 'Classification', cell: (f) => f.classification ?? '—', width: 160 },
+          {
+            id: 'description', header: 'Description',
+            cell: (f) => (
+              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+                {f.description ?? '—'}
+              </CsBox>
+            ),
+          },
+        ]}
+        empty={<CsBox textAlign="center" color="inherit" padding="m">No fabrics yet.</CsBox>}
+      />
+      {canWrite && (
+        <CsModal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New fabric"
+          size="medium"
+        >
+          <FabricForm onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
+        </CsModal>
+      )}
+    </>
   );
 }
 
@@ -668,59 +668,70 @@ function VrfsTab({
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        {canWrite && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> New VRF</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New VRF</DialogTitle></DialogHeader>
-              <VrfForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 2 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>RD</TableHead>
-                  <TableHead>Default</TableHead>
-                  <TableHead>Description</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.map((v) => (
-                  <TableRow
-                    key={v.id} className="cursor-pointer hover:bg-accent/40"
-                    onClick={() => onSelect(v.id)}
-                  >
-                    <TableCell className="font-medium flex items-center gap-2">
-                      <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                      {v.name}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{v.rd ?? '—'}</TableCell>
-                    <TableCell>
-                      {v.is_default ? <Badge variant="secondary">default</Badge> : '—'}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{v.description ?? '—'}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+    <>
+      <CsTable<Vrf>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading VRFs…"
+        items={data}
+        trackBy="id"
+        onRowClick={({ detail }) => onSelect(detail.item.id)}
+        header={
+          <CsHeader
+            counter={`(${data.length})`}
+            actions={
+              canWrite && (
+                <CsButton variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                  New VRF
+                </CsButton>
+              )
+            }
+          >
+            VRFs
+          </CsHeader>
+        }
+        columnDefinitions={[
+          {
+            id: 'name', header: 'Name',
+            cell: (v) => (
+              <span style={{ fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
+                {v.name}
+              </span>
+            ),
+          },
+          {
+            id: 'rd', header: 'RD',
+            cell: (v) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{v.rd ?? '—'}</span>,
+            width: 160,
+          },
+          {
+            id: 'default', header: 'Default',
+            cell: (v) => v.is_default ? <CsBadge>default</CsBadge> : '—',
+            width: 100,
+          },
+          {
+            id: 'description', header: 'Description',
+            cell: (v) => (
+              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+                {v.description ?? '—'}
+              </CsBox>
+            ),
+          },
+        ]}
+        empty={<CsBox textAlign="center" color="inherit" padding="m">No VRFs yet.</CsBox>}
+      />
+      {canWrite && (
+        <CsModal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New VRF"
+          size="medium"
+        >
+          <VrfForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
+        </CsModal>
+      )}
+    </>
   );
 }
 
