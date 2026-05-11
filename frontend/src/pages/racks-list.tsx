@@ -1,16 +1,22 @@
+// Racks list — Cloudscape Cards collection (one tile per rack).
+
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useList } from '@refinedev/core';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Server } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import Cards from '@cloudscape-design/components/cards';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Link from '@cloudscape-design/components/link';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+
 import { CapacityBar } from '@/components/capacity-bar';
-import { Badge } from '@/components/ui/badge';
 import { http } from '@/lib/http';
 
 type Site = { id: string; code: string; name: string };
@@ -27,9 +33,14 @@ type ForecastRow = {
   days_until_full: number | null;
   runway_band: 'critical' | 'warning' | 'healthy' | 'unknown';
 };
-const BAND_VARIANT: Record<ForecastRow['runway_band'], 'critical' | 'warning' | 'success' | 'secondary'> = {
-  critical: 'critical', warning: 'warning', healthy: 'success', unknown: 'secondary',
+
+const BAND_COLOR: Record<ForecastRow['runway_band'], 'red' | 'severity-medium' | 'green' | 'grey'> = {
+  critical: 'red',
+  warning: 'severity-medium',
+  healthy: 'green',
+  unknown: 'grey',
 };
+
 function formatDays(d: number | null): string {
   if (d === null) return '—';
   if (d < 1) return '<1d';
@@ -38,9 +49,12 @@ function formatDays(d: number | null): string {
   return `${Math.round(d)}d`;
 }
 
+const ALL_SITES_OPT: SelectProps.Option = { value: 'all', label: 'All sites' };
+
 export function RacksListPage() {
   const nav = useNavigate();
-  const [siteId, setSiteId] = useState<string>('all');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option>(ALL_SITES_OPT);
+  const siteId = siteOpt.value!;
 
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
   const racksRes = useList<Rack>({
@@ -49,7 +63,6 @@ export function RacksListPage() {
     filters: siteId === 'all' ? [] : [{ field: 'site_id', operator: 'eq', value: siteId }],
   });
 
-  // Pull capacity for the same filter set in one round-trip.
   const capacityRes = useQuery({
     queryKey: ['racks-capacity', siteId],
     queryFn: async () => {
@@ -60,7 +73,6 @@ export function RacksListPage() {
     },
     refetchInterval: 30_000,
   });
-
   const capById = useMemo(() => {
     const m = new Map<string, CapacityRow>();
     for (const c of capacityRes.data ?? []) m.set(c.rack_id, c);
@@ -87,107 +99,127 @@ export function RacksListPage() {
   const racks = racksRes.result.data ?? [];
   const racksTotal = racksRes.result.total ?? racks.length;
 
+  const siteOptions: SelectProps.Option[] = [
+    ALL_SITES_OPT,
+    ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
+  ];
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Racks</h1>
-          <p className="text-sm text-muted-foreground">{racksTotal} racks</p>
-        </div>
-        <div className="flex gap-2">
-          <Select value={siteId} onValueChange={setSiteId}>
-            <SelectTrigger className="w-[260px]">
-              <SelectValue placeholder="Filter by site" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sites</SelectItem>
-              {sites.map((s) => (
-                <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={() => nav('/racks/new')}>
-            <Plus className="h-4 w-4" /> New rack
-          </Button>
-        </div>
-      </div>
-
-      {racksRes.query.isLoading ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-44 rounded-lg" />)}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          {racks.map((r) => {
-            const cap = capById.get(r.id);
-            return (
-              <Card
-                key={r.id}
-                role="button"
-                onClick={() => nav(`/racks/${r.id}`)}
-                className="cursor-pointer transition-colors hover:bg-accent/40"
-              >
-                <CardContent className="space-y-3 p-4">
-                  <div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Server className="h-3.5 w-3.5" /> {r.code}
-                    </div>
-                    <div className="mt-1 truncate text-base font-semibold">{r.name}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {r.u_height}U · {r.max_kw ? `${r.max_kw} kW` : 'unrated'}
-                    </div>
-                  </div>
-
-                  {cap ? (
-                    <div className="space-y-2">
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          counter={`(${racksTotal})`}
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <FormField label="Site">
+                <Select
+                  selectedOption={siteOpt}
+                  onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+                  options={siteOptions}
+                  expandToViewport
+                />
+              </FormField>
+              <Button variant="primary" iconName="add-plus" onClick={() => nav('/racks/new')}>
+                New rack
+              </Button>
+            </SpaceBetween>
+          }
+        >
+          Racks
+        </Header>
+      }
+    >
+      <Cards<Rack>
+        loading={racksRes.query.isLoading}
+        loadingText="Loading racks…"
+        items={racks}
+        trackBy="id"
+        cardsPerRow={[
+          { cards: 1 },
+          { minWidth: 500, cards: 2 },
+          { minWidth: 900, cards: 3 },
+          { minWidth: 1300, cards: 4 },
+        ]}
+        cardDefinition={{
+          header: (r) => (
+            <Link
+              href={`/racks/${r.id}`}
+              onFollow={(e) => { e.preventDefault(); nav(`/racks/${r.id}`); }}
+            >
+              {r.code} · {r.name}
+            </Link>
+          ),
+          sections: [
+            {
+              id: 'spec',
+              content: (r) => (
+                <Box color="text-status-inactive" fontSize="body-s">
+                  {r.u_height}U · {r.max_kw ? `${r.max_kw} kW` : 'unrated'}
+                </Box>
+              ),
+            },
+            {
+              id: 'capacity',
+              content: (r) => {
+                const cap = capById.get(r.id);
+                if (!cap) return <Box color="text-status-inactive">Loading…</Box>;
+                return (
+                  <SpaceBetween size="xxs">
+                    <CapacityBar
+                      used={cap.u_used} total={cap.u_total}
+                      leftLabel={`${cap.u_used}/${cap.u_total} U`}
+                      compact
+                    />
+                    {cap.kw_max !== null ? (
                       <CapacityBar
-                        used={cap.u_used} total={cap.u_total}
-                        leftLabel={`${cap.u_used}/${cap.u_total} U`}
+                        used={cap.kw_current ?? 0}
+                        total={cap.kw_max}
+                        unknown={cap.kw_current === null}
+                        leftLabel={
+                          cap.kw_current === null
+                            ? `—/${cap.kw_max} kW`
+                            : `${cap.kw_current.toFixed(1)}/${cap.kw_max} kW`
+                        }
                         compact
                       />
-                      {cap.kw_max !== null ? (
-                        <CapacityBar
-                          used={cap.kw_current ?? 0}
-                          total={cap.kw_max}
-                          unknown={cap.kw_current === null}
-                          leftLabel={
-                            cap.kw_current === null
-                              ? `—/${cap.kw_max} kW`
-                              : `${cap.kw_current.toFixed(1)}/${cap.kw_max} kW`
-                          }
-                          compact
-                        />
-                      ) : (
-                        <div className="text-[11px] text-muted-foreground">No kW rating</div>
-                      )}
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <span>Largest gap: <span className="font-mono">{cap.biggest_contiguous_free}U</span></span>
-                        {(() => {
-                          const fc = forecastById.get(r.id);
-                          if (!fc) return null;
-                          if (fc.slope_u_per_day === null) {
-                            return <Badge variant="secondary" className="text-[10px]">no trend</Badge>;
-                          }
-                          return (
-                            <Badge variant={BAND_VARIANT[fc.runway_band]} className="text-[10px]">
-                              {formatDays(fc.days_until_full)} runway
-                            </Badge>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  ) : (
-                    <Skeleton className="h-16 w-full" />
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-          {racks.length === 0 && (
-            <p className="col-span-full text-sm text-muted-foreground">No racks for this filter.</p>
-          )}
-        </div>
-      )}
-    </div>
+                    ) : (
+                      <Box color="text-status-inactive" fontSize="body-s">No kW rating</Box>
+                    )}
+                  </SpaceBetween>
+                );
+              },
+            },
+            {
+              id: 'runway',
+              content: (r) => {
+                const cap = capById.get(r.id);
+                const fc = forecastById.get(r.id);
+                return (
+                  <SpaceBetween size="xxs" direction="horizontal">
+                    {cap && (
+                      <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                        Largest gap: <span style={{ fontFamily: 'ui-monospace, monospace' }}>{cap.biggest_contiguous_free}U</span>
+                      </Box>
+                    )}
+                    {fc && fc.slope_u_per_day !== null && (
+                      <Badge color={BAND_COLOR[fc.runway_band]}>
+                        {`${formatDays(fc.days_until_full)} runway`}
+                      </Badge>
+                    )}
+                    {fc && fc.slope_u_per_day === null && <Badge>no trend</Badge>}
+                  </SpaceBetween>
+                );
+              },
+            },
+          ],
+        }}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No racks for this filter.
+          </Box>
+        }
+      />
+    </ContentLayout>
   );
 }

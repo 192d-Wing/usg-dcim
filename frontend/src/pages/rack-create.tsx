@@ -1,49 +1,48 @@
+// New rack — Cloudscape ContentLayout + Container with cascading
+// Site → Building → Room → Row pickers and a height picker.
+
+import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useList } from '@refinedev/core';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { ArrowLeft, Plus } from 'lucide-react';
-import { http } from '@/lib/http';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import {
-  Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { RackHeightPicker } from '@/components/rack-height-picker';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+
+import { http } from '@/lib/http';
+import { RackHeightPicker } from '@/components/rack-height-picker';
 
 type Site = { id: string; code: string; name: string };
 type HierarchyItem = { id: string; code: string; name: string };
 
-const schema = z.object({
-  site_id: z.string().uuid(),
-  building_id: z.string().uuid(),
-  room_id: z.string().uuid(),
-  row_id: z.string().uuid(),
-  name: z.string().min(1),
-  code: z.string().min(1),
-  u_height: z.coerce.number().min(1).max(60).default(42),
-  max_kw: z.string().optional(),
-  serial: z.string().optional(),
-});
-
 export function RackCreatePage() {
   const nav = useNavigate();
   const qc = useQueryClient();
-  const form = useForm<z.infer<typeof schema>>({
-    resolver: zodResolver(schema),
-    defaultValues: { u_height: 42 },
-  });
 
-  const siteId = form.watch('site_id');
-  const buildingId = form.watch('building_id');
-  const roomId = form.watch('room_id');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
+  const [buildingOpt, setBuildingOpt] = useState<SelectProps.Option | null>(null);
+  const [roomOpt, setRoomOpt] = useState<SelectProps.Option | null>(null);
+  const [rowOpt, setRowOpt] = useState<SelectProps.Option | null>(null);
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [uHeight, setUHeight] = useState(42);
+  const [maxKw, setMaxKw] = useState('');
+  const [serial, setSerial] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const siteId = siteOpt?.value ?? '';
+  const buildingId = buildingOpt?.value ?? '';
+  const roomId = roomOpt?.value ?? '';
 
   const sites = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
   const buildings = useList<HierarchyItem>({
@@ -65,180 +64,188 @@ export function RackCreatePage() {
     queryOptions: { enabled: !!roomId },
   });
 
+  const toOpts = (items: HierarchyItem[]): SelectProps.Option[] =>
+    items.map((i) => ({ value: i.id, label: `${i.code} · ${i.name}` }));
+
   async function quickCreate(kind: 'building' | 'room' | 'row', label: string) {
     if (!label.trim()) return;
     try {
-      const payload =
-        kind === 'building' ? { site_id: siteId, name: label, code: label } :
-        kind === 'room' ? { building_id: buildingId, name: label, code: label } :
-        { room_id: roomId, name: label, code: label };
+      let payload: Record<string, unknown> = {};
+      if (kind === 'building') payload = { site_id: siteId, name: label, code: label };
+      else if (kind === 'room') payload = { building_id: buildingId, name: label, code: label };
+      else payload = { room_id: roomId, name: label, code: label };
       const r = await http.post(`/inventory/${kind}s`, payload);
+      const opt = { value: r.data.id, label: `${label} · ${label}` };
       toast.success(`${kind} created`);
       if (kind === 'building') {
         await qc.invalidateQueries({ queryKey: ['data', 'inventory/buildings'] });
-        form.setValue('building_id', r.data.id);
-        form.resetField('room_id');
-        form.resetField('row_id');
+        setBuildingOpt(opt);
+        setRoomOpt(null); setRowOpt(null);
       } else if (kind === 'room') {
         await qc.invalidateQueries({ queryKey: ['data', 'inventory/rooms'] });
-        form.setValue('room_id', r.data.id);
-        form.resetField('row_id');
+        setRoomOpt(opt);
+        setRowOpt(null);
       } else {
         await qc.invalidateQueries({ queryKey: ['data', 'inventory/rows'] });
-        form.setValue('row_id', r.data.id);
+        setRowOpt(opt);
       }
     } catch (err: any) {
       toast.error(err?.message ?? 'failed');
     }
   }
 
-  async function onSubmit(v: z.infer<typeof schema>) {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!siteId) errs.site = 'Site required';
+    if (!buildingId) errs.building = 'Building required';
+    if (!roomId) errs.room = 'Room required';
+    if (!rowOpt?.value) errs.row = 'Row required';
+    if (!name.trim()) errs.name = 'Name required';
+    if (!code.trim()) errs.code = 'Code required';
+    if (uHeight < 1 || uHeight > 60) errs.height = '1..60';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       const r = await http.post('/inventory/racks', {
-        site_id: v.site_id,
-        row_id: v.row_id,
-        name: v.name,
-        code: v.code,
-        u_height: v.u_height,
-        max_kw: v.max_kw ? Number(v.max_kw) : null,
-        serial: v.serial || null,
+        site_id: siteId,
+        row_id: rowOpt!.value,
+        name, code, u_height: uHeight,
+        max_kw: maxKw ? Number(maxKw) : null,
+        serial: serial || null,
       });
       toast.success('Rack created');
       nav(`/racks/${r.data.id}`);
     } catch (err: any) {
       toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <div className="space-y-4">
-      <Button variant="ghost" size="sm" onClick={() => nav('/racks')} className="-ml-2">
-        <ArrowLeft className="h-4 w-4" /> All racks
-      </Button>
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>New rack</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField control={form.control} name="site_id" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Site</FormLabel>
-                  <Select value={field.value ?? ''} onValueChange={(v) => {
-                    field.onChange(v);
-                    form.resetField('building_id'); form.resetField('room_id'); form.resetField('row_id');
-                  }}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Pick a site…" /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      {(sites.result.data ?? []).map((s) => (
-                        <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )} />
-
-              <CascadeRow
-                label="Building" value={form.watch('building_id') ?? ''}
-                disabled={!siteId}
-                items={buildings.result.data ?? []}
-                onChange={(v) => { form.setValue('building_id', v); form.resetField('room_id'); form.resetField('row_id'); }}
-                onAdd={(label) => quickCreate('building', label)}
-              />
-              <CascadeRow
-                label="Room" value={form.watch('room_id') ?? ''}
-                disabled={!buildingId}
-                items={rooms.result.data ?? []}
-                onChange={(v) => { form.setValue('room_id', v); form.resetField('row_id'); }}
-                onAdd={(label) => quickCreate('room', label)}
-              />
-              <CascadeRow
-                label="Row" value={form.watch('row_id') ?? ''}
-                disabled={!roomId}
-                items={rows.result.data ?? []}
-                onChange={(v) => form.setValue('row_id', v)}
-                onAdd={(label) => quickCreate('row', label)}
-              />
-
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={form.control} name="name" render={({ field }) => (
-                  <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
-                <FormField control={form.control} name="code" render={({ field }) => (
-                  <FormItem><FormLabel>Code</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
-              </div>
-              <FormField control={form.control} name="u_height" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Rack height</FormLabel>
-                  <FormControl>
-                    <RackHeightPicker value={Number(field.value) || 42} onChange={field.onChange} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={form.control} name="max_kw" render={({ field }) => (
-                  <FormItem><FormLabel>Max kW</FormLabel><FormControl><Input type="number" step="0.1" {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
-                <FormField control={form.control} name="serial" render={({ field }) => (
-                  <FormItem><FormLabel>Serial</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-                )} />
-              </div>
-              <Button type="submit" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Creating…' : 'Create rack'}
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          actions={<Button onClick={() => nav('/racks')} iconName="angle-left">All racks</Button>}
+        >
+          New rack
+        </Header>
+      }
+    >
+      <Container>
+        <form onSubmit={onSubmit}>
+          <Form
+            actions={
+              <Button variant="primary" formAction="submit" loading={submitting}>
+                {submitting ? 'Creating…' : 'Create rack'}
               </Button>
-            </form>
+            }
+          >
+            <SpaceBetween size="m">
+              <FormField label="Site" errorText={errors.site}>
+                <Select
+                  placeholder="Pick a site…"
+                  selectedOption={siteOpt}
+                  onChange={({ detail }) => {
+                    setSiteOpt(detail.selectedOption);
+                    setBuildingOpt(null); setRoomOpt(null); setRowOpt(null);
+                  }}
+                  options={toOpts(sites.result.data ?? [])}
+                  expandToViewport
+                />
+              </FormField>
+
+              <CascadeRow
+                label="Building"
+                disabled={!siteId}
+                opt={buildingOpt}
+                options={toOpts(buildings.result.data ?? [])}
+                errorText={errors.building}
+                onChange={(o) => { setBuildingOpt(o); setRoomOpt(null); setRowOpt(null); }}
+                onAdd={(v) => quickCreate('building', v)}
+              />
+              <CascadeRow
+                label="Room"
+                disabled={!buildingId}
+                opt={roomOpt}
+                options={toOpts(rooms.result.data ?? [])}
+                errorText={errors.room}
+                onChange={(o) => { setRoomOpt(o); setRowOpt(null); }}
+                onAdd={(v) => quickCreate('room', v)}
+              />
+              <CascadeRow
+                label="Row"
+                disabled={!roomId}
+                opt={rowOpt}
+                options={toOpts(rows.result.data ?? [])}
+                errorText={errors.row}
+                onChange={setRowOpt}
+                onAdd={(v) => quickCreate('row', v)}
+              />
+
+              <ColumnLayout columns={2}>
+                <FormField label="Name" errorText={errors.name}>
+                  <Input value={name} onChange={({ detail }) => setName(detail.value)} />
+                </FormField>
+                <FormField label="Code" errorText={errors.code}>
+                  <Input value={code} onChange={({ detail }) => setCode(detail.value)} />
+                </FormField>
+              </ColumnLayout>
+              <FormField label="Rack height" errorText={errors.height}>
+                <RackHeightPicker value={uHeight} onChange={(v) => setUHeight(v)} />
+              </FormField>
+              <ColumnLayout columns={2}>
+                <FormField label="Max kW">
+                  <Input type="number" value={maxKw} onChange={({ detail }) => setMaxKw(detail.value)} />
+                </FormField>
+                <FormField label="Serial">
+                  <Input value={serial} onChange={({ detail }) => setSerial(detail.value)} />
+                </FormField>
+              </ColumnLayout>
+            </SpaceBetween>
           </Form>
-        </CardContent>
-      </Card>
-    </div>
+        </form>
+      </Container>
+    </ContentLayout>
   );
 }
 
 function CascadeRow({
-  label, value, disabled, items, onChange, onAdd,
-}: {
+  label, disabled, opt, options, errorText, onChange, onAdd,
+}: Readonly<{
   label: string;
-  value: string;
   disabled: boolean;
-  items: { id: string; code: string; name: string }[];
-  onChange: (v: string) => void;
+  opt: SelectProps.Option | null;
+  options: SelectProps.Option[];
+  errorText?: string;
+  onChange: (opt: SelectProps.Option) => void;
   onAdd: (label: string) => void;
-}) {
+}>) {
+  function quickAdd() {
+    const v = window.prompt(`New ${label.toLowerCase()} (used for both name and code):`);
+    if (v) onAdd(v.trim());
+  }
   return (
-    <FormItem>
-      <FormLabel>{label}</FormLabel>
-      <div className="flex gap-2">
-        <Select value={value} onValueChange={onChange} disabled={disabled}>
-          <SelectTrigger className="flex-1">
-            <SelectValue placeholder={disabled ? 'Pick the parent first' : `Select a ${label.toLowerCase()}…`} />
-          </SelectTrigger>
-          <SelectContent>
-            {items.map((o) => <SelectItem key={o.id} value={o.id}>{o.code} · {o.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <QuickAddButton disabled={disabled} label={label} onAdd={onAdd} />
-      </div>
-      {!disabled && items.length === 0 && (
-        <FormDescription>None yet — use <strong>+ New</strong> to create one.</FormDescription>
-      )}
-    </FormItem>
+    <FormField
+      label={label}
+      errorText={errorText}
+      description={!disabled && options.length === 0 ? `None yet — use + New to create one.` : undefined}
+    >
+      <SpaceBetween size="xs" direction="horizontal">
+        <Select
+          placeholder={disabled ? 'Pick the parent first' : `Select a ${label.toLowerCase()}…`}
+          selectedOption={opt}
+          onChange={({ detail }) => onChange(detail.selectedOption)}
+          options={options}
+          disabled={disabled}
+          expandToViewport
+        />
+        <Button disabled={disabled} iconName="add-plus" onClick={quickAdd}>New</Button>
+      </SpaceBetween>
+    </FormField>
   );
 }
 
-function QuickAddButton({ disabled, label, onAdd }: { disabled: boolean; label: string; onAdd: (label: string) => void }) {
-  return (
-    <Button
-      type="button" variant="outline" size="sm" disabled={disabled}
-      onClick={() => {
-        const v = window.prompt(`New ${label.toLowerCase()} (used for both name and code):`);
-        if (v) onAdd(v.trim());
-      }}
-    >
-      <Plus className="h-4 w-4" /> New
-    </Button>
-  );
-}

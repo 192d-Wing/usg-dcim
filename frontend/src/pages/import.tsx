@@ -1,20 +1,25 @@
+// Bulk import — Cloudscape page with site selector, drag-drop CSV
+// zone, preview Table, and import result summary.
+
 import { useMemo, useRef, useState } from 'react';
 import { useList, useGetIdentity } from '@refinedev/core';
-import {
-  Upload, FileText, AlertTriangle, CheckCircle2, Trash2, Download,
-} from 'lucide-react';
+import { toast } from 'sonner';
+
+import Alert from '@cloudscape-design/components/alert';
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { parseCsv } from '@/lib/csv';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { toast } from 'sonner';
 
 type Site = { id: string; code: string; name: string };
 type Rack = { id: string; name: string; code: string; site_id: string };
@@ -24,8 +29,6 @@ const ASSET_KINDS = [
   'storage', 'chassis', 'blade', 'patch_panel', 'other',
 ];
 
-// Required columns we map straight through. Anything in `header` not listed
-// here is preserved into metadata_json so users can carry custom fields.
 const REQUIRED = ['name', 'kind'] as const;
 const SUPPORTED = [
   'name', 'kind', 'hostname', 'manufacturer', 'model', 'serial', 'firmware',
@@ -35,11 +38,7 @@ const SUPPORTED = [
 ] as const;
 
 type Issue = { row: number; message: string };
-
-type Mapped = {
-  body: Record<string, unknown>;
-  issues: Issue[];
-};
+type Mapped = { body: Record<string, unknown>; issues: Issue[] };
 
 const SAMPLE = `name,kind,manufacturer,model,serial,hostname,rack_code,rack_position_u,rack_units,psu_count
 R01-srv1,server,Dell,PowerEdge R750,ABC123,r01-srv1.dc1.local,R01,1,2,2
@@ -50,7 +49,8 @@ R01-pdu-A,pdu,APC,AP8941,GHI789,,R01,,,
 export function ImportPage() {
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
   const sites = sitesRes.result.data ?? [];
-  const [siteId, setSiteId] = useState('');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
+  const siteId = siteOpt?.value ?? '';
   const racksRes = useList<Rack>({
     resource: 'inventory/racks',
     pagination: { pageSize: 500 },
@@ -96,9 +96,10 @@ export function ImportPage() {
   const validation = useMemo(() => mapRows(rows, racksByCode), [rows, racksByCode]);
 
   async function submit() {
-    if (!siteId) return toast.error('Pick a site first');
+    if (!siteId) { toast.error('Pick a site first'); return; }
     if (validation.issues.some((i) => i.message.startsWith('FATAL'))) {
-      return toast.error('Fix fatal issues before importing');
+      toast.error('Fix fatal issues before importing');
+      return;
     }
     setSubmitting(true);
     try {
@@ -125,13 +126,12 @@ export function ImportPage() {
 
   if (!canBulk) {
     return (
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Bulk import</h1>
-        <p className="text-sm text-muted-foreground">
-          You don't have <code className="font-mono">inventory:bulk</code>. Ask an admin for a role
-          that includes it (EnterpriseAdmin).
-        </p>
-      </div>
+      <ContentLayout header={<Header variant="h1">Bulk import</Header>}>
+        <Box color="text-status-inactive">
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>inventory:bulk</code>.
+          Ask an admin for a role that includes it (EnterpriseAdmin).
+        </Box>
+      </ContentLayout>
     );
   }
 
@@ -140,206 +140,193 @@ export function ImportPage() {
   const fatal = validation.issues.filter((i) => i.message.startsWith('FATAL'));
   const warnings = validation.issues.filter((i) => !i.message.startsWith('FATAL'));
 
+  const siteOptions: SelectProps.Option[] = sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` }));
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Bulk import — assets</h1>
-          <p className="text-sm text-muted-foreground">
-            Upsert by (manufacturer, serial). Required columns: <code className="font-mono">name</code>, <code className="font-mono">kind</code>.
-          </p>
-        </div>
-        <Button variant="outline" onClick={downloadSample}>
-          <Download className="h-4 w-4" /> Download sample
-        </Button>
-      </div>
-
-      <Card>
-        <CardContent className="p-4 space-y-3">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Target site</label>
-            <Select value={siteId} onValueChange={setSiteId}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Pick a site" /></SelectTrigger>
-              <SelectContent>
-                {sites.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              All rows will be assigned to this site. The optional <code className="font-mono">rack_code</code> column places them in a rack.
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
-      {!filename ? (
-        <button
-          type="button"
-          onClick={() => fileInput.current?.click()}
-          onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            const file = e.dataTransfer.files?.[0];
-            if (file) loadFile(file);
-          }}
-          className={`flex w-full flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed p-12 text-sm transition-colors ${
-            dragOver ? 'border-primary bg-primary/5' : 'border-muted hover:border-muted-foreground/50'
-          }`}
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          description={<>Upsert by (manufacturer, serial). Required columns: <code style={{ fontFamily: 'ui-monospace, monospace' }}>name</code>, <code style={{ fontFamily: 'ui-monospace, monospace' }}>kind</code>.</>}
+          actions={<Button iconName="download" onClick={downloadSample}>Download sample</Button>}
         >
-          <Upload className="h-8 w-8 text-muted-foreground" />
-          <span className="font-medium">Drop a CSV here, or click to choose</span>
-          <span className="text-xs text-muted-foreground">UTF-8 · header row required</span>
-          <input
-            ref={fileInput}
-            type="file"
-            accept=".csv,text/csv"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
+          Bulk import — assets
+        </Header>
+      }
+    >
+      <SpaceBetween size="l">
+        <Container header={<Header variant="h2">Target site</Header>}>
+          <FormField
+            label="Site"
+            description="All rows will be assigned to this site. The optional rack_code column places them in a rack."
+          >
+            <Select
+              placeholder="Pick a site"
+              selectedOption={siteOpt}
+              onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+              options={siteOptions}
+              expandToViewport
+            />
+          </FormField>
+        </Container>
+
+        {!filename ? (
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const file = e.dataTransfer.files?.[0];
               if (file) loadFile(file);
-              e.target.value = '';
             }}
-          />
-        </button>
-      ) : (
-        <Card>
-          <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileText className="h-4 w-4" /> {filename}
-              <Badge variant="secondary" className="ml-2">{rows.length} rows</Badge>
-            </CardTitle>
-            <Button variant="ghost" size="sm" onClick={clearFile}>
-              <Trash2 className="h-3.5 w-3.5" /> Clear
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {requiredMissing.length > 0 && (
-              <Issuebar
-                tone="danger"
-                title={`Missing required column${requiredMissing.length === 1 ? '' : 's'}`}
-                detail={requiredMissing.map((c) => `"${c}"`).join(', ')}
-              />
-            )}
-            {unknownColumns.length > 0 && (
-              <Issuebar
-                tone="warn"
-                title={`Unrecognized column${unknownColumns.length === 1 ? '' : 's'} (will be ignored)`}
-                detail={unknownColumns.map((c) => `"${c}"`).join(', ')}
-              />
-            )}
-            {fatal.length > 0 && <Issuebar tone="danger" title={`${fatal.length} fatal row issue${fatal.length === 1 ? '' : 's'}`} issues={fatal} />}
-            {warnings.length > 0 && <Issuebar tone="warn" title={`${warnings.length} warning${warnings.length === 1 ? '' : 's'}`} issues={warnings} />}
-
-            <div className="overflow-x-auto rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12 text-right">#</TableHead>
-                    {header.map((h) => (
-                      <TableHead key={h} className={SUPPORTED.includes(h as typeof SUPPORTED[number]) ? '' : 'text-muted-foreground line-through'}>
-                        {h}
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.slice(0, 10).map((r, i) => (
-                    <TableRow key={`row-${i}`}>
-                      <TableCell className="text-muted-foreground tabular-nums">{i + 1}</TableCell>
-                      {header.map((h) => (
-                        <TableCell key={h} className="text-xs font-mono whitespace-nowrap">{r[h]}</TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {rows.length > 10 && (
-                <p className="px-3 py-2 text-xs text-muted-foreground border-t">
-                  Showing 10 of {rows.length} rows. All will be sent on import.
-                </p>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={clearFile}>Cancel</Button>
-              <Button
-                onClick={submit}
-                disabled={submitting || !siteId || requiredMissing.length > 0 || fatal.length > 0 || rows.length === 0}
+            style={{
+              all: 'unset',
+              cursor: 'pointer',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              gap: 8, padding: 48, borderRadius: 12,
+              border: '2px dashed var(--color-border-divider-default, #555)',
+              background: dragOver ? 'var(--color-background-input-disabled, #2a2a2a)' : 'transparent',
+              textAlign: 'center',
+            }}
+          >
+            <Box fontSize="heading-m">Drop a CSV here, or click to choose</Box>
+            <Box color="text-status-inactive" fontSize="body-s">UTF-8 · header row required</Box>
+            <input
+              ref={fileInput}
+              type="file"
+              accept=".csv,text/csv"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) loadFile(file);
+                e.target.value = '';
+              }}
+            />
+          </button>
+        ) : (
+          <Container
+            header={
+              <Header
+                actions={
+                  <SpaceBetween size="xs" direction="horizontal">
+                    <Button onClick={clearFile} iconName="remove">Clear</Button>
+                    <Button
+                      variant="primary"
+                      loading={submitting}
+                      disabled={submitting || !siteId || requiredMissing.length > 0 || fatal.length > 0 || rows.length === 0}
+                      onClick={submit}
+                    >
+                      {submitting ? 'Importing…' : `Import ${rows.length} row${rows.length === 1 ? '' : 's'}`}
+                    </Button>
+                  </SpaceBetween>
+                }
+                counter={`(${rows.length} rows)`}
               >
-                {submitting ? 'Importing…' : `Import ${rows.length} row${rows.length === 1 ? '' : 's'}`}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                {filename}
+              </Header>
+            }
+          >
+            <SpaceBetween size="m">
+              {requiredMissing.length > 0 && (
+                <Alert type="error" header={`Missing required column${requiredMissing.length === 1 ? '' : 's'}`}>
+                  {requiredMissing.map((c) => `"${c}"`).join(', ')}
+                </Alert>
+              )}
+              {unknownColumns.length > 0 && (
+                <Alert type="warning" header={`Unrecognized column${unknownColumns.length === 1 ? '' : 's'} (will be ignored)`}>
+                  {unknownColumns.map((c) => `"${c}"`).join(', ')}
+                </Alert>
+              )}
+              {fatal.length > 0 && (
+                <Alert type="error" header={`${fatal.length} fatal row issue${fatal.length === 1 ? '' : 's'}`}>
+                  <ul style={{ marginTop: 4, paddingLeft: 20 }}>
+                    {fatal.slice(0, 8).map((i) => (
+                      <li key={`iss-${i.row}-${i.message}`}>row {i.row}: {i.message.replace(/^FATAL /, '')}</li>
+                    ))}
+                    {fatal.length > 8 && <li>…and {fatal.length - 8} more</li>}
+                  </ul>
+                </Alert>
+              )}
+              {warnings.length > 0 && (
+                <Alert type="warning" header={`${warnings.length} warning${warnings.length === 1 ? '' : 's'}`}>
+                  <ul style={{ marginTop: 4, paddingLeft: 20 }}>
+                    {warnings.slice(0, 8).map((i) => (
+                      <li key={`iss-${i.row}-${i.message}`}>row {i.row}: {i.message}</li>
+                    ))}
+                    {warnings.length > 8 && <li>…and {warnings.length - 8} more</li>}
+                  </ul>
+                </Alert>
+              )}
 
-      {result && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <CheckCircle2 className="h-4 w-4 text-success" /> Import complete
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="flex gap-2">
-              <Badge variant="success">{result.inserted} inserted</Badge>
-              <Badge variant="secondary">{result.updated} updated</Badge>
-              {result.failed > 0
-                ? <Badge variant="critical">{result.failed} failed</Badge>
-                : <Badge variant="success">0 failed</Badge>}
-            </div>
-            {result.errors.length > 0 && (
-              <div className="space-y-1">
-                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Errors</div>
-                <ul className="rounded-md border bg-muted/30 p-2 text-xs space-y-1 max-h-48 overflow-y-auto">
-                  {result.errors.map((e, i) => (
-                    <li key={`err-${i}`} className="font-mono">
-                      {e.serial ? `${e.serial}: ` : ''}<span className="text-destructive">{e.error}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-    </div>
+              <Table
+                variant="embedded"
+                items={rows.slice(0, 10).map((r, i) => ({ ...r, _idx: String(i) })) as Array<Record<string, string>>}
+                trackBy="_idx"
+                columnDefinitions={[
+                  {
+                    id: 'rowIdx', header: '#',
+                    cell: (r: Record<string, string>) => (
+                      <Box variant="span" color="text-status-inactive">{Number(r._idx) + 1}</Box>
+                    ),
+                    width: 60,
+                  },
+                  ...header.map((h) => ({
+                    id: h,
+                    header: SUPPORTED.includes(h as typeof SUPPORTED[number])
+                      ? h
+                      : <span style={{ textDecoration: 'line-through', opacity: 0.5 }}>{h}</span>,
+                    cell: (r: Record<string, string>) => (
+                      <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
+                        {r[h]}
+                      </span>
+                    ),
+                  })),
+                ]}
+              />
+              {rows.length > 10 && (
+                <Box color="text-status-inactive" fontSize="body-s">
+                  Showing 10 of {rows.length} rows. All will be sent on import.
+                </Box>
+              )}
+            </SpaceBetween>
+          </Container>
+        )}
+
+        {result && (
+          <Container header={<Header variant="h2">Import complete</Header>}>
+            <SpaceBetween size="s">
+              <SpaceBetween size="xs" direction="horizontal">
+                <StatusIndicator type="success">{`${result.inserted} inserted`}</StatusIndicator>
+                <Badge>{`${result.updated} updated`}</Badge>
+                {result.failed > 0
+                  ? <StatusIndicator type="error">{`${result.failed} failed`}</StatusIndicator>
+                  : <StatusIndicator type="success">0 failed</StatusIndicator>}
+              </SpaceBetween>
+              {result.errors.length > 0 && (
+                <Container header={<Header variant="h3">Errors</Header>}>
+                  <ul style={{ margin: 0, paddingLeft: 20, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+                    {result.errors.map((e) => (
+                      <li key={`${e.serial ?? ''}-${e.error}`}>
+                        {e.serial ? `${e.serial}: ` : ''}
+                        <Box variant="span" color="text-status-error">{e.error}</Box>
+                      </li>
+                    ))}
+                  </ul>
+                </Container>
+              )}
+            </SpaceBetween>
+          </Container>
+        )}
+      </SpaceBetween>
+    </ContentLayout>
   );
 }
 
-function Issuebar({
-  tone, title, detail, issues,
-}: {
-  tone: 'warn' | 'danger';
-  title: string;
-  detail?: string;
-  issues?: Issue[];
-}) {
-  const cls = tone === 'danger'
-    ? 'border-destructive/40 bg-destructive/10'
-    : 'border-warning/40 bg-warning/10';
-  const titleCls = tone === 'danger' ? 'text-destructive' : 'text-warning';
-  return (
-    <div className={`rounded-md border p-3 text-xs ${cls}`}>
-      <p className={`font-medium ${titleCls} flex items-center gap-1.5`}>
-        <AlertTriangle className="h-3.5 w-3.5" /> {title}
-      </p>
-      {detail && <p className="mt-1 text-foreground/80">{detail}</p>}
-      {issues && issues.length > 0 && (
-        <ul className="mt-1 list-disc pl-5 text-foreground/80 space-y-0.5">
-          {issues.slice(0, 8).map((i, k) => (
-            <li key={`iss-${k}`}>row {i.row}: {i.message.replace(/^FATAL /, '')}</li>
-          ))}
-          {issues.length > 8 && <li>…and {issues.length - 8} more</li>}
-        </ul>
-      )}
-    </div>
-  );
-}
+// ----------------------- CSV → API mapping -----------------------
 
 function mapRows(
   rows: Record<string, string>[],
@@ -348,7 +335,7 @@ function mapRows(
   const bodies: Record<string, unknown>[] = [];
   const issues: Issue[] = [];
   rows.forEach((r, idx) => {
-    const rowNum = idx + 2; // +1 for 1-index, +1 for header row
+    const rowNum = idx + 2;
     const m = mapRow(r, racksByCode, rowNum, issues);
     if (m) bodies.push(m.body);
   });
@@ -389,7 +376,6 @@ function mapRow(
     metadata_json: {},
   };
 
-  // Numeric coercions with row-level issues so the user sees what's wrong.
   for (const [col, key] of [
     ['rack_position_u', 'rack_position_u'],
     ['rack_units', 'rack_units'],
@@ -408,8 +394,6 @@ function mapRow(
   }
   if (body.rack_units === undefined && body.rack_position_u !== undefined) body.rack_units = 1;
 
-  // rack_code → rack_id lookup. Warn (don't fail) if unknown — the asset is
-  // still importable as unplaced.
   const rackCode = (r.rack_code ?? '').trim();
   if (rackCode) {
     const rk = racksByCode.get(rackCode.toLowerCase());
