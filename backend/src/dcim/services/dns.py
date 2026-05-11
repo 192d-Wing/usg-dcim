@@ -45,6 +45,7 @@ from ..models.dns import (
     DnsRecordType,
     DnsServer,
     DnsServerRole,
+    DnsView,
     DnsZone,
     DnsZoneKind,
 )
@@ -592,12 +593,31 @@ def render_zone_file(
 
 # ---------- Corefile rendering ----------
 
+def _view_expr(cidrs: Iterable[str]) -> str:
+    """Compose CoreDNS view-plugin `expr` for a set of client CIDRs.
+    `incidr(client_ip, '<cidr>')` is the expr-lang function CoreDNS
+    ships with the view plugin; ORing each CIDR gives the operator's
+    intent without needing a separate ACL plugin."""
+    parts = [f"incidr(client_ip, '{c}')" for c in cidrs if c]
+    return " || ".join(parts) if parts else "false"
+
+
+def _zone_view_filename(zone_name: str, view_name: str | None) -> str:
+    """Filename for a (zone, view) zone file. Default view (None)
+    keeps the legacy `<zone>.zone` shape so existing operators don't
+    see churn; per-view zones go to `<zone>.view-<name>.zone`."""
+    if view_name is None:
+        return f"{zone_name}.zone"
+    return f"{zone_name}.view-{view_name}.zone"
+
+
 def render_corefile_auth(
     zone_names: Iterable[str],
     *,
     zones_dir: str,
     keys_dir: str | None = None,
     dnssec_keys_by_zone: dict[str, list[str]] | None = None,
+    views_by_zone: dict[str, list[dict]] | None = None,
 ) -> str:
     """Authoritative Corefile: one `file` block per zone, plus health,
     prometheus, errors, log.
@@ -612,16 +632,21 @@ def render_corefile_auth(
     is provided, the renderer emits a `dnssec { key file ... }`
     directive in that zone's block so CoreDNS signs responses on the
     fly using the operator's KSK + ZSK material.
+
+    `views_by_zone` maps each zone with split-horizon configured to a
+    priority-sorted list of view dicts (`{name, cidrs}`). When set,
+    the renderer emits one `<zone>:53` block per view scoped by the
+    CoreDNS `view` plugin's `expr` directive, plus a fallback block
+    serving the default zone file for clients that don't match any
+    view's CIDR list. CoreDNS picks the first matching block on the
+    fly (priority order is enforced by the order we write blocks).
     """
     base = zones_dir.rstrip("/")
     keys_base = keys_dir.rstrip("/") if keys_dir else None
     dnssec_map = dnssec_keys_by_zone or {}
-    blocks = []
+    views_map = views_by_zone or {}
+    blocks: list[str] = []
     for name in sorted(zone_names):
-        # Always emit the DNSSEC stanza when keys exist for the zone —
-        # CoreDNS will include DNSKEY records in responses and sign
-        # the rrsets on the fly. Retired keys travel here too so
-        # cached validators keep working past a rotation.
         dnssec_block = ""
         if keys_base and dnssec_map.get(name):
             key_lines = "\n".join(
@@ -629,6 +654,29 @@ def render_corefile_auth(
                 for kb in sorted(dnssec_map[name])
             )
             dnssec_block = f"    dnssec {{\n{key_lines}\n    }}\n"
+        zone_views = views_map.get(name) or []
+        # One block per view, then a default block as the fallthrough.
+        # Operators put narrower CIDRs in the higher-priority view; we
+        # emit blocks in that same order so CoreDNS's first-match
+        # wins. Each view points at its own zone file so per-view
+        # records don't bleed across.
+        for view in zone_views:
+            view_file = _zone_view_filename(name, view["name"])
+            blocks.append(
+                f"{name}:53 {{\n"
+                f"    view {view['name']} {{\n"
+                f"        expr {_view_expr(view['cidrs'])}\n"
+                f"    }}\n"
+                f"    file {base}/{view_file}\n"
+                f"{dnssec_block}"
+                f"    log\n"
+                f"    errors\n"
+                f"}}"
+            )
+        # Default / fallthrough block — always last for the zone so
+        # the view-scoped blocks above win when their expr matches.
+        # Only this block carries prometheus + health to avoid
+        # double-registering them per view.
         blocks.append(
             f"{name}:53 {{\n"
             f"    file {base}/{name}.zone\n"
@@ -884,6 +932,74 @@ async def _records_by_zone(
     return grouped
 
 
+async def _views_and_zone_files_for_split_horizon(
+    db: AsyncSession,
+    zones: Iterable[DnsZone],
+    records_by_zone: dict[UUID, list[DnsRecord]],
+    unhealthy_check_ids: set,
+) -> tuple[dict[str, str], dict[str, list[dict]]]:
+    """Build (zone_files, views_by_zone) for any zone whose records
+    bind to a DnsView. Returns:
+
+      - zone_files: filename -> zone-file text. Includes both per-view
+        files (records matching a specific view + null-view records)
+        AND a default file (only null-view records) — the latter is
+        served to clients that don't match any view's CIDR list.
+      - views_by_zone: zone-name -> list of view dicts ordered by
+        priority (lower first) for the Corefile renderer.
+
+    Zones without any view-bound records yield neither and fall back
+    to the legacy single-file render handled by the caller.
+    """
+    zone_files: dict[str, str] = {}
+    views_by_zone: dict[str, list[dict]] = {}
+    # Find which zones actually have view-bound records — for zones
+    # with none we let the caller handle the legacy render path.
+    fabric_ids = {z.fabric_id for z in zones}
+    if not fabric_ids:
+        return zone_files, views_by_zone
+    all_views = list((
+        await db.execute(
+            select(DnsView)
+            .where(DnsView.fabric_id.in_(fabric_ids))
+            .order_by(DnsView.priority.asc(), DnsView.name.asc())
+        )
+    ).scalars().all())
+    views_by_fabric: dict[UUID, list[DnsView]] = {}
+    for v in all_views:
+        views_by_fabric.setdefault(v.fabric_id, []).append(v)
+    for z in zones:
+        recs = records_by_zone.get(z.id, [])
+        if not any(r.view_id is not None for r in recs):
+            continue
+        zone_views = views_by_fabric.get(z.fabric_id, [])
+        if not zone_views:
+            continue  # records reference views but none exist — render default only
+        # Default file: only null-view records (the "served to
+        # everyone else" answer set).
+        default_records = [r for r in recs if r.view_id is None]
+        zone_files[_zone_view_filename(z.name, None)] = render_zone_file(
+            z, default_records, unhealthy_check_ids=unhealthy_check_ids,
+        )
+        # Per-view files: records matching that view OR null-view
+        # (so a view sees both its overrides and the default rrset).
+        per_zone_views: list[dict] = []
+        for view in zone_views:
+            view_recs = [
+                r for r in recs
+                if r.view_id == view.id or r.view_id is None
+            ]
+            zone_files[_zone_view_filename(z.name, view.name)] = render_zone_file(
+                z, view_recs, unhealthy_check_ids=unhealthy_check_ids,
+            )
+            per_zone_views.append({
+                "name": view.name,
+                "cidrs": list(view.match_cidrs or []),
+            })
+        views_by_zone[z.name] = per_zone_views
+    return zone_files, views_by_zone
+
+
 async def _dnssec_artifacts_for_zones(
     db: AsyncSession, zones: Iterable[DnsZone],
 ) -> tuple[dict[str, str], dict[str, list[str]]]:
@@ -1063,13 +1179,24 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
                 )
             )).all()
         }
-        zone_files = {
-            _filename_for_zone(z.name): render_zone_file(
+        # Split-horizon: zones with view-bound records get one zone
+        # file per view (filtered to that view's records + null-view
+        # defaults) plus a default file. Zones without view-bound
+        # records use the legacy single-file path.
+        split_files, views_by_zone = await _views_and_zone_files_for_split_horizon(
+            db, zones, records_by_zone, unhealthy,
+        )
+        zone_files: dict[str, str] = {}
+        for z in zones:
+            if z.name in views_by_zone:
+                # split_files already contains both the default and
+                # per-view files keyed by their proper filenames.
+                continue
+            zone_files[_filename_for_zone(z.name)] = render_zone_file(
                 z, records_by_zone.get(z.id, []),
                 unhealthy_check_ids=unhealthy,
             )
-            for z in zones
-        }
+        zone_files.update(split_files)
         key_files, dnssec_keys_by_zone = await _dnssec_artifacts_for_zones(db, zones)
         # Path matches the site-dns compose layout: the dns-state
         # volume is mounted at /var/lib/dcim-dns in both the collector
@@ -1082,6 +1209,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             zones_dir=zones_dir_path,
             keys_dir=keys_dir_path if dnssec_keys_by_zone else None,
             dnssec_keys_by_zone=dnssec_keys_by_zone or None,
+            views_by_zone=views_by_zone or None,
         )
         gobgp: dict | None = None
     else:
