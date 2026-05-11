@@ -45,6 +45,15 @@ dns:
   # to /api/v1/dns/servers/{id}/metrics for the Servers tab dashboard.
   metrics_enabled: true
   metrics_interval_seconds: 60
+  # Run DnsHealthCheck probes from this collector. Useful when probe
+  # targets live on site networks central can't reach (the central
+  # worker falls back to its own probes when the collector goes
+  # quiet, so a collector that drops offline doesn't strand status).
+  # Set health_check_fabric_id to the fabric whose checks this site
+  # owns — leaving it blank leaves probes to central.
+  health_checks_enabled: false
+  # health_check_fabric_id: 00000000-0000-0000-0000-000000000000
+  health_check_poll_interval_seconds: 60
   servers:
     - id: 00000000-0000-0000-0000-000000000000   # auth DnsServer
       role: auth

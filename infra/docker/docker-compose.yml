@@ -88,6 +88,13 @@ services:
       DCIM_OIDC_CLIENT_ID: dcim-spa
       DCIM_OIDC_CLIENT_SECRET: dev-secret-change-me
       DCIM_OIDC_REDIRECT_URI: http://localhost:5173/login/callback
+      # DNSSEC private-key encryption secret. New DnsKey rows get
+      # Fernet-encrypted at rest when this is set. Pass through from
+      # the shell env so the dev .env can keep an existing key (or
+      # generate one with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # ). Optional in dev; required for any real production zone.
+      DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
     ports: ["8000:8000"]
     depends_on:
       postgres: { condition: service_healthy }
@@ -105,6 +112,10 @@ services:
       DCIM_POSTGRES_DSN: postgresql+asyncpg://dcim:dcim@postgres:5432/dcim
       DCIM_REDIS_DSN: redis://redis:6379/0
       DCIM_ELASTIC_URL: http://elastic:9200
+      # Worker shares the DNSSEC secret with the api so the ZSK
+      # rotation cron can decrypt + re-encrypt without round-tripping
+      # through central. Same shell-env passthrough as api above.
+      DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
     depends_on:
       api: { condition: service_started }
 

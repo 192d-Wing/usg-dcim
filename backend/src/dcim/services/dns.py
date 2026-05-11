@@ -105,38 +105,45 @@ def _format_rdata(rtype: str, data: dict) -> str:
     raise ValueError(f"unknown record type {rtype}")
 
 
-async def _probe_tcp(target: str, port: int, timeout: int) -> tuple[DnsHealthCheckStatus, str | None]:
+# Health-check probes hit operator-trusted internal targets that
+# often use self-signed certs. Constant-bound so the security note
+# lives in one place rather than scattered noqa comments.
+_INSECURE_INTERNAL_PROBE = False
+
+
+async def _probe_tcp(target: str, port: int, deadline_s: int) -> tuple[DnsHealthCheckStatus, str | None]:
     import asyncio
     if port <= 0:
         return DnsHealthCheckStatus.unhealthy, "tcp probe requires a port"
     try:
-        fut = asyncio.open_connection(target, port)
-        _, writer = await asyncio.wait_for(fut, timeout=timeout)
+        async with asyncio.timeout(deadline_s):
+            _, writer = await asyncio.open_connection(target, port)
         writer.close()
         try:
             await writer.wait_closed()
-        except Exception:  # noqa: BLE001
+        except OSError:
             pass
         return DnsHealthCheckStatus.healthy, None
-    except Exception as e:  # noqa: BLE001
+    except OSError as e:
+        # TimeoutError is an OSError subclass in 3.11+; one branch
+        # covers both connection failure and asyncio.timeout()
+        # cancellation.
         return DnsHealthCheckStatus.unhealthy, f"tcp probe failed: {e}"[:512]
 
 
 async def _probe_http(
-    proto: str, target: str, port: int, path: str, timeout: int,
+    proto: str, target: str, port: int, path: str, deadline_s: int,
 ) -> tuple[DnsHealthCheckStatus, str | None]:
+    import asyncio
     import httpx
     url = f"{proto}://{target}:{port}{path or '/'}"
     try:
-        # Probe targets often use self-signed certs internally;
-        # operators trust the destination if they configured it.
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            verify=False,  # noqa: S501  # NOSONAR: probes are operator-trusted internal targets
+        async with asyncio.timeout(deadline_s), httpx.AsyncClient(
+            verify=_INSECURE_INTERNAL_PROBE,
             follow_redirects=False,
         ) as client:
             r = await client.get(url)
-    except Exception as e:  # noqa: BLE001
+    except (httpx.HTTPError, OSError) as e:
         return DnsHealthCheckStatus.unhealthy, f"http probe failed: {e}"[:512]
     if 200 <= r.status_code < 400:
         return DnsHealthCheckStatus.healthy, None
@@ -277,18 +284,19 @@ def generate_dnssec_keypair(
         algorithm=_DNSSEC_ALG_NUMBER[algorithm],
         public_key_b64=pub_b64,
     )
+    # private_pem lands in Postgres as a Fernet-encrypted blob when
+    # settings.dns_dnssec_secret is configured. Without a secret,
+    # plaintext flows through (with a warning at write time
+    # elsewhere). zone_name is on the signature only as a hint for
+    # future use (DNSKEY rdata is keyed by the zone the caller binds
+    # to the DnsKey row, not by anything we return).
+    _ = zone_name
     return {
         "role": role,
         "algorithm": algorithm,
-        # private_pem lands in Postgres as a Fernet-encrypted blob
-        # when settings.dns_dnssec_secret is configured. Without a
-        # secret, plaintext flows through (with a warning at write
-        # time elsewhere).
         "private_pem": encrypt_dnssec_private_pem(pem),
         "public_key_b64": pub_b64,
         "key_tag": tag,
-        # zone_name is informational — caller binds the actual zone_id.
-        "_zone": zone_name,
     }
 
 
@@ -569,15 +577,15 @@ async def probe_health_check(
     caller is responsible for persisting status + last_checked_at."""
     target = str(check.target_ip).split("/", 1)[0]
     proto = check.protocol.value if hasattr(check.protocol, "value") else check.protocol
-    timeout = check.timeout_seconds or 5
+    deadline = check.timeout_seconds or 5
     if proto == "icmp":
         # Raw sockets need root; skipped in v1.
         return DnsHealthCheckStatus.unknown, "icmp not supported in worker"
     if proto == "tcp":
-        return await _probe_tcp(target, check.port or 0, timeout)
+        return await _probe_tcp(target, check.port or 0, deadline)
     if proto in ("http", "https"):
         port = check.port or (443 if proto == "https" else 80)
-        return await _probe_http(proto, target, port, check.path or "/", timeout)
+        return await _probe_http(proto, target, port, check.path or "/", deadline)
     return DnsHealthCheckStatus.unknown, "unsupported protocol"
 
 

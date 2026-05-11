@@ -49,6 +49,7 @@ import Tabs from '@cloudscape-design/components/tabs';
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
   enclave: string | null; classification: string | null;
+  dns_recursive_upstreams: string[] | null;
 };
 type Vrf = {
   id: string; fabric_id: string; name: string;
@@ -541,6 +542,7 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
   });
   const data = result.data ?? [];
   const [createOpen, setCreateOpen] = useState(false);
+  const [editFabric, setEditFabric] = useState<Fabric | null>(null);
 
   return (
     <>
@@ -596,6 +598,24 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
               </Box>
             ),
           },
+          {
+            id: 'dns_upstreams', header: 'DNS upstreams',
+            cell: (f) => f.dns_recursive_upstreams && f.dns_recursive_upstreams.length > 0
+              ? <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{f.dns_recursive_upstreams.join(', ')}</span>
+              : <Box variant="span" color="text-status-inactive" fontSize="body-s">system default</Box>,
+            width: 240,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (f: Fabric) => (
+              <Button
+                iconName="edit" variant="inline-icon"
+                ariaLabel={`Edit ${f.name}`}
+                onClick={() => setEditFabric(f)}
+              />
+            ),
+            width: 60,
+          }] : []),
         ]}
         empty={
           <Box textAlign="center" color="inherit" padding="l">
@@ -616,16 +636,43 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
           <FabricForm onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
         </Modal>
       )}
+      {canWrite && (
+        <Modal
+          visible={editFabric !== null}
+          onDismiss={() => setEditFabric(null)}
+          header="Edit fabric"
+          size="medium"
+        >
+          {editFabric && (
+            <FabricForm
+              fabric={editFabric}
+              onSaved={async () => { setEditFabric(null); await tableQuery.refetch(); }}
+            />
+          )}
+        </Modal>
+      )}
     </>
   );
 }
 
-function FabricForm({ onSaved }: { onSaved: () => void }) {
-  const [name, setName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [enclave, setEnclave] = useState('');
-  const [classification, setClassification] = useState('');
-  const [description, setDescription] = useState('');
+function FabricForm({
+  fabric, onSaved,
+}: {
+  fabric?: Fabric;
+  onSaved: () => void;
+}) {
+  const editing = fabric != null;
+  const [name, setName] = useState(fabric?.name ?? '');
+  const [slug, setSlug] = useState(fabric?.slug ?? '');
+  const [enclave, setEnclave] = useState(fabric?.enclave ?? '');
+  const [classification, setClassification] = useState(fabric?.classification ?? '');
+  const [description, setDescription] = useState(fabric?.description ?? '');
+  // Per-fabric DNS recursive upstreams — the recursive Corefile reads
+  // this list when set, otherwise falls back to the system-wide
+  // dns_recursive_upstreams setting. One IP[:port] per line.
+  const [upstreams, setUpstreams] = useState(
+    (fabric?.dns_recursive_upstreams ?? []).join('\n'),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -633,20 +680,34 @@ function FabricForm({ onSaved }: { onSaved: () => void }) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!name.trim()) errs.name = 'Name required';
-    if (!slug.trim() || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(slug)) {
+    if (!editing && (!slug.trim() || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(slug))) {
       errs.slug = 'lowercase alphanumeric + hyphens';
     }
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
+    const upstreamList = upstreams
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const body: Record<string, unknown> = {
+      name,
+      description: description || null,
+      enclave: enclave || null,
+      classification: classification || null,
+      // Empty list -> NULL on the backend so the renderer falls back
+      // to settings.dns_recursive_upstreams.
+      dns_recursive_upstreams: upstreamList.length > 0 ? upstreamList : null,
+    };
     try {
-      await http.post('/ipam/fabrics', {
-        name, slug,
-        description: description || null,
-        enclave: enclave || null,
-        classification: classification || null,
-      });
-      toast.success('Fabric created (with default VRF)');
+      if (editing) {
+        await http.patch(`/ipam/fabrics/${fabric!.id}`, body);
+        toast.success('Fabric updated');
+      } else {
+        body.slug = slug;
+        await http.post('/ipam/fabrics', body);
+        toast.success('Fabric created (with default VRF)');
+      }
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); } finally { setSubmitting(false); }
   }
@@ -655,7 +716,7 @@ function FabricForm({ onSaved }: { onSaved: () => void }) {
       <Form
         actions={
           <Button variant="primary" formAction="submit" loading={submitting}>
-            {submitting ? 'Saving…' : 'Create'}
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create'}
           </Button>
         }
       >
@@ -663,8 +724,17 @@ function FabricForm({ onSaved }: { onSaved: () => void }) {
           <FormField label="Name" errorText={errors.name}>
             <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. Production" />
           </FormField>
-          <FormField label="Slug" errorText={errors.slug}>
-            <Input value={slug} onChange={({ detail }) => setSlug(detail.value)} placeholder="prod" />
+          <FormField
+            label="Slug"
+            errorText={errors.slug}
+            description={editing ? "Slug is immutable after creation." : undefined}
+          >
+            <Input
+              value={slug}
+              onChange={({ detail }) => setSlug(detail.value)}
+              placeholder="prod"
+              disabled={editing}
+            />
           </FormField>
           <ColumnLayout columns={2}>
             <FormField label="Enclave">
@@ -676,6 +746,31 @@ function FabricForm({ onSaved }: { onSaved: () => void }) {
           </ColumnLayout>
           <FormField label="Description">
             <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
+          </FormField>
+          <FormField
+            label="DNS recursive upstreams (optional)"
+            description={
+              <>
+                One <code>ip</code> or <code>ip:port</code> per line.
+                Empty falls back to the system-wide
+                <code> dns_recursive_upstreams</code> setting.
+              </>
+            }
+          >
+            <textarea
+              value={upstreams}
+              onChange={(e) => setUpstreams(e.target.value)}
+              rows={4}
+              placeholder={'10.7.0.53\n10.7.0.54:5353'}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
+            />
           </FormField>
         </SpaceBetween>
       </Form>
