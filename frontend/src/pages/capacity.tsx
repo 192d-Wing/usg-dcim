@@ -1,22 +1,25 @@
+// Capacity & free space — Cloudscape filter Container + results Table.
+
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useList } from '@refinedev/core';
 import { useQuery } from '@tanstack/react-query';
-import { Search } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { CapacityBar } from '@/components/capacity-bar';
-import { Badge } from '@/components/ui/badge';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
+import { CapacityBar } from '@/components/capacity-bar';
 
 type Site = { id: string; code: string; name: string };
 type FreeSpaceRow = {
@@ -31,21 +34,27 @@ type FreeSpaceRow = {
   free_runs: { start_u: number; length: number }[];
 };
 
+const ANY_SITE_OPT: SelectProps.Option = { value: 'all', label: 'Any site' };
+
 export function CapacityPage() {
   const nav = useNavigate();
   const [minU, setMinU] = useState('1');
-  const [siteId, setSiteId] = useState('all');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option>(ANY_SITE_OPT);
   const [minKw, setMinKw] = useState('');
 
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
   const sites = sitesRes.result.data ?? [];
+  const siteOptions: SelectProps.Option[] = [
+    ANY_SITE_OPT,
+    ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
+  ];
 
   const params: Record<string, string | number> = { u: Number(minU) || 1, limit: 200 };
-  if (siteId !== 'all') params.site_id = siteId;
+  if (siteOpt.value !== ANY_SITE_OPT.value) params.site_id = siteOpt.value!;
   if (minKw && Number(minKw) > 0) params.min_kw_headroom = Number(minKw);
 
   const result = useQuery({
-    queryKey: ['free-space', minU, siteId, minKw],
+    queryKey: ['free-space', minU, siteOpt.value, minKw],
     queryFn: async () => {
       const r = await http.get<{ racks: FreeSpaceRow[]; count: number }>('/dashboards/free-space', { params });
       return r.data;
@@ -54,143 +63,135 @@ export function CapacityPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Capacity & free space</h1>
-        <p className="text-sm text-muted-foreground">
-          Find racks with enough contiguous U slots — and optional kW headroom — for an upcoming install.
-        </p>
-      </div>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          description="Find racks with enough contiguous U slots — and optional kW headroom — for an upcoming install."
+        >
+          Capacity & free space
+        </Header>
+      }
+    >
+      <SpaceBetween size="l">
+        <Container header={<Header variant="h2">Search</Header>}>
+          <ColumnLayout columns={4}>
+            <FormField label="Need at least (U)">
+              <Input
+                type="number"
+                value={minU}
+                onChange={({ detail }) => setMinU(detail.value)}
+              />
+            </FormField>
+            <FormField label="Site">
+              <Select
+                selectedOption={siteOpt}
+                onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+                options={siteOptions}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="Min kW headroom (optional)">
+              <Input
+                type="number"
+                value={minKw}
+                onChange={({ detail }) => setMinKw(detail.value)}
+                placeholder="e.g. 2.5"
+              />
+            </FormField>
+            <FormField label=" ">
+              <Button
+                onClick={() => { setMinU('1'); setSiteOpt(ANY_SITE_OPT); setMinKw(''); }}
+              >
+                Reset
+              </Button>
+            </FormField>
+          </ColumnLayout>
+        </Container>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Search className="h-4 w-4" /> Search
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="min-u">Need at least (U)</Label>
-            <Input
-              id="min-u" type="number" min={1} max={60}
-              value={minU} onChange={(e) => setMinU(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="site">Site</Label>
-            <Select value={siteId} onValueChange={setSiteId}>
-              <SelectTrigger id="site"><SelectValue placeholder="Any site" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Any site</SelectItem>
-                {sites.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="min-kw">Min kW headroom (optional)</Label>
-            <Input
-              id="min-kw" type="number" step="0.1" placeholder="e.g. 2.5"
-              value={minKw} onChange={(e) => setMinKw(e.target.value)}
-            />
-          </div>
-          <div className="flex items-end">
-            <Button
-              variant="outline"
-              onClick={() => { setMinU('1'); setSiteId('all'); setMinKw(''); }}
-              className="w-full"
+        <Table<FreeSpaceRow>
+          variant="container"
+          loading={result.isLoading}
+          loadingText="Searching racks…"
+          items={result.data?.racks ?? []}
+          trackBy="rack_id"
+          onRowClick={({ detail }) => nav(`/racks/${detail.item.rack_id}`)}
+          header={
+            <Header
+              counter={`(${result.data?.count ?? 0})`}
+              description="Sorted by largest contiguous gap"
             >
-              Reset
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-          <CardTitle className="text-base">
-            {result.data ? `${result.data.count} matching rack${result.data.count === 1 ? '' : 's'}` : 'Results'}
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">Sorted by largest contiguous gap</p>
-        </CardHeader>
-        <CardContent className="p-0">
-          {result.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (result.data?.racks.length ?? 0) === 0 ? (
-            <p className="p-6 text-sm text-muted-foreground">
+              Matching racks
+            </Header>
+          }
+          columnDefinitions={[
+            {
+              id: 'rack', header: 'Rack',
+              cell: (r) => (
+                <SpaceBetween size="xxxs">
+                  <span style={{ fontWeight: 500 }}>{r.code} · {r.name}</span>
+                  <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                    site <span style={{ fontFamily: 'ui-monospace, monospace' }}>{r.site_id.slice(0, 8)}…</span>
+                  </Box>
+                </SpaceBetween>
+              ),
+            },
+            {
+              id: 'gap', header: 'Largest gap',
+              cell: (r) => (
+                <Badge color={r.biggest_contiguous_free >= 4 ? 'green' : 'grey'}>
+                  {`${r.biggest_contiguous_free}U`}
+                </Badge>
+              ),
+              width: 130,
+            },
+            {
+              id: 'free', header: 'Free slots',
+              cell: (r) => (
+                <SpaceBetween size="xxs" direction="horizontal">
+                  {r.free_runs.slice(0, 4).map((run) => (
+                    <Badge key={`${run.start_u}-${run.length}`}>
+                      {`${run.length}U @ U${run.start_u}`}
+                    </Badge>
+                  ))}
+                  {r.free_runs.length > 4 && <Badge>{`+${r.free_runs.length - 4}`}</Badge>}
+                </SpaceBetween>
+              ),
+            },
+            {
+              id: 'u', header: 'U utilization',
+              cell: (r) => (
+                <CapacityBar used={r.u_used} total={r.u_total} leftLabel={`${r.u_used}/${r.u_total} U`} compact />
+              ),
+              width: 220,
+            },
+            {
+              id: 'kw', header: 'kW utilization',
+              cell: (r) => r.kw_max === null
+                ? <Box variant="span" color="text-status-inactive" fontSize="body-s">Unrated</Box>
+                : (
+                  <CapacityBar
+                    used={r.kw_current ?? 0}
+                    total={r.kw_max}
+                    unknown={r.kw_current === null}
+                    leftLabel={
+                      r.kw_current === null
+                        ? `—/${r.kw_max} kW`
+                        : `${r.kw_current.toFixed(1)}/${r.kw_max} kW`
+                    }
+                    compact
+                  />
+                ),
+              width: 220,
+            },
+          ]}
+          empty={
+            <Box textAlign="center" color="inherit" padding="m">
               No racks match. Try lowering the U requirement or removing the kW headroom filter.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Rack</TableHead>
-                  <TableHead className="w-24">Largest gap</TableHead>
-                  <TableHead>Free slots</TableHead>
-                  <TableHead className="w-48">U utilization</TableHead>
-                  <TableHead className="w-48">kW utilization</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {result.data?.racks.map((r) => (
-                  <TableRow key={r.rack_id} onClick={() => nav(`/racks/${r.rack_id}`)} className="cursor-pointer">
-                    <TableCell>
-                      <div className="font-medium">{r.code} · {r.name}</div>
-                      <div className="text-[11px] text-muted-foreground">
-                        site <span className="font-mono">{r.site_id.slice(0, 8)}…</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={r.biggest_contiguous_free >= 4 ? 'success' : 'secondary'} className="font-mono">
-                        {r.biggest_contiguous_free}U
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {r.free_runs.slice(0, 4).map((run) => (
-                          <Badge key={`${run.start_u}-${run.length}`} variant="outline" className="font-mono text-[10px]">
-                            {run.length}U @ U{run.start_u}
-                          </Badge>
-                        ))}
-                        {r.free_runs.length > 4 && (
-                          <Badge variant="outline" className="text-[10px]">+{r.free_runs.length - 4}</Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <CapacityBar
-                        used={r.u_used} total={r.u_total}
-                        leftLabel={`${r.u_used}/${r.u_total} U`}
-                        compact
-                      />
-                    </TableCell>
-                    <TableCell>
-                      {r.kw_max === null ? (
-                        <span className="text-xs text-muted-foreground">Unrated</span>
-                      ) : (
-                        <CapacityBar
-                          used={r.kw_current ?? 0}
-                          total={r.kw_max}
-                          unknown={r.kw_current === null}
-                          leftLabel={
-                            r.kw_current === null
-                              ? `—/${r.kw_max} kW`
-                              : `${r.kw_current.toFixed(1)}/${r.kw_max} kW`
-                          }
-                          compact
-                        />
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+            </Box>
+          }
+        />
+      </SpaceBetween>
+    </ContentLayout>
   );
 }

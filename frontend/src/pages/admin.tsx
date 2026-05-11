@@ -1,33 +1,31 @@
+// Admin — Users + Roles management with assignments manager.
+// Cloudscape Tabs + Table + Modal + Form everywhere.
+
 import { useState } from 'react';
 import { useTable, useGetIdentity, useList } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import {
-  Plus, Pencil, Power, Users as UsersIcon, ShieldCheck, Trash2, X,
-} from 'lucide-react';
+import { toast } from 'sonner';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import Checkbox from '@cloudscape-design/components/checkbox';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import Pagination from '@cloudscape-design/components/pagination';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+import Tabs from '@cloudscape-design/components/tabs';
+
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { toast } from 'sonner';
 
 type User = {
   id: string; email: string; display_name: string | null;
@@ -43,8 +41,16 @@ type Assignment = {
   id: string; user_id: string; role_id: string;
   role_name: string; scopes: ScopeRow[];
 };
+type Site = { id: string; code: string; name: string };
 
-const SCOPE_TYPES = ['global', 'region', 'site', 'site_group', 'enclave', 'organization'];
+const SCOPE_TYPES: SelectProps.Option[] = [
+  { value: 'global', label: 'global' },
+  { value: 'region', label: 'region' },
+  { value: 'site', label: 'site' },
+  { value: 'site_group', label: 'site_group' },
+  { value: 'enclave', label: 'enclave' },
+  { value: 'organization', label: 'organization' },
+];
 
 export function AdminPage() {
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
@@ -54,32 +60,29 @@ export function AdminPage() {
 
   if (!canUsers && !canRoles) {
     return (
-      <div className="space-y-2">
-        <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-        <p className="text-sm text-muted-foreground">
-          You don't have <code className="font-mono">users:manage</code> or{' '}
-          <code className="font-mono">roles:manage</code>.
-        </p>
-      </div>
+      <ContentLayout header={<Header variant="h1">Admin</Header>}>
+        <Box color="text-status-inactive">
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>users:manage</code> or{' '}
+          <code style={{ fontFamily: 'ui-monospace, monospace' }}>roles:manage</code>.
+        </Box>
+      </ContentLayout>
     );
   }
 
-  const initial = canUsers ? 'users' : 'roles';
+  const tabs: { id: string; label: string; content: React.ReactNode }[] = [];
+  if (canUsers) tabs.push({ id: 'users', label: 'Users', content: <UsersTab /> });
+  if (canRoles) tabs.push({ id: 'roles', label: 'Roles', content: <RolesTab myCapabilities={myCaps} /> });
+
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-        <p className="text-sm text-muted-foreground">User accounts, roles, and role assignments</p>
-      </div>
-      <Tabs defaultValue={initial}>
-        <TabsList>
-          {canUsers && <TabsTrigger value="users"><UsersIcon className="h-3.5 w-3.5" /> Users</TabsTrigger>}
-          {canRoles && <TabsTrigger value="roles"><ShieldCheck className="h-3.5 w-3.5" /> Roles</TabsTrigger>}
-        </TabsList>
-        {canUsers && <TabsContent value="users" className="pt-3"><UsersTab /></TabsContent>}
-        {canRoles && <TabsContent value="roles" className="pt-3"><RolesTab myCapabilities={myCaps} /></TabsContent>}
-      </Tabs>
-    </div>
+    <ContentLayout
+      header={
+        <Header variant="h1" description="User accounts, roles, and role assignments.">
+          Admin
+        </Header>
+      }
+    >
+      <Tabs tabs={tabs} />
+    </ContentLayout>
   );
 }
 
@@ -107,184 +110,142 @@ function UsersTab() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4" /> New user</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>New user</DialogTitle></DialogHeader>
-            <UserForm onSaved={async () => { setCreateOpen(false); await refresh(); }} />
-          </DialogContent>
-        </Dialog>
-      </div>
+    <SpaceBetween size="l">
+      <Table<User>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading users…"
+        items={data}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${data.length})`}
+            actions={
+              <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                New user
+              </Button>
+            }
+          >
+            Users
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'email', header: 'Email', cell: (u) => <span style={{ fontWeight: 500 }}>{u.email}</span> },
+          { id: 'display_name', header: 'Display name', cell: (u) => u.display_name ?? '—' },
+          {
+            id: 'sso', header: 'SSO',
+            cell: (u) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{u.sso_subject ?? '—'}</span>,
+          },
+          {
+            id: 'last_login', header: 'Last login',
+            cell: (u) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{formatDate(u.last_login_at)}</Box>,
+            width: 200,
+          },
+          {
+            id: 'status', header: 'Status',
+            cell: (u) => u.is_active
+              ? <StatusIndicator type="success">active</StatusIndicator>
+              : <StatusIndicator type="stopped">inactive</StatusIndicator>,
+            width: 120,
+          },
+          {
+            id: 'actions', header: '',
+            cell: (u) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button onClick={() => setAssigningTo(u)}>Roles</Button>
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditing(u)} ariaLabel={`Edit ${u.email}`} />
+                <Button iconName={u.is_active ? 'status-stopped' : 'status-positive'}
+                  variant="inline-icon" onClick={() => toggleActive(u)}
+                  ariaLabel={u.is_active ? `Deactivate ${u.email}` : `Activate ${u.email}`} />
+              </SpaceBetween>
+            ),
+            width: 200,
+          },
+        ]}
+        empty={<Box textAlign="center" color="inherit" padding="m">No users.</Box>}
+        pagination={
+          pageCount > 1 ? (
+            <Pagination
+              currentPageIndex={currentPage}
+              pagesCount={pageCount}
+              onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+            />
+          ) : undefined
+        }
+      />
 
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Display name</TableHead>
-                  <TableHead>SSO</TableHead>
-                  <TableHead>Last login</TableHead>
-                  <TableHead className="w-24">Status</TableHead>
-                  <TableHead className="w-44" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">No users.</TableCell>
-                  </TableRow>
-                )}
-                {data.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell className="font-medium">{u.email}</TableCell>
-                    <TableCell>{u.display_name ?? '—'}</TableCell>
-                    <TableCell className="font-mono text-xs">{u.sso_subject ?? '—'}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">{formatDate(u.last_login_at)}</TableCell>
-                    <TableCell>
-                      <Badge variant={u.is_active ? 'success' : 'secondary'}>
-                        {u.is_active ? 'active' : 'inactive'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setAssigningTo(u)} title="Manage role assignments">
-                          <ShieldCheck className="h-3.5 w-3.5" /> Roles
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(u)} title="Edit">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => toggleActive(u)} title={u.is_active ? 'Deactivate' : 'Activate'}>
-                          <Power className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage <= 1}>Prev</Button>
-          <span>page {currentPage} of {pageCount}</span>
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage >= pageCount}>Next</Button>
-        </div>
-      )}
-
-      <Dialog open={editing !== null} onOpenChange={(o) => { if (!o) setEditing(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit user</DialogTitle></DialogHeader>
-          {editing && <UserForm user={editing} onSaved={async () => { setEditing(null); await refresh(); }} />}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={assigningTo !== null} onOpenChange={(o) => { if (!o) setAssigningTo(null); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4" /> Roles for {assigningTo?.email}
-            </DialogTitle>
-          </DialogHeader>
-          {assigningTo && <AssignmentsManager user={assigningTo} />}
-        </DialogContent>
-      </Dialog>
-    </div>
+      <Modal visible={createOpen} onDismiss={() => setCreateOpen(false)} header="New user" size="medium">
+        <UserForm onSaved={async () => { setCreateOpen(false); await refresh(); }} />
+      </Modal>
+      <Modal visible={editing !== null} onDismiss={() => setEditing(null)} header="Edit user" size="medium">
+        {editing && <UserForm user={editing} onSaved={async () => { setEditing(null); await refresh(); }} />}
+      </Modal>
+      <Modal
+        visible={assigningTo !== null}
+        onDismiss={() => setAssigningTo(null)}
+        header={`Roles for ${assigningTo?.email ?? ''}`}
+        size="large"
+      >
+        {assigningTo && <AssignmentsManager user={assigningTo} />}
+      </Modal>
+    </SpaceBetween>
   );
 }
 
-const userSchema = z.object({
-  email: z.string().email('Email required'),
-  display_name: z.string().optional(),
-  is_active: z.boolean(),
-});
-
-function UserForm({ user, onSaved }: { user?: User; onSaved: () => void }) {
+function UserForm({ user, onSaved }: Readonly<{ user?: User; onSaved: () => void }>) {
   const editing = !!user;
-  const form = useForm<z.infer<typeof userSchema>>({
-    resolver: zodResolver(userSchema),
-    defaultValues: {
-      email: user?.email ?? '',
-      display_name: user?.display_name ?? '',
-      is_active: user?.is_active ?? true,
-    },
-  });
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [displayName, setDisplayName] = useState(user?.display_name ?? '');
+  const [isActive, setIsActive] = useState(user?.is_active ?? true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  async function onSubmit(v: z.infer<typeof userSchema>) {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!editing && !/^.+@.+\..+$/.test(email)) errs.email = 'Email required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       if (editing && user) {
-        await http.patch(`/admin/users/${user.id}`, {
-          display_name: v.display_name || null,
-          is_active: v.is_active,
-        });
+        await http.patch(`/admin/users/${user.id}`, { display_name: displayName || null, is_active: isActive });
         toast.success('User updated');
       } else {
-        await http.post('/admin/users', {
-          email: v.email,
-          display_name: v.display_name || null,
-          is_active: v.is_active,
-        });
+        await http.post('/admin/users', { email, display_name: displayName || null, is_active: isActive });
         toast.success('User created');
       }
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'save failed'); }
+    } catch (err: any) { toast.error(err?.message ?? 'save failed'); } finally { setSubmitting(false); }
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="email" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Email</FormLabel>
-            <FormControl><Input type="email" disabled={editing} {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="display_name" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Display name (optional)</FormLabel>
-            <FormControl><Input {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="is_active" render={({ field }) => (
-          <FormItem className="flex items-center gap-3 space-y-0">
-            <FormControl>
-              <input
-                type="checkbox"
-                className="h-4 w-4"
-                checked={field.value}
-                onChange={(e) => field.onChange(e.target.checked)}
-              />
-            </FormControl>
-            <FormLabel className="!mt-0 text-sm font-normal">Active</FormLabel>
-          </FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Email" errorText={errors.email}>
+            <Input type="email" value={email} disabled={editing}
+              onChange={({ detail }) => setEmail(detail.value)} />
+          </FormField>
+          <FormField label="Display name (optional)">
+            <Input value={displayName ?? ''} onChange={({ detail }) => setDisplayName(detail.value)} />
+          </FormField>
+          <Checkbox checked={isActive} onChange={({ detail }) => setIsActive(detail.checked)}>Active</Checkbox>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
 // ----------------------- Assignments manager -----------------------
 
-type Site = { id: string; code: string; name: string };
-
-function AssignmentsManager({ user }: { user: User }) {
+function AssignmentsManager({ user }: Readonly<{ user: User }>) {
   const qc = useQueryClient();
   const assignments = useQuery({
     queryKey: ['admin-assignments', user.id],
@@ -296,7 +257,15 @@ function AssignmentsManager({ user }: { user: User }) {
   const sites = sitesRes.result.data ?? [];
   const sitesById = new Map(sites.map((s) => [s.id, s]));
 
-  const [roleId, setRoleId] = useState('');
+  const roleOptions: SelectProps.Option[] = roles.map((r) => ({
+    value: r.id,
+    label: r.is_system ? `${r.name} (system)` : r.name,
+  }));
+  const siteOptions: SelectProps.Option[] = sites.map((s) => ({
+    value: s.id, label: `${s.code} · ${s.name}`,
+  }));
+
+  const [roleOpt, setRoleOpt] = useState<SelectProps.Option | null>(null);
   const [scopeRows, setScopeRows] = useState<{ scope_type: string; target_id: string }[]>([]);
 
   function addScopeRow() {
@@ -310,11 +279,11 @@ function AssignmentsManager({ user }: { user: User }) {
   }
 
   async function assign() {
-    if (!roleId) return toast.error('Pick a role');
+    if (!roleOpt?.value) { toast.error('Pick a role'); return; }
     try {
       await http.post('/admin/assignments', {
         user_id: user.id,
-        role_id: roleId,
+        role_id: roleOpt.value,
         scopes: scopeRows
           .filter((s) => s.scope_type === 'global' || s.target_id)
           .map((s) => ({
@@ -323,7 +292,7 @@ function AssignmentsManager({ user }: { user: User }) {
           })),
       });
       toast.success('Role assigned');
-      setRoleId('');
+      setRoleOpt(null);
       setScopeRows([]);
       await qc.invalidateQueries({ queryKey: ['admin-assignments', user.id] });
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
@@ -348,114 +317,94 @@ function AssignmentsManager({ user }: { user: User }) {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-          Current roles
-        </div>
-        {assignments.isLoading ? (
-          <Skeleton className="h-16 w-full" />
-        ) : (assignments.data ?? []).length === 0 ? (
-          <p className="text-xs text-muted-foreground">No role assignments.</p>
-        ) : (
-          <div className="space-y-2">
-            {(assignments.data ?? []).map((a) => (
-              <div key={a.id} className="flex items-start justify-between rounded-md border bg-muted/30 p-2 text-sm">
-                <div>
-                  <div className="font-medium">{a.role_name}</div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {a.scopes.length === 0
-                      ? <Badge variant="secondary" className="text-[10px]">no scope (role default)</Badge>
-                      : a.scopes.map((s) => (
-                        <Badge key={s.id} variant="outline" className="font-mono text-[10px]">{describeScope(s)}</Badge>
-                      ))}
-                  </div>
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => remove(a)}>
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
+    <SpaceBetween size="l">
+      <Container header={<Header variant="h3">Current roles</Header>}>
+        {assignments.isLoading && <Box color="text-status-inactive">Loading…</Box>}
+        {!assignments.isLoading && (assignments.data ?? []).length === 0 && (
+          <Box color="text-status-inactive">No role assignments.</Box>
         )}
-      </div>
-
-      <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Assign a role
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Role</label>
-          <Select value={roleId} onValueChange={setRoleId}>
-            <SelectTrigger><SelectValue placeholder="Pick a role" /></SelectTrigger>
-            <SelectContent>
-              {roles.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.name}{r.is_system && ' (system)'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium text-muted-foreground">Scope rows (empty = role default)</label>
-            <Button type="button" size="sm" variant="outline" onClick={addScopeRow}>
-              <Plus className="h-3.5 w-3.5" /> Row
-            </Button>
-          </div>
-          {scopeRows.map((row, idx) => (
-            <div key={`scope-${idx}`} className="flex items-center gap-2">
-              <Select value={row.scope_type} onValueChange={(v) => updateScopeRow(idx, { scope_type: v, target_id: '' })}>
-                <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {SCOPE_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {row.scope_type === 'global' ? (
-                <span className="text-xs text-muted-foreground">unrestricted</span>
-              ) : row.scope_type === 'site' ? (
-                <Select value={row.target_id} onValueChange={(v) => updateScopeRow(idx, { target_id: v })}>
-                  <SelectTrigger className="flex-1"><SelectValue placeholder="Pick a site" /></SelectTrigger>
-                  <SelectContent>
-                    {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  className="flex-1 font-mono text-xs"
-                  placeholder={
-                    row.scope_type === 'enclave' ? 'enclave name'
-                    : row.scope_type === 'organization' ? 'organization label'
-                    : 'uuid'
-                  }
-                  value={row.target_id}
-                  onChange={(e) => updateScopeRow(idx, { target_id: e.target.value })}
-                />
-              )}
-              <Button type="button" size="sm" variant="ghost" onClick={() => removeScopeRow(idx)}>
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+        <SpaceBetween size="s">
+          {(assignments.data ?? []).map((a) => (
+            <Container key={a.id}>
+              <SpaceBetween size="xs" direction="horizontal">
+                <Box>
+                  <Box variant="awsui-key-label">{a.role_name}</Box>
+                  <SpaceBetween size="xxs" direction="horizontal">
+                    {a.scopes.length === 0
+                      ? <Badge>no scope (role default)</Badge>
+                      : a.scopes.map((s) => <Badge key={s.id}>{describeScope(s)}</Badge>)}
+                  </SpaceBetween>
+                </Box>
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(a)} ariaLabel="Remove assignment" />
+              </SpaceBetween>
+            </Container>
           ))}
-        </div>
+        </SpaceBetween>
+      </Container>
 
-        <Button onClick={assign} disabled={!roleId}>Assign role</Button>
-      </div>
-    </div>
+      <Container header={<Header variant="h3">Assign a role</Header>}>
+        <SpaceBetween size="m">
+          <FormField label="Role">
+            <Select
+              placeholder="Pick a role"
+              selectedOption={roleOpt}
+              onChange={({ detail }) => setRoleOpt(detail.selectedOption)}
+              options={roleOptions}
+              expandToViewport
+            />
+          </FormField>
+          <Box>
+            <SpaceBetween size="xs" direction="horizontal">
+              <Box variant="awsui-key-label">Scope rows (empty = role default)</Box>
+              <Button iconName="add-plus" onClick={addScopeRow}>Row</Button>
+            </SpaceBetween>
+            <SpaceBetween size="xs">
+              {scopeRows.map((row, idx) => (
+                <SpaceBetween key={`scope-${idx}`} size="xs" direction="horizontal">
+                  <Select
+                    selectedOption={SCOPE_TYPES.find((s) => s.value === row.scope_type) ?? SCOPE_TYPES[0]}
+                    onChange={({ detail }) => updateScopeRow(idx, { scope_type: detail.selectedOption.value!, target_id: '' })}
+                    options={SCOPE_TYPES}
+                    expandToViewport
+                  />
+                  {row.scope_type === 'global' && (
+                    <Box variant="span" color="text-status-inactive" fontSize="body-s">unrestricted</Box>
+                  )}
+                  {row.scope_type === 'site' && (
+                    <Select
+                      placeholder="Pick a site"
+                      selectedOption={siteOptions.find((s) => s.value === row.target_id) ?? null}
+                      onChange={({ detail }) => updateScopeRow(idx, { target_id: detail.selectedOption.value ?? '' })}
+                      options={siteOptions}
+                      expandToViewport
+                    />
+                  )}
+                  {row.scope_type !== 'global' && row.scope_type !== 'site' && (
+                    <Input
+                      value={row.target_id}
+                      onChange={({ detail }) => updateScopeRow(idx, { target_id: detail.value })}
+                      placeholder={
+                        row.scope_type === 'enclave' ? 'enclave name'
+                        : row.scope_type === 'organization' ? 'organization label'
+                        : 'uuid'
+                      }
+                    />
+                  )}
+                  <Button iconName="close" variant="inline-icon" onClick={() => removeScopeRow(idx)} ariaLabel="Remove row" />
+                </SpaceBetween>
+              ))}
+            </SpaceBetween>
+          </Box>
+          <Button variant="primary" onClick={assign} disabled={!roleOpt?.value}>Assign role</Button>
+        </SpaceBetween>
+      </Container>
+    </SpaceBetween>
   );
 }
 
 // ----------------------- Roles -----------------------
 
-const roleSchema = z.object({
-  name: z.string().min(1, 'Name required'),
-  description: z.string().optional(),
-  permission_codes: z.array(z.string()).min(1, 'Pick at least one capability'),
-});
-
-function RolesTab({ myCapabilities }: { myCapabilities: string[] }) {
+function RolesTab({ myCapabilities }: Readonly<{ myCapabilities: string[] }>) {
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<Role>({
     resource: 'admin/roles',
     pagination: { pageSize: 50 },
@@ -468,7 +417,7 @@ function RolesTab({ myCapabilities }: { myCapabilities: string[] }) {
   async function refresh() { await tableQuery.refetch(); }
 
   async function remove(r: Role) {
-    if (r.is_system) return toast.error('system roles cannot be deleted');
+    if (r.is_system) { toast.error('system roles cannot be deleted'); return; }
     if (!window.confirm(`Delete role "${r.name}"?`)) return;
     try {
       await http.delete(`/admin/roles/${r.id}`);
@@ -478,194 +427,163 @@ function RolesTab({ myCapabilities }: { myCapabilities: string[] }) {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogTrigger asChild>
-            <Button><Plus className="h-4 w-4" /> New role</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>New role</DialogTitle></DialogHeader>
-            <RoleForm
-              myCapabilities={myCapabilities}
-              onSaved={async () => { setCreateOpen(false); await refresh(); }}
+    <SpaceBetween size="l">
+      <Table<Role>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading roles…"
+        items={data}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${data.length})`}
+            actions={
+              <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                New role
+              </Button>
+            }
+          >
+            Roles
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (r) => <span style={{ fontWeight: 500 }}>{r.name}</span> },
+          {
+            id: 'description', header: 'Description',
+            cell: (r) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{r.description ?? '—'}</Box>,
+          },
+          {
+            id: 'capabilities', header: 'Capabilities',
+            cell: (r) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                {r.permission_codes.slice(0, 6).map((c) => <Badge key={c}>{c}</Badge>)}
+                {r.permission_codes.length > 6 && <Badge>{`+${r.permission_codes.length - 6}`}</Badge>}
+              </SpaceBetween>
+            ),
+          },
+          {
+            id: 'type', header: 'Type',
+            cell: (r) => r.is_system
+              ? <Badge color="grey">system</Badge>
+              : <Badge color="green">custom</Badge>,
+            width: 110,
+          },
+          {
+            id: 'actions', header: '',
+            cell: (r) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" disabled={r.is_system} onClick={() => setEditing(r)} ariaLabel={`Edit ${r.name}`} />
+                <Button iconName="remove" variant="inline-icon" disabled={r.is_system} onClick={() => remove(r)} ariaLabel={`Delete ${r.name}`} />
+              </SpaceBetween>
+            ),
+            width: 120,
+          },
+        ]}
+        empty={<Box textAlign="center" color="inherit" padding="m">No roles defined.</Box>}
+        pagination={
+          pageCount > 1 ? (
+            <Pagination
+              currentPageIndex={currentPage}
+              pagesCount={pageCount}
+              onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
             />
-          </DialogContent>
-        </Dialog>
-      </div>
+          ) : undefined
+        }
+      />
 
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Capabilities</TableHead>
-                  <TableHead className="w-24">Type</TableHead>
-                  <TableHead className="w-28" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-muted-foreground">No roles defined.</TableCell>
-                  </TableRow>
-                )}
-                {data.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="font-medium">{r.name}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{r.description ?? '—'}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1 max-w-md">
-                        {r.permission_codes.slice(0, 6).map((c) => (
-                          <Badge key={c} variant="secondary" className="font-mono text-[10px]">{c}</Badge>
-                        ))}
-                        {r.permission_codes.length > 6 && (
-                          <Badge variant="outline" className="text-[10px]">+{r.permission_codes.length - 6}</Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={r.is_system ? 'secondary' : 'success'}>
-                        {r.is_system ? 'system' : 'custom'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setEditing(r)} disabled={r.is_system}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => remove(r)} disabled={r.is_system}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage <= 1}>Prev</Button>
-          <span>page {currentPage} of {pageCount}</span>
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage >= pageCount}>Next</Button>
-        </div>
-      )}
-
-      <Dialog open={editing !== null} onOpenChange={(o) => { if (!o) setEditing(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit role</DialogTitle></DialogHeader>
-          {editing && (
-            <RoleForm
-              myCapabilities={myCapabilities}
-              role={editing}
-              onSaved={async () => { setEditing(null); await refresh(); }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+      <Modal visible={createOpen} onDismiss={() => setCreateOpen(false)} header="New role" size="medium">
+        <RoleForm myCapabilities={myCapabilities} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
+      </Modal>
+      <Modal visible={editing !== null} onDismiss={() => setEditing(null)} header="Edit role" size="medium">
+        {editing && (
+          <RoleForm
+            myCapabilities={myCapabilities}
+            role={editing}
+            onSaved={async () => { setEditing(null); await refresh(); }}
+          />
+        )}
+      </Modal>
+    </SpaceBetween>
   );
 }
 
 function RoleForm({
   myCapabilities, role, onSaved,
-}: {
+}: Readonly<{
   myCapabilities: string[];
   role?: Role;
   onSaved: () => void;
-}) {
+}>) {
   const editing = !!role;
-  const form = useForm<z.infer<typeof roleSchema>>({
-    resolver: zodResolver(roleSchema),
-    defaultValues: {
-      name: role?.name ?? '',
-      description: role?.description ?? '',
-      permission_codes: role?.permission_codes ?? [],
-    },
-  });
-  const selected = form.watch('permission_codes');
+  const [name, setName] = useState(role?.name ?? '');
+  const [description, setDescription] = useState(role?.description ?? '');
+  const [selected, setSelected] = useState<string[]>(role?.permission_codes ?? []);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  function toggleCap(cap: string, checked: boolean) {
-    const cur = form.getValues('permission_codes');
-    if (checked) form.setValue('permission_codes', [...cur, cap], { shouldValidate: true });
-    else form.setValue('permission_codes', cur.filter((c) => c !== cap), { shouldValidate: true });
+  function toggle(cap: string, checked: boolean) {
+    setSelected((cur) => checked ? [...cur, cap] : cur.filter((c) => c !== cap));
   }
 
-  async function onSubmit(v: z.infer<typeof roleSchema>) {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Name required';
+    if (selected.length === 0) errs.caps = 'Pick at least one capability';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
+      const body = { name, description: description || null, permission_codes: selected };
       if (editing && role) {
-        await http.patch(`/admin/roles/${role.id}`, {
-          name: v.name,
-          description: v.description || null,
-          permission_codes: v.permission_codes,
-        });
+        await http.patch(`/admin/roles/${role.id}`, body);
         toast.success('Role updated');
       } else {
-        await http.post('/admin/roles', {
-          name: v.name,
-          description: v.description || null,
-          permission_codes: v.permission_codes,
-        });
+        await http.post('/admin/roles', body);
         toast.success('Role created');
       }
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'save failed'); }
+    } catch (err: any) { toast.error(err?.message ?? 'save failed'); } finally { setSubmitting(false); }
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Name</FormLabel>
-            <FormControl><Input {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Description (optional)</FormLabel>
-            <FormControl><Input {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="permission_codes" render={() => (
-          <FormItem>
-            <FormLabel>Capabilities</FormLabel>
-            <p className="text-xs text-muted-foreground">
-              You can only grant capabilities you hold yourself.
-            </p>
-            <div className="grid max-h-48 grid-cols-2 gap-1.5 overflow-y-auto rounded-md border bg-muted/30 p-3">
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} />
+          </FormField>
+          <FormField label="Description (optional)">
+            <Input value={description ?? ''} onChange={({ detail }) => setDescription(detail.value)} />
+          </FormField>
+          <FormField
+            label="Capabilities"
+            description="You can only grant capabilities you hold yourself."
+            errorText={errors.caps}
+          >
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6,
+              maxHeight: 200, overflowY: 'auto',
+            }}>
               {myCapabilities.map((c) => (
-                <label key={c} className="flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    className="h-3.5 w-3.5"
-                    checked={selected.includes(c)}
-                    onChange={(e) => toggleCap(c, e.target.checked)}
-                  />
-                  <span className="font-mono">{c}</span>
-                </label>
+                <Checkbox
+                  key={c}
+                  checked={selected.includes(c)}
+                  onChange={({ detail }) => toggle(c, detail.checked)}
+                >
+                  <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{c}</span>
+                </Checkbox>
               ))}
             </div>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
