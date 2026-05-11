@@ -102,6 +102,20 @@ class DnsAgentConfig(BaseModel):
     # Whether to scrape metrics at all. Set to false on air-gapped
     # collectors where outbound metrics push isn't wanted.
     metrics_enabled: bool = True
+    # Run DnsHealthCheck probes from this collector — useful when
+    # target IPs live on a site network central can't reach. The
+    # collector polls /dns/health-checks?fabric_id=<...> for the
+    # check list and POSTs each probe result back; central's worker
+    # naturally backs off once it sees fresh last_checked_at values.
+    health_checks_enabled: bool = False
+    # Which fabric's checks this collector probes. Must be set when
+    # health_checks_enabled = true. A single collector can only
+    # probe one fabric in v1.
+    health_check_fabric_id: UUID | None = None
+    # Top-level poll interval — how often we refresh the check list
+    # from central. Each individual check fires on its own
+    # interval_seconds within this cadence.
+    health_check_poll_interval_seconds: int = 60
 
 
 class CollectorConfig(BaseModel):

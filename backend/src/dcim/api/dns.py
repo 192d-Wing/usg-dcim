@@ -78,6 +78,7 @@ from ..schemas.dns import (
     DnsDsRecordOut,
     DnsHealthCheckCreate,
     DnsHealthCheckOut,
+    DnsHealthCheckResult,
     DnsHealthCheckUpdate,
     DnsKeyOut,
     DnsMetricsSampleIn,
@@ -1446,6 +1447,29 @@ async def delete_health_check(
         target_type="dns_health_check", target_id=str(check_id),
         metadata={"name": obj.name, "target_ip": str(obj.target_ip)},
     )
+    await db.commit()
+
+
+@router.post("/health-checks/{check_id}/result", status_code=204)
+async def post_health_check_result(
+    check_id: UUID,
+    payload: DnsHealthCheckResult,
+    _: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Collector callback after running one probe. Skip audit on this
+    path — every 30s probe shouldn't generate an audit row; the
+    central worker also writes this column on its fallback cycles.
+
+    last_checked_at advances on every callback so the worker can tell
+    "already probed recently" from "stale" and skip the redundant
+    central probe in the next cron tick."""
+    obj = await db.get(DnsHealthCheck, check_id)
+    if obj is None:
+        raise NotFoundError(_HC_NOT_FOUND)
+    obj.status = payload.status
+    obj.last_checked_at = datetime.now(UTC)
+    obj.last_error = payload.error
     await db.commit()
 
 

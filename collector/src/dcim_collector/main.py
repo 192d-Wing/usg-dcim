@@ -13,6 +13,7 @@ from .config import CollectorConfig
 from .dns_agent import run_dns_agent
 from .drivers import load_driver
 from .forwarder import Forwarder
+from .health_agent import run_health_agent
 
 log = structlog.get_logger("collector.main")
 
@@ -68,6 +69,7 @@ async def run(config_path: str) -> None:
     tasks.append(asyncio.create_task(_drain_loop(fwd)))
     tasks.append(asyncio.create_task(_heartbeat_loop(fwd, cfg.heartbeat_interval_seconds)))
     tasks.append(asyncio.create_task(run_dns_agent(cfg)))
+    tasks.append(asyncio.create_task(run_health_agent(cfg)))
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

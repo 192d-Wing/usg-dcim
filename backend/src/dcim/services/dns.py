@@ -21,7 +21,7 @@ import hashlib
 import ipaddress
 import json
 from collections.abc import Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -493,6 +493,32 @@ async def rotate_zone_key(
     )
     await db.flush()
     return new_key, active_keys
+
+
+async def central_health_checks_due(db: AsyncSession) -> list[DnsHealthCheck]:
+    """Health checks the central worker should probe — anything
+    enabled whose last_checked_at is older than interval_seconds * 1.5
+    (or never). Collectors that probe on their own keep
+    last_checked_at fresh, so this naturally yields the gap-filler
+    set for central."""
+    now = datetime.now(UTC)
+    checks = list((
+        await db.execute(
+            select(DnsHealthCheck).where(DnsHealthCheck.enabled.is_(True))
+        )
+    ).scalars().all())
+    due: list[DnsHealthCheck] = []
+    for c in checks:
+        if c.last_checked_at is None:
+            due.append(c)
+            continue
+        # 1.5x grace lets the collector's probe race with the
+        # central worker without us treating a slightly-late
+        # collector probe as "stale".
+        cutoff = now - timedelta(seconds=c.interval_seconds * 1.5)
+        if c.last_checked_at < cutoff:
+            due.append(c)
+    return due
 
 
 async def auto_rotate_due_zsks(db: AsyncSession) -> dict:

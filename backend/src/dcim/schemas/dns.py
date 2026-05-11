@@ -347,6 +347,14 @@ class DnsHealthCheckOut(DnsHealthCheckBase):
     updated_at: datetime
 
 
+class DnsHealthCheckResult(BaseModel):
+    """Collector callback after running one probe. The central worker
+    falls back to probing checks whose last_checked_at lags, so a
+    collector that drops offline doesn't strand a status."""
+    status: DnsHealthCheckStatus
+    error: str | None = None
+
+
 # ---------- DnsView ----------
 
 class DnsViewBase(BaseModel):

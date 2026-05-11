@@ -116,17 +116,15 @@ async def dns_rotate_zsks(_ctx) -> dict:
 
 
 async def dns_health_checks(_ctx) -> dict:
-    """Probe every enabled DnsHealthCheck and update its status. The
-    bundle renderer reads this status to exclude records bound to
-    unhealthy checks from the rendered zone."""
+    """Central-side gap-filler probe loop. Only fires checks whose
+    last_checked_at is older than interval_seconds * 1.5 — collectors
+    that probe on their own keep last_checked_at fresh and central
+    naturally backs off. Standalone deployments without collector
+    probing fall through to full central probing."""
     async with async_session() as db:
-        checks = (
-            await db.execute(
-                select(DnsHealthCheck).where(DnsHealthCheck.enabled.is_(True))
-            )
-        ).scalars().all()
+        due = await dns_svc.central_health_checks_due(db)
         changed = 0
-        for check in checks:
+        for check in due:
             new_status, err = await dns_svc.probe_health_check(check)
             if check.status != new_status:
                 check.status = new_status
@@ -134,8 +132,8 @@ async def dns_health_checks(_ctx) -> dict:
             check.last_checked_at = datetime.now(UTC)
             check.last_error = err
         await db.commit()
-    log.info("dns_health_checks", probed=len(checks), changed=changed)
-    return {"probed": len(checks), "changed": changed}
+    log.info("dns_health_checks", probed=len(due), changed=changed)
+    return {"probed": len(due), "changed": changed}
 
 
 async def startup(ctx) -> None:
