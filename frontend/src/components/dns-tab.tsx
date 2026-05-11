@@ -782,7 +782,7 @@ function formatRdata(r: DnsRecord): string {
 function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
   const [name, setName] = useState('');
   const [typeOpt, setTypeOpt] = useState<SelectProps.Option>({ value: 'A', label: 'A' });
-  const [ttl, setTtl] = useState('');
+  const [ttl, setTtl] = useState('60');
   const [target, setTarget] = useState('');
   const [priority, setPriority] = useState('');
   const [weight, setWeight] = useState('');
@@ -897,7 +897,7 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
             </FormField>
             <FormField
               label="TTL (seconds)"
-              description={`Defaults to zone default of ${zone.default_ttl}`}
+              description={`Clear to inherit the zone default (${zone.default_ttl})`}
             >
               <Input
                 type="number"
