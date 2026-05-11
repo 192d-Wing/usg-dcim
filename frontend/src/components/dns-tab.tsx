@@ -673,13 +673,18 @@ type AuditEntry = {
   id: string;
   occurred_at: string;
   actor_label: string | null;
+  actor_ip: string | null;
   action: string;
   target_type: string | null;
   target_id: string | null;
+  request_id: string | null;
   success: boolean;
+  diff_json: Record<string, unknown>;
+  metadata_json: Record<string, unknown>;
 };
 
 function ZoneActivityTab({ zoneId, recordIds }: { zoneId: string; recordIds: string[] }) {
+  const [openEntry, setOpenEntry] = useState<AuditEntry | null>(null);
   const zoneEvents = useQuery({
     queryKey: ['audit', 'dns_zone', zoneId],
     queryFn: async () => (await http.get<{ items: AuditEntry[] }>(
@@ -711,51 +716,155 @@ function ZoneActivityTab({ zoneId, recordIds }: { zoneId: string; recordIds: str
   const loading = zoneEvents.isLoading || recordEvents.isLoading;
 
   return (
-    <Table<AuditEntry>
-      variant="embedded"
-      loading={loading}
-      loadingText="Loading activity…"
-      items={entries}
-      trackBy="id"
-      columnDefinitions={[
-        {
-          id: 'when', header: 'When (UTC)',
-          cell: (e) => {
-            const zulu = new Date(e.occurred_at).toISOString().replace(/\.\d{3}Z$/, 'Z');
-            return <span style={MONO}>{zulu}</span>;
+    <>
+      <Table<AuditEntry>
+        variant="embedded"
+        loading={loading}
+        loadingText="Loading activity…"
+        items={entries}
+        trackBy="id"
+        // Whole-row click opens the detail modal — the timestamp cell
+        // is also a Link for keyboard-only navigation.
+        onRowClick={({ detail }) => setOpenEntry(detail.item)}
+        columnDefinitions={[
+          {
+            id: 'when', header: 'When (UTC)',
+            cell: (e) => {
+              const zulu = new Date(e.occurred_at).toISOString().replace(/\.\d{3}Z$/, 'Z');
+              return (
+                <Link
+                  href={`#audit-${e.id}`}
+                  onFollow={(ev) => { ev.preventDefault(); setOpenEntry(e); }}
+                >
+                  <span style={MONO}>{zulu}</span>
+                </Link>
+              );
+            },
+            width: 220,
           },
-          width: 220,
-        },
-        {
-          id: 'actor', header: 'Actor',
-          cell: (e) => e.actor_label
-            ?? <Box color="text-status-inactive" fontSize="body-s">—</Box>,
-        },
-        {
-          id: 'action', header: 'Action',
-          cell: (e) => <span style={MONO}>{e.action}</span>,
-        },
-        {
-          id: 'target', header: 'Target',
-          cell: (e) => e.target_type
-            ? <span style={MONO}>{e.target_type}:{(e.target_id ?? '').slice(0, 8)}…</span>
-            : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
-          width: 220,
-        },
-        {
-          id: 'result', header: 'Result',
-          cell: (e) => e.success
-            ? <StatusIndicator type="success">ok</StatusIndicator>
-            : <StatusIndicator type="error">fail</StatusIndicator>,
-          width: 80,
-        },
-      ]}
-      empty={
-        <Box textAlign="center" padding="l" color="text-status-inactive">
-          No activity recorded yet for this zone.
+          {
+            id: 'actor', header: 'Actor',
+            cell: (e) => e.actor_label
+              ?? <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+          },
+          {
+            id: 'action', header: 'Action',
+            cell: (e) => <span style={MONO}>{e.action}</span>,
+          },
+          {
+            id: 'target', header: 'Target',
+            cell: (e) => e.target_type
+              ? <span style={MONO}>{e.target_type}:{(e.target_id ?? '').slice(0, 8)}…</span>
+              : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+            width: 220,
+          },
+          {
+            id: 'result', header: 'Result',
+            cell: (e) => e.success
+              ? <StatusIndicator type="success">ok</StatusIndicator>
+              : <StatusIndicator type="error">fail</StatusIndicator>,
+            width: 80,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" padding="l" color="text-status-inactive">
+            No activity recorded yet for this zone.
+          </Box>
+        }
+      />
+      <Modal
+        visible={openEntry !== null}
+        onDismiss={() => setOpenEntry(null)}
+        header="Activity detail"
+        size="large"
+        footer={
+          <Box float="right">
+            <Button onClick={() => setOpenEntry(null)}>Close</Button>
+          </Box>
+        }
+      >
+        {openEntry && <ActivityDetail entry={openEntry} />}
+      </Modal>
+    </>
+  );
+}
+
+function ActivityDetail({ entry }: { entry: AuditEntry }) {
+  const zulu = new Date(entry.occurred_at).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const hasDiff = Object.keys(entry.diff_json ?? {}).length > 0;
+  const hasMeta = Object.keys(entry.metadata_json ?? {}).length > 0;
+  return (
+    <SpaceBetween size="m">
+      <KeyValuePairs
+        columns={3}
+        items={[
+          { label: 'When (UTC)', value: <span style={MONO}>{zulu}</span> },
+          {
+            label: 'Actor',
+            value: entry.actor_label
+              ?? <Box color="text-status-inactive">—</Box>,
+          },
+          {
+            label: 'Result',
+            value: entry.success
+              ? <StatusIndicator type="success">ok</StatusIndicator>
+              : <StatusIndicator type="error">fail</StatusIndicator>,
+          },
+          { label: 'Action', value: <span style={MONO}>{entry.action}</span> },
+          {
+            label: 'Target',
+            value: entry.target_type
+              ? <span style={MONO}>{entry.target_type}:{entry.target_id}</span>
+              : <Box color="text-status-inactive">—</Box>,
+          },
+          {
+            label: 'Actor IP',
+            value: entry.actor_ip
+              ? <span style={MONO}>{entry.actor_ip}</span>
+              : <Box color="text-status-inactive">—</Box>,
+          },
+          {
+            label: 'Request ID',
+            value: entry.request_id
+              ? <span style={MONO}>{entry.request_id}</span>
+              : <Box color="text-status-inactive">—</Box>,
+          },
+        ]}
+      />
+      {hasDiff && (
+        <Box>
+          <Box variant="awsui-key-label">Diff</Box>
+          <pre style={{
+            maxHeight: '32vh', overflow: 'auto', padding: '12px',
+            fontSize: '12px', fontFamily: 'ui-monospace, monospace', margin: 0,
+            background: colorBackgroundContainerContent,
+            border: `1px solid ${colorBorderDividerDefault}`,
+            borderRadius: '8px',
+          }}>
+            {JSON.stringify(entry.diff_json, null, 2)}
+          </pre>
         </Box>
-      }
-    />
+      )}
+      {hasMeta && (
+        <Box>
+          <Box variant="awsui-key-label">Metadata</Box>
+          <pre style={{
+            maxHeight: '32vh', overflow: 'auto', padding: '12px',
+            fontSize: '12px', fontFamily: 'ui-monospace, monospace', margin: 0,
+            background: colorBackgroundContainerContent,
+            border: `1px solid ${colorBorderDividerDefault}`,
+            borderRadius: '8px',
+          }}>
+            {JSON.stringify(entry.metadata_json, null, 2)}
+          </pre>
+        </Box>
+      )}
+      {!hasDiff && !hasMeta && (
+        <Box color="text-status-inactive">
+          No diff or metadata recorded for this event.
+        </Box>
+      )}
+    </SpaceBetween>
   );
 }
 
