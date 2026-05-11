@@ -4,50 +4,28 @@
 //                   rows are read-only with a badge.
 //   3. Servers + anycast — register CoreDNS deployments, bind recursive
 //                   servers to BGP peers + an anycast group.
-//
-// Visual conventions mirror the existing OverlaysTab pattern in
-// frontend/src/pages/ipam.tsx: fabric selector at the top, then panels.
 
 import { useEffect, useMemo, useState } from 'react';
 import { useList } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Plus, Pencil, Trash2, RefreshCw, FileText } from 'lucide-react';
 import { http } from '@/lib/http';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 import { toast } from 'sonner';
-// Cloudscape primitives for the DNS tab outer chrome and the
-// ZonesPanel migration. The inner Records / Anycast / Servers panels
-// still render shadcn and migrate in follow-ups.
-import CsBox from '@cloudscape-design/components/box';
-import CsButton from '@cloudscape-design/components/button';
-import CsContainer from '@cloudscape-design/components/container';
-import CsColumnLayout from '@cloudscape-design/components/column-layout';
-import CsFormField from '@cloudscape-design/components/form-field';
-import CsHeader from '@cloudscape-design/components/header';
-import CsModal from '@cloudscape-design/components/modal';
-import CsSelect, { SelectProps as CsSelectProps } from '@cloudscape-design/components/select';
-import CsSpaceBetween from '@cloudscape-design/components/space-between';
-import CsStatusIndicator from '@cloudscape-design/components/status-indicator';
-import CsTable from '@cloudscape-design/components/table';
-import CsBadge from '@cloudscape-design/components/badge';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Spinner from '@cloudscape-design/components/spinner';
+import Table from '@cloudscape-design/components/table';
 
 type Fabric = { id: string; name: string };
 type Site = { id: string; code: string; name: string };
@@ -108,6 +86,10 @@ type BgpPeer = {
 };
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'NS', 'CAA', 'PTR'] as const;
+type RecordType = (typeof RECORD_TYPES)[number];
+const RECORD_TYPE_OPTS: SelectProps.Option[] = RECORD_TYPES.map((t) => ({ value: t, label: t }));
+
+const MONO = { fontFamily: 'ui-monospace, monospace' } as const;
 
 export function DnsTab({ canWrite }: { canWrite: boolean }) {
   const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
@@ -115,20 +97,19 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
   const [fabricId, setFabricId] = useState<string>('');
   const [zoneId, setZoneId] = useState<string | null>(null);
 
-  // First fabric becomes the default once fabrics arrive.
   useEffect(() => {
     if (!fabricId && fabrics.length > 0) setFabricId(fabrics[0].id);
   }, [fabricId, fabrics]);
 
-  const fabricOptions: CsSelectProps.Option[] =
+  const fabricOptions: SelectProps.Option[] =
     fabrics.map((f) => ({ value: f.id, label: f.name }));
   const fabricOpt = fabricOptions.find((o) => o.value === fabricId) ?? null;
 
   return (
-    <CsSpaceBetween size="l">
-      <CsContainer header={<CsHeader variant="h2">Fabric</CsHeader>}>
-        <CsFormField label="Fabric">
-          <CsSelect
+    <SpaceBetween size="l">
+      <Container header={<Header variant="h2">Fabric</Header>}>
+        <FormField label="Fabric">
+          <Select
             placeholder="Pick a fabric"
             selectedOption={fabricOpt}
             onChange={({ detail }) => {
@@ -140,11 +121,11 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
             options={fabricOptions}
             expandToViewport
           />
-        </CsFormField>
-      </CsContainer>
+        </FormField>
+      </Container>
 
       {fabricId && (
-        <CsColumnLayout columns={2}>
+        <ColumnLayout columns={2}>
           <ZonesPanel
             fabricId={fabricId}
             selectedZoneId={zoneId}
@@ -154,13 +135,13 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
           {zoneId
             ? <RecordsPanel zoneId={zoneId} canWrite={canWrite} />
             : (
-              <CsContainer>
-                <CsBox padding="m" color="text-status-inactive">
+              <Container>
+                <Box padding="m" color="text-status-inactive">
                   Pick a zone to see its records.
-                </CsBox>
-              </CsContainer>
+                </Box>
+              </Container>
             )}
-        </CsColumnLayout>
+        </ColumnLayout>
       )}
 
       {fabricId && (
@@ -170,18 +151,11 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
       {fabricId && (
         <ServersPanel fabricId={fabricId} canWrite={canWrite} />
       )}
-    </CsSpaceBetween>
+    </SpaceBetween>
   );
 }
 
 // ----------------------- Zones -----------------------
-
-const zoneSchema = z.object({
-  name: z.string().min(1),
-  kind: z.enum(['apex', 'site']),
-  site_id: z.string().optional(),
-  default_ttl: z.string().min(1),
-});
 
 function ZonesPanel({
   fabricId, selectedZoneId, onSelectZone, canWrite,
@@ -226,15 +200,9 @@ function ZonesPanel({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
 
-  // Note: previously used <FileText> + <RefreshCw> + <Trash2> from
-  // lucide for the per-row action buttons. Cloudscape inline-icon
-  // buttons take a Cloudscape icon name instead, so the lucide icons
-  // get dropped from this panel — they remain imported because the
-  // Records / Anycast / Servers panels still use them.
-  void FileText; void RefreshCw;
   return (
     <>
-      <CsTable<DnsZone>
+      <Table<DnsZone>
         variant="container"
         loading={zonesQ.isLoading}
         loadingText="Loading zones…"
@@ -254,47 +222,47 @@ function ZonesPanel({
           allItemsSelectionLabel: () => 'select all',
         }}
         header={
-          <CsHeader
+          <Header
             counter={`(${zones.length})`}
             actions={canWrite && (
-              <CsButton iconName="add-plus" onClick={() => setCreateOpen(true)}>
+              <Button iconName="add-plus" onClick={() => setCreateOpen(true)}>
                 Add zone
-              </CsButton>
+              </Button>
             )}
             description="Select a zone to see its records."
           >
             Zones
-          </CsHeader>
+          </Header>
         }
         columnDefinitions={[
           {
             id: 'name', header: 'Name',
-            cell: (z) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{z.name}</span>,
+            cell: (z) => <span style={MONO}>{z.name}</span>,
           },
           {
             id: 'kind', header: 'Kind',
             cell: (z) => z.kind === 'apex'
-              ? <CsStatusIndicator type="info">apex</CsStatusIndicator>
-              : <CsBadge>site</CsBadge>,
+              ? <StatusIndicator type="info">apex</StatusIndicator>
+              : <Badge>site</Badge>,
             width: 100,
           },
           {
             id: 'ttl', header: 'TTL',
-            cell: (z) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{z.default_ttl}</span>,
+            cell: (z) => <span style={MONO}>{z.default_ttl}</span>,
             width: 100,
           },
           {
             id: 'actions', header: '',
             cell: (z) => (
-              <CsSpaceBetween size="xxs" direction="horizontal">
-                <CsButton
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button
                   iconName="file"
                   variant="inline-icon"
                   onClick={() => setPreviewZone(z)}
                   ariaLabel={`Preview ${z.name}`}
                 />
                 {canWrite && z.kind === 'site' && (
-                  <CsButton
+                  <Button
                     iconName="refresh"
                     variant="inline-icon"
                     onClick={() => syncFromIpam(z)}
@@ -302,47 +270,47 @@ function ZonesPanel({
                   />
                 )}
                 {canWrite && (
-                  <CsButton
+                  <Button
                     iconName="remove"
                     variant="inline-icon"
                     onClick={() => remove(z)}
                     ariaLabel={`Delete ${z.name}`}
                   />
                 )}
-              </CsSpaceBetween>
+              </SpaceBetween>
             ),
             width: 140,
           },
         ]}
         empty={
-          <CsBox textAlign="center" color="inherit" padding="m">
+          <Box textAlign="center" color="inherit" padding="m">
             No zones in this fabric yet.
-          </CsBox>
+          </Box>
         }
       />
       {canWrite && (
-        <CsModal
+        <Modal
           visible={createOpen}
           onDismiss={() => setCreateOpen(false)}
           header="New DNS zone"
           size="medium"
         >
           <ZoneForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
-        </CsModal>
+        </Modal>
       )}
-      <CsModal
+      <Modal
         visible={previewZone !== null}
         onDismiss={() => setPreviewZone(null)}
         header={
           <span>
             Zone preview:{' '}
-            <span style={{ fontFamily: 'ui-monospace, monospace' }}>{previewZone?.name}</span>
+            <span style={MONO}>{previewZone?.name}</span>
           </span>
         }
         size="large"
       >
         {previewZone && <ZonePreview zoneId={previewZone.id} />}
-      </CsModal>
+      </Modal>
     </>
   );
 }
@@ -352,89 +320,114 @@ function ZonePreview({ zoneId }: { zoneId: string }) {
     queryKey: ['dns-zone-preview', zoneId],
     queryFn: async () => (await http.get<{ text: string; record_count: number }>(`/dns/zones/${zoneId}/preview`)).data,
   });
-  if (isLoading) return <p className="text-sm text-muted-foreground">Rendering…</p>;
+  if (isLoading) return <Box color="text-status-inactive"><Spinner /> Rendering…</Box>;
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">{data?.record_count} records</p>
-      <pre className="max-h-[60vh] overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
+    <SpaceBetween size="xs">
+      <Box color="text-status-inactive" fontSize="body-s">{data?.record_count} records</Box>
+      <pre style={{
+        maxHeight: '60vh', overflow: 'auto', padding: '12px',
+        fontSize: '12px', fontFamily: 'ui-monospace, monospace',
+        background: 'var(--color-background-container-content, #fafafa)',
+        border: '1px solid var(--color-border-divider-default, #e9ebed)',
+        borderRadius: '8px',
+      }}>
         {data?.text}
       </pre>
-    </div>
+    </SpaceBetween>
   );
 }
 
 function ZoneForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void }) {
-  const NONE = '__none__';
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 500 } });
   const sites = sitesRes.result.data ?? [];
-  const form = useForm<z.infer<typeof zoneSchema>>({
-    resolver: zodResolver(zoneSchema),
-    defaultValues: { name: '', kind: 'site', site_id: NONE, default_ttl: '300' },
-  });
-  const kind = form.watch('kind');
-  async function onSubmit(v: z.infer<typeof zoneSchema>) {
-    if (v.kind === 'site' && (!v.site_id || v.site_id === NONE)) {
-      toast.error('Site zones require a site');
-      return;
-    }
+
+  const [name, setName] = useState('');
+  const [kindOpt, setKindOpt] = useState<SelectProps.Option>({ value: 'site', label: 'Site (per-site)' });
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
+  const [ttl, setTtl] = useState('300');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const kindOptions: SelectProps.Option[] = [
+    { value: 'apex', label: 'Apex (per-fabric)' },
+    { value: 'site', label: 'Site (per-site)' },
+  ];
+  const siteOptions: SelectProps.Option[] = sites.map((s) => ({
+    value: s.id, label: `${s.code} · ${s.name}`,
+  }));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
+    if (!ttl.trim() || Number.isNaN(Number(ttl))) errs.ttl = 'Required (seconds)';
+    if (kindOpt.value === 'site' && !siteOpt) errs.site = 'Pick a site';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/dns/zones', {
-        name: v.name,
-        kind: v.kind,
+        name,
+        kind: kindOpt.value,
         fabric_id: fabricId,
-        site_id: v.kind === 'site' && v.site_id !== NONE ? v.site_id : null,
-        default_ttl: Number(v.default_ttl),
+        site_id: kindOpt.value === 'site' ? siteOpt?.value : null,
+        default_ttl: Number(ttl),
       });
       toast.success('Zone created');
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
   }
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Zone FQDN</FormLabel>
-            <FormControl><Input placeholder="e.g. site42.prod.dcim.mil" className="font-mono" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="kind" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Kind</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value="apex">Apex (per-fabric)</SelectItem>
-                  <SelectItem value="site">Site (per-site)</SelectItem>
-                </SelectContent>
-              </Select>
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="default_ttl" render={({ field }) => (
-            <FormItem><FormLabel>Default TTL (s)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        {kind === 'site' && (
-          <FormField control={form.control} name="site_id" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Site</FormLabel>
-              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue placeholder="Pick a site" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={NONE}>(unassigned)</SelectItem>
-                  {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </FormItem>
-          )} />
-        )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Zone FQDN" errorText={errors.name}>
+            <Input
+              value={name}
+              onChange={({ detail }) => setName(detail.value)}
+              placeholder="e.g. site42.prod.dcim.mil"
+            />
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Kind">
+              <Select
+                selectedOption={kindOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setKindOpt(detail.selectedOption);
+                }}
+                options={kindOptions}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="Default TTL (s)" errorText={errors.ttl}>
+              <Input type="number" value={ttl} onChange={({ detail }) => setTtl(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          {kindOpt.value === 'site' && (
+            <FormField label="Site" errorText={errors.site}>
+              <Select
+                placeholder="Pick a site"
+                selectedOption={siteOpt}
+                onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+                options={siteOptions}
+                expandToViewport
+              />
+            </FormField>
+          )}
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
@@ -470,62 +463,77 @@ function RecordsPanel({ zoneId, canWrite }: { zoneId: string; canWrite: boolean 
   }
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b p-3">
-          <h3 className="text-sm font-semibold">Records</h3>
-          {canWrite && (
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add record</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>New DNS record</DialogTitle></DialogHeader>
-                <RecordForm zoneId={zoneId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Data</TableHead>
-              <TableHead>Source</TableHead>
-              {canWrite && <TableHead className="w-12" />}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {records.length === 0 && !recordsQ.isLoading && (
-              <TableRow><TableCell colSpan={canWrite ? 5 : 4} className="text-muted-foreground">
-                No records yet.
-              </TableCell></TableRow>
+    <>
+      <Table<DnsRecord>
+        variant="container"
+        loading={recordsQ.isLoading}
+        loadingText="Loading records…"
+        items={records}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${records.length})`}
+            actions={canWrite && (
+              <Button iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                Add record
+              </Button>
             )}
-            {records.map((r) => (
-              <TableRow key={r.id}>
-                <TableCell className="font-mono">{r.name || '@'}</TableCell>
-                <TableCell><Badge variant="outline">{r.type}</Badge></TableCell>
-                <TableCell className="font-mono text-xs">{formatRdata(r)}</TableCell>
-                <TableCell>
-                  {r.source === 'ipam'
-                    ? <Badge variant="secondary" className="text-[10px]">from IPAM</Badge>
-                    : <span className="text-xs text-muted-foreground">manual</span>}
-                </TableCell>
-                {canWrite && (
-                  <TableCell>
-                    <Button size="sm" variant="ghost" onClick={() => remove(r)} title="Delete record"
-                      disabled={r.source === 'ipam'}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+          >
+            Records
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'name', header: 'Name',
+            cell: (r) => <span style={MONO}>{r.name || '@'}</span>,
+          },
+          {
+            id: 'type', header: 'Type',
+            cell: (r) => <Badge>{r.type}</Badge>,
+            width: 90,
+          },
+          {
+            id: 'data', header: 'Data',
+            cell: (r) => <span style={MONO}>{formatRdata(r)}</span>,
+          },
+          {
+            id: 'source', header: 'Source',
+            cell: (r) => r.source === 'ipam'
+              ? <Badge color="blue">from IPAM</Badge>
+              : <Box color="text-status-inactive" fontSize="body-s">manual</Box>,
+            width: 110,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (r: DnsRecord) => (
+              <Button
+                iconName="remove"
+                variant="inline-icon"
+                disabled={r.source === 'ipam'}
+                onClick={() => remove(r)}
+                ariaLabel={`Delete ${r.name || '@'} ${r.type}`}
+              />
+            ),
+            width: 60,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No records yet.
+          </Box>
+        }
+      />
+      {canWrite && (
+        <Modal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New DNS record"
+          size="medium"
+        >
+          <RecordForm zoneId={zoneId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
+        </Modal>
+      )}
+    </>
   );
 }
 
@@ -546,180 +554,186 @@ function formatRdata(r: DnsRecord): string {
   }
 }
 
-const recordSchema = z.object({
-  name: z.string().min(1),
-  type: z.enum(RECORD_TYPES),
-  ttl: z.string().optional(),
-  // The data shape is type-dependent; we collect the union of fields and
-  // pick the right ones based on `type` at submit time.
-  target: z.string().optional(),
-  priority: z.string().optional(),
-  weight: z.string().optional(),
-  port: z.string().optional(),
-  text: z.string().optional(),
-  flags: z.string().optional(),
-  tag: z.string().optional(),
-  value: z.string().optional(),
-});
-
 function RecordForm({ zoneId, onSaved }: { zoneId: string; onSaved: () => void }) {
-  const form = useForm<z.infer<typeof recordSchema>>({
-    resolver: zodResolver(recordSchema),
-    defaultValues: { name: '@', type: 'A' },
-  });
-  const type = form.watch('type');
+  const [name, setName] = useState('@');
+  const [typeOpt, setTypeOpt] = useState<SelectProps.Option>({ value: 'A', label: 'A' });
+  const [ttl, setTtl] = useState('');
+  const [target, setTarget] = useState('');
+  const [priority, setPriority] = useState('');
+  const [weight, setWeight] = useState('');
+  const [port, setPort] = useState('');
+  const [text, setText] = useState('');
+  const [flags, setFlags] = useState('');
+  const [tag, setTag] = useState('issue');
+  const [value, setValue] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  function buildData(v: z.infer<typeof recordSchema>): Record<string, any> {
-    switch (v.type) {
+  const type = typeOpt.value as RecordType;
+
+  function buildData(): Record<string, any> {
+    switch (type) {
       case 'A':
       case 'AAAA':
       case 'CNAME':
       case 'NS':
       case 'PTR':
-        return { target: v.target ?? '' };
+        return { target };
       case 'MX':
-        return { priority: Number(v.priority ?? 10), target: v.target ?? '' };
+        return { priority: Number(priority || 10), target };
       case 'TXT':
-        return { text: v.text ?? '' };
+        return { text };
       case 'SRV':
         return {
-          priority: Number(v.priority ?? 0),
-          weight: Number(v.weight ?? 0),
-          port: Number(v.port ?? 0),
-          target: v.target ?? '',
+          priority: Number(priority || 0),
+          weight: Number(weight || 0),
+          port: Number(port || 0),
+          target,
         };
       case 'CAA':
         return {
-          flags: Number(v.flags ?? 0),
-          tag: v.tag ?? 'issue',
-          value: v.value ?? '',
+          flags: Number(flags || 0),
+          tag: tag || 'issue',
+          value,
         };
     }
   }
 
-  async function onSubmit(v: z.infer<typeof recordSchema>) {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
+    if ((['A', 'AAAA', 'CNAME', 'NS', 'PTR', 'MX', 'SRV'] as RecordType[]).includes(type) && !target.trim()) {
+      errs.target = 'Required';
+    }
+    if (type === 'TXT' && !text.trim()) errs.text = 'Required';
+    if (type === 'CAA' && !value.trim()) errs.value = 'Required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/dns/records', {
         zone_id: zoneId,
-        name: v.name,
-        type: v.type,
-        ttl: v.ttl ? Number(v.ttl) : null,
-        data: buildData(v),
+        name,
+        type,
+        ttl: ttl ? Number(ttl) : null,
+        data: buildData(),
       });
       toast.success('Record created');
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
-          <FormField control={form.control} name="name" render={({ field }) => (
-            <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="@ or leaf-01" className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="type" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Type</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  {RECORD_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="ttl" render={({ field }) => (
-            <FormItem><FormLabel>TTL (s, optional)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        {/* Type-specific fields. We render only what the chosen record type needs. */}
-        {(['A', 'AAAA', 'CNAME', 'NS', 'PTR'] as const).includes(type as any) && (
-          <FormField control={form.control} name="target" render={({ field }) => (
-            <FormItem><FormLabel>{type === 'A' || type === 'AAAA' ? 'IP address' : 'Target FQDN'}</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        )}
-        {type === 'MX' && (
-          <div className="grid grid-cols-2 gap-3">
-            <FormField control={form.control} name="priority" render={({ field }) => (
-              <FormItem><FormLabel>Priority</FormLabel><FormControl><Input type="number" placeholder="10" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="target" render={({ field }) => (
-              <FormItem><FormLabel>Mail server FQDN</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-          </div>
-        )}
-        {type === 'TXT' && (
-          <FormField control={form.control} name="text" render={({ field }) => (
-            <FormItem><FormLabel>Text (no surrounding quotes)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        )}
-        {type === 'SRV' && (
-          <div className="grid grid-cols-4 gap-3">
-            <FormField control={form.control} name="priority" render={({ field }) => (
-              <FormItem><FormLabel>Priority</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="weight" render={({ field }) => (
-              <FormItem><FormLabel>Weight</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="port" render={({ field }) => (
-              <FormItem><FormLabel>Port</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="target" render={({ field }) => (
-              <FormItem><FormLabel>Target</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-          </div>
-        )}
-        {type === 'CAA' && (
-          <div className="grid grid-cols-3 gap-3">
-            <FormField control={form.control} name="flags" render={({ field }) => (
-              <FormItem><FormLabel>Flags</FormLabel><FormControl><Input type="number" placeholder="0" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="tag" render={({ field }) => (
-              <FormItem><FormLabel>Tag</FormLabel><FormControl><Input placeholder="issue" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="value" render={({ field }) => (
-              <FormItem><FormLabel>Value</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-          </div>
-        )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <ColumnLayout columns={3}>
+            <FormField label="Name" errorText={errors.name}>
+              <Input
+                value={name}
+                onChange={({ detail }) => setName(detail.value)}
+                placeholder="@ or leaf-01"
+              />
+            </FormField>
+            <FormField label="Type">
+              <Select
+                selectedOption={typeOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setTypeOpt(detail.selectedOption);
+                }}
+                options={RECORD_TYPE_OPTS}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="TTL (s, optional)">
+              <Input type="number" value={ttl} onChange={({ detail }) => setTtl(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+
+          {(['A', 'AAAA', 'CNAME', 'NS', 'PTR'] as RecordType[]).includes(type) && (
+            <FormField
+              label={type === 'A' || type === 'AAAA' ? 'IP address' : 'Target FQDN'}
+              errorText={errors.target}
+            >
+              <Input value={target} onChange={({ detail }) => setTarget(detail.value)} />
+            </FormField>
+          )}
+
+          {type === 'MX' && (
+            <ColumnLayout columns={2}>
+              <FormField label="Priority">
+                <Input
+                  type="number" value={priority}
+                  onChange={({ detail }) => setPriority(detail.value)}
+                  placeholder="10"
+                />
+              </FormField>
+              <FormField label="Mail server FQDN" errorText={errors.target}>
+                <Input value={target} onChange={({ detail }) => setTarget(detail.value)} />
+              </FormField>
+            </ColumnLayout>
+          )}
+
+          {type === 'TXT' && (
+            <FormField label="Text (no surrounding quotes)" errorText={errors.text}>
+              <Input value={text} onChange={({ detail }) => setText(detail.value)} />
+            </FormField>
+          )}
+
+          {type === 'SRV' && (
+            <ColumnLayout columns={4}>
+              <FormField label="Priority">
+                <Input type="number" value={priority} onChange={({ detail }) => setPriority(detail.value)} />
+              </FormField>
+              <FormField label="Weight">
+                <Input type="number" value={weight} onChange={({ detail }) => setWeight(detail.value)} />
+              </FormField>
+              <FormField label="Port">
+                <Input type="number" value={port} onChange={({ detail }) => setPort(detail.value)} />
+              </FormField>
+              <FormField label="Target" errorText={errors.target}>
+                <Input value={target} onChange={({ detail }) => setTarget(detail.value)} />
+              </FormField>
+            </ColumnLayout>
+          )}
+
+          {type === 'CAA' && (
+            <ColumnLayout columns={3}>
+              <FormField label="Flags">
+                <Input
+                  type="number" value={flags}
+                  onChange={({ detail }) => setFlags(detail.value)} placeholder="0"
+                />
+              </FormField>
+              <FormField label="Tag">
+                <Input value={tag} onChange={({ detail }) => setTag(detail.value)} placeholder="issue" />
+              </FormField>
+              <FormField label="Value" errorText={errors.value}>
+                <Input value={value} onChange={({ detail }) => setValue(detail.value)} />
+              </FormField>
+            </ColumnLayout>
+          )}
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
-// ----------------------- Servers + anycast -----------------------
-
-const serverSchema = z.object({
-  name: z.string().min(1),
-  site_id: z.string().min(1),
-  role: z.enum(['auth', 'recursive']),
-  unicast_ip: z.string().min(1),
-  anycast_group_id: z.string().optional(),
-});
-
-const anycastSchema = z.object({
-  name: z.string().min(1),
-  service: z.enum(['dns_recursive', 'ntp', 'log']),
-  anycast_ipv4: z.string().optional(),
-  anycast_ipv6: z.string().optional(),
-});
-
-const bgpSchema = z.object({
-  name: z.string().min(1),
-  site_id: z.string().min(1),
-  local_asn: z.string().min(1),
-  peer_asn: z.string().min(1),
-  peer_ip: z.string().min(1),
-  md5_password: z.string().optional(),
-});
+// ----------------------- Anycast groups -----------------------
 
 function AnycastGroupsPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
   const qc = useQueryClient();
-  // Same query keys as ServersPanel — react-query dedupes the fetch.
   const groupsQ = useQuery({
     queryKey: ['anycast-groups', fabricId],
     queryFn: async () => (
@@ -743,8 +757,6 @@ function AnycastGroupsPanel({ fabricId, canWrite }: { fabricId: string; canWrite
   }
 
   async function remove(g: AnycastGroup) {
-    // Backend already refuses if any DnsServer is bound; we surface the
-    // count up-front so the operator doesn't have to read the toast.
     const bound = servers.filter((s) => s.anycast_group_id === g.id).length;
     if (bound > 0) {
       toast.error(`${bound} DNS server(s) still bound; unbind before deleting`);
@@ -759,85 +771,101 @@ function AnycastGroupsPanel({ fabricId, canWrite }: { fabricId: string; canWrite
   }
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b p-3">
-          <h3 className="text-sm font-semibold">Anycast groups</h3>
-          {canWrite && (
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add anycast group</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>New anycast group</DialogTitle></DialogHeader>
-                <AnycastForm
-                  fabricId={fabricId}
-                  onSaved={async () => { setCreateOpen(false); await refresh(); }}
-                />
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Service</TableHead>
-              <TableHead>Anycast v4</TableHead>
-              <TableHead>Anycast v6</TableHead>
-              <TableHead>Bound servers</TableHead>
-              {canWrite && <TableHead className="w-20" />}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {groups.length === 0 && !groupsQ.isLoading && (
-              <TableRow><TableCell colSpan={canWrite ? 6 : 5} className="text-muted-foreground">
-                No anycast groups in this fabric yet.
-              </TableCell></TableRow>
+    <>
+      <Table<AnycastGroup>
+        variant="container"
+        loading={groupsQ.isLoading}
+        loadingText="Loading anycast groups…"
+        items={groups}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${groups.length})`}
+            actions={canWrite && (
+              <Button iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                Add anycast group
+              </Button>
             )}
-            {groups.map((g) => {
-              const boundCount = servers.filter((s) => s.anycast_group_id === g.id).length;
+          >
+            Anycast groups
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (g) => g.name },
+          {
+            id: 'service', header: 'Service',
+            cell: (g) => <Badge>{g.service}</Badge>,
+            width: 130,
+          },
+          {
+            id: 'v4', header: 'Anycast v4',
+            cell: (g) => <span style={MONO}>{g.anycast_ipv4 ?? '—'}</span>,
+          },
+          {
+            id: 'v6', header: 'Anycast v6',
+            cell: (g) => <span style={MONO}>{g.anycast_ipv6 ?? '—'}</span>,
+          },
+          {
+            id: 'bound', header: 'Bound servers',
+            cell: (g) => {
+              const c = servers.filter((s) => s.anycast_group_id === g.id).length;
               return (
-                <TableRow key={g.id}>
-                  <TableCell className="font-medium">{g.name}</TableCell>
-                  <TableCell><Badge variant="secondary" className="text-[10px]">{g.service}</Badge></TableCell>
-                  <TableCell className="font-mono text-xs">{g.anycast_ipv4 ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs">{g.anycast_ipv6 ?? '—'}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {boundCount === 0 ? '—' : `${boundCount} server${boundCount === 1 ? '' : 's'}`}
-                  </TableCell>
-                  {canWrite && (
-                    <TableCell>
-                      <Button size="sm" variant="ghost" onClick={() => setEditGroup(g)} title="Edit anycast group">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => remove(g)} title="Delete anycast group">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
+                <Box color="text-status-inactive" fontSize="body-s">
+                  {c === 0 ? '—' : `${c} server${c === 1 ? '' : 's'}`}
+                </Box>
               );
-            })}
-          </TableBody>
-        </Table>
-      </CardContent>
-      <Dialog open={editGroup !== null} onOpenChange={(o) => { if (!o) setEditGroup(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit anycast group</DialogTitle></DialogHeader>
-          {editGroup && (
-            <AnycastForm
-              fabricId={fabricId}
-              group={editGroup}
-              onSaved={async () => { setEditGroup(null); await refresh(); }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </Card>
+            },
+            width: 140,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (g: AnycastGroup) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditGroup(g)} ariaLabel={`Edit ${g.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(g)} ariaLabel={`Delete ${g.name}`} />
+              </SpaceBetween>
+            ),
+            width: 110,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No anycast groups in this fabric yet.
+          </Box>
+        }
+      />
+      {canWrite && (
+        <Modal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New anycast group"
+          size="medium"
+        >
+          <AnycastForm
+            fabricId={fabricId}
+            onSaved={async () => { setCreateOpen(false); await refresh(); }}
+          />
+        </Modal>
+      )}
+      <Modal
+        visible={editGroup !== null}
+        onDismiss={() => setEditGroup(null)}
+        header="Edit anycast group"
+        size="medium"
+      >
+        {editGroup && (
+          <AnycastForm
+            fabricId={fabricId}
+            group={editGroup}
+            onSaved={async () => { setEditGroup(null); await refresh(); }}
+          />
+        )}
+      </Modal>
+    </>
   );
 }
 
+// ----------------------- Servers -----------------------
 
 function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
   const qc = useQueryClient();
@@ -884,115 +912,161 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
   }
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b p-3">
-          <h3 className="text-sm font-semibold">DNS servers + anycast</h3>
-          {canWrite && (
-            <div className="flex gap-2">
-              <Dialog open={bgpOpen} onOpenChange={setBgpOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> BGP peer</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader><DialogTitle>New BGP peer</DialogTitle></DialogHeader>
-                  <BgpPeerForm sites={sites} onSaved={async () => { setBgpOpen(false); await qc.invalidateQueries({ queryKey: ['bgp-peers'] }); }} />
-                </DialogContent>
-              </Dialog>
-              <Dialog open={serverOpen} onOpenChange={setServerOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm"><Plus className="h-3.5 w-3.5" /> DNS server</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader><DialogTitle>New DNS server</DialogTitle></DialogHeader>
-                  <ServerForm fabricId={fabricId} sites={sites} anycast={anycast} onSaved={async () => { setServerOpen(false); await qc.invalidateQueries({ queryKey: ['dns-servers', fabricId] }); }} />
-                </DialogContent>
-              </Dialog>
-            </div>
-          )}
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Site</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Unicast IP</TableHead>
-              <TableHead>Anycast v4</TableHead>
-              <TableHead>Anycast v6</TableHead>
-              <TableHead>Last render</TableHead>
-              <TableHead>BGP peers</TableHead>
-              {canWrite && <TableHead className="w-20" />}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {servers.length === 0 && !serversQ.isLoading && (
-              <TableRow><TableCell colSpan={canWrite ? 9 : 8} className="text-muted-foreground">No DNS servers yet.</TableCell></TableRow>
+    <>
+      <Table<DnsServer>
+        variant="container"
+        loading={serversQ.isLoading}
+        loadingText="Loading DNS servers…"
+        items={servers}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${servers.length})`}
+            actions={canWrite && (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button iconName="add-plus" onClick={() => setBgpOpen(true)}>BGP peer</Button>
+                <Button variant="primary" iconName="add-plus" onClick={() => setServerOpen(true)}>DNS server</Button>
+              </SpaceBetween>
             )}
-            {servers.map((s) => {
+          >
+            DNS servers + anycast
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (s) => s.name },
+          {
+            id: 'site', header: 'Site',
+            cell: (s) => (
+              <Box fontSize="body-s">
+                {sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}
+              </Box>
+            ),
+            width: 110,
+          },
+          {
+            id: 'role', header: 'Role',
+            cell: (s) => <Badge color={s.role === 'recursive' ? 'blue' : 'grey'}>{s.role}</Badge>,
+            width: 110,
+          },
+          {
+            id: 'unicast', header: 'Unicast IP',
+            cell: (s) => <span style={MONO}>{s.unicast_ip}</span>,
+          },
+          {
+            id: 'v4', header: 'Anycast v4',
+            cell: (s) => {
               const ag = anycast.find((a) => a.id === s.anycast_group_id);
-              return (
-                <TableRow key={s.id}>
-                  <TableCell className="font-medium">{s.name}</TableCell>
-                  <TableCell className="text-xs">{sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}</TableCell>
-                  <TableCell><Badge variant={s.role === 'recursive' ? 'default' : 'secondary'}>{s.role}</Badge></TableCell>
-                  <TableCell className="font-mono text-xs">{s.unicast_ip}</TableCell>
-                  <TableCell className="font-mono text-xs">{ag?.anycast_ipv4 ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs">{ag?.anycast_ipv6 ?? '—'}</TableCell>
-                  <TableCell>
-                    <RenderStatusBadge server={s} />
-                  </TableCell>
-                  <TableCell>
-                    {s.role === 'recursive'
-                      ? <BindingsCell server={s} peers={peers} canWrite={canWrite} />
-                      : <span className="text-xs text-muted-foreground">—</span>}
-                  </TableCell>
-                  {canWrite && (
-                    <TableCell>
-                      <Button size="sm" variant="ghost" onClick={() => setEditServer(s)} title="Edit DNS server">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => removeServer(s)} title="Delete DNS server">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </CardContent>
-      <Dialog open={editServer !== null} onOpenChange={(o) => { if (!o) setEditServer(null); }}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit DNS server</DialogTitle></DialogHeader>
-          {editServer && (
+              return <span style={MONO}>{ag?.anycast_ipv4 ?? '—'}</span>;
+            },
+          },
+          {
+            id: 'v6', header: 'Anycast v6',
+            cell: (s) => {
+              const ag = anycast.find((a) => a.id === s.anycast_group_id);
+              return <span style={MONO}>{ag?.anycast_ipv6 ?? '—'}</span>;
+            },
+          },
+          {
+            id: 'render', header: 'Last render',
+            cell: (s) => <RenderStatusBadge server={s} />,
+          },
+          {
+            id: 'bgp', header: 'BGP peers',
+            cell: (s) => s.role === 'recursive'
+              ? <BindingsCell server={s} peers={peers} canWrite={canWrite} />
+              : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (s: DnsServer) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditServer(s)} ariaLabel={`Edit ${s.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => removeServer(s)} ariaLabel={`Delete ${s.name}`} />
+              </SpaceBetween>
+            ),
+            width: 110,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No DNS servers yet.
+          </Box>
+        }
+      />
+      {canWrite && (
+        <>
+          <Modal
+            visible={bgpOpen}
+            onDismiss={() => setBgpOpen(false)}
+            header="New BGP peer"
+            size="medium"
+          >
+            <BgpPeerForm
+              sites={sites}
+              onSaved={async () => {
+                setBgpOpen(false);
+                await qc.invalidateQueries({ queryKey: ['bgp-peers'] });
+              }}
+            />
+          </Modal>
+          <Modal
+            visible={serverOpen}
+            onDismiss={() => setServerOpen(false)}
+            header="New DNS server"
+            size="medium"
+          >
             <ServerForm
               fabricId={fabricId}
               sites={sites}
               anycast={anycast}
-              server={editServer}
-              onSaved={async () => { setEditServer(null); await refreshServers(); }}
+              onSaved={async () => {
+                setServerOpen(false);
+                await qc.invalidateQueries({ queryKey: ['dns-servers', fabricId] });
+              }}
             />
-          )}
-        </DialogContent>
-      </Dialog>
-    </Card>
+          </Modal>
+          <Modal
+            visible={editServer !== null}
+            onDismiss={() => setEditServer(null)}
+            header="Edit DNS server"
+            size="medium"
+          >
+            {editServer && (
+              <ServerForm
+                fabricId={fabricId}
+                sites={sites}
+                anycast={anycast}
+                server={editServer}
+                onSaved={async () => { setEditServer(null); await refreshServers(); }}
+              />
+            )}
+          </Modal>
+        </>
+      )}
+    </>
   );
 }
 
 function RenderStatusBadge({ server }: { server: DnsServer }) {
-  if (!server.last_render_at) return <span className="text-xs text-muted-foreground">never</span>;
+  if (!server.last_render_at) {
+    return <Box color="text-status-inactive" fontSize="body-s">never</Box>;
+  }
   const ok = server.last_render_status === 'ok';
+  const when = new Date(server.last_render_at).toLocaleString();
   return (
-    <span className="inline-flex items-center gap-2">
-      <Badge variant={ok ? 'success' as any : 'destructive'} className="text-[10px]">
+    <SpaceBetween size="xxs" direction="horizontal">
+      <StatusIndicator type={ok ? 'success' : 'error'}>
         {server.last_render_status}
-      </Badge>
-      <span className="text-[10px] text-muted-foreground" title={server.last_render_error ?? ''}>
-        {new Date(server.last_render_at).toLocaleString()}
-      </span>
-    </span>
+      </StatusIndicator>
+      <Box
+        color="text-status-inactive"
+        fontSize="body-s"
+        // The title gives a hover-over for the error text, which is the
+        // operator's quickest path when last_render_status='error'.
+      >
+        <span title={server.last_render_error ?? ''}>{when}</span>
+      </Box>
+    </SpaceBetween>
   );
 }
 
@@ -1023,33 +1097,45 @@ function BindingsCell({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
 
+  const peerOptions: SelectProps.Option[] = sitePeers
+    .filter((p) => !bindings.some((b) => b.bgp_peer_id === p.id))
+    .map((p) => ({ value: p.id, label: `${p.peer_ip} (AS${p.peer_asn})` }));
+
   return (
-    <div className="space-y-1">
+    <SpaceBetween size="xxs">
       {bindings.map((b) => {
         const p = peers.find((x) => x.id === b.bgp_peer_id);
         return (
-          <div key={b.id} className="flex items-center gap-1 text-xs">
-            <span className="font-mono">{p?.peer_ip ?? b.bgp_peer_id.slice(0, 8) + '…'}</span>
-            {p && <span className="text-muted-foreground">AS{p.peer_asn}</span>}
-            {canWrite && (
-              <Button size="sm" variant="ghost" className="h-5 w-5 p-0" onClick={() => remove(b.id)}>
-                <Trash2 className="h-3 w-3" />
-              </Button>
+          <SpaceBetween key={b.id} size="xxs" direction="horizontal">
+            <span style={{ ...MONO, fontSize: '12px' }}>
+              {p?.peer_ip ?? b.bgp_peer_id.slice(0, 8) + '…'}
+            </span>
+            {p && (
+              <Box color="text-status-inactive" fontSize="body-s">AS{p.peer_asn}</Box>
             )}
-          </div>
+            {canWrite && (
+              <Button
+                iconName="remove"
+                variant="inline-icon"
+                onClick={() => remove(b.id)}
+                ariaLabel="Remove binding"
+              />
+            )}
+          </SpaceBetween>
         );
       })}
-      {canWrite && sitePeers.length > bindings.length && (
-        <Select value="" onValueChange={(v) => add(v)}>
-          <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="+ add peer" /></SelectTrigger>
-          <SelectContent>
-            {sitePeers
-              .filter((p) => !bindings.some((b) => b.bgp_peer_id === p.id))
-              .map((p) => <SelectItem key={p.id} value={p.id}>{p.peer_ip} (AS{p.peer_asn})</SelectItem>)}
-          </SelectContent>
-        </Select>
+      {canWrite && peerOptions.length > 0 && (
+        <Select
+          placeholder="+ add peer"
+          selectedOption={null}
+          onChange={({ detail }) => {
+            if (detail.selectedOption.value) add(detail.selectedOption.value);
+          }}
+          options={peerOptions}
+          expandToViewport
+        />
       )}
-    </div>
+    </SpaceBetween>
   );
 }
 
@@ -1059,113 +1145,153 @@ function ServerForm({
   fabricId: string;
   sites: Site[];
   anycast: AnycastGroup[];
-  /** When set, the form patches an existing server. Otherwise creates. */
   server?: DnsServer;
   onSaved: () => void;
 }) {
-  const NONE = '__none__';
   const editing = !!server;
-  const form = useForm<z.infer<typeof serverSchema>>({
-    resolver: zodResolver(serverSchema),
-    defaultValues: {
-      name: server?.name ?? '',
-      site_id: server?.site_id ?? '',
-      role: server?.role ?? 'auth',
-      unicast_ip: server?.unicast_ip ?? '',
-      anycast_group_id: server?.anycast_group_id ?? NONE,
-    },
+  const [name, setName] = useState(server?.name ?? '');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(() => {
+    if (!server) return null;
+    const s = sites.find((x) => x.id === server.site_id);
+    return s ? { value: s.id, label: `${s.code} · ${s.name}` } : null;
   });
-  // role is locked when editing (changing it would invalidate the
-  // server's bundle — easier to delete + recreate). We still display
-  // it so the operator knows what they're looking at.
-  const role = form.watch('role');
-  async function onSubmit(v: z.infer<typeof serverSchema>) {
+  const [roleOpt, setRoleOpt] = useState<SelectProps.Option>(
+    server?.role === 'recursive'
+      ? { value: 'recursive', label: 'Recursive' }
+      : { value: 'auth', label: 'Authoritative' },
+  );
+  const [unicastIp, setUnicastIp] = useState(server?.unicast_ip ?? '');
+  const [anycastOpt, setAnycastOpt] = useState<SelectProps.Option | null>(() => {
+    if (!server?.anycast_group_id) return null;
+    const g = anycast.find((a) => a.id === server.anycast_group_id);
+    return g
+      ? { value: g.id, label: `${g.name} (${g.anycast_ipv4 ?? g.anycast_ipv6 ?? '—'})` }
+      : null;
+  });
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const siteOptions: SelectProps.Option[] = sites.map((s) => ({
+    value: s.id, label: `${s.code} · ${s.name}`,
+  }));
+  const roleOptions: SelectProps.Option[] = [
+    { value: 'auth', label: 'Authoritative' },
+    { value: 'recursive', label: 'Recursive' },
+  ];
+  const anycastOptions: SelectProps.Option[] = anycast.map((a) => ({
+    value: a.id, label: `${a.name} (${a.anycast_ipv4 ?? a.anycast_ipv6 ?? '—'})`,
+  }));
+
+  const role = roleOpt.value as 'auth' | 'recursive';
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
+    if (!editing && !siteOpt) errs.site = 'Pick a site';
+    if (!unicastIp.trim()) errs.unicast_ip = 'Required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       if (editing && server) {
-        // PATCH: only the fields the operator can change. site_id +
-        // role + fabric_id are immutable post-create.
         await http.patch(`/dns/servers/${server.id}`, {
-          name: v.name,
-          unicast_ip: v.unicast_ip,
-          anycast_group_id: server.role === 'recursive' && v.anycast_group_id && v.anycast_group_id !== NONE
-            ? v.anycast_group_id : null,
+          name,
+          unicast_ip: unicastIp,
+          anycast_group_id: server.role === 'recursive' && anycastOpt?.value
+            ? anycastOpt.value : null,
         });
         toast.success('DNS server updated');
       } else {
         await http.post('/dns/servers', {
-          name: v.name,
-          site_id: v.site_id,
+          name,
+          site_id: siteOpt!.value,
           fabric_id: fabricId,
-          role: v.role,
-          unicast_ip: v.unicast_ip,
-          anycast_group_id: v.role === 'recursive' && v.anycast_group_id !== NONE ? v.anycast_group_id : null,
+          role,
+          unicast_ip: unicastIp,
+          anycast_group_id: role === 'recursive' && anycastOpt?.value ? anycastOpt.value : null,
         });
         toast.success('DNS server created');
       }
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
   }
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. site42-coredns-auth" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="site_id" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Site</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange} disabled={editing}>
-                <FormControl><SelectTrigger><SelectValue placeholder="Pick a site" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {editing && (
-                <p className="text-xs text-muted-foreground">Site is immutable after creation.</p>
-              )}
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="role" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Role</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange} disabled={editing}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value="auth">Authoritative</SelectItem>
-                  <SelectItem value="recursive">Recursive</SelectItem>
-                </SelectContent>
-              </Select>
-              {editing && (
-                <p className="text-xs text-muted-foreground">Role is immutable after creation.</p>
-              )}
-            </FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="unicast_ip" render={({ field }) => (
-          <FormItem><FormLabel>Unicast (mgmt) IP</FormLabel><FormControl><Input className="font-mono" placeholder="10.42.0.53" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        {role === 'recursive' && (
-          <FormField control={form.control} name="anycast_group_id" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Anycast group</FormLabel>
-              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue placeholder="Pick an anycast group" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={NONE}>(none)</SelectItem>
-                  {anycast.map((a) => <SelectItem key={a.id} value={a.id}>{a.name} ({a.anycast_ipv4 ?? a.anycast_ipv6})</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">Recursive servers must bind an anycast group.</p>
-            </FormItem>
-          )} />
-        )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input
+              value={name}
+              onChange={({ detail }) => setName(detail.value)}
+              placeholder="e.g. site42-coredns-auth"
+            />
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField
+              label="Site"
+              errorText={errors.site}
+              description={editing ? 'Site is immutable after creation.' : undefined}
+            >
+              <Select
+                placeholder="Pick a site"
+                selectedOption={siteOpt}
+                onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+                options={siteOptions}
+                disabled={editing}
+                expandToViewport
+              />
+            </FormField>
+            <FormField
+              label="Role"
+              description={editing ? 'Role is immutable after creation.' : undefined}
+            >
+              <Select
+                selectedOption={roleOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setRoleOpt(detail.selectedOption);
+                }}
+                options={roleOptions}
+                disabled={editing}
+                expandToViewport
+              />
+            </FormField>
+          </ColumnLayout>
+          <FormField label="Unicast (mgmt) IP" errorText={errors.unicast_ip}>
+            <Input
+              value={unicastIp}
+              onChange={({ detail }) => setUnicastIp(detail.value)}
+              placeholder="10.42.0.53"
+            />
+          </FormField>
+          {role === 'recursive' && (
+            <FormField
+              label="Anycast group"
+              description="Recursive servers must bind an anycast group."
+            >
+              <Select
+                placeholder="Pick an anycast group"
+                selectedOption={anycastOpt}
+                onChange={({ detail }) => setAnycastOpt(detail.selectedOption)}
+                options={anycastOptions}
+                expandToViewport
+              />
+            </FormField>
+          )}
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
@@ -1173,136 +1299,200 @@ function AnycastForm({
   fabricId, group, onSaved,
 }: {
   fabricId: string;
-  /** When set, the form patches an existing group. Service + fabric
-   * are immutable post-create (changing them would silently drop the
-   * binding from every DnsServer that points here). */
   group?: AnycastGroup;
   onSaved: () => void;
 }) {
   const editing = !!group;
-  const form = useForm<z.infer<typeof anycastSchema>>({
-    resolver: zodResolver(anycastSchema),
-    defaultValues: {
-      name: group?.name ?? '',
-      service: group?.service ?? 'dns_recursive',
-      anycast_ipv4: group?.anycast_ipv4 ?? '',
-      anycast_ipv6: group?.anycast_ipv6 ?? '',
-    },
+  const [name, setName] = useState(group?.name ?? '');
+  const [serviceOpt, setServiceOpt] = useState<SelectProps.Option>(() => {
+    const svc = group?.service ?? 'dns_recursive';
+    const label = svc === 'dns_recursive' ? 'DNS recursive'
+      : svc === 'ntp' ? 'NTP (reserved)' : 'Log (reserved)';
+    return { value: svc, label };
   });
-  async function onSubmit(v: z.infer<typeof anycastSchema>) {
+  const [ipv4, setIpv4] = useState(group?.anycast_ipv4 ?? '');
+  const [ipv6, setIpv6] = useState(group?.anycast_ipv6 ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const serviceOptions: SelectProps.Option[] = [
+    { value: 'dns_recursive', label: 'DNS recursive' },
+    { value: 'ntp', label: 'NTP (reserved)' },
+    { value: 'log', label: 'Log (reserved)' },
+  ];
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
+    if (!ipv4.trim() && !ipv6.trim()) errs.ipv4 = 'At least one of v4 / v6 must be set';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       if (editing && group) {
         await http.patch(`/dns/anycast-groups/${group.id}`, {
-          name: v.name,
-          anycast_ipv4: v.anycast_ipv4 || null,
-          anycast_ipv6: v.anycast_ipv6 || null,
+          name,
+          anycast_ipv4: ipv4 || null,
+          anycast_ipv6: ipv6 || null,
         });
         toast.success('Anycast group updated');
       } else {
         await http.post('/dns/anycast-groups', {
-          name: v.name, fabric_id: fabricId, service: v.service,
-          anycast_ipv4: v.anycast_ipv4 || null,
-          anycast_ipv6: v.anycast_ipv6 || null,
+          name, fabric_id: fabricId, service: serviceOpt.value,
+          anycast_ipv4: ipv4 || null,
+          anycast_ipv6: ipv6 || null,
         });
         toast.success('Anycast group created');
       }
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
   }
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. prod-dns-recursive" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="service" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Service</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange} disabled={editing}>
-              <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-              <SelectContent>
-                <SelectItem value="dns_recursive">DNS recursive</SelectItem>
-                <SelectItem value="ntp">NTP (reserved)</SelectItem>
-                <SelectItem value="log">Log (reserved)</SelectItem>
-              </SelectContent>
-            </Select>
-            {editing && (
-              <p className="text-xs text-muted-foreground">Service is immutable after creation.</p>
-            )}
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="anycast_ipv4" render={({ field }) => (
-            <FormItem><FormLabel>Anycast IPv4 (optional)</FormLabel><FormControl><Input className="font-mono" placeholder="10.255.0.53" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="anycast_ipv6" render={({ field }) => (
-            <FormItem><FormLabel>Anycast IPv6 (optional)</FormLabel><FormControl><Input className="font-mono" placeholder="2001:db8::53" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <p className="text-xs text-muted-foreground">At least one of v4 / v6 must be set.</p>
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input
+              value={name}
+              onChange={({ detail }) => setName(detail.value)}
+              placeholder="e.g. prod-dns-recursive"
+            />
+          </FormField>
+          <FormField
+            label="Service"
+            description={editing ? 'Service is immutable after creation.' : undefined}
+          >
+            <Select
+              selectedOption={serviceOpt}
+              onChange={({ detail }) => {
+                if (detail.selectedOption.value) setServiceOpt(detail.selectedOption);
+              }}
+              options={serviceOptions}
+              disabled={editing}
+              expandToViewport
+            />
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Anycast IPv4 (optional)" errorText={errors.ipv4}>
+              <Input
+                value={ipv4}
+                onChange={({ detail }) => setIpv4(detail.value)}
+                placeholder="10.255.0.53"
+              />
+            </FormField>
+            <FormField label="Anycast IPv6 (optional)">
+              <Input
+                value={ipv6}
+                onChange={({ detail }) => setIpv6(detail.value)}
+                placeholder="2001:db8::53"
+              />
+            </FormField>
+          </ColumnLayout>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
 function BgpPeerForm({ sites, onSaved }: { sites: Site[]; onSaved: () => void }) {
-  const form = useForm<z.infer<typeof bgpSchema>>({
-    resolver: zodResolver(bgpSchema),
-    defaultValues: { name: '', site_id: '', local_asn: '65000', peer_asn: '65001', peer_ip: '', md5_password: '' },
-  });
-  async function onSubmit(v: z.infer<typeof bgpSchema>) {
+  const [name, setName] = useState('');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
+  const [localAsn, setLocalAsn] = useState('65000');
+  const [peerAsn, setPeerAsn] = useState('65001');
+  const [peerIp, setPeerIp] = useState('');
+  const [md5, setMd5] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const siteOptions: SelectProps.Option[] = sites.map((s) => ({
+    value: s.id, label: `${s.code} · ${s.name}`,
+  }));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
+    if (!siteOpt) errs.site = 'Pick a site';
+    if (!peerIp.trim()) errs.peer_ip = 'Required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/dns/bgp-peers', {
-        name: v.name,
-        site_id: v.site_id,
-        local_asn: Number(v.local_asn),
-        peer_asn: Number(v.peer_asn),
-        peer_ip: v.peer_ip,
-        md5_password: v.md5_password || null,
+        name,
+        site_id: siteOpt!.value,
+        local_asn: Number(localAsn),
+        peer_asn: Number(peerAsn),
+        peer_ip: peerIp,
+        md5_password: md5 || null,
       });
       toast.success('BGP peer created');
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
   }
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. site42-leaf-01" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="site_id" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Site</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange}>
-              <FormControl><SelectTrigger><SelectValue placeholder="Pick a site" /></SelectTrigger></FormControl>
-              <SelectContent>
-                {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="local_asn" render={({ field }) => (
-            <FormItem><FormLabel>Local AS</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="peer_asn" render={({ field }) => (
-            <FormItem><FormLabel>Peer AS</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="peer_ip" render={({ field }) => (
-          <FormItem><FormLabel>Peer IP</FormLabel><FormControl><Input className="font-mono" placeholder="10.42.255.1" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="md5_password" render={({ field }) => (
-          <FormItem><FormLabel>MD5 password (optional)</FormLabel><FormControl><Input type="password" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input
+              value={name}
+              onChange={({ detail }) => setName(detail.value)}
+              placeholder="e.g. site42-leaf-01"
+            />
+          </FormField>
+          <FormField label="Site" errorText={errors.site}>
+            <Select
+              placeholder="Pick a site"
+              selectedOption={siteOpt}
+              onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+              options={siteOptions}
+              expandToViewport
+            />
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Local AS">
+              <Input type="number" value={localAsn} onChange={({ detail }) => setLocalAsn(detail.value)} />
+            </FormField>
+            <FormField label="Peer AS">
+              <Input type="number" value={peerAsn} onChange={({ detail }) => setPeerAsn(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <FormField label="Peer IP" errorText={errors.peer_ip}>
+            <Input
+              value={peerIp}
+              onChange={({ detail }) => setPeerIp(detail.value)}
+              placeholder="10.42.255.1"
+            />
+          </FormField>
+          <FormField label="MD5 password (optional)">
+            <Input type="password" value={md5} onChange={({ detail }) => setMd5(detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
