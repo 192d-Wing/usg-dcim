@@ -27,13 +27,27 @@
               '</p>' +
             '</div>';
         }
+        // Benign warnings emitted by ResizeObserver loops (Cloudscape and
+        // many other layout libraries trigger these during normal
+        // operation). They aren't fatal — swallow before the boot
+        // handler treats the page as crashed.
+        function isBenign(msg) {
+          var m = String(msg || '');
+          return m.indexOf('ResizeObserver loop') === 0
+            || m.indexOf('ResizeObserver loop completed') !== -1
+            || m.indexOf('ResizeObserver loop limit exceeded') !== -1;
+        }
         window.addEventListener('error', function (e) {
+          var msg = String(e.message || (e.error && e.error.message) || 'unknown');
+          if (isBenign(msg)) return;
           var stack = e.error && e.error.stack ? String(e.error.stack) : '';
-          show('error', String(e.message || (e.error && e.error.message) || 'unknown'), stack);
+          show('error', msg, stack);
         });
         window.addEventListener('unhandledrejection', function (e) {
           var r = e.reason || {};
-          show('unhandledrejection', String(r.message || r), String(r.stack || ''));
+          var msg = String(r.message || r);
+          if (isBenign(msg)) return;
+          show('unhandledrejection', msg, String(r.stack || ''));
         });
       })();
     </script>
