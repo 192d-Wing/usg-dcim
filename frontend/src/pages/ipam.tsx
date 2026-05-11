@@ -59,6 +59,7 @@ import CsColumnLayout from '@cloudscape-design/components/column-layout';
 import CsSegmentedControl from '@cloudscape-design/components/segmented-control';
 import CsBadge from '@cloudscape-design/components/badge';
 import CsBreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
+import CsCards from '@cloudscape-design/components/cards';
 
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
@@ -524,13 +525,20 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
 
   return (
     <>
-      <CsTable<Fabric>
-        variant="container"
+      {/* Cards — a 5-field-per-fabric Table looked stretched at full
+          container width. Cards renders each fabric as a tile with the
+          name as a clickable header and the rest as small key/value
+          sections. Scales 1/2/3 per row by viewport. */}
+      <CsCards<Fabric>
         loading={tableQuery.isLoading}
         loadingText="Loading fabrics…"
         items={data}
         trackBy="id"
-        onRowClick={({ detail }) => onSelect(detail.item.id)}
+        cardsPerRow={[
+          { cards: 1 },
+          { minWidth: 600, cards: 2 },
+          { minWidth: 1100, cards: 3 },
+        ]}
         header={
           <CsHeader
             counter={`(${data.length})`}
@@ -545,25 +553,47 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
             Fabrics
           </CsHeader>
         }
-        columnDefinitions={[
-          { id: 'name', header: 'Name', cell: (f) => <span style={{ fontWeight: 500 }}>{f.name}</span> },
-          {
-            id: 'slug', header: 'Slug',
-            cell: (f) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{f.slug}</span>,
-            width: 140,
-          },
-          { id: 'enclave', header: 'Enclave', cell: (f) => f.enclave ?? '—', width: 140 },
-          { id: 'classification', header: 'Classification', cell: (f) => f.classification ?? '—', width: 160 },
-          {
-            id: 'description', header: 'Description',
-            cell: (f) => (
-              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
-                {f.description ?? '—'}
-              </CsBox>
-            ),
-          },
-        ]}
-        empty={<CsBox textAlign="center" color="inherit" padding="m">No fabrics yet.</CsBox>}
+        cardDefinition={{
+          header: (f) => (
+            <CsButton variant="inline-link" onClick={() => onSelect(f.id)}>
+              {f.name}
+            </CsButton>
+          ),
+          sections: [
+            {
+              id: 'slug',
+              header: 'Slug',
+              content: (f) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{f.slug}</span>,
+            },
+            {
+              id: 'enclave',
+              header: 'Enclave',
+              content: (f) => f.enclave ?? '—',
+            },
+            {
+              id: 'classification',
+              header: 'Classification',
+              content: (f) => f.classification ?? '—',
+            },
+            {
+              id: 'description',
+              header: 'Description',
+              content: (f) => (
+                <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+                  {f.description ?? '—'}
+                </CsBox>
+              ),
+            },
+          ],
+        }}
+        empty={
+          <CsBox textAlign="center" color="inherit" padding="l">
+            <CsSpaceBetween size="xs">
+              <b>No fabrics yet</b>
+              <CsBox variant="p" color="inherit">Create one to start carving supernets and subnets.</CsBox>
+            </CsSpaceBetween>
+          </CsBox>
+        }
       />
       {canWrite && (
         <CsModal
