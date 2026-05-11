@@ -568,6 +568,7 @@ function ZoneDetailView({
   const [createOpen, setCreateOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [editRecord, setEditRecord] = useState<DnsRecord | null>(null);
   const [soaOpen, setSoaOpen] = useState(false);
   const [selected, setSelected] = useState<DnsRecord[]>([]);
   const [filterText, setFilterText] = useState('');
@@ -837,6 +838,30 @@ function ZoneDetailView({
             },
             width: 110,
           },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (r: DnsRecord) => {
+              // Edit only makes sense for manual records — IPAM/DDNS
+              // rows are projector-owned (the SOA row sets a soa- id
+              // prefix and is already filtered out below). The SOA
+              // virtual row has its own edit modal driven from the
+              // record name link.
+              if (r.id.startsWith('soa-')) {
+                return <Box color="text-status-inactive" fontSize="body-s">—</Box>;
+              }
+              if (r.source !== 'manual') {
+                return <Box color="text-status-inactive" fontSize="body-s">—</Box>;
+              }
+              return (
+                <Button
+                  iconName="edit" variant="inline-icon"
+                  ariaLabel={`Edit ${r.name || '@'} ${r.type}`}
+                  onClick={() => setEditRecord(r)}
+                />
+              );
+            },
+            width: 60,
+          }] : []),
         ]}
         empty={
           <Box textAlign="center" padding="l">
@@ -895,6 +920,29 @@ function ZoneDetailView({
             zone={zone}
             onSaved={async () => { setCreateOpen(false); await refresh(); }}
           />
+        </Modal>
+      )}
+      {canWrite && (
+        <Modal
+          visible={editRecord !== null}
+          onDismiss={() => setEditRecord(null)}
+          header={
+            <span>
+              Edit record:{' '}
+              <span style={MONO}>
+                {editRecord ? fqdn(editRecord.name, zone.name) : ''} ({editRecord?.type})
+              </span>
+            </span>
+          }
+          size="medium"
+        >
+          {editRecord && (
+            <RecordForm
+              zone={zone}
+              record={editRecord}
+              onSaved={async () => { setEditRecord(null); await refresh(); }}
+            />
+          )}
         </Modal>
       )}
       {canWrite && (
@@ -1980,21 +2028,44 @@ function ZoneImportForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void 
 }
 
 
-function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
-  const [name, setName] = useState('');
-  const [typeOpt, setTypeOpt] = useState<SelectProps.Option>({ value: 'A', label: 'A' });
-  const [ttl, setTtl] = useState('60');
-  const [target, setTarget] = useState('');
-  const [priority, setPriority] = useState('');
-  const [weight, setWeight] = useState('');
-  const [port, setPort] = useState('');
-  const [text, setText] = useState('');
-  const [flags, setFlags] = useState('');
-  const [tag, setTag] = useState('issue');
-  const [value, setValue] = useState('');
-  const [healthCheckOpt, setHealthCheckOpt] = useState<SelectProps.Option>({ value: '', label: 'None — always render' });
+function RecordForm({
+  zone, record, onSaved,
+}: {
+  zone: DnsZone;
+  // When set, the form edits an existing manual record via PATCH —
+  // PUT-style replace semantics aren't supported on the API, but every
+  // field here maps to one PATCH-able column.
+  record?: DnsRecord;
+  onSaved: () => void;
+}) {
+  // Pre-fill the rdata fields from `record.data` when editing; new
+  // records start from empty + sensible defaults.
+  const rdata = (record?.data ?? {}) as Record<string, any>;
+  const [name, setName] = useState(record?.name === '@' ? '' : (record?.name ?? ''));
+  const [typeOpt, setTypeOpt] = useState<SelectProps.Option>({
+    value: record?.type ?? 'A',
+    label: record?.type ?? 'A',
+  });
+  const [ttl, setTtl] = useState(record?.ttl != null ? String(record.ttl) : '60');
+  const [target, setTarget] = useState(rdata.target ?? '');
+  const [priority, setPriority] = useState(rdata.priority != null ? String(rdata.priority) : '');
+  const [weight, setWeight] = useState(rdata.weight != null ? String(rdata.weight) : '');
+  const [port, setPort] = useState(rdata.port != null ? String(rdata.port) : '');
+  const [text, setText] = useState(rdata.text ?? '');
+  const [flags, setFlags] = useState(rdata.flags != null ? String(rdata.flags) : '');
+  const [tag, setTag] = useState(rdata.tag ?? 'issue');
+  const [value, setValue] = useState(rdata.value ?? '');
+  const [healthCheckOpt, setHealthCheckOpt] = useState<SelectProps.Option>(
+    record?.health_check_id
+      ? { value: record.health_check_id, label: 'Loading…' }
+      : { value: '', label: 'None — always render' },
+  );
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Type selector is locked in edit mode — the backend treats the
+  // type as immutable per record (different rdata shape per type).
+  const editing = record != null;
 
   // Pull the fabric's health checks so the operator can gate this
   // record on a probe. Only meaningful for A/AAAA records — the
@@ -2067,15 +2138,25 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
     try {
-      await http.post('/dns/records', {
-        zone_id: zone.id,
-        name: lhs,
-        type,
-        ttl: ttl ? Number(ttl) : null,
-        data: buildData(),
-        health_check_id: healthCheckOpt.value || null,
-      });
-      toast.success('Record created');
+      if (editing) {
+        await http.patch(`/dns/records/${record!.id}`, {
+          name: lhs,
+          ttl: ttl ? Number(ttl) : null,
+          data: buildData(),
+          health_check_id: healthCheckOpt.value || null,
+        });
+        toast.success('Record updated');
+      } else {
+        await http.post('/dns/records', {
+          zone_id: zone.id,
+          name: lhs,
+          type,
+          ttl: ttl ? Number(ttl) : null,
+          data: buildData(),
+          health_check_id: healthCheckOpt.value || null,
+        });
+        toast.success('Record created');
+      }
       onSaved();
     } catch (err: any) {
       toast.error(err?.message ?? 'failed');
@@ -2089,14 +2170,14 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
       <Form
         actions={
           <Button variant="primary" formAction="submit" loading={submitting}>
-            {submitting ? 'Saving…' : 'Create'}
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create'}
           </Button>
         }
       >
         <SpaceBetween size="m">
           <FormField
             label="Record name"
-            description={`Leave blank to create a record at the zone apex (${zone.name})`}
+            description={`Leave blank to ${editing ? 'point' : 'create a record'} at the zone apex (${zone.name})`}
             errorText={errors.name}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2114,13 +2195,17 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
           </FormField>
 
           <ColumnLayout columns={2}>
-            <FormField label="Record type">
+            <FormField
+              label="Record type"
+              description={editing ? "Type can't change after creation — delete and re-create to switch." : undefined}
+            >
               <Select
                 selectedOption={typeOpt}
                 onChange={({ detail }) => {
                   if (detail.selectedOption.value) setTypeOpt(detail.selectedOption);
                 }}
                 options={RECORD_TYPE_OPTS}
+                disabled={editing}
                 expandToViewport
               />
             </FormField>
