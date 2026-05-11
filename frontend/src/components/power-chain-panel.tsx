@@ -1,24 +1,24 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Zap, Plug, Plus, Trash2, AlertTriangle, ShieldCheck, ShieldAlert, ShieldOff } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
+import { toast } from 'sonner';
+
+import Alert from '@cloudscape-design/components/alert';
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Modal from '@cloudscape-design/components/modal';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { hasCapability } from '@/lib/access-control-provider';
-import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
 
 export type PowerChainAsset = {
   id: string;
@@ -49,18 +49,39 @@ export type PerAsset = {
   redundancy: 'redundant' | 'single' | 'unpowered' | 'n/a';
 };
 
-type Props = {
+type Props = Readonly<{
   rackId: string;
   pdus: PduSummary[];
   perAsset: Record<string, PerAsset>;
   assets: PowerChainAsset[];
-};
+}>;
+
+const MONO = { fontFamily: 'ui-monospace, monospace' } as const;
+
+function mountLabel(mount: string): string {
+  if (mount === 'rack') return '1U mount';
+  if (mount === 'vertical-left') return '0U vertical (left)';
+  if (mount === 'vertical-right') return '0U vertical (right)';
+  return mount;
+}
+
+function sideBadgeColor(side: string | null | undefined): 'blue' | 'red' | 'grey' {
+  if (side === 'A') return 'blue';
+  if (side === 'B') return 'red';
+  return 'grey';
+}
+
+function redundancyStatus(r: PerAsset['redundancy']) {
+  if (r === 'redundant') return { type: 'success' as const, label: 'redundant' };
+  if (r === 'single') return { type: 'warning' as const, label: 'single' };
+  if (r === 'unpowered') return { type: 'error' as const, label: 'unpowered' };
+  return { type: 'info' as const, label: 'n/a' };
+}
 
 export function PowerChainPanel({ rackId, pdus, perAsset, assets }: Props) {
   const canWrite = hasCapability('inventory:write');
   const nonPdus = assets.filter((a) => a.kind !== 'pdu');
 
-  // Roll up redundancy counts for the summary header
   const counts = useMemo(() => {
     const c = { redundant: 0, single: 0, unpowered: 0, total: nonPdus.length };
     for (const a of nonPdus) {
@@ -73,128 +94,124 @@ export function PowerChainPanel({ rackId, pdus, perAsset, assets }: Props) {
   }, [nonPdus, perAsset]);
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-        <div className="flex items-center gap-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Zap className="h-4 w-4" /> Power chain
-          </CardTitle>
-        </div>
-        <div className="flex items-center gap-3 text-xs">
-          <Counter icon={ShieldCheck} tone="success" label="Redundant" n={counts.redundant} />
-          <Counter icon={ShieldAlert} tone="warning" label="Single" n={counts.single} />
-          <Counter icon={ShieldOff} tone="critical" label="Unpowered" n={counts.unpowered} />
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <Container
+      header={
+        <Header
+          variant="h2"
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <StatusIndicator type="success">{counts.redundant} Redundant</StatusIndicator>
+              <StatusIndicator type="warning">{counts.single} Single</StatusIndicator>
+              <StatusIndicator type="error">{counts.unpowered} Unpowered</StatusIndicator>
+            </SpaceBetween>
+          }
+        >
+          Power chain
+        </Header>
+      }
+    >
+      <SpaceBetween size="m">
         <PduStrip pdus={pdus} />
 
         {nonPdus.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No powered devices in this rack yet.</p>
+          <Box color="text-status-inactive">No powered devices in this rack yet.</Box>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Device</TableHead>
-                <TableHead className="w-32">Redundancy</TableHead>
-                <TableHead>Power feeds</TableHead>
-                {canWrite && <TableHead className="w-24"></TableHead>}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {nonPdus.map((a) => {
-                const pa = perAsset[a.id] ?? { sides_covered: [], connections: [], redundancy: 'unpowered' as const };
-                return (
-                  <DeviceRow
-                    key={a.id}
-                    rackId={rackId}
-                    asset={a}
-                    pdus={pdus}
-                    chain={pa}
-                    canWrite={canWrite}
-                  />
-                );
-              })}
-            </TableBody>
-          </Table>
+          <Table<PowerChainAsset>
+            variant="embedded"
+            items={nonPdus}
+            trackBy="id"
+            columnDefinitions={[
+              {
+                id: 'device', header: 'Device',
+                cell: (a) => (
+                  <>
+                    <Box fontWeight="bold">{a.name}</Box>
+                    <Box color="text-status-inactive" fontSize="body-s">
+                      {a.kind}{a.psu_count ? ` · ${a.psu_count} PSU` : ''}
+                    </Box>
+                  </>
+                ),
+              },
+              {
+                id: 'redundancy', header: 'Redundancy',
+                cell: (a) => {
+                  const chain = perAsset[a.id];
+                  const r = chain?.redundancy ?? 'unpowered';
+                  const s = redundancyStatus(r);
+                  return <StatusIndicator type={s.type}>{s.label}</StatusIndicator>;
+                },
+                width: 140,
+              },
+              {
+                id: 'feeds', header: 'Power feeds',
+                cell: (a) => {
+                  const chain = perAsset[a.id] ?? { sides_covered: [], connections: [], redundancy: 'unpowered' as const };
+                  return <FeedsCell rackId={rackId} chain={chain} canWrite={canWrite} />;
+                },
+              },
+              ...(canWrite ? [{
+                id: 'connect', header: '',
+                cell: (a: PowerChainAsset) => (
+                  <ConnectButton rackId={rackId} asset={a} pdus={pdus} chain={perAsset[a.id]} />
+                ),
+                width: 110,
+              }] : []),
+            ]}
+            empty={<Box color="text-status-inactive">No powered devices.</Box>}
+          />
         )}
-      </CardContent>
-    </Card>
+      </SpaceBetween>
+    </Container>
   );
 }
 
-function Counter({ icon: Icon, tone, label, n }: {
-  icon: React.ComponentType<{ className?: string }>;
-  tone: 'success' | 'warning' | 'critical';
-  label: string;
-  n: number;
-}) {
-  const cls = tone === 'success' ? 'text-success' : tone === 'warning' ? 'text-warning' : 'text-destructive';
-  return (
-    <span className={cn('flex items-center gap-1 font-medium', cls)}>
-      <Icon className="h-3.5 w-3.5" /> {n} {label}
-    </span>
-  );
-}
-
-function PduStrip({ pdus }: { pdus: PduSummary[] }) {
+function PduStrip({ pdus }: Readonly<{ pdus: PduSummary[] }>) {
   if (pdus.length === 0) {
-    return <p className="text-xs text-muted-foreground">No PDUs in this rack.</p>;
+    return <Box color="text-status-inactive" fontSize="body-s">No PDUs in this rack.</Box>;
   }
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+    <ColumnLayout columns={Math.min(4, pdus.length) as 1 | 2 | 3 | 4}>
       {pdus.map((p) => {
-        const sideColor =
-          p.side === 'A' ? 'bg-blue-500/15 text-blue-300 border-blue-500/40' :
-          p.side === 'B' ? 'bg-red-500/15 text-red-300 border-red-500/40' :
-          p.side === 'C' ? 'bg-purple-500/15 text-purple-300 border-purple-500/40' :
-          'bg-muted text-muted-foreground border-border';
+        const pct = p.total_outlets ? (p.used_outlets / p.total_outlets) * 100 : 0;
         return (
-          <div key={p.id} className={cn('rounded-md border p-2', sideColor)}>
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-mono font-semibold">{p.name}</span>
-              {p.side && <Badge variant="outline" className="border-current text-current">Side {p.side}</Badge>}
-            </div>
-            <div className="mt-1 flex items-center justify-between text-[10px] opacity-90">
-              <span>{p.mount === 'rack' ? '1U mount' : p.mount === 'vertical-left' ? '0U vertical (left)' : p.mount === 'vertical-right' ? '0U vertical (right)' : p.mount}</span>
-              <span>{p.face}</span>
-            </div>
-            <div className="mt-2 text-[10px] tabular-nums">
-              {p.used_outlets} / {p.total_outlets} outlets used
-            </div>
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-black/40">
-              <div
-                className="h-full bg-current"
-                style={{ width: p.total_outlets ? `${(p.used_outlets / p.total_outlets) * 100}%` : '0%' }}
-              />
-            </div>
-          </div>
+          <Container key={p.id} disableContentPaddings={false}>
+            <SpaceBetween size="xxs">
+              <SpaceBetween size="xs" direction="horizontal">
+                <span style={{ ...MONO, fontWeight: 600 }}>{p.name}</span>
+                {p.side && <Badge color={sideBadgeColor(p.side)}>Side {p.side}</Badge>}
+              </SpaceBetween>
+              <Box color="text-status-inactive" fontSize="body-s">
+                {mountLabel(p.mount)} · {p.face}
+              </Box>
+              <Box fontSize="body-s">
+                {p.used_outlets} / {p.total_outlets} outlets used
+              </Box>
+              <div style={{
+                height: 4, overflow: 'hidden', borderRadius: 999,
+                background: 'var(--color-background-input-disabled, #eaeded)',
+              }}>
+                <div style={{
+                  height: '100%',
+                  width: `${pct}%`,
+                  background: 'var(--color-text-status-info, #0972d3)',
+                }} />
+              </div>
+            </SpaceBetween>
+          </Container>
         );
       })}
-    </div>
+    </ColumnLayout>
   );
 }
 
-function DeviceRow({
-  rackId, asset, pdus, chain, canWrite,
-}: {
+function FeedsCell({
+  rackId, chain, canWrite,
+}: Readonly<{
   rackId: string;
-  asset: PowerChainAsset;
-  pdus: PduSummary[];
   chain: PerAsset;
   canWrite: boolean;
-}) {
+}>) {
   const qc = useQueryClient();
-  const [editOpen, setEditOpen] = useState(false);
-
-  const variantFor = chain.redundancy === 'redundant' ? 'success'
-    : chain.redundancy === 'single' ? 'warning'
-    : chain.redundancy === 'unpowered' ? 'critical'
-    : 'secondary';
-  const Icon = chain.redundancy === 'redundant' ? ShieldCheck
-    : chain.redundancy === 'single' ? ShieldAlert
-    : ShieldOff;
-
   async function disconnect(outletId: string) {
     try {
       await http.delete(`/power/outlets/${outletId}/connect`);
@@ -204,102 +221,88 @@ function DeviceRow({
       toast.error(err?.message ?? 'Failed to disconnect');
     }
   }
-
+  if (chain.connections.length === 0) {
+    return <Box color="text-status-inactive" fontSize="body-s">No connections</Box>;
+  }
   return (
-    <TableRow>
-      <TableCell>
-        <div className="font-medium">{asset.name}</div>
-        <div className="text-[11px] text-muted-foreground">
-          {asset.kind}{asset.psu_count ? ` · ${asset.psu_count} PSU` : ''}
-        </div>
-      </TableCell>
-      <TableCell>
-        <Badge variant={variantFor as any} className="gap-1">
-          <Icon className="h-3 w-3" /> {chain.redundancy}
-        </Badge>
-      </TableCell>
-      <TableCell>
-        {chain.connections.length === 0 ? (
-          <span className="text-xs text-muted-foreground">No connections</span>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {chain.connections
-              .sort((a, b) => a.psu_index - b.psu_index)
-              .map((c) => {
-                const sideColor =
-                  c.pdu_side === 'A' ? 'border-blue-500/50 text-blue-300' :
-                  c.pdu_side === 'B' ? 'border-red-500/50 text-red-300' :
-                  c.pdu_side === 'C' ? 'border-purple-500/50 text-purple-300' :
-                  'border-border text-muted-foreground';
-                return (
-                  <div key={c.outlet_id} className="group flex items-center gap-1">
-                    <Badge variant="outline" className={cn('font-mono text-[10px]', sideColor)}>
-                      <Plug className="mr-1 h-3 w-3" />
-                      PSU{c.psu_index} → {c.pdu_name} · U{String(c.outlet_label ?? c.outlet_position).padStart(2, '0')}
-                    </Badge>
-                    {canWrite && (
-                      <button
-                        type="button"
-                        onClick={() => disconnect(c.outlet_id)}
-                        className="opacity-0 transition-opacity group-hover:opacity-100"
-                        title="Disconnect"
-                      >
-                        <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-          </div>
-        )}
-      </TableCell>
-      {canWrite && (
-        <TableCell>
-          <Dialog open={editOpen} onOpenChange={setEditOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="outline">
-                <Plus className="h-3 w-3" /> Connect
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Connect {asset.name} to a PDU outlet</DialogTitle>
-              </DialogHeader>
-              <ConnectForm
-                rackId={rackId}
-                asset={asset}
-                pdus={pdus}
-                existingPsuIndices={chain.connections.map((c) => c.psu_index)}
-                onDone={() => {
-                  setEditOpen(false);
-                  qc.invalidateQueries({ queryKey: ['rack-detail', rackId] });
-                }}
+    <SpaceBetween size="xxs" direction="horizontal">
+      {[...chain.connections]
+        .sort((a, b) => a.psu_index - b.psu_index)
+        .map((c) => (
+          <SpaceBetween key={c.outlet_id} size="xxs" direction="horizontal">
+            <Badge color={sideBadgeColor(c.pdu_side)}>
+              PSU{c.psu_index} → {c.pdu_name} · U{String(c.outlet_label ?? c.outlet_position).padStart(2, '0')}
+            </Badge>
+            {canWrite && (
+              <Button
+                iconName="remove"
+                variant="inline-icon"
+                onClick={() => disconnect(c.outlet_id)}
+                ariaLabel="Disconnect"
               />
-            </DialogContent>
-          </Dialog>
-        </TableCell>
-      )}
-    </TableRow>
+            )}
+          </SpaceBetween>
+        ))}
+    </SpaceBetween>
+  );
+}
+
+function ConnectButton({
+  rackId, asset, pdus, chain,
+}: Readonly<{
+  rackId: string;
+  asset: PowerChainAsset;
+  pdus: PduSummary[];
+  chain: PerAsset | undefined;
+}>) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const existing = chain?.connections.map((c) => c.psu_index) ?? [];
+  return (
+    <>
+      <Button iconName="add-plus" onClick={() => setOpen(true)}>Connect</Button>
+      <Modal
+        visible={open}
+        onDismiss={() => setOpen(false)}
+        header={`Connect ${asset.name} to a PDU outlet`}
+        size="medium"
+      >
+        <ConnectForm
+          asset={asset}
+          pdus={pdus}
+          existingPsuIndices={existing}
+          onDone={() => {
+            setOpen(false);
+            qc.invalidateQueries({ queryKey: ['rack-detail', rackId] });
+          }}
+        />
+      </Modal>
+    </>
   );
 }
 
 function ConnectForm({
-  rackId, asset, pdus, existingPsuIndices, onDone,
-}: {
-  rackId: string;
+  asset, pdus, existingPsuIndices, onDone,
+}: Readonly<{
   asset: PowerChainAsset;
   pdus: PduSummary[];
   existingPsuIndices: number[];
   onDone: () => void;
-}) {
-  const [pduId, setPduId] = useState<string>(pdus[0]?.id ?? '');
-  const [outletId, setOutletId] = useState<string>('');
+}>) {
   const psuCount = asset.psu_count ?? 2;
-  const nextPsu = Array.from({ length: psuCount }, (_, i) => i + 1).find((i) => !existingPsuIndices.includes(i)) ?? 1;
+  const nextPsu = Array.from({ length: psuCount }, (_, i) => i + 1)
+    .find((i) => !existingPsuIndices.includes(i)) ?? 1;
+
   const [psuIndex, setPsuIndex] = useState<number>(nextPsu);
+  const [pduOpt, setPduOpt] = useState<SelectProps.Option | null>(
+    pdus[0] ? { value: pdus[0].id, label: `${pdus[0].name}${pdus[0].side ? ` (side ${pdus[0].side})` : ''}` } : null,
+  );
+  const [outletOpt, setOutletOpt] = useState<SelectProps.Option | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Fetch outlets for the chosen PDU
+  const pduId = pduOpt?.value ?? '';
+  const outletId = outletOpt?.value ?? '';
+
   const outletsRes = useQuery({
     queryKey: ['outlets', pduId],
     queryFn: async () => {
@@ -331,63 +334,71 @@ function ConnectForm({
     }
   }
 
+  const psuOptions: SelectProps.Option[] = Array.from({ length: psuCount }, (_, i) => i + 1).map((i) => ({
+    value: String(i),
+    label: `PSU${i}${existingPsuIndices.includes(i) ? ' (already connected)' : ''}`,
+    disabled: existingPsuIndices.includes(i),
+  }));
+  const pduOptions: SelectProps.Option[] = pdus.map((p) => ({
+    value: p.id,
+    label: `${p.name}${p.side ? ` (side ${p.side})` : ''}`,
+  }));
   const availableOutlets = (outletsRes.data ?? []).filter((o: any) => !o.connected);
+  const outletOptions: SelectProps.Option[] = availableOutlets.map((o: any) => ({
+    value: o.id,
+    label: `Outlet ${String(o.label ?? o.position).padStart(2, '0')}${o.phase ? ` · phase ${o.phase}` : ''}${o.receptacle ? ` · ${o.receptacle}` : ''}`,
+  }));
 
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <div className="space-y-1.5">
-        <Label>PSU</Label>
-        <Select value={String(psuIndex)} onValueChange={(v) => setPsuIndex(Number(v))}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {Array.from({ length: psuCount }, (_, i) => i + 1).map((i) => (
-              <SelectItem key={i} value={String(i)} disabled={existingPsuIndices.includes(i)}>
-                PSU{i} {existingPsuIndices.includes(i) ? '(already connected)' : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label>PDU</Label>
-        <Select value={pduId} onValueChange={(v) => { setPduId(v); setOutletId(''); }}>
-          <SelectTrigger><SelectValue placeholder="Pick a PDU" /></SelectTrigger>
-          <SelectContent>
-            {pdus.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name} {p.side ? `(side ${p.side})` : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <div className="space-y-1.5">
-        <Label>Outlet</Label>
-        <Select value={outletId} onValueChange={setOutletId} disabled={!pduId || outletsRes.isLoading}>
-          <SelectTrigger>
-            <SelectValue placeholder={outletsRes.isLoading ? 'Loading…' : 'Pick an outlet'} />
-          </SelectTrigger>
-          <SelectContent>
-            {availableOutlets.length === 0 && (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">All outlets in use on this PDU.</div>
-            )}
-            {availableOutlets.map((o: any) => (
-              <SelectItem key={o.id} value={o.id}>
-                Outlet {String(o.label ?? o.position).padStart(2, '0')}{o.phase ? ` · phase ${o.phase}` : ''}{o.receptacle ? ` · ${o.receptacle}` : ''}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      {asset.psu_count && asset.psu_count > 1 && pdus.length >= 2 && (
-        <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-[11px] text-muted-foreground">
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 text-warning" />
-          For redundancy, connect each PSU to a PDU on a different side (A vs B).
-        </div>
-      )}
-      <Button type="submit" disabled={busy || !outletId}>
-        {busy ? 'Connecting…' : 'Connect'}
-      </Button>
+    <form onSubmit={submit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={busy} disabled={!outletId}>
+            {busy ? 'Connecting…' : 'Connect'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="PSU">
+            <Select
+              selectedOption={psuOptions.find((o) => o.value === String(psuIndex)) ?? null}
+              onChange={({ detail }) => {
+                if (detail.selectedOption.value) setPsuIndex(Number(detail.selectedOption.value));
+              }}
+              options={psuOptions}
+              expandToViewport
+            />
+          </FormField>
+          <FormField label="PDU">
+            <Select
+              placeholder="Pick a PDU"
+              selectedOption={pduOpt}
+              onChange={({ detail }) => {
+                setPduOpt(detail.selectedOption);
+                setOutletOpt(null);
+              }}
+              options={pduOptions}
+              expandToViewport
+            />
+          </FormField>
+          <FormField label="Outlet">
+            <Select
+              placeholder={outletsRes.isLoading ? 'Loading…' : 'Pick an outlet'}
+              selectedOption={outletOpt}
+              onChange={({ detail }) => setOutletOpt(detail.selectedOption)}
+              options={outletOptions}
+              disabled={!pduId || outletsRes.isLoading}
+              empty={availableOutlets.length === 0 ? 'All outlets in use on this PDU.' : undefined}
+              expandToViewport
+            />
+          </FormField>
+          {asset.psu_count && asset.psu_count > 1 && pdus.length >= 2 && (
+            <Alert type="warning">
+              For redundancy, connect each PSU to a PDU on a different side (A vs B).
+            </Alert>
+          )}
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }

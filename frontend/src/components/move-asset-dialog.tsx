@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useList, useUpdate } from '@refinedev/core';
 import { toast } from 'sonner';
-import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import SegmentedControl from '@cloudscape-design/components/segmented-control';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
 
 type MoveAsset = {
   id: string;
@@ -32,24 +34,23 @@ type RackAsset = {
   mount: 'rack' | 'vertical-left' | 'vertical-right';
 };
 
-type Props = {
+type Props = Readonly<{
   asset: MoveAsset | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onMoved?: () => void;
-};
+}>;
 
 export function MoveAssetDialog({ asset, open, onOpenChange, onMoved }: Props) {
-  const [siteId, setSiteId] = useState<string>('');
-  const [rackId, setRackId] = useState<string>('');
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
+  const [rackOpt, setRackOpt] = useState<SelectProps.Option | null>(null);
   const [face, setFace] = useState<'front' | 'rear'>('front');
   const [positionU, setPositionU] = useState<string>('');
 
-  // Reset form whenever the dialog re-opens for a different asset.
   useEffect(() => {
     if (!asset || !open) return;
-    setSiteId(asset.site_id);
-    setRackId(asset.rack_id ?? '');
+    setSiteOpt(null);
+    setRackOpt(null);
     setFace(asset.face);
     setPositionU(asset.rack_position_u != null ? String(asset.rack_position_u) : '');
   }, [asset, open]);
@@ -59,12 +60,33 @@ export function MoveAssetDialog({ asset, open, onOpenChange, onMoved }: Props) {
     pagination: { pageSize: 200 },
     queryOptions: { enabled: open },
   });
+  const sites = sitesRes.result.data ?? [];
+
+  // Seed site selection once the list arrives, if the asset has a site.
+  useEffect(() => {
+    if (!siteOpt && asset && sites.length > 0) {
+      const s = sites.find((x) => x.id === asset.site_id);
+      if (s) setSiteOpt({ value: s.id, label: `${s.code} · ${s.name}` });
+    }
+  }, [sites, asset, siteOpt]);
+
+  const siteId = siteOpt?.value ?? '';
   const racksRes = useList<Rack>({
     resource: 'inventory/racks',
     pagination: { pageSize: 200 },
     filters: siteId ? [{ field: 'site_id', operator: 'eq', value: siteId }] : [],
     queryOptions: { enabled: open && !!siteId },
   });
+  const racks = racksRes.result.data ?? [];
+
+  useEffect(() => {
+    if (!rackOpt && asset?.rack_id && racks.length > 0) {
+      const r = racks.find((x) => x.id === asset.rack_id);
+      if (r) setRackOpt({ value: r.id, label: `${r.code} · ${r.name} (${r.u_height}U)` });
+    }
+  }, [racks, asset, rackOpt]);
+
+  const rackId = rackOpt?.value ?? '';
   const targetAssetsRes = useList<RackAsset>({
     resource: 'inventory/assets',
     pagination: { pageSize: 500 },
@@ -72,8 +94,6 @@ export function MoveAssetDialog({ asset, open, onOpenChange, onMoved }: Props) {
     queryOptions: { enabled: open && !!rackId },
   });
 
-  const sites = sitesRes.result.data ?? [];
-  const racks = racksRes.result.data ?? [];
   const targetAssets = targetAssetsRes.result.data ?? [];
   const targetRack = racks.find((r) => r.id === rackId);
   const units = Math.max(1, asset?.rack_units ?? 1);
@@ -93,7 +113,8 @@ export function MoveAssetDialog({ asset, open, onOpenChange, onMoved }: Props) {
     return occ;
   }, [targetAssets, asset, face]);
 
-  let validation: { kind: 'ok' | 'overflow' | 'collision' | 'unplaced'; msg: string } = {
+  type ValidationKind = 'ok' | 'overflow' | 'collision' | 'unplaced';
+  let validation: { kind: ValidationKind; msg: string } = {
     kind: 'unplaced', msg: 'Will be moved without a U position.',
   };
   if (u != null && top != null && targetRack) {
@@ -111,7 +132,8 @@ export function MoveAssetDialog({ asset, open, onOpenChange, onMoved }: Props) {
           msg: `U${hits.join(', U')} already occupied on the ${face} face.`,
         };
       } else {
-        validation = { kind: 'ok', msg: `Will occupy U${u}${units > 1 ? `–U${top}` : ''} on ${face}.` };
+        const range = units > 1 ? `–U${top}` : '';
+        validation = { kind: 'ok', msg: `Will occupy U${u}${range} on ${face}.` };
       }
     }
   }
@@ -142,9 +164,9 @@ export function MoveAssetDialog({ asset, open, onOpenChange, onMoved }: Props) {
       },
       {
         onSuccess: () => {
-          toast.success(
-            `Moved ${asset.name}${targetRack ? ` to ${targetRack.code}` : ''}${u != null ? ` · U${u}` : ''}`,
-          );
+          const rackSuffix = targetRack ? ` to ${targetRack.code}` : '';
+          const uSuffix = u != null ? ` · U${u}` : '';
+          toast.success(`Moved ${asset.name}${rackSuffix}${uSuffix}`);
           onOpenChange(false);
           onMoved?.();
         },
@@ -153,91 +175,95 @@ export function MoveAssetDialog({ asset, open, onOpenChange, onMoved }: Props) {
     );
   }
 
+  const siteOptions: SelectProps.Option[] = sites.map((s) => ({
+    value: s.id, label: `${s.code} · ${s.name}`,
+  }));
+  const rackOptions: SelectProps.Option[] = racks.map((r) => ({
+    value: r.id, label: `${r.code} · ${r.name} (${r.u_height}U)`,
+  }));
+
+  let validationStatusType: 'success' | 'info' | 'error';
+  if (validation.kind === 'ok') validationStatusType = 'success';
+  else if (validation.kind === 'unplaced') validationStatusType = 'info';
+  else validationStatusType = 'error';
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Move {asset?.name ?? 'asset'}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Target site</Label>
+    <Modal
+      visible={open}
+      onDismiss={() => onOpenChange(false)}
+      header={`Move ${asset?.name ?? 'asset'}`}
+      size="medium"
+    >
+      <Form
+        actions={
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button variant="link" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button variant="primary" disabled={!canSubmit} loading={isPending} onClick={submit}>
+              {isPending ? 'Moving…' : 'Move'}
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          <ColumnLayout columns={2}>
+            <FormField label="Target site">
               <Select
-                value={siteId}
-                onValueChange={(v) => { setSiteId(v); setRackId(''); }}
-              >
-                <SelectTrigger><SelectValue placeholder="Pick a site" /></SelectTrigger>
-                <SelectContent>
-                  {sites.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label>Target rack</Label>
-              <Select
-                value={rackId}
-                onValueChange={setRackId}
-                disabled={!siteId || racksRes.result.isFetching}
-              >
-                <SelectTrigger><SelectValue placeholder="Pick a rack" /></SelectTrigger>
-                <SelectContent>
-                  {racks.map((r) => (
-                    <SelectItem key={r.id} value={r.id}>
-                      {r.code} · {r.name} ({r.u_height}U)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-[auto_1fr] gap-3">
-            <div className="space-y-1.5">
-              <Label>Face</Label>
-              <Tabs value={face} onValueChange={(v) => setFace(v as 'front' | 'rear')}>
-                <TabsList>
-                  <TabsTrigger value="front">Front</TabsTrigger>
-                  <TabsTrigger value="rear">Rear</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-            <div className="space-y-1.5">
-              <Label>
-                Position U {targetRack && <span className="text-muted-foreground">(1–{targetRack.u_height})</span>}
-                {units > 1 && <span className="text-muted-foreground"> · {units}U device</span>}
-              </Label>
-              <Input
-                type="number"
-                inputMode="numeric"
-                min={1}
-                max={targetRack?.u_height}
-                value={positionU}
-                placeholder="leave blank to unplace"
-                onChange={(e) => setPositionU(e.target.value)}
+                placeholder="Pick a site"
+                selectedOption={siteOpt}
+                onChange={({ detail }) => {
+                  setSiteOpt(detail.selectedOption);
+                  setRackOpt(null);
+                }}
+                options={siteOptions}
+                expandToViewport
               />
-            </div>
-          </div>
-          {asset && (
-            <p
-              className={
-                validation.kind === 'ok' ? 'text-xs text-success' :
-                validation.kind === 'unplaced' ? 'text-xs text-muted-foreground' :
-                'text-xs font-medium text-destructive'
+            </FormField>
+            <FormField label="Target rack">
+              <Select
+                placeholder="Pick a rack"
+                selectedOption={rackOpt}
+                onChange={({ detail }) => setRackOpt(detail.selectedOption)}
+                options={rackOptions}
+                disabled={!siteId}
+                expandToViewport
+              />
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={2}>
+            <FormField label="Face">
+              <SegmentedControl
+                selectedId={face}
+                onChange={({ detail }) => setFace(detail.selectedId as 'front' | 'rear')}
+                options={[
+                  { id: 'front', text: 'Front' },
+                  { id: 'rear', text: 'Rear' },
+                ]}
+              />
+            </FormField>
+            <FormField
+              label="Position U"
+              description={
+                [
+                  targetRack ? `1–${targetRack.u_height}` : null,
+                  units > 1 ? `${units}U device` : null,
+                ].filter(Boolean).join(' · ') || undefined
               }
             >
-              {validation.msg}
-            </p>
+              <Input
+                type="number"
+                value={positionU}
+                placeholder="leave blank to unplace"
+                onChange={({ detail }) => setPositionU(detail.value)}
+              />
+            </FormField>
+          </ColumnLayout>
+          {asset && (
+            <Box>
+              <StatusIndicator type={validationStatusType}>{validation.msg}</StatusIndicator>
+            </Box>
           )}
-        </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={!canSubmit}>
-            {isPending ? 'Moving…' : 'Move'}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </SpaceBetween>
+      </Form>
+    </Modal>
   );
 }

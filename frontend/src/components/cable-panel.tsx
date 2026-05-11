@@ -1,28 +1,21 @@
 import { useMemo, useState } from 'react';
 import { useList, useUpdate, useDelete } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { Cable as CableIcon, Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { hasCapability } from '@/lib/access-control-provider';
 
@@ -48,33 +41,33 @@ type RackAsset = { id: string; name: string; kind: string; port_count?: number |
 const COMMON_MEDIA = ['cat6', 'cat6a', 'smf', 'mmf', 'dac', 'aoc', 'power-c13', 'power-c19'];
 const COMMON_COLORS = ['blue', 'yellow', 'red', 'green', 'orange', 'white', 'black', 'gray'];
 
-const cableSchema = z.object({
-  a_asset_id: z.string().uuid('Pick an A-end asset'),
-  a_port: z.string().optional(),
-  b_asset_id: z.string().uuid('Pick a B-end asset'),
-  b_port: z.string().optional(),
-  medium: z.string().optional(),
-  color: z.string().optional(),
-  length_m: z.string().optional(),
-  label: z.string().optional(),
-  face: z.string().optional(),
-}).refine((v) => v.a_asset_id !== v.b_asset_id, {
-  path: ['b_asset_id'], message: 'A-end and B-end must differ',
-});
-type CableForm = z.infer<typeof cableSchema>;
+const FACE_OPTIONS: SelectProps.Option[] = [
+  { value: 'all', label: 'All faces' },
+  { value: 'front', label: 'Front only' },
+  { value: 'rear', label: 'Rear only' },
+  { value: 'unspecified', label: 'Unspecified' },
+];
 
-type Props = {
+const FORM_FACE_OPTIONS: SelectProps.Option[] = [
+  { value: 'unspecified', label: 'Unspecified' },
+  { value: 'front', label: 'Front' },
+  { value: 'rear', label: 'Rear' },
+];
+
+const MONO = { fontFamily: 'ui-monospace, monospace' } as const;
+
+type Props = Readonly<{
   rackId: string;
   siteId: string;
   rackAssets: RackAsset[];
-};
+}>;
 
 export function CablePanel({ rackId, siteId, rackAssets }: Props) {
   const canWrite = hasCapability('inventory:write');
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Cable | null>(null);
-  const [faceFilter, setFaceFilter] = useState<'all' | 'front' | 'rear' | 'unspecified'>('all');
+  const [faceOpt, setFaceOpt] = useState<SelectProps.Option>(FACE_OPTIONS[0]);
 
   const cablesRes = useQuery({
     queryKey: ['rack-cables', rackId],
@@ -88,11 +81,13 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
   });
 
   const allCables = cablesRes.data ?? [];
+  const faceFilter = faceOpt.value;
   const cables = useMemo(() => {
     if (faceFilter === 'all') return allCables;
     if (faceFilter === 'unspecified') return allCables.filter((c) => !c.face);
     return allCables.filter((c) => c.face === faceFilter);
   }, [allCables, faceFilter]);
+
   const otherEndIds = useMemo(() => {
     const local = new Set(rackAssets.map((a) => a.id));
     const ids = new Set<string>();
@@ -103,7 +98,6 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
     return Array.from(ids);
   }, [allCables, rackAssets]);
 
-  // Hydrate names for endpoints that live outside this rack.
   const remoteRes = useQuery({
     queryKey: ['cable-remote-endpoints', otherEndIds.sort().join(',')],
     queryFn: async () => {
@@ -127,7 +121,8 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
 
   const deleteMutation = useDelete();
   function onDelete(c: Cable) {
-    if (!confirm(`Delete cable${c.label ? ` "${c.label}"` : ''}?`)) return;
+    const labelSuffix = c.label ? ` "${c.label}"` : '';
+    if (!globalThis.confirm(`Delete cable${labelSuffix}?`)) return;
     deleteMutation.mutate(
       { resource: 'inventory/cables', id: c.id, successNotification: false },
       {
@@ -140,99 +135,110 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
     );
   }
 
+  const counterText = faceFilter === 'all'
+    ? `(${cables.length})`
+    : `(${cables.length} of ${allCables.length})`;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <CableIcon className="h-4 w-4" /> Cables ({cables.length}{faceFilter === 'all' ? '' : ` of ${allCables.length}`})
-        </CardTitle>
-        <div className="flex items-center gap-2">
-          <Select value={faceFilter} onValueChange={(v) => setFaceFilter(v as typeof faceFilter)}>
-            <SelectTrigger className="w-[170px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All faces</SelectItem>
-              <SelectItem value="front">Front only</SelectItem>
-              <SelectItem value="rear">Rear only</SelectItem>
-              <SelectItem value="unspecified">Unspecified</SelectItem>
-            </SelectContent>
-          </Select>
-          {canWrite && (
-            <Button size="sm" onClick={() => { setEditing(null); setDialogOpen(true); }}>
-              <Plus className="h-4 w-4" /> Add cable
-            </Button>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        {cablesRes.isLoading ? (
-          <div className="space-y-2 p-6">
-            <Skeleton className="h-5 w-full" />
-            <Skeleton className="h-5 w-full" />
-          </div>
-        ) : cables.length === 0 ? (
-          <p className="p-6 text-sm text-muted-foreground">No cables logged for this rack yet.</p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16">Face</TableHead>
-                <TableHead>A-end</TableHead>
-                <TableHead>A port</TableHead>
-                <TableHead>B-end</TableHead>
-                <TableHead>B port</TableHead>
-                <TableHead>Medium</TableHead>
-                <TableHead>Color</TableHead>
-                <TableHead className="w-16 text-right">Len (m)</TableHead>
-                <TableHead>Label</TableHead>
-                {canWrite && <TableHead className="w-20" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {cables.map((c) => {
-                const a = assetById.get(c.a_asset_id);
-                const b = assetById.get(c.b_asset_id);
-                return (
-                  <TableRow key={c.id}>
-                    <TableCell>
-                      {c.face
-                        ? <Badge variant="outline" className="capitalize">{c.face}</Badge>
-                        : <span className="text-muted-foreground">—</span>}
-                    </TableCell>
-                    <TableCell className="font-medium">{a?.name ?? c.a_asset_id.slice(0, 8)}</TableCell>
-                    <TableCell className="font-mono text-xs">{c.a_port ?? '—'}</TableCell>
-                    <TableCell className="font-medium">{b?.name ?? c.b_asset_id.slice(0, 8)}</TableCell>
-                    <TableCell className="font-mono text-xs">{c.b_port ?? '—'}</TableCell>
-                    <TableCell>{c.medium ? <Badge variant="secondary">{c.medium}</Badge> : '—'}</TableCell>
-                    <TableCell>
-                      {c.color ? (
-                        <span className="flex items-center gap-1.5 text-xs">
-                          <span
-                            className="h-3 w-3 rounded-sm border border-border"
-                            style={{ background: c.color }}
-                          />
-                          {c.color}
-                        </span>
-                      ) : '—'}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{c.length_m ?? '—'}</TableCell>
-                    <TableCell className="text-muted-foreground">{c.label ?? '—'}</TableCell>
-                    {canWrite && (
-                      <TableCell className="text-right">
-                        <Button size="sm" variant="ghost" onClick={() => { setEditing(c); setDialogOpen(true); }}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button size="sm" variant="ghost" onClick={() => onDelete(c)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </CardContent>
+    <>
+      <Table<Cable>
+        variant="container"
+        loading={cablesRes.isLoading}
+        loadingText="Loading cables…"
+        items={cables}
+        trackBy="id"
+        header={
+          <Header
+            counter={counterText}
+            actions={
+              <SpaceBetween size="xs" direction="horizontal">
+                <Select
+                  selectedOption={faceOpt}
+                  onChange={({ detail }) => {
+                    if (detail.selectedOption.value) setFaceOpt(detail.selectedOption);
+                  }}
+                  options={FACE_OPTIONS}
+                  expandToViewport
+                />
+                {canWrite && (
+                  <Button
+                    variant="primary"
+                    iconName="add-plus"
+                    onClick={() => { setEditing(null); setDialogOpen(true); }}
+                  >
+                    Add cable
+                  </Button>
+                )}
+              </SpaceBetween>
+            }
+          >
+            Cables
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'face', header: 'Face',
+            cell: (c) => c.face
+              ? <Badge>{c.face}</Badge>
+              : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+            width: 90,
+          },
+          { id: 'a', header: 'A-end', cell: (c) => assetById.get(c.a_asset_id)?.name ?? c.a_asset_id.slice(0, 8) },
+          { id: 'aport', header: 'A port', cell: (c) => <span style={MONO}>{c.a_port ?? '—'}</span>, width: 90 },
+          { id: 'b', header: 'B-end', cell: (c) => assetById.get(c.b_asset_id)?.name ?? c.b_asset_id.slice(0, 8) },
+          { id: 'bport', header: 'B port', cell: (c) => <span style={MONO}>{c.b_port ?? '—'}</span>, width: 90 },
+          {
+            id: 'medium', header: 'Medium',
+            cell: (c) => c.medium ? <Badge>{c.medium}</Badge> : '—',
+            width: 100,
+          },
+          {
+            id: 'color', header: 'Color',
+            cell: (c) => c.color ? (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <span style={{
+                  display: 'inline-block', width: 12, height: 12, borderRadius: 2,
+                  background: c.color, border: '1px solid var(--color-border-divider-default, #e9ebed)',
+                }} />
+                <Box fontSize="body-s">{c.color}</Box>
+              </SpaceBetween>
+            ) : '—',
+            width: 100,
+          },
+          { id: 'len', header: 'Len (m)', cell: (c) => c.length_m ?? '—', width: 90 },
+          {
+            id: 'label', header: 'Label',
+            cell: (c) => c.label
+              ? <span>{c.label}</span>
+              : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (c: Cable) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button
+                  iconName="edit"
+                  variant="inline-icon"
+                  onClick={() => { setEditing(c); setDialogOpen(true); }}
+                  ariaLabel="Edit cable"
+                />
+                <Button
+                  iconName="remove"
+                  variant="inline-icon"
+                  onClick={() => onDelete(c)}
+                  ariaLabel="Delete cable"
+                />
+              </SpaceBetween>
+            ),
+            width: 100,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No cables logged for this rack yet.
+          </Box>
+        }
+      />
       <CableDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -241,51 +247,58 @@ export function CablePanel({ rackId, siteId, rackAssets }: Props) {
         editing={editing}
         onSaved={() => qc.invalidateQueries({ queryKey: ['rack-cables', rackId] })}
       />
-    </Card>
+    </>
   );
 }
 
 function CableDialog({
   open, onOpenChange, siteId, rackAssets, editing, onSaved,
-}: {
+}: Readonly<{
   open: boolean;
   onOpenChange: (o: boolean) => void;
   siteId: string;
   rackAssets: RackAsset[];
   editing: Cable | null;
   onSaved: () => void;
-}) {
-  const form = useForm<CableForm>({
-    resolver: zodResolver(cableSchema),
-    defaultValues: {
-      a_asset_id: editing?.a_asset_id ?? rackAssets[0]?.id ?? '',
-      a_port: editing?.a_port ?? '',
-      b_asset_id: editing?.b_asset_id ?? rackAssets[1]?.id ?? '',
-      b_port: editing?.b_port ?? '',
-      medium: editing?.medium ?? '',
-      color: editing?.color ?? '',
-      length_m: editing?.length_m != null ? String(editing.length_m) : '',
-      label: editing?.label ?? '',
-      face: editing?.face ?? '',
-    },
-    values: editing
-      ? {
-        a_asset_id: editing.a_asset_id,
-        a_port: editing.a_port ?? '',
-        b_asset_id: editing.b_asset_id,
-        b_port: editing.b_port ?? '',
-        medium: editing.medium ?? '',
-        color: editing.color ?? '',
-        length_m: editing.length_m != null ? String(editing.length_m) : '',
-        label: editing.label ?? '',
-        face: editing.face ?? '',
-      }
-      : undefined,
-  });
+}>) {
+  const initial = useMemo(() => ({
+    a_asset_id: editing?.a_asset_id ?? rackAssets[0]?.id ?? '',
+    a_port: editing?.a_port ?? '',
+    b_asset_id: editing?.b_asset_id ?? rackAssets[1]?.id ?? '',
+    b_port: editing?.b_port ?? '',
+    medium: editing?.medium ?? '',
+    color: editing?.color ?? '',
+    length_m: editing?.length_m != null ? String(editing.length_m) : '',
+    label: editing?.label ?? '',
+    face: editing?.face ?? '',
+  }), [editing, rackAssets]);
 
-  // Site-wide asset list for cross-rack cabling. The form is opened from a
-  // specific rack, so we default endpoint pickers to local-rack assets but let
-  // either side reach to any asset in the same site.
+  const [aAssetId, setAAssetId] = useState(initial.a_asset_id);
+  const [aPort, setAPort] = useState(initial.a_port);
+  const [bAssetId, setBAssetId] = useState(initial.b_asset_id);
+  const [bPort, setBPort] = useState(initial.b_port);
+  const [medium, setMedium] = useState(initial.medium);
+  const [color, setColor] = useState(initial.color);
+  const [lengthM, setLengthM] = useState(initial.length_m);
+  const [label, setLabel] = useState(initial.label);
+  const [face, setFace] = useState(initial.face);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Reset state when the dialog re-opens for a different editing target.
+  useMemo(() => {
+    setAAssetId(initial.a_asset_id);
+    setAPort(initial.a_port);
+    setBAssetId(initial.b_asset_id);
+    setBPort(initial.b_port);
+    setMedium(initial.medium);
+    setColor(initial.color);
+    setLengthM(initial.length_m);
+    setLabel(initial.label);
+    setFace(initial.face);
+    setErrors({});
+  }, [initial]);
+
   const siteAssetsRes = useList<Asset>({
     resource: 'inventory/assets',
     pagination: { pageSize: 500 },
@@ -305,31 +318,66 @@ function CableDialog({
     return m;
   }, [rackAssets, siteAssets]);
 
-  const aAssetId = form.watch('a_asset_id');
-  const bAssetId = form.watch('b_asset_id');
   const aPortCount = portCountById.get(aAssetId);
   const bPortCount = portCountById.get(bAssetId);
 
+  function assetOptions(): SelectProps.Options {
+    const localIds = new Set(rackAssets.map((a) => a.id));
+    const remote = siteAssets.filter((a) => !localIds.has(a.id));
+    const groups: SelectProps.OptionGroup[] = [];
+    if (rackAssets.length > 0) {
+      groups.push({
+        label: 'In this rack',
+        options: rackAssets.map((a) => ({ value: a.id, label: a.name, description: a.kind })),
+      });
+    }
+    if (remote.length > 0) {
+      groups.push({
+        label: 'Other in site',
+        options: remote.map((a) => ({ value: a.id, label: a.name, description: a.kind })),
+      });
+    }
+    return groups;
+  }
+  const aOptions = assetOptions();
+  const bOptions = assetOptions();
+
+  const aSelectedOpt: SelectProps.Option | null = aAssetId
+    ? { value: aAssetId, label: rackAssets.concat(siteAssets as any).find((a: any) => a.id === aAssetId)?.name ?? aAssetId }
+    : null;
+  const bSelectedOpt: SelectProps.Option | null = bAssetId
+    ? { value: bAssetId, label: rackAssets.concat(siteAssets as any).find((a: any) => a.id === bAssetId)?.name ?? bAssetId }
+    : null;
+
   const updateMutation = useUpdate();
 
-  async function onSubmit(v: CableForm) {
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!aAssetId) errs.a_asset_id = 'Required';
+    if (!bAssetId) errs.b_asset_id = 'Required';
+    if (aAssetId && bAssetId && aAssetId === bAssetId) errs.b_asset_id = 'A-end and B-end must differ';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     const payload = {
-      a_asset_id: v.a_asset_id,
-      a_port: v.a_port || null,
-      b_asset_id: v.b_asset_id,
-      b_port: v.b_port || null,
-      medium: v.medium || null,
-      color: v.color || null,
-      length_m: v.length_m ? Number(v.length_m) : null,
-      label: v.label || null,
-      face: v.face || null,
+      a_asset_id: aAssetId,
+      a_port: aPort || null,
+      b_asset_id: bAssetId,
+      b_port: bPort || null,
+      medium: medium || null,
+      color: color || null,
+      length_m: lengthM ? Number(lengthM) : null,
+      label: label || null,
+      face: face || null,
     };
+    setSubmitting(true);
     try {
       if (editing) {
         await new Promise<void>((resolve, reject) => {
           updateMutation.mutate(
             { resource: 'inventory/cables', id: editing.id, values: payload, successNotification: false },
-            { onSuccess: () => resolve(), onError: (e) => reject(e) },
+            { onSuccess: () => resolve(), onError: (err) => reject(err) },
           );
         });
         toast.success('Cable updated');
@@ -341,170 +389,147 @@ function CableDialog({
       onSaved();
     } catch (err: any) {
       toast.error(err?.message ?? 'Save failed');
+    } finally {
+      setSubmitting(false);
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>{editing ? 'Edit cable' : 'Add cable'}</DialogTitle>
-        </DialogHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <FormField control={form.control} name="a_asset_id" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>A-end asset</FormLabel>
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Pick A-end" /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <AssetGroup label="In this rack" assets={rackAssets} />
-                      <AssetGroup
-                        label="Other in site"
-                        assets={siteAssets.filter((a) => !rackAssets.some((r) => r.id === a.id))}
-                      />
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="a_port" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>A port</FormLabel>
-                  <FormControl>
-                    <PortPicker portCount={aPortCount} value={field.value ?? ''} onChange={field.onChange} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="b_asset_id" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>B-end asset</FormLabel>
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Pick B-end" /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <AssetGroup label="In this rack" assets={rackAssets} />
-                      <AssetGroup
-                        label="Other in site"
-                        assets={siteAssets.filter((a) => !rackAssets.some((r) => r.id === a.id))}
-                      />
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="b_port" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>B port</FormLabel>
-                  <FormControl>
-                    <PortPicker portCount={bPortCount} value={field.value ?? ''} onChange={field.onChange} />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <FormField control={form.control} name="medium" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Medium</FormLabel>
-                  <FormControl>
-                    <Input list="cable-media" placeholder="cat6, smf…" {...field} />
-                  </FormControl>
-                  <datalist id="cable-media">
-                    {COMMON_MEDIA.map((m) => <option key={m} value={m} />)}
-                  </datalist>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="color" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Color</FormLabel>
-                  <FormControl>
-                    <Input list="cable-colors" placeholder="blue, yellow…" {...field} />
-                  </FormControl>
-                  <datalist id="cable-colors">
-                    {COMMON_COLORS.map((c) => <option key={c} value={c} />)}
-                  </datalist>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="length_m" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Length (m)</FormLabel>
-                  <FormControl><Input type="number" step="0.1" min={0} {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-            </div>
-            <div className="grid grid-cols-[160px_1fr] gap-3">
-              <FormField control={form.control} name="face" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Routing face</FormLabel>
-                  <Select value={field.value || 'unspecified'} onValueChange={(v) => field.onChange(v === 'unspecified' ? '' : v)}>
-                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                    <SelectContent>
-                      <SelectItem value="unspecified">Unspecified</SelectItem>
-                      <SelectItem value="front">Front</SelectItem>
-                      <SelectItem value="rear">Rear</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )} />
-              <FormField control={form.control} name="label" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Label (optional)</FormLabel>
-                  <FormControl><Input placeholder="e.g. CAB-001" {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
-              <Button type="submit" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Add cable'}
+    <Modal
+      visible={open}
+      onDismiss={() => onOpenChange(false)}
+      header={editing ? 'Edit cable' : 'Add cable'}
+      size="large"
+    >
+      <form onSubmit={onSubmit}>
+        <Form
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => onOpenChange(false)} variant="link">Cancel</Button>
+              <Button variant="primary" formAction="submit" loading={submitting}>
+                {submitting ? 'Saving…' : editing ? 'Save' : 'Add cable'}
               </Button>
-            </DialogFooter>
-          </form>
+            </SpaceBetween>
+          }
+        >
+          <SpaceBetween size="m">
+            <ColumnLayout columns={2}>
+              <FormField label="A-end asset" errorText={errors.a_asset_id}>
+                <Select
+                  placeholder="Pick A-end"
+                  selectedOption={aSelectedOpt}
+                  onChange={({ detail }) => {
+                    if (detail.selectedOption.value) setAAssetId(detail.selectedOption.value);
+                  }}
+                  options={aOptions}
+                  expandToViewport
+                />
+              </FormField>
+              <FormField label="A port">
+                <PortPicker portCount={aPortCount} value={aPort} onChange={setAPort} />
+              </FormField>
+              <FormField label="B-end asset" errorText={errors.b_asset_id}>
+                <Select
+                  placeholder="Pick B-end"
+                  selectedOption={bSelectedOpt}
+                  onChange={({ detail }) => {
+                    if (detail.selectedOption.value) setBAssetId(detail.selectedOption.value);
+                  }}
+                  options={bOptions}
+                  expandToViewport
+                />
+              </FormField>
+              <FormField label="B port">
+                <PortPicker portCount={bPortCount} value={bPort} onChange={setBPort} />
+              </FormField>
+            </ColumnLayout>
+            <ColumnLayout columns={3}>
+              <FormField label="Medium">
+                <Input
+                  value={medium}
+                  onChange={({ detail }) => setMedium(detail.value)}
+                  placeholder="cat6, smf…"
+                  // Native datalist for autocomplete suggestions; Cloudscape's
+                  // Autosuggest would also work but Input is simpler here.
+                />
+                <datalist id="cable-media">
+                  {COMMON_MEDIA.map((m) => <option key={m} value={m} />)}
+                </datalist>
+              </FormField>
+              <FormField label="Color">
+                <Input
+                  value={color}
+                  onChange={({ detail }) => setColor(detail.value)}
+                  placeholder="blue, yellow…"
+                />
+                <datalist id="cable-colors">
+                  {COMMON_COLORS.map((c) => <option key={c} value={c} />)}
+                </datalist>
+              </FormField>
+              <FormField label="Length (m)">
+                <Input
+                  type="number"
+                  value={lengthM}
+                  onChange={({ detail }) => setLengthM(detail.value)}
+                  step={0.1}
+                />
+              </FormField>
+            </ColumnLayout>
+            <ColumnLayout columns={2}>
+              <FormField label="Routing face">
+                <Select
+                  selectedOption={
+                    FORM_FACE_OPTIONS.find((o) => o.value === (face || 'unspecified')) ?? FORM_FACE_OPTIONS[0]
+                  }
+                  onChange={({ detail }) => {
+                    const v = detail.selectedOption.value ?? 'unspecified';
+                    setFace(v === 'unspecified' ? '' : v);
+                  }}
+                  options={FORM_FACE_OPTIONS}
+                  expandToViewport
+                />
+              </FormField>
+              <FormField label="Label (optional)">
+                <Input
+                  value={label}
+                  onChange={({ detail }) => setLabel(detail.value)}
+                  placeholder="e.g. CAB-001"
+                />
+              </FormField>
+            </ColumnLayout>
+          </SpaceBetween>
         </Form>
-      </DialogContent>
-    </Dialog>
+      </form>
+    </Modal>
   );
 }
 
 function PortPicker({
   portCount, value, onChange,
-}: {
+}: Readonly<{
   portCount: number | undefined;
   value: string;
   onChange: (v: string) => void;
-}) {
+}>) {
   if (!portCount || portCount <= 0) {
-    return <Input placeholder="e.g. eth0, Gi0/24" value={value} onChange={(e) => onChange(e.target.value)} />;
+    return (
+      <Input
+        value={value}
+        onChange={({ detail }) => onChange(detail.value)}
+        placeholder="e.g. eth0, Gi0/24"
+      />
+    );
   }
+  const options: SelectProps.Option[] = Array.from({ length: portCount }, (_, i) => String(i + 1)).map((p) => ({
+    value: p, label: p,
+  }));
   return (
-    <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger><SelectValue placeholder={`Pick port (1-${portCount})`} /></SelectTrigger>
-      <SelectContent>
-        {Array.from({ length: portCount }, (_, i) => String(i + 1)).map((p) => (
-          <SelectItem key={p} value={p}>{p}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function AssetGroup({ label, assets }: { label: string; assets: { id: string; name: string; kind: string }[] }) {
-  if (assets.length === 0) return null;
-  return (
-    <>
-      <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      {assets.map((a) => (
-        <SelectItem key={a.id} value={a.id}>
-          {a.name} <span className="text-muted-foreground">· {a.kind}</span>
-        </SelectItem>
-      ))}
-    </>
+    <Select
+      placeholder={`Pick port (1-${portCount})`}
+      selectedOption={value ? { value, label: value } : null}
+      onChange={({ detail }) => onChange(detail.selectedOption.value ?? '')}
+      options={options}
+      expandToViewport
+    />
   );
 }

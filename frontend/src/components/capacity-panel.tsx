@@ -1,6 +1,10 @@
-import { Server, Zap, Ruler } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import Header from '@cloudscape-design/components/header';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+
 import { CapacityBar } from './capacity-bar';
 
 export type Capacity = {
@@ -15,34 +19,34 @@ export type Capacity = {
   free_runs: { start_u: number; length: number }[];
 };
 
-export function CapacityPanel({ capacity }: { capacity: Capacity }) {
+const MONO = { fontFamily: 'ui-monospace, monospace' } as const;
+
+function badgeColorForRun(length: number): 'green' | 'grey' {
+  if (length >= 4) return 'green';
+  return 'grey';
+}
+
+export function CapacityPanel({ capacity }: Readonly<{ capacity: Capacity }>) {
   const c = capacity;
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Server className="h-4 w-4" /> Capacity
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-5 md:grid-cols-3">
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Ruler className="h-3.5 w-3.5" /> Rack space
-          </div>
+    <Container header={<Header variant="h2">Capacity</Header>}>
+      <ColumnLayout columns={3}>
+        <SpaceBetween size="xs">
+          <Box variant="awsui-key-label">Rack space</Box>
           <CapacityBar
             used={c.u_used}
             total={c.u_total}
             leftLabel={`${c.u_used} / ${c.u_total} U used`}
           />
-          <p className="text-xs text-muted-foreground">{c.u_free} U free</p>
-        </div>
+          <Box color="text-status-inactive" fontSize="body-s">{c.u_free} U free</Box>
+        </SpaceBetween>
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Zap className="h-3.5 w-3.5" /> Power
-          </div>
+        <SpaceBetween size="xs">
+          <Box variant="awsui-key-label">Power</Box>
           {c.kw_max === null ? (
-            <p className="text-xs text-muted-foreground">No max kW configured for this rack.</p>
+            <Box color="text-status-inactive" fontSize="body-s">
+              No max kW configured for this rack.
+            </Box>
           ) : (
             <>
               <CapacityBar
@@ -55,41 +59,35 @@ export function CapacityPanel({ capacity }: { capacity: Capacity }) {
                     : `${c.kw_current.toFixed(2)} / ${c.kw_max} kW`
                 }
               />
-              <p className="text-xs text-muted-foreground">
+              <Box color="text-status-inactive" fontSize="body-s">
                 {c.kw_current === null
                   ? 'Awaiting current PDU telemetry'
                   : `${(c.kw_max - c.kw_current).toFixed(2)} kW headroom`}
-              </p>
+              </Box>
             </>
           )}
-        </div>
+        </SpaceBetween>
 
-        <div className="space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            Free contiguous space
-          </div>
+        <SpaceBetween size="xs">
+          <Box variant="awsui-key-label">Free contiguous space</Box>
           {c.free_runs.length === 0 ? (
-            <p className="text-xs text-muted-foreground">Rack is full.</p>
+            <Box color="text-status-inactive" fontSize="body-s">Rack is full.</Box>
           ) : (
             <>
-              <div className="flex flex-wrap gap-1.5">
+              <SpaceBetween size="xxs" direction="horizontal">
                 {c.free_runs.slice(0, 6).map((r) => (
-                  <Badge
-                    key={`${r.start_u}-${r.length}`}
-                    variant={r.length >= 4 ? 'success' : r.length >= 2 ? 'secondary' : 'outline'}
-                    className="font-mono"
-                  >
+                  <Badge key={`${r.start_u}-${r.length}`} color={badgeColorForRun(r.length)}>
                     {r.length}U @ U{r.start_u}
                   </Badge>
                 ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Largest gap: <span className="font-mono">{c.biggest_contiguous_free}U</span>
-              </p>
+              </SpaceBetween>
+              <Box color="text-status-inactive" fontSize="body-s">
+                Largest gap: <span style={MONO}>{c.biggest_contiguous_free}U</span>
+              </Box>
             </>
           )}
-        </div>
-      </CardContent>
-    </Card>
+        </SpaceBetween>
+      </ColumnLayout>
+    </Container>
   );
 }

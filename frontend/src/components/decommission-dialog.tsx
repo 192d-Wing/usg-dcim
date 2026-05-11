@@ -1,18 +1,18 @@
-import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { AlertTriangle, ShieldCheck } from 'lucide-react';
-import { http } from '@/lib/http';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
+
+import Alert from '@cloudscape-design/components/alert';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import Checkbox from '@cloudscape-design/components/checkbox';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+
+import { http } from '@/lib/http';
 
 type AssetMini = {
   id: string;
@@ -22,51 +22,51 @@ type AssetMini = {
   lifecycle_state: string;
 };
 
-const formSchema = z.object({
-  confirm_name: z.string(),
-  sanitization_note: z.string().min(3, 'Sanitization note required'),
-  reason: z.string().min(3, 'Reason required'),
-  acknowledged: z.literal(true, { errorMap: () => ({ message: 'You must confirm' }) }),
-});
-
 export function DecommissionDialog({
   asset, open, onOpenChange, onDecommissioned,
-}: {
+}: Readonly<{
   asset: AssetMini | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDecommissioned: () => void;
-}) {
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      confirm_name: '',
-      sanitization_note: '',
-      reason: '',
-      acknowledged: false as unknown as true,
-    },
-  });
+}>) {
+  const [reason, setReason] = useState('');
+  const [sanitization, setSanitization] = useState('');
+  const [confirmName, setConfirmName] = useState('');
+  const [acknowledged, setAcknowledged] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  // Reset the form whenever the dialog opens for a new asset.
-  if (asset && form.formState.defaultValues?.confirm_name === '' && open === false) {
-    // no-op — keep defaults; reset happens on close below.
-  }
-
-  async function onSubmit(v: z.infer<typeof formSchema>) {
-    if (!asset) return;
-    if (v.confirm_name.trim() !== asset.name) {
-      form.setError('confirm_name', { message: `must match "${asset.name}"` });
-      return;
+  useEffect(() => {
+    if (open) {
+      setReason('');
+      setSanitization('');
+      setConfirmName('');
+      setAcknowledged(false);
+      setErrors({});
     }
+  }, [open, asset?.id]);
+
+  if (!asset) return null;
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!asset) return;
+    const errs: Record<string, string> = {};
+    if (reason.trim().length < 3) errs.reason = 'Reason required';
+    if (sanitization.trim().length < 3) errs.sanitization = 'Sanitization note required';
+    if (confirmName.trim() !== asset.name) errs.confirm = `must match "${asset.name}"`;
+    if (!acknowledged) errs.ack = 'You must confirm';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
     setSubmitting(true);
     try {
       await http.post(`/inventory/assets/${asset.id}/decommission`, {
-        sanitization_note: v.sanitization_note,
-        reason: v.reason,
+        sanitization_note: sanitization,
+        reason,
       });
       toast.success(`${asset.name} decommissioned`);
-      form.reset();
       onDecommissioned();
       onOpenChange(false);
     } catch (err: any) {
@@ -76,103 +76,97 @@ export function DecommissionDialog({
     }
   }
 
-  function handleOpenChange(o: boolean) {
-    if (!o) form.reset();
-    onOpenChange(o);
-  }
-
-  if (!asset) return null;
-
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-warning" /> Decommission asset
-          </DialogTitle>
-        </DialogHeader>
+    <Modal
+      visible={open}
+      onDismiss={() => onOpenChange(false)}
+      header="Decommission asset"
+      size="medium"
+    >
+      <SpaceBetween size="m">
+        <Box>
+          <ColumnLayout columns={2} variant="text-grid">
+            <div>
+              <Box variant="awsui-key-label">Name</Box>
+              <Box>{asset.name}</Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Kind</Box>
+              <Box>{asset.kind}</Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Serial</Box>
+              <Box>
+                <span style={{ fontFamily: 'ui-monospace, monospace' }}>{asset.serial ?? '—'}</span>
+              </Box>
+            </div>
+            <div>
+              <Box variant="awsui-key-label">Current state</Box>
+              <Box>{asset.lifecycle_state}</Box>
+            </div>
+          </ColumnLayout>
+        </Box>
 
-        <div className="rounded-md border bg-muted/30 p-3 text-xs space-y-1">
-          <div><span className="text-muted-foreground">Name:</span> <span className="font-medium">{asset.name}</span></div>
-          <div><span className="text-muted-foreground">Kind:</span> {asset.kind}</div>
-          <div><span className="text-muted-foreground">Serial:</span> <span className="font-mono">{asset.serial ?? '—'}</span></div>
-          <div><span className="text-muted-foreground">Current state:</span> {asset.lifecycle_state}</div>
-        </div>
-
-        <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs">
-          <p className="font-medium text-warning">This action will:</p>
-          <ul className="mt-1 list-disc pl-5 text-foreground/80 space-y-0.5">
-            <li>flip the asset's lifecycle state to <span className="font-mono">decommissioned</span></li>
+        <Alert type="warning" header="This action will:">
+          <ul style={{ margin: 0, paddingLeft: 20 }}>
+            <li>flip the asset's lifecycle state to <span style={{ fontFamily: 'ui-monospace, monospace' }}>decommissioned</span></li>
             <li>drop every power connection that lands on this asset</li>
             {asset.kind === 'pdu' && (
               <li>drop power connections served by this PDU's outlets (downstream devices will go unpowered)</li>
             )}
             <li>append an audit-log entry with your sanitization note + reason</li>
           </ul>
-          <p className="mt-2 text-muted-foreground">
+          <Box color="text-status-inactive" fontSize="body-s" padding={{ top: 'xs' }}>
             The asset itself stays in inventory so historical reports keep resolving — flip to{' '}
-            <span className="font-mono">retired</span> later to fully archive.
-          </p>
-        </div>
+            <span style={{ fontFamily: 'ui-monospace, monospace' }}>retired</span> later to fully archive.
+          </Box>
+        </Alert>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            <FormField control={form.control} name="reason" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Reason</FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g. EOL replacement, hardware failure" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="sanitization_note" render={({ field }) => (
-              <FormItem>
-                <FormLabel className="flex items-center gap-1.5">
-                  <ShieldCheck className="h-3.5 w-3.5" /> Sanitization note
-                </FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g. NIST 800-88 purge complete, certificate #DC-2026-0123" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="confirm_name" render={({ field }) => (
-              <FormItem>
-                <FormLabel>Type the asset name to confirm</FormLabel>
-                <FormControl>
-                  <Input placeholder={asset.name} className="font-mono" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <FormField control={form.control} name="acknowledged" render={({ field }) => (
-              <FormItem className="flex items-center gap-3 space-y-0">
-                <FormControl>
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={field.value === true}
-                    onChange={(e) => field.onChange(e.target.checked)}
-                  />
-                </FormControl>
-                <FormLabel className="!mt-0 text-sm font-normal">
+        <form onSubmit={onSubmit}>
+          <Form
+            actions={
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button onClick={() => onOpenChange(false)} variant="link">Cancel</Button>
+                <Button variant="primary" formAction="submit" loading={submitting}>
+                  {submitting ? 'Decommissioning…' : 'Decommission'}
+                </Button>
+              </SpaceBetween>
+            }
+          >
+            <SpaceBetween size="m">
+              <FormField label="Reason" errorText={errors.reason}>
+                <Input
+                  value={reason}
+                  onChange={({ detail }) => setReason(detail.value)}
+                  placeholder="e.g. EOL replacement, hardware failure"
+                />
+              </FormField>
+              <FormField label="Sanitization note" errorText={errors.sanitization}>
+                <Input
+                  value={sanitization}
+                  onChange={({ detail }) => setSanitization(detail.value)}
+                  placeholder="e.g. NIST 800-88 purge complete, certificate #DC-2026-0123"
+                />
+              </FormField>
+              <FormField label="Type the asset name to confirm" errorText={errors.confirm}>
+                <Input
+                  value={confirmName}
+                  onChange={({ detail }) => setConfirmName(detail.value)}
+                  placeholder={asset.name}
+                />
+              </FormField>
+              <FormField errorText={errors.ack}>
+                <Checkbox
+                  checked={acknowledged}
+                  onChange={({ detail }) => setAcknowledged(detail.checked)}
+                >
                   I understand power connections will be dropped
-                </FormLabel>
-                <FormMessage />
-              </FormItem>
-            )} />
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" variant="destructive" disabled={submitting}>
-                {submitting ? 'Decommissioning…' : 'Decommission'}
-              </Button>
-            </div>
-          </form>
-        </Form>
-      </DialogContent>
-    </Dialog>
+                </Checkbox>
+              </FormField>
+            </SpaceBetween>
+          </Form>
+        </form>
+      </SpaceBetween>
+    </Modal>
   );
 }

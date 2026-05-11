@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import Spinner from '@cloudscape-design/components/spinner';
 import { http } from '@/lib/http';
 
 type Band = 'critical' | 'warning' | 'healthy' | 'unknown';
@@ -35,8 +38,11 @@ type Forecast = {
   what_if_runway_band?: Band;
 };
 
-const BAND_VARIANT: Record<string, 'critical' | 'warning' | 'success' | 'secondary'> = {
-  critical: 'critical', warning: 'warning', healthy: 'success', unknown: 'secondary',
+const BAND_COLOR: Record<Band, 'red' | 'severity-medium' | 'green' | 'grey'> = {
+  critical: 'red',
+  warning: 'severity-medium',
+  healthy: 'green',
+  unknown: 'grey',
 };
 
 function formatDays(d: number | null | undefined): string {
@@ -52,7 +58,7 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleDateString();
 }
 
-export function ForecastPanel({ rackId }: { rackId: string }) {
+export function ForecastPanel({ rackId }: Readonly<{ rackId: string }>) {
   const [whatIfU, setWhatIfU] = useState<string>('');
   const addUnits = whatIfU ? Math.max(0, Math.min(60, Number(whatIfU))) : 0;
 
@@ -70,131 +76,142 @@ export function ForecastPanel({ rackId }: { rackId: string }) {
   const f = forecastRes.data;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <TrendingUp className="h-4 w-4" /> Capacity forecast
-          {f && (
-            <Badge variant={BAND_VARIANT[f.runway_band]} className="ml-2 capitalize">
+    <Container
+      header={
+        <Header
+          variant="h2"
+          actions={f && (
+            <Badge color={BAND_COLOR[f.runway_band]}>
               {f.runway_band}
             </Badge>
           )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {forecastRes.isLoading ? (
-          <Skeleton className="h-24 w-full" />
-        ) : !f ? (
-          <p className="text-sm text-muted-foreground">No forecast available.</p>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-              <Field label="Used / total" value={`${f.u_used} / ${f.u_total} U`} />
-              <Field label="Free" value={`${f.u_free} U`} />
-              <Field
-                label="Growth"
-                value={
-                  f.slope_u_per_day === null
-                    ? 'no trend yet'
-                    : `${f.slope_u_per_day.toFixed(2)} U/day`
-                }
-              />
-              <Field
-                label="Runway"
-                value={
-                  f.slope_u_per_day === null
-                    ? '—'
-                    : `${formatDays(f.days_until_full)} (${formatDate(f.projected_fill_date)})`
-                }
-              />
-            </div>
-            {f.slope_u_per_day === null && (
-              <p className="text-xs text-muted-foreground">
-                Need at least two placements with distinct timestamps before a slope can be inferred.
-              </p>
-            )}
-            {f.kw_forecast && <KwSection kw={f.kw_forecast} />}
-            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
-              <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-                What-if: add U to this rack
-              </Label>
-              <div className="flex items-center gap-3">
-                <Input
-                  type="number" min={0} max={60} className="w-24"
-                  value={whatIfU} placeholder="0"
-                  onChange={(e) => setWhatIfU(e.target.value)}
-                />
-                {addUnits > 0 && (
-                  <div className="flex flex-1 items-center gap-3 text-sm">
-                    <span className="text-muted-foreground">→</span>
-                    <span>
-                      {f.what_if_u_used} / {f.u_total} U used
-                      <span className="text-muted-foreground"> · {f.what_if_u_free} U free</span>
-                    </span>
-                    {f.what_if_runway_band && (
-                      <Badge variant={BAND_VARIANT[f.what_if_runway_band]} className="capitalize">
-                        {formatDays(f.what_if_days_until_full)} runway · {f.what_if_runway_band}
-                      </Badge>
-                    )}
-                  </div>
-                )}
+        >
+          Capacity forecast
+        </Header>
+      }
+    >
+      {forecastRes.isLoading && (
+        <Box color="text-status-inactive"><Spinner /> Loading…</Box>
+      )}
+      {!forecastRes.isLoading && !f && (
+        <Box color="text-status-inactive">No forecast available.</Box>
+      )}
+      {f && (
+        <SpaceBetween size="m">
+          <ColumnLayout columns={4}>
+            <Field label="Used / total" value={`${f.u_used} / ${f.u_total} U`} />
+            <Field label="Free" value={`${f.u_free} U`} />
+            <Field
+              label="Growth"
+              value={
+                f.slope_u_per_day === null
+                  ? 'no trend yet'
+                  : `${f.slope_u_per_day.toFixed(2)} U/day`
+              }
+            />
+            <Field
+              label="Runway"
+              value={
+                f.slope_u_per_day === null
+                  ? '—'
+                  : `${formatDays(f.days_until_full)} (${formatDate(f.projected_fill_date)})`
+              }
+            />
+          </ColumnLayout>
+          {f.slope_u_per_day === null && (
+            <Box color="text-status-inactive" fontSize="body-s">
+              Need at least two placements with distinct timestamps before a slope can be inferred.
+            </Box>
+          )}
+          {f.kw_forecast && <KwSection kw={f.kw_forecast} />}
+          <Container header={<Header variant="h3">What-if: add U to this rack</Header>}>
+            <SpaceBetween size="xs">
+              <div style={{ width: 140 }}>
+                <FormField label="Units to add">
+                  <Input
+                    type="number"
+                    value={whatIfU}
+                    placeholder="0"
+                    onChange={({ detail }) => setWhatIfU(detail.value)}
+                  />
+                </FormField>
               </div>
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+              {addUnits > 0 && (
+                <SpaceBetween size="xs" direction="horizontal">
+                  <Box color="text-status-inactive">→</Box>
+                  <Box>
+                    {f.what_if_u_used} / {f.u_total} U used
+                    <Box variant="span" color="text-status-inactive">
+                      {' '}· {f.what_if_u_free} U free
+                    </Box>
+                  </Box>
+                  {f.what_if_runway_band && (
+                    <Badge color={BAND_COLOR[f.what_if_runway_band]}>
+                      {formatDays(f.what_if_days_until_full)} runway · {f.what_if_runway_band}
+                    </Badge>
+                  )}
+                </SpaceBetween>
+              )}
+            </SpaceBetween>
+          </Container>
+        </SpaceBetween>
+      )}
+    </Container>
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: Readonly<{ label: string; value: string }>) {
   return (
     <div>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-sm font-medium tabular-nums">{value}</div>
+      <Box variant="awsui-key-label">{label}</Box>
+      <Box fontSize="body-m" fontWeight="bold">{value}</Box>
     </div>
   );
 }
 
-function KwSection({ kw }: { kw: KwForecast }) {
+function KwSection({ kw }: Readonly<{ kw: KwForecast }>) {
   const slope = kw.slope_kw_per_day;
   return (
-    <div className="rounded-md border bg-muted/20 p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-          kW trend ({kw.days}d window · {kw.samples} samples)
-        </Label>
-        <Badge variant={BAND_VARIANT[kw.runway_band]} className="capitalize">
-          {kw.runway_band}
-        </Badge>
-      </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Field
-          label="Current"
-          value={kw.current_kw === null ? '—' : `${kw.current_kw.toFixed(2)} kW`}
-        />
-        <Field
-          label="Max rated"
-          value={kw.max_kw === null ? '—' : `${kw.max_kw.toFixed(1)} kW`}
-        />
-        <Field
-          label="Growth"
-          value={slope === null ? 'no trend yet' : `${(slope * 1000).toFixed(0)} W/day`}
-        />
-        <Field
-          label="Runway to max"
-          value={
-            kw.days_until_max === null
-              ? '—'
-              : `${formatDays(kw.days_until_max)} (${formatDate(kw.projected_max_date)})`
-          }
-        />
-      </div>
-      {kw.samples < 2 && (
-        <p className="text-xs text-muted-foreground">
-          Need at least two daily kW samples from PDU telemetry before a slope can be inferred.
-        </p>
-      )}
-    </div>
+    <Container
+      header={
+        <Header
+          variant="h3"
+          actions={<Badge color={BAND_COLOR[kw.runway_band]}>{kw.runway_band}</Badge>}
+          description={`${kw.days}d window · ${kw.samples} samples`}
+        >
+          kW trend
+        </Header>
+      }
+    >
+      <SpaceBetween size="xs">
+        <ColumnLayout columns={4}>
+          <Field
+            label="Current"
+            value={kw.current_kw === null ? '—' : `${kw.current_kw.toFixed(2)} kW`}
+          />
+          <Field
+            label="Max rated"
+            value={kw.max_kw === null ? '—' : `${kw.max_kw.toFixed(1)} kW`}
+          />
+          <Field
+            label="Growth"
+            value={slope === null ? 'no trend yet' : `${(slope * 1000).toFixed(0)} W/day`}
+          />
+          <Field
+            label="Runway to max"
+            value={
+              kw.days_until_max === null
+                ? '—'
+                : `${formatDays(kw.days_until_max)} (${formatDate(kw.projected_max_date)})`
+            }
+          />
+        </ColumnLayout>
+        {kw.samples < 2 && (
+          <Box color="text-status-inactive" fontSize="body-s">
+            Need at least two daily kW samples from PDU telemetry before a slope can be inferred.
+          </Box>
+        )}
+      </SpaceBetween>
+    </Container>
   );
 }
