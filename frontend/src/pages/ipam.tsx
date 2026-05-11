@@ -2503,7 +2503,7 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
   const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
   const fabrics = fabricsRes.result.data ?? [];
   const [fabricId, setFabricId] = useState<string>('');
-  const [overlayId, setOverlayId] = useState<string | null>(null);
+  const [selectedOverlay, setSelectedOverlay] = useState<Overlay[]>([]);
   const [createOverlayOpen, setCreateOverlayOpen] = useState(false);
 
   // First fabric becomes the default once fabrics arrive — saves a click.
@@ -2519,84 +2519,106 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
     ).data.items ?? [],
   });
   const overlays = overlaysQ.data ?? [];
+  const overlayId = selectedOverlay[0]?.id ?? null;
 
   async function refreshOverlays() {
     await qc.invalidateQueries({ queryKey: ['overlays-for-fabric', fabricId] });
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fabric</p>
-          <Select value={fabricId} onValueChange={(v) => { setFabricId(v); setOverlayId(null); }}>
-            <SelectTrigger className="w-[260px]"><SelectValue placeholder="Pick a fabric" /></SelectTrigger>
-            <SelectContent>
-              {fabrics.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        {canWrite && fabricId && (
-          <Dialog open={createOverlayOpen} onOpenChange={setCreateOverlayOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> New overlay</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New overlay</DialogTitle></DialogHeader>
-              <OverlayForm
-                fabricId={fabricId}
-                onSaved={async () => { setCreateOverlayOpen(false); await refreshOverlays(); }}
-              />
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
+  const fabricOptions: CsSelectProps.Option[] =
+    fabrics.map((f) => ({ value: f.id, label: f.name }));
+  const fabricOpt = fabricOptions.find((o) => o.value === fabricId) ?? null;
 
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>UDP port</TableHead>
-                <TableHead>MTU</TableHead>
-                <TableHead className="w-32" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {overlays.length === 0 && !overlaysQ.isLoading && (
-                <TableRow><TableCell colSpan={5} className="text-muted-foreground">
-                  No overlays in this fabric yet.
-                </TableCell></TableRow>
-              )}
-              {overlays.map((o) => (
-                <TableRow
-                  key={o.id}
-                  className={'cursor-pointer hover:bg-accent/40 ' + (overlayId === o.id ? 'bg-accent/30' : '')}
-                  onClick={() => setOverlayId(o.id === overlayId ? null : o.id)}
-                >
-                  <TableCell className="font-medium">{o.name}</TableCell>
-                  <TableCell><Badge variant="secondary">{o.kind}</Badge></TableCell>
-                  <TableCell className="font-mono">{o.udp_port}</TableCell>
-                  <TableCell>{o.mtu ?? '—'}</TableCell>
-                  <TableCell className="text-right text-xs text-muted-foreground">
-                    {overlayId === o.id ? 'selected' : 'click to drill'}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+  return (
+    <CsSpaceBetween size="l">
+      <CsContainer header={<CsHeader variant="h2">Fabric</CsHeader>}>
+        <CsFormField label="Fabric">
+          <CsSelect
+            placeholder="Pick a fabric"
+            selectedOption={fabricOpt}
+            onChange={({ detail }) => {
+              if (detail.selectedOption.value) {
+                setFabricId(detail.selectedOption.value);
+                setSelectedOverlay([]);
+              }
+            }}
+            options={fabricOptions}
+            expandToViewport
+          />
+        </CsFormField>
+      </CsContainer>
+
+      <CsTable<Overlay>
+        variant="container"
+        loading={overlaysQ.isLoading}
+        loadingText="Loading overlays…"
+        items={overlays}
+        trackBy="id"
+        selectionType="single"
+        selectedItems={selectedOverlay}
+        onSelectionChange={({ detail }) => setSelectedOverlay(detail.selectedItems)}
+        ariaLabels={{
+          selectionGroupLabel: 'Overlay selection',
+          itemSelectionLabel: (_d, item) => `Select overlay ${item.name}`,
+          allItemsSelectionLabel: () => 'select all',
+        }}
+        header={
+          <CsHeader
+            counter={
+              selectedOverlay.length
+                ? `(${selectedOverlay.length}/${overlays.length})`
+                : `(${overlays.length})`
+            }
+            actions={
+              canWrite && fabricId && (
+                <CsButton variant="primary" iconName="add-plus" onClick={() => setCreateOverlayOpen(true)}>
+                  New overlay
+                </CsButton>
+              )
+            }
+            description="Select an overlay to drill into its VNIs and VTEPs."
+          >
+            Overlays
+          </CsHeader>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (o) => <span style={{ fontWeight: 500 }}>{o.name}</span> },
+          { id: 'kind', header: 'Kind', cell: (o) => <CsBadge>{o.kind}</CsBadge>, width: 120 },
+          {
+            id: 'udp', header: 'UDP port',
+            cell: (o) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{o.udp_port}</span>,
+            width: 120,
+          },
+          { id: 'mtu', header: 'MTU', cell: (o) => o.mtu ?? '—', width: 100 },
+        ]}
+        empty={
+          <CsBox textAlign="center" color="inherit" padding="m">
+            No overlays in this fabric yet.
+          </CsBox>
+        }
+      />
 
       {overlayId && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <CsColumnLayout columns={2}>
           <VnisPanel overlayId={overlayId} canWrite={canWrite} />
           <VtepsPanel overlayId={overlayId} canWrite={canWrite} />
-        </div>
+        </CsColumnLayout>
       )}
-    </div>
+
+      {canWrite && fabricId && (
+        <CsModal
+          visible={createOverlayOpen}
+          onDismiss={() => setCreateOverlayOpen(false)}
+          header="New overlay"
+          size="medium"
+        >
+          <OverlayForm
+            fabricId={fabricId}
+            onSaved={async () => { setCreateOverlayOpen(false); await refreshOverlays(); }}
+          />
+        </CsModal>
+      )}
+    </CsSpaceBetween>
   );
 }
 
@@ -2715,65 +2737,70 @@ function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boole
   }
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b p-3">
-          <h3 className="text-sm font-semibold">VNIs</h3>
-          {canWrite && (
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add VNI</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>New VNI</DialogTitle></DialogHeader>
-                <VniForm
-                  overlayId={overlayId}
-                  onSaved={async () => {
-                    setCreateOpen(false);
-                    await qc.invalidateQueries({ queryKey: ['vnis-for-overlay', overlayId] });
-                  }}
-                />
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>VNI</TableHead>
-              <TableHead>Kind</TableHead>
-              <TableHead>Name</TableHead>
-              <TableHead>VLAN / RT</TableHead>
-              {canWrite && <TableHead className="w-12" />}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {vnis.length === 0 && !vnisQ.isLoading && (
-              <TableRow><TableCell colSpan={canWrite ? 5 : 4} className="text-muted-foreground">No VNIs yet.</TableCell></TableRow>
+    <>
+      <CsTable<Vni>
+        variant="container"
+        loading={vnisQ.isLoading}
+        loadingText="Loading VNIs…"
+        items={vnis}
+        trackBy="id"
+        header={
+          <CsHeader
+            counter={`(${vnis.length})`}
+            actions={canWrite && (
+              <CsButton iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                Add VNI
+              </CsButton>
             )}
-            {vnis.map((v) => (
-              <TableRow key={v.id}>
-                <TableCell className="font-mono">{v.vni}</TableCell>
-                <TableCell><Badge variant={v.kind === 'l3' ? 'default' : 'secondary'}>{v.kind}</Badge></TableCell>
-                <TableCell>{v.name ?? '—'}</TableCell>
-                <TableCell className="text-xs text-muted-foreground">
-                  {v.vlan_id ? `vlan ${v.vlan_id}` : ''}
-                  {v.evpn_route_target ? ` · rt ${v.evpn_route_target}` : ''}
-                  {v.vrf_id ? ` · vrf bound` : ''}
-                </TableCell>
-                {canWrite && (
-                  <TableCell>
-                    <Button size="sm" variant="ghost" onClick={() => remove(v)} title="Delete VNI">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+          >
+            VNIs
+          </CsHeader>
+        }
+        columnDefinitions={[
+          {
+            id: 'vni', header: 'VNI',
+            cell: (v) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.vni}</span>,
+            width: 100,
+          },
+          { id: 'kind', header: 'Kind', cell: (v) => <CsBadge>{v.kind}</CsBadge>, width: 80 },
+          { id: 'name', header: 'Name', cell: (v) => v.name ?? '—' },
+          {
+            id: 'vlan_rt', header: 'VLAN / RT',
+            cell: (v) => (
+              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+                {v.vlan_id ? `vlan ${v.vlan_id}` : ''}
+                {v.evpn_route_target ? ` · rt ${v.evpn_route_target}` : ''}
+                {v.vrf_id ? ` · vrf bound` : ''}
+              </CsBox>
+            ),
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (v: Vni) => (
+              <CsButton iconName="remove" variant="inline-icon" onClick={() => remove(v)} ariaLabel={`Delete VNI ${v.vni}`} />
+            ),
+            width: 60,
+          }] : []),
+        ]}
+        empty={<CsBox textAlign="center" color="inherit" padding="m">No VNIs yet.</CsBox>}
+      />
+      {canWrite && (
+        <CsModal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New VNI"
+          size="medium"
+        >
+          <VniForm
+            overlayId={overlayId}
+            onSaved={async () => {
+              setCreateOpen(false);
+              await qc.invalidateQueries({ queryKey: ['vnis-for-overlay', overlayId] });
+            }}
+          />
+        </CsModal>
+      )}
+    </>
   );
 }
 
@@ -2890,60 +2917,63 @@ function VtepsPanel({ overlayId, canWrite }: { overlayId: string; canWrite: bool
   }
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b p-3">
-          <h3 className="text-sm font-semibold">VTEPs</h3>
-          {canWrite && (
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add VTEP</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>New VTEP</DialogTitle></DialogHeader>
-                <VtepForm
-                  overlayId={overlayId}
-                  assets={assets}
-                  onSaved={async () => {
-                    setCreateOpen(false);
-                    await qc.invalidateQueries({ queryKey: ['vteps-for-overlay', overlayId] });
-                  }}
-                />
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Asset</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Loopback</TableHead>
-              {canWrite && <TableHead className="w-12" />}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {vteps.length === 0 && !vtepsQ.isLoading && (
-              <TableRow><TableCell colSpan={canWrite ? 4 : 3} className="text-muted-foreground">No VTEPs yet.</TableCell></TableRow>
+    <>
+      <CsTable<Vtep>
+        variant="container"
+        loading={vtepsQ.isLoading}
+        loadingText="Loading VTEPs…"
+        items={vteps}
+        trackBy="id"
+        header={
+          <CsHeader
+            counter={`(${vteps.length})`}
+            actions={canWrite && (
+              <CsButton iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                Add VTEP
+              </CsButton>
             )}
-            {vteps.map((v) => (
-              <TableRow key={v.id}>
-                <TableCell>{assetsById.get(v.asset_id)?.name ?? v.asset_id.slice(0, 8) + '…'}</TableCell>
-                <TableCell><Badge variant="secondary">{v.role}</Badge></TableCell>
-                <TableCell className="font-mono">{v.loopback_ip ?? '—'}</TableCell>
-                {canWrite && (
-                  <TableCell>
-                    <Button size="sm" variant="ghost" onClick={() => remove(v)} title="Delete VTEP">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+          >
+            VTEPs
+          </CsHeader>
+        }
+        columnDefinitions={[
+          {
+            id: 'asset', header: 'Asset',
+            cell: (v) => assetsById.get(v.asset_id)?.name ?? v.asset_id.slice(0, 8) + '…',
+          },
+          { id: 'role', header: 'Role', cell: (v) => <CsBadge>{v.role}</CsBadge>, width: 100 },
+          {
+            id: 'loopback', header: 'Loopback',
+            cell: (v) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.loopback_ip ?? '—'}</span>,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (v: Vtep) => (
+              <CsButton iconName="remove" variant="inline-icon" onClick={() => remove(v)} ariaLabel="Delete VTEP" />
+            ),
+            width: 60,
+          }] : []),
+        ]}
+        empty={<CsBox textAlign="center" color="inherit" padding="m">No VTEPs yet.</CsBox>}
+      />
+      {canWrite && (
+        <CsModal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New VTEP"
+          size="medium"
+        >
+          <VtepForm
+            overlayId={overlayId}
+            assets={assets}
+            onSaved={async () => {
+              setCreateOpen(false);
+              await qc.invalidateQueries({ queryKey: ['vteps-for-overlay', overlayId] });
+            }}
+          />
+        </CsModal>
+      )}
+    </>
   );
 }
 
