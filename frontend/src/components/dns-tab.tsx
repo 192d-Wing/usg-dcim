@@ -1035,76 +1035,22 @@ function ZonePreviewBody({ zoneId }: { zoneId: string }) {
   );
 }
 
-// Compute the reverse-zone name for a given IPv4 or IPv6 address —
-// matches the backend's services.dns.reverse_zone_name() at the /24
-// (in-addr.arpa) or /64 (ip6.arpa) boundary. Returns null when the
-// input isn't a parseable address.
-function deriveReverseZoneName(addr: string): string | null {
-  const s = addr.trim();
-  if (!s) return null;
-  // IPv4: four octets, decimal, no embedded letters.
-  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
-  if (v4) {
-    const octets = [v4[1], v4[2], v4[3], v4[4]].map(Number);
-    if (octets.some((o) => o < 0 || o > 255)) return null;
-    return `${octets[2]}.${octets[1]}.${octets[0]}.in-addr.arpa`;
-  }
-  // IPv6: minimal parser — collapse :: into the zero run, take the
-  // first 16 nibbles of the expanded form for the /64 reverse name.
-  if (/[a-fA-F:]/.test(s)) {
-    try {
-      const parts = s.toLowerCase().split('::');
-      if (parts.length > 2) return null;
-      const left = parts[0] ? parts[0].split(':') : [];
-      const right = parts.length === 2 && parts[1] ? parts[1].split(':') : [];
-      const missing = 8 - (left.length + right.length);
-      if (missing < 0) return null;
-      const groups = [
-        ...left,
-        ...Array(parts.length === 2 ? missing : 0).fill('0'),
-        ...right,
-      ];
-      if (groups.length !== 8) return null;
-      const nibbles = groups
-        .map((g) => g.padStart(4, '0'))
-        .join('')
-        .slice(0, 16);
-      if (!/^[0-9a-f]{16}$/.test(nibbles)) return null;
-      return nibbles.split('').reverse().join('.') + '.ip6.arpa';
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
 function ZoneForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void }) {
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 500 } });
   const sites = sitesRes.result.data ?? [];
 
-  // Top-level type: a "Primary" zone covers both apex (per-fabric) and
-  // site (per-site) — operators pick the sub-kind once they've chosen
-  // primary. "Reverse" switches the form to derive its name from an
-  // IP address; nothing else applies.
-  const [typeOpt, setTypeOpt] = useState<SelectProps.Option>({ value: 'primary', label: 'Primary (forward)' });
   const [name, setName] = useState('');
   const [kindOpt, setKindOpt] = useState<SelectProps.Option>({ value: 'site', label: 'Site (per-site)' });
   const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
   const [ttl, setTtl] = useState('60');
-  const [reverseAddr, setReverseAddr] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const isReverse = typeOpt.value === 'reverse';
-  const reverseDerived = useMemo(
-    () => isReverse ? deriveReverseZoneName(reverseAddr) : null,
-    [isReverse, reverseAddr],
-  );
-
-  const typeOptions: SelectProps.Option[] = [
-    { value: 'primary', label: 'Primary (forward)' },
-    { value: 'reverse', label: 'Reverse (PTR)' },
-  ];
+  // Reverse zones (in-addr.arpa / ip6.arpa) are intentionally absent
+  // from this form — they're created automatically by the IPAM
+  // projector whenever an IPAddress has a dns_name set, scoped to the
+  // same (fabric, site) as its forward zone. Operators don't pre-stage
+  // them by hand.
   const kindOptions: SelectProps.Option[] = [
     { value: 'apex', label: 'Apex (per-fabric)' },
     { value: 'site', label: 'Site (per-site)' },
@@ -1116,33 +1062,20 @@ function ZoneForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
     if (!ttl.trim() || Number.isNaN(Number(ttl))) errs.ttl = 'Required (seconds)';
-    if (isReverse) {
-      if (!reverseAddr.trim()) errs.addr = 'IP address required';
-      else if (!reverseDerived) errs.addr = 'Not a valid IPv4 or IPv6 address';
-      if (!siteOpt) errs.site = 'Pick a site';
-    } else {
-      if (!name.trim()) errs.name = 'Required';
-      if (kindOpt.value === 'site' && !siteOpt) errs.site = 'Pick a site';
-    }
+    if (kindOpt.value === 'site' && !siteOpt) errs.site = 'Pick a site';
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
     try {
-      const body: Record<string, unknown> = {
+      await http.post('/dns/zones', {
+        name,
+        kind: kindOpt.value,
         fabric_id: fabricId,
+        site_id: kindOpt.value === 'site' ? siteOpt?.value : null,
         default_ttl: Number(ttl),
-      };
-      if (isReverse) {
-        body.name = reverseDerived;
-        body.kind = 'reverse';
-        body.site_id = siteOpt?.value;
-      } else {
-        body.name = name;
-        body.kind = kindOpt.value;
-        body.site_id = kindOpt.value === 'site' ? siteOpt?.value : null;
-      }
-      await http.post('/dns/zones', body);
+      });
       toast.success('Zone created');
       onSaved();
     } catch (err: any) {
@@ -1162,17 +1095,21 @@ function ZoneForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void
         }
       >
         <SpaceBetween size="m">
+          <FormField label="Zone FQDN" errorText={errors.name}>
+            <Input
+              value={name}
+              onChange={({ detail }) => setName(detail.value)}
+              placeholder="e.g. site42.prod.dcim.mil"
+            />
+          </FormField>
           <ColumnLayout columns={2}>
-            <FormField
-              label="Type"
-              description="Reverse zones are normally auto-created by IPAM, but you can pre-stage one here."
-            >
+            <FormField label="Kind">
               <Select
-                selectedOption={typeOpt}
+                selectedOption={kindOpt}
                 onChange={({ detail }) => {
-                  if (detail.selectedOption.value) setTypeOpt(detail.selectedOption);
+                  if (detail.selectedOption.value) setKindOpt(detail.selectedOption);
                 }}
-                options={typeOptions}
+                options={kindOptions}
                 expandToViewport
               />
             </FormField>
@@ -1180,71 +1117,16 @@ function ZoneForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void
               <Input type="number" value={ttl} onChange={({ detail }) => setTtl(detail.value)} />
             </FormField>
           </ColumnLayout>
-
-          {!isReverse && (
-            <>
-              <FormField label="Zone FQDN" errorText={errors.name}>
-                <Input
-                  value={name}
-                  onChange={({ detail }) => setName(detail.value)}
-                  placeholder="e.g. site42.prod.dcim.mil"
-                />
-              </FormField>
-              <FormField label="Kind">
-                <Select
-                  selectedOption={kindOpt}
-                  onChange={({ detail }) => {
-                    if (detail.selectedOption.value) setKindOpt(detail.selectedOption);
-                  }}
-                  options={kindOptions}
-                  expandToViewport
-                />
-              </FormField>
-              {kindOpt.value === 'site' && (
-                <FormField label="Site" errorText={errors.site}>
-                  <Select
-                    placeholder="Pick a site"
-                    selectedOption={siteOpt}
-                    onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
-                    options={siteOptions}
-                    expandToViewport
-                  />
-                </FormField>
-              )}
-            </>
-          )}
-
-          {isReverse && (
-            <>
-              <FormField
-                label="IP address"
-                description="Any IPv4 or IPv6 inside the desired /24 or /64. The zone name is derived from this."
-                errorText={errors.addr}
-              >
-                <Input
-                  value={reverseAddr}
-                  onChange={({ detail }) => setReverseAddr(detail.value)}
-                  placeholder="10.0.5.1   or   2001:db8::1"
-                />
-              </FormField>
-              <FormField label="Derived zone name">
-                <Input
-                  value={reverseDerived ?? ''}
-                  readOnly
-                  disabled
-                  placeholder="(enter an IP above)"
-                />
-              </FormField>
-              <FormField label="Site" errorText={errors.site}>
-                <Select
-                  placeholder="Pick a site"
-                  selectedOption={siteOpt}
-                  onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
-                  options={siteOptions}
-                  expandToViewport
-                />
-              </FormField>
-            </>
+          {kindOpt.value === 'site' && (
+            <FormField label="Site" errorText={errors.site}>
+              <Select
+                placeholder="Pick a site"
+                selectedOption={siteOpt}
+                onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
+                options={siteOptions}
+                expandToViewport
+              />
+            </FormField>
           )}
         </SpaceBetween>
       </Form>
