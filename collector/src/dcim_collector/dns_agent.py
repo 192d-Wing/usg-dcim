@@ -110,27 +110,62 @@ async def _post_status(
         log.warning("dns_status_post_failed", server_id=server_id, err=str(e))
 
 
+def _stale_files(target_dir: Path, keep: set[str], suffix: str | None) -> list[Path]:
+    """Files in target_dir that aren't in `keep` and (when `suffix`
+    is set) match that suffix. Caller is responsible for unlinking."""
+    if not target_dir.exists():
+        return []
+    return [
+        f for f in target_dir.iterdir()
+        if f.is_file()
+        and f.name not in keep
+        and (suffix is None or f.suffix == suffix)
+    ]
+
+
+def _sync_dir(target_dir: Path, files: dict[str, str], suffix: str | None = None) -> None:
+    """Atomically write each (filename, text) into target_dir and
+    delete any pre-existing files that aren't in the new set. When
+    `suffix` is given, only files with that suffix are considered for
+    cleanup so unrelated siblings stay intact."""
+    for f in _stale_files(target_dir, set(files), suffix):
+        f.unlink()
+    for name, text in files.items():
+        _atomic_write(target_dir / name, text)
+
+
+def _write_zones(out: Path, zones: dict[str, str]) -> None:
+    zones_dir = out / "zones"
+    files = {f"{name}.zone": text for name, text in zones.items()}
+    _sync_dir(zones_dir, files, suffix=".zone")
+
+
+def _write_key_files(out: Path, key_files: dict[str, str]) -> None:
+    """DNSSEC .key + .private pairs. Restrictive permissions on the
+    .private half — CoreDNS doesn't enforce them but anyone reviewing
+    the bundle should see locked-down files."""
+    keys_dir = out / "keys"
+    _sync_dir(keys_dir, key_files)
+    for name in key_files:
+        if name.endswith(".private"):
+            try:
+                os.chmod(keys_dir / name, 0o600)
+            except OSError:
+                pass
+
+
 def _write_bundle(server: DnsServerConfig, bundle: dict) -> None:
     """Materialize the bundle on disk in the layout CoreDNS expects:
       <output_dir>/Corefile
-      <output_dir>/zones/<name>.zone   (one per zone)
-      <output_dir>/gobgp.yaml          (recursive only)
+      <output_dir>/zones/<name>.zone     (one per zone)
+      <output_dir>/keys/<basename>.key   (DNSSEC, when zone is signed)
+      <output_dir>/keys/<basename>.private
+      <output_dir>/gobgp.yaml            (recursive only)
     """
     out = Path(server.output_dir)
     _atomic_write(out / "Corefile", bundle.get("corefile", ""))
-    zones = bundle.get("zones") or {}
-    zones_dir = out / "zones"
-    if zones_dir.exists():
-        # Drop stale zone files before writing the new set; otherwise
-        # a deleted zone keeps living in the file plugin until restart.
-        for f in zones_dir.iterdir():
-            if f.is_file() and f.suffix == ".zone":
-                # Only remove if not in the new bundle.
-                stem = f.stem
-                if stem not in zones:
-                    f.unlink()
-    for name, text in zones.items():
-        _atomic_write(zones_dir / f"{name}.zone", text)
+    _write_zones(out, bundle.get("zones") or {})
+    _write_key_files(out, bundle.get("key_files") or {})
     if server.role == "recursive" and bundle.get("gobgp") is not None:
         _atomic_write(out / "gobgp.yaml", yaml.safe_dump(bundle["gobgp"]))
 

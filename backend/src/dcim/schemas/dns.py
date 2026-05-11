@@ -534,6 +534,11 @@ class DnsBundle(BaseModel):
     corefile: str
     zones: dict[str, str]   # filename -> zone-file text
     gobgp: dict | None      # GoBGP YAML (None for auth servers)
+    # BIND-format DNSSEC key files (.key + .private pairs) the
+    # collector materializes alongside zone files so CoreDNS's dnssec
+    # plugin can sign responses. Empty dict for unsigned zones or
+    # recursive servers.
+    key_files: dict[str, str] = Field(default_factory=dict)
 
 
 class DnsRenderStatus(BaseModel):

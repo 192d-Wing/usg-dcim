@@ -243,6 +243,97 @@ def generate_dnssec_keypair(
     }
 
 
+def _bind_key_basename(zone_name: str, alg_number: int, key_tag: int) -> str:
+    """BIND key-file basename — CoreDNS's dnssec plugin reads
+    `<basename>.key` + `<basename>.private` from disk. Format is
+    `K<zone>.+<alg:03d>+<tag:05d>` (RFC 5074 §5.1.1, BIND convention)."""
+    fqdn = zone_name.rstrip(".") + "."
+    return f"K{fqdn}+{alg_number:03d}+{key_tag:05d}"
+
+
+def _bind_public_key_file(zone: DnsZone, key: DnsKey) -> str:
+    """Text of the BIND `.key` file — one DNSKEY RR in presentation
+    form. CoreDNS reads this to know which keys belong to the zone."""
+    alg = _DNSSEC_ALG_NUMBER[key.algorithm]
+    flags = _key_flags(key.role)
+    fqdn = zone.name.rstrip(".") + "."
+    return (
+        f"; This is a {key.role.value.upper()}-type key, keyid {key.key_tag}, "
+        f"for {fqdn}\n"
+        f"{fqdn} IN DNSKEY {flags} 3 {alg} {key.public_key_b64}\n"
+    )
+
+
+def _ecdsa_private_scalar_b64(pem: str) -> str:
+    """Extract the raw 32-byte private scalar from a PKCS8-PEM
+    ECDSAP256 key and base64-encode it. BIND's `.private` file wants
+    the bare scalar, not the PKCS8 wrapping."""
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    priv = serialization.load_pem_private_key(pem.encode("ascii"), password=None)
+    scalar = priv.private_numbers().private_value
+    return base64.b64encode(scalar.to_bytes(32, "big")).decode("ascii")
+
+
+def _ed25519_private_raw_b64(pem: str) -> str:
+    """Same idea for Ed25519 — the 32-byte private seed."""
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    priv = serialization.load_pem_private_key(pem.encode("ascii"), password=None)
+    raw = priv.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    return base64.b64encode(raw).decode("ascii")
+
+
+def _bind_private_key_file(key: DnsKey) -> str:
+    """Text of the BIND `.private` file. ECDSAP256 / Ed25519 ship the
+    raw scalar; RSA needs the full CRT params and is deferred — the
+    catalog accepts the algorithm but render raises for now."""
+    alg = _DNSSEC_ALG_NUMBER[key.algorithm]
+    alg_label = {
+        DnsKeyAlgorithm.ecdsap256sha256: "ECDSAP256SHA256",
+        DnsKeyAlgorithm.ed25519: "ED25519",
+        DnsKeyAlgorithm.rsasha256: "RSASHA256",
+    }[key.algorithm]
+    if key.algorithm == DnsKeyAlgorithm.ecdsap256sha256:
+        scalar_b64 = _ecdsa_private_scalar_b64(key.private_pem)
+    elif key.algorithm == DnsKeyAlgorithm.ed25519:
+        scalar_b64 = _ed25519_private_raw_b64(key.private_pem)
+    else:
+        raise NotImplementedError(
+            "RSASHA256 BIND-format export not implemented; pick ECDSAP256 "
+            "or Ed25519 for now",
+        )
+    return (
+        "Private-key-format: v1.3\n"
+        f"Algorithm: {alg} ({alg_label})\n"
+        f"PrivateKey: {scalar_b64}\n"
+    )
+
+
+def render_dnssec_key_files(
+    zone: DnsZone, keys: Iterable[DnsKey],
+) -> dict[str, str]:
+    """Map of `{filename: text}` for every active key on this zone.
+    Filenames carry both .key and .private suffixes; CoreDNS infers
+    the pair from the basename in the Corefile's `key file` line.
+
+    Retired keys are included so cached validators can continue to
+    verify until the operator purges them — same semantics as the
+    `keys` table in the UI."""
+    out: dict[str, str] = {}
+    fqdn = zone.name.rstrip(".") + "."
+    for key in keys:
+        alg = _DNSSEC_ALG_NUMBER[key.algorithm]
+        base = _bind_key_basename(fqdn, alg, key.key_tag)
+        out[f"{base}.key"] = _bind_public_key_file(zone, key)
+        out[f"{base}.private"] = _bind_private_key_file(key)
+    return out
+
+
 def render_ds_records(zone: DnsZone, keys: Iterable[DnsKey]) -> list[dict]:
     """Compute DS records for the zone's KSK(s). DS = digest of the
     canonical owner name (lowercased FQDN with trailing dot) plus the
@@ -336,20 +427,47 @@ def render_zone_file(
 
 # ---------- Corefile rendering ----------
 
-def render_corefile_auth(zone_names: Iterable[str], *, zones_dir: str) -> str:
+def render_corefile_auth(
+    zone_names: Iterable[str],
+    *,
+    zones_dir: str,
+    keys_dir: str | None = None,
+    dnssec_keys_by_zone: dict[str, list[str]] | None = None,
+) -> str:
     """Authoritative Corefile: one `file` block per zone, plus health,
     prometheus, errors, log.
 
     `zones_dir` is the absolute path where the collector writes zone
     files inside the CoreDNS container (CoreDNS resolves relative paths
     against its cwd, not the Corefile's directory, so we always emit
-    absolute paths)."""
+    absolute paths).
+
+    `dnssec_keys_by_zone` maps each signed zone's name to the list of
+    BIND key-file basenames CoreDNS should load. When set + `keys_dir`
+    is provided, the renderer emits a `dnssec { key file ... }`
+    directive in that zone's block so CoreDNS signs responses on the
+    fly using the operator's KSK + ZSK material.
+    """
     base = zones_dir.rstrip("/")
+    keys_base = keys_dir.rstrip("/") if keys_dir else None
+    dnssec_map = dnssec_keys_by_zone or {}
     blocks = []
     for name in sorted(zone_names):
+        # Always emit the DNSSEC stanza when keys exist for the zone —
+        # CoreDNS will include DNSKEY records in responses and sign
+        # the rrsets on the fly. Retired keys travel here too so
+        # cached validators keep working past a rotation.
+        dnssec_block = ""
+        if keys_base and dnssec_map.get(name):
+            key_lines = "\n".join(
+                f"        key file {keys_base}/{kb}"
+                for kb in sorted(dnssec_map[name])
+            )
+            dnssec_block = f"    dnssec {{\n{key_lines}\n    }}\n"
         blocks.append(
             f"{name}:53 {{\n"
             f"    file {base}/{name}.zone\n"
+            f"{dnssec_block}"
             f"    log\n"
             f"    errors\n"
             f"    prometheus :9153\n"
@@ -541,9 +659,17 @@ def _filename_for_zone(zone_name: str) -> str:
     return zone_name.rstrip(".")
 
 
-def bundle_etag(corefile: str, zones: dict[str, str], gobgp: dict | None) -> str:
+def bundle_etag(
+    corefile: str,
+    zones: dict[str, str],
+    gobgp: dict | None,
+    *,
+    key_files: dict[str, str] | None = None,
+) -> str:
     """Stable hash over the bundle so the collector can skip no-op
-    pulls. Sorted JSON keeps the etag deterministic across renders."""
+    pulls. Sorted JSON keeps the etag deterministic across renders.
+    DNSSEC key files are folded in too so the collector re-applies
+    after a key rotation."""
     h = hashlib.sha256()
     h.update(corefile.encode("utf-8"))
     h.update(b"\x00")
@@ -554,6 +680,13 @@ def bundle_etag(corefile: str, zones: dict[str, str], gobgp: dict | None) -> str
         h.update(b"\x00")
     if gobgp is not None:
         h.update(json.dumps(gobgp, sort_keys=True).encode("utf-8"))
+    if key_files:
+        h.update(b"\x01")  # discriminator vs the zone-name stream
+        for k in sorted(key_files):
+            h.update(k.encode("utf-8"))
+            h.update(b"\x00")
+            h.update(key_files[k].encode("utf-8"))
+            h.update(b"\x00")
     return h.hexdigest()[:32]
 
 
@@ -584,6 +717,41 @@ async def _records_by_zone(
     for r in rows:
         grouped[r.zone_id].append(r)
     return grouped
+
+
+async def _dnssec_artifacts_for_zones(
+    db: AsyncSession, zones: Iterable[DnsZone],
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Return (key_files, dnssec_keys_by_zone) for every signed zone
+    in the iterable. `key_files` maps filename → text (both .key and
+    .private members per key); `dnssec_keys_by_zone` maps zone name to
+    the basenames CoreDNS's dnssec plugin should load. Empty dicts
+    when no zone is signed."""
+    signed = [z for z in zones if z.signed]
+    if not signed:
+        return {}, {}
+    keys = list((
+        await db.execute(
+            select(DnsKey).where(DnsKey.zone_id.in_([z.id for z in signed]))
+        )
+    ).scalars().all())
+    keys_by_zone: dict[UUID, list[DnsKey]] = {}
+    for k in keys:
+        keys_by_zone.setdefault(k.zone_id, []).append(k)
+    files: dict[str, str] = {}
+    basenames_by_zone: dict[str, list[str]] = {}
+    for z in signed:
+        zone_keys = keys_by_zone.get(z.id, [])
+        if not zone_keys:
+            continue
+        zone_files = render_dnssec_key_files(z, zone_keys)
+        files.update(zone_files)
+        # Strip the .key suffix to get the basename CoreDNS expects in
+        # `key file <basename>` (it appends .key + .private itself).
+        basenames_by_zone[z.name] = sorted(
+            fn[:-4] for fn in zone_files if fn.endswith(".key")
+        )
+    return files, basenames_by_zone
 
 
 async def _local_auth_unicast_ip(db: AsyncSession, server: DnsServer) -> str | None:
@@ -737,13 +905,18 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             )
             for z in zones
         }
+        key_files, dnssec_keys_by_zone = await _dnssec_artifacts_for_zones(db, zones)
         # Path matches the site-dns compose layout: the dns-state
         # volume is mounted at /var/lib/dcim-dns in both the collector
         # and CoreDNS containers, and the collector writes zones to
         # /var/lib/dcim-dns/<role>/zones/.
+        zones_dir_path = f"/var/lib/dcim-dns/{server.role.value}/zones"
+        keys_dir_path = f"/var/lib/dcim-dns/{server.role.value}/keys"
         corefile = render_corefile_auth(
             (z.name for z in zones),
-            zones_dir=f"/var/lib/dcim-dns/{server.role.value}/zones",
+            zones_dir=zones_dir_path,
+            keys_dir=keys_dir_path if dnssec_keys_by_zone else None,
+            dnssec_keys_by_zone=dnssec_keys_by_zone or None,
         )
         gobgp: dict | None = None
     else:
@@ -773,8 +946,14 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             server=server, peers=peers, peer_asns=peer_asns,
             local_asn=get_settings().dns_anycast_originate_asn,
         ) if anycast else None
-    etag = bundle_etag(corefile, zone_files, gobgp)
-    return {"corefile": corefile, "zones": zone_files, "gobgp": gobgp, "etag": etag}
+    etag = bundle_etag(corefile, zone_files, gobgp, key_files=key_files)
+    return {
+        "corefile": corefile,
+        "zones": zone_files,
+        "gobgp": gobgp,
+        "key_files": key_files,
+        "etag": etag,
+    }
 
 
 # ---------- IPAM → DNS projection ----------
