@@ -190,26 +190,28 @@ def test_corefile_recursive_emits_blocklist_templates():
     assert "template IN AAAA" not in cf
 
 
-def test_gobgp_config_has_neighbor_and_anycast_network():
+def test_gobgp_config_has_neighbor():
+    # render_gobgp_config emits BGP global + neighbor stanzas; prefix
+    # advertisement is now a runtime gRPC operation rather than a
+    # config-file thing (gobgpd rejected the old `static-routes` /
+    # `route-server` keys we used to emit, so they're gone).
     server = SimpleNamespace(unicast_ip="10.42.0.53", id=uuid4())
-    peer = SimpleNamespace(local_asn=65000, peer_asn=65001, peer_ip="10.42.255.1", md5_password=None)
-    anycast = SimpleNamespace(
-        anycast_ipv4="10.255.0.53", anycast_ipv6="2001:db8::53",
+    peer_id = uuid4()
+    peer = SimpleNamespace(id=peer_id, peer_asn_id=uuid4(),
+                           peer_ip="10.42.255.1")
+    cfg = render_gobgp_config(
+        server=server,
+        peers=[peer],
+        peer_asns={peer.peer_asn_id: 65001},
+        local_asn=4_200_000_000,
     )
-    cfg = render_gobgp_config(server=server, peers=[peer], anycast_group=anycast)
-    assert cfg["global"]["config"]["as"] == 65000
+    assert cfg["global"]["config"]["as"] == 4_200_000_000
+    assert cfg["global"]["config"]["router-id"] == "10.42.0.53"
     assert cfg["neighbors"][0]["config"]["neighbor-address"] == "10.42.255.1"
-    prefixes = {n["config"]["prefix"] for n in cfg["static-routes"]}
-    assert "10.255.0.53/32" in prefixes
-    assert "2001:db8::53/128" in prefixes
-
-
-def test_gobgp_md5_password_passes_through():
-    server = SimpleNamespace(unicast_ip="10.42.0.53", id=uuid4())
-    peer = SimpleNamespace(local_asn=65000, peer_asn=65001, peer_ip="10.42.255.1", md5_password="secret")
-    anycast = SimpleNamespace(anycast_ipv4="10.255.0.53", anycast_ipv6=None)
-    cfg = render_gobgp_config(server=server, peers=[peer], anycast_group=anycast)
-    assert cfg["neighbors"][0]["config"]["auth-password"] == "secret"
+    assert cfg["neighbors"][0]["config"]["peer-as"] == 65001
+    # MD5 password / static-route stanzas intentionally absent.
+    assert "static-routes" not in cfg
+    assert "auth-password" not in cfg["neighbors"][0]["config"]
 
 
 def test_etag_changes_when_corefile_changes():
