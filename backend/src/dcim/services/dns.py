@@ -125,14 +125,20 @@ def render_zone_file(zone: DnsZone, records: Iterable[DnsRecord]) -> str:
 
 # ---------- Corefile rendering ----------
 
-def render_corefile_auth(zone_names: Iterable[str]) -> str:
+def render_corefile_auth(zone_names: Iterable[str], *, zones_dir: str) -> str:
     """Authoritative Corefile: one `file` block per zone, plus health,
-    prometheus, errors, log."""
+    prometheus, errors, log.
+
+    `zones_dir` is the absolute path where the collector writes zone
+    files inside the CoreDNS container (CoreDNS resolves relative paths
+    against its cwd, not the Corefile's directory, so we always emit
+    absolute paths)."""
+    base = zones_dir.rstrip("/")
     blocks = []
     for name in sorted(zone_names):
         blocks.append(
             f"{name}:53 {{\n"
-            f"    file /etc/coredns/zones/{name}.zone\n"
+            f"    file {base}/{name}.zone\n"
             f"    log\n"
             f"    errors\n"
             f"    prometheus :9153\n"
@@ -182,7 +188,6 @@ def render_gobgp_config(
     server: DnsServer,
     peers: Iterable[BgpPeer],
     peer_asns: dict,
-    anycast_group: AnycastGroup,
     local_asn: int,
 ) -> dict:
     """GoBGP YAML config (returned as a dict; collector serializes to
@@ -209,13 +214,12 @@ def render_gobgp_config(
         }
         for p in peer_list
     ]
-    networks: list[dict] = []
-    if anycast_group.anycast_ipv4:
-        ip4 = str(anycast_group.anycast_ipv4).split("/", 1)[0]
-        networks.append({"config": {"prefix": f"{ip4}/32"}})
-    if anycast_group.anycast_ipv6:
-        ip6 = str(anycast_group.anycast_ipv6).split("/", 1)[0]
-        networks.append({"config": {"prefix": f"{ip6}/128"}})
+    # gobgpd's config file schema only accepts `global`, `neighbors`,
+    # `defined-sets`, and `policy-definitions`. Prefix advertisement
+    # (the anycast /32 and /128) is a runtime operation against the
+    # gobgp gRPC API — `gobgp global rib add <prefix>` — driven by the
+    # collector or a sidecar once the session is up. The anycast
+    # group's IPs are not surfaced in the gobgpd config file.
     return {
         "global": {
             "config": {
@@ -226,8 +230,6 @@ def render_gobgp_config(
         "neighbors": neighbors,
         "defined-sets": {},
         "policy-definitions": [],
-        "route-server": {},
-        "static-routes": networks,
     }
 
 
@@ -361,7 +363,14 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             _filename_for_zone(z.name): render_zone_file(z, records_by_zone.get(z.id, []))
             for z in zones
         }
-        corefile = render_corefile_auth(z.name for z in zones)
+        # Path matches the site-dns compose layout: the dns-state
+        # volume is mounted at /var/lib/dcim-dns in both the collector
+        # and CoreDNS containers, and the collector writes zones to
+        # /var/lib/dcim-dns/<role>/zones/.
+        corefile = render_corefile_auth(
+            (z.name for z in zones),
+            zones_dir=f"/var/lib/dcim-dns/{server.role.value}/zones",
+        )
         gobgp: dict | None = None
     else:
         # Recursive: assemble forwarders + stub for the fabric apex.
@@ -377,10 +386,13 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             upstream_resolvers=upstreams,
         )
         zone_files = {}
+        # `anycast` gates whether we emit a gobgpd config at all — the
+        # group's IPs don't flow into the yaml (route advertisement is
+        # a runtime gRPC operation), but a server without a bound
+        # anycast group has no reason to run gobgp.
         peers, peer_asns, anycast = await _bgp_for_server(db, server)
         gobgp = render_gobgp_config(
             server=server, peers=peers, peer_asns=peer_asns,
-            anycast_group=anycast,
             local_asn=get_settings().dns_anycast_originate_asn,
         ) if anycast else None
     etag = bundle_etag(corefile, zone_files, gobgp)

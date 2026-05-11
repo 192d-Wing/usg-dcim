@@ -1,0 +1,5 @@
+# Per-site config + secrets. Operators copy collector.yaml.example to
+# collector.yaml and drop the issued bearer token alongside it; neither
+# should ever land in version control.
+collector.yaml
+token

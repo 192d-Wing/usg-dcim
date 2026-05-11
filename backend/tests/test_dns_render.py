@@ -93,10 +93,13 @@ def test_zone_file_srv_format():
 
 
 def test_corefile_auth_contains_zone_blocks():
-    cf = render_corefile_auth(["a.example.", "b.example."])
+    cf = render_corefile_auth(
+        ["a.example.", "b.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+    )
     assert "a.example.:53 {" in cf
     assert "b.example.:53 {" in cf
-    assert "file /etc/coredns/zones/a.example..zone" in cf
+    assert "file /var/lib/dcim-dns/auth/zones/a.example..zone" in cf
 
 
 def test_corefile_recursive_includes_apex_stub_when_set():
