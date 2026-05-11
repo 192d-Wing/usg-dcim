@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router';
 
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
+import Cards from '@cloudscape-design/components/cards';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
@@ -15,7 +16,6 @@ import Header from '@cloudscape-design/components/header';
 import Link from '@cloudscape-design/components/link';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Spinner from '@cloudscape-design/components/spinner';
-import Table from '@cloudscape-design/components/table';
 
 import { http } from '@/lib/http';
 import { relativeTime } from '@/lib/utils';
@@ -101,12 +101,20 @@ export function DashboardPage() {
           </ColumnLayout>
         </Container>
 
-        <Table<AtRiskSite>
-          variant="container"
+        {/* Cards (not Table) — a 2-field at-a-glance list looked
+            stretched in a wide Table because the columns spread to the
+            container's edges with empty middle. Cards renders one tile
+            per site and degrades cleanly when the list is empty. */}
+        <Cards<AtRiskSite>
           loading={atRisk.isLoading}
           loadingText="Loading at-risk sites…"
           items={atRiskRows}
           trackBy="site_id"
+          cardsPerRow={[
+            { cards: 1 },
+            { minWidth: 500, cards: 2 },
+            { minWidth: 900, cards: 3 },
+          ]}
           header={
             <Header
               counter={`(${atRiskRows.length})`}
@@ -115,38 +123,34 @@ export function DashboardPage() {
               Sites at risk
             </Header>
           }
-          columnDefinitions={[
-            {
-              id: 'site',
-              header: 'Site',
-              cell: (s) => {
-                const site = sitesById.get(s.site_id);
-                return (
-                  <Link
-                    href={`/sites/${s.site_id}`}
-                    onFollow={(e) => { e.preventDefault(); navigate(`/sites/${s.site_id}`); }}
-                  >
-                    {site
-                      ? `${site.code} · ${site.name}`
-                      : `${s.site_id.slice(0, 8)}…`}
-                  </Link>
-                );
+          cardDefinition={{
+            header: (s) => {
+              const site = sitesById.get(s.site_id);
+              return (
+                <Link
+                  href={`/sites/${s.site_id}`}
+                  onFollow={(e) => { e.preventDefault(); navigate(`/sites/${s.site_id}`); }}
+                >
+                  {site
+                    ? `${site.code} · ${site.name}`
+                    : `${s.site_id.slice(0, 8)}…`}
+                </Link>
+              );
+            },
+            sections: [
+              {
+                id: 'alerts',
+                header: 'Open alerts',
+                content: (s) => <Badge color="red">{String(s.alert_count)}</Badge>,
               },
-            },
-            {
-              id: 'alerts',
-              header: 'Open alerts',
-              // Badge with the raw count is the right primitive — a
-              // StatusIndicator with a number reads as "icon: 3" rather
-              // than "3 alerts" and looks visually noisy. `red` ties to
-              // the same severity color the alerts page uses.
-              cell: (s) => <Badge color="red">{String(s.alert_count)}</Badge>,
-              width: 140,
-            },
-          ]}
+            ],
+          }}
           empty={
-            <Box textAlign="center" color="inherit" padding="m">
-              No sites currently at risk.
+            <Box textAlign="center" color="inherit" padding="l">
+              <SpaceBetween size="xs">
+                <b>No sites currently at risk</b>
+                <Box variant="p" color="inherit">All clear — nothing major or worse is firing.</Box>
+              </SpaceBetween>
             </Box>
           }
         />
