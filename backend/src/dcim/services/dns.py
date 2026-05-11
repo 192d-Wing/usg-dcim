@@ -1218,10 +1218,12 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         local_auth_ip = await _local_auth_unicast_ip(db, server)
         forwarders = await _fabric_forwarders(db, server.fabric_id)
         blocklists = await _fabric_blocklists(db, server.fabric_id)
-        # Operator-configured upstreams aren't modeled per-fabric yet
-        # (deferred to a Fabric.dns_upstreams field). Default to public
-        # quad-eight / cloudflare for the v1 plumbing.
-        upstreams = ["1.1.1.1", "8.8.8.8"]
+        # Upstreams come from settings — operators with an internal
+        # recursive (AD DNS, Unbound farm, etc.) override
+        # DCIM_DNS_RECURSIVE_UPSTREAMS so the catch-all forward
+        # doesn't leak queries to the public internet. Per-fabric
+        # override is a future DnsFabricSettings table; not in v1.
+        upstreams = list(get_settings().dns_recursive_upstreams)
         corefile = render_corefile_recursive(
             fabric_apexes=apex_names,
             auth_unicast_ip=local_auth_ip,
@@ -1368,6 +1370,11 @@ async def _emit_forward_and_reverse(
     """Emit the A/AAAA + matching PTR for one IPAM row. Returns the
     reverse zone id if a PTR was added (caller tracks touched zones for
     the SOA-serial bump), or None on invalid input."""
+    # Operators can opt out of projecting DHCP leases into DNS via
+    # the dns_ddns_enabled setting; static IPAM rows still project
+    # so the projector isn't a binary on/off.
+    if ip.source == IpAddressSource.dhcp and not get_settings().dns_ddns_enabled:
+        return None
     addr_str = str(ip.address).split("/", 1)[0]
     try:
         a = parse_address(addr_str)

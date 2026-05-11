@@ -101,6 +101,7 @@ from ..security import audit
 from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
 from ..security.deps import Principal, require_capability
 from ..services import dns as dns_svc
+from ..settings import get_settings
 from ._pagination import paginate
 
 router = APIRouter(prefix="/dns", tags=["dns"])
@@ -408,9 +409,14 @@ async def enable_dnssec(
             await db.commit()
         return existing
     now = datetime.now(UTC)
+    default_alg = dns_svc.DnsKeyAlgorithm(
+        get_settings().dns_dnssec_default_algorithm,
+    )
     keys: list[DnsKey] = []
     for role in (DnsKeyRole.ksk, DnsKeyRole.zsk):
-        material = dns_svc.generate_dnssec_keypair(zone.name, role)
+        material = dns_svc.generate_dnssec_keypair(
+            zone.name, role, algorithm=default_alg,
+        )
         keys.append(DnsKey(
             zone_id=zone_id,
             role=material["role"],

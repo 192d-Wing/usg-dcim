@@ -93,6 +93,28 @@ class Settings(BaseSettings):
     # 60-second scrapes and 5 servers produces ~36k rows per fortnight.
     dns_metrics_retention_days: int = 14
 
+    # Default algorithm picked when an operator clicks Enable DNSSEC
+    # without specifying one. ECDSAP256SHA256 is short-key,
+    # widely-supported, and recommended by RFC 8624 — switch to
+    # ed25519 if the resolver fleet has been validated.
+    dns_dnssec_default_algorithm: Literal[
+        "ecdsap256sha256", "ed25519", "rsasha256",
+    ] = "ecdsap256sha256"
+
+    # Whether the IPAM → DNS projector projects DHCP-sourced
+    # IPAddress rows. Operators who don't want lease churn driving
+    # DNS can flip this off and let the projector handle only
+    # static IPAM rows (source=ipam).
+    dns_ddns_enabled: bool = True
+
+    # Catch-all upstreams the recursive Corefile forwards to when no
+    # conditional forwarder or apex stub matches. Operators with an
+    # internal recursive (e.g. Active Directory DNS) override this
+    # to keep DNS off the public internet.
+    dns_recursive_upstreams: list[str] = Field(
+        default_factory=lambda: ["1.1.1.1", "8.8.8.8"],
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
