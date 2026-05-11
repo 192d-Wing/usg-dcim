@@ -1132,6 +1132,18 @@ async def _fabric_blocklists(
     ]
 
 
+async def _recursive_upstreams_for_fabric(
+    db: AsyncSession, fabric_id: UUID,
+) -> list[str]:
+    """Fabric-level override beats the system-wide setting. Local
+    import keeps the models.ipam ↔ services.dns dependency one-way."""
+    from ..models.ipam import Fabric  # noqa: PLC0415 — avoid import cycle
+    fabric = await db.get(Fabric, fabric_id)
+    if fabric is not None and fabric.dns_recursive_upstreams:
+        return list(fabric.dns_recursive_upstreams)
+    return list(get_settings().dns_recursive_upstreams)
+
+
 async def _fabric_apex_names(db: AsyncSession, fabric_id: UUID) -> list[str]:
     """Every apex zone bound to this fabric. Multiple are allowed — the
     recursive Corefile emits a stub-forward per apex."""
@@ -1190,6 +1202,10 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
       recursive -> empty zones, recursive Corefile (with stub for the
                    fabric apex), GoBGP config + anycast advertisement.
     """
+    # Default everything that's only populated on one branch — keeps
+    # the bundle shape stable across roles and the return statement
+    # safe regardless of which branch ran.
+    key_files: dict[str, str] = {}
     if server.role == DnsServerRole.auth:
         zones = await _zones_for_server(db, server)
         records_by_zone = await _records_by_zone(db, zones)
@@ -1244,12 +1260,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         local_auth_ip = await _local_auth_unicast_ip(db, server)
         forwarders = await _fabric_forwarders(db, server.fabric_id)
         blocklists = await _fabric_blocklists(db, server.fabric_id)
-        # Upstreams come from settings — operators with an internal
-        # recursive (AD DNS, Unbound farm, etc.) override
-        # DCIM_DNS_RECURSIVE_UPSTREAMS so the catch-all forward
-        # doesn't leak queries to the public internet. Per-fabric
-        # override is a future DnsFabricSettings table; not in v1.
-        upstreams = list(get_settings().dns_recursive_upstreams)
+        upstreams = await _recursive_upstreams_for_fabric(db, server.fabric_id)
         corefile = render_corefile_recursive(
             fabric_apexes=apex_names,
             auth_unicast_ip=local_auth_ip,

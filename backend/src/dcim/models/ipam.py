@@ -21,6 +21,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     Enum,
@@ -107,6 +108,12 @@ class Fabric(UUIDPrimaryKey, Timestamped, Base):
     # belonging to this fabric without a separate join.
     enclave: Mapped[str | None] = mapped_column(String(64))
     classification: Mapped[str | None] = mapped_column(String(32))
+    # Per-fabric override for the recursive Corefile's catch-all
+    # upstreams. Stored as a JSON array of "ip" or "ip:port" strings;
+    # NULL = use the system-wide dns_recursive_upstreams setting.
+    # Lets multi-tenant installs point each fabric at its own
+    # internal resolver estate without a setting-per-fabric.
+    dns_recursive_upstreams: Mapped[list[str] | None] = mapped_column(JSON)
 
     vrfs: Mapped[list[Vrf]] = relationship(back_populates="fabric")
 

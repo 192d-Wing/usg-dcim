@@ -39,6 +39,9 @@ class FabricBase(BaseModel):
     description: str | None = None
     enclave: str | None = None
     classification: str | None = None
+    # Per-fabric override for the recursive Corefile's catch-all
+    # forward. NULL falls back to settings.dns_recursive_upstreams.
+    dns_recursive_upstreams: list[str] | None = None
 
 
 class FabricCreate(FabricBase):
@@ -51,6 +54,7 @@ class FabricUpdate(BaseModel):
     description: str | None = None
     enclave: str | None = None
     classification: str | None = None
+    dns_recursive_upstreams: list[str] | None = None
 
 
 class FabricOut(FabricBase):
