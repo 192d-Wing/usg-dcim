@@ -57,6 +57,9 @@ type DnsZone = {
   // zone's updated_at timestamp. Surfaced here so operators can verify
   // it without inspecting the rendered zone file.
   serial: number;
+  // True once an operator has clicked Enable DNSSEC — keys live in
+  // dns_keys, surfaced via /dns/zones/{id}/keys + /ds-records.
+  signed: boolean;
 };
 
 type DnsRecordSource = 'manual' | 'ipam' | 'ddns';
@@ -768,6 +771,11 @@ function ZoneDetailView({
               />
             ),
           },
+          {
+            id: 'dnssec',
+            label: 'DNSSEC',
+            content: <ZoneDnssecTab zone={zone} canWrite={canWrite} />,
+          },
         ]}
       />
 
@@ -1026,6 +1034,216 @@ function ActivityDetail({ entry }: { entry: AuditEntry }) {
           No diff or metadata recorded for this event.
         </Box>
       )}
+    </SpaceBetween>
+  );
+}
+
+// DNSSEC tab — surfaces the zone's keys + DS records, with an enable
+// button when the zone isn't signed yet. Keys are read-only here;
+// rotation lives in a future commit.
+type DnssecKey = {
+  id: string;
+  zone_id: string;
+  role: 'ksk' | 'zsk';
+  algorithm: string;
+  public_key_b64: string;
+  key_tag: number;
+  active_from: string;
+  retired_at: string | null;
+};
+
+type DnssecDs = {
+  key_tag: number;
+  algorithm: number;
+  digest_type: number;
+  digest: string;
+  rr: string;
+};
+
+function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean }; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const keysQ = useQuery({
+    queryKey: ['dns-keys', zone.id],
+    queryFn: async () => (
+      await http.get<DnssecKey[]>(`/dns/zones/${zone.id}/keys`)
+    ).data ?? [],
+  });
+  const dsQ = useQuery({
+    queryKey: ['dns-ds', zone.id],
+    queryFn: async () => (
+      await http.get<DnssecDs[]>(`/dns/zones/${zone.id}/ds-records`)
+    ).data ?? [],
+    enabled: zone.signed === true,
+  });
+  const [busy, setBusy] = useState(false);
+
+  async function enable() {
+    if (!window.confirm(`Generate KSK + ZSK for ${zone.name} and mark it signed?`)) return;
+    setBusy(true);
+    try {
+      await http.post(`/dns/zones/${zone.id}/enable-dnssec`, {});
+      toast.success('DNSSEC enabled');
+      await qc.invalidateQueries({ queryKey: ['dns-zone', zone.id] });
+      await qc.invalidateQueries({ queryKey: ['dns-keys', zone.id] });
+      await qc.invalidateQueries({ queryKey: ['dns-ds', zone.id] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'enable failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied');
+    } catch {
+      toast.error('Clipboard unavailable');
+    }
+  }
+
+  if (!zone.signed) {
+    return (
+      <Container
+        header={<Header variant="h2">DNSSEC</Header>}
+      >
+        <SpaceBetween size="m">
+          <Box>
+            This zone is <b>unsigned</b>. Enabling DNSSEC generates a
+            key-signing key (KSK) and a zone-signing key (ZSK), both
+            ECDSAP256SHA256 by default. You'll then upload the DS
+            record below to the parent zone's operator to chain trust.
+          </Box>
+          {canWrite && (
+            <Button
+              variant="primary" loading={busy}
+              onClick={enable} iconName="security"
+            >
+              Enable DNSSEC
+            </Button>
+          )}
+          {!canWrite && (
+            <Box color="text-status-inactive" fontSize="body-s">
+              You don't have permission to enable DNSSEC on this zone.
+            </Box>
+          )}
+        </SpaceBetween>
+      </Container>
+    );
+  }
+
+  const keys = keysQ.data ?? [];
+  const ds = dsQ.data ?? [];
+
+  return (
+    <SpaceBetween size="m">
+      <Container
+        header={
+          <Header variant="h2" description="Key roster and parent-zone DS records.">
+            DNSSEC — {zone.name}
+          </Header>
+        }
+      >
+        <KeyValuePairs
+          columns={3}
+          items={[
+            { label: 'Status', value: <Badge color="green">Signed</Badge> },
+            { label: 'Algorithm', value: keys[0]?.algorithm ?? '—' },
+            { label: 'Keys', value: `${keys.length} (${keys.filter((k) => k.role === 'ksk').length} KSK / ${keys.filter((k) => k.role === 'zsk').length} ZSK)` },
+          ]}
+        />
+      </Container>
+
+      <Table<DnssecKey>
+        variant="container"
+        loading={keysQ.isLoading}
+        loadingText="Loading keys…"
+        items={keys}
+        trackBy="id"
+        header={<Header counter={`(${keys.length})`}>Keys</Header>}
+        columnDefinitions={[
+          {
+            id: 'role', header: 'Role',
+            cell: (k) => k.role === 'ksk'
+              ? <Badge color="blue">KSK</Badge>
+              : <Badge>ZSK</Badge>,
+            width: 90,
+          },
+          {
+            id: 'tag', header: 'Key tag',
+            cell: (k) => <span style={MONO}>{k.key_tag}</span>,
+            width: 110,
+          },
+          { id: 'alg', header: 'Algorithm', cell: (k) => k.algorithm, width: 200 },
+          {
+            id: 'active_from', header: 'Active from (UTC)',
+            cell: (k) => (
+              <span style={MONO}>
+                {new Date(k.active_from).toISOString().replace(/\.\d{3}Z$/, 'Z')}
+              </span>
+            ),
+            width: 220,
+          },
+          {
+            id: 'retired_at', header: 'Retired',
+            cell: (k) => k.retired_at
+              ? <span style={MONO}>{new Date(k.retired_at).toISOString().replace(/\.\d{3}Z$/, 'Z')}</span>
+              : <Box color="text-status-inactive">—</Box>,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" color="text-status-inactive" padding="m">
+            No keys recorded for this signed zone (re-enable to repair).
+          </Box>
+        }
+      />
+
+      <Table<DnssecDs>
+        variant="container"
+        loading={dsQ.isLoading}
+        loadingText="Computing DS records…"
+        items={ds}
+        trackBy="key_tag"
+        header={
+          <Header
+            counter={`(${ds.length})`}
+            description="Upload these to the parent zone's operator to chain the trust anchor. Each row is one DS RR."
+          >
+            DS records
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'tag', header: 'Key tag',
+            cell: (d) => <span style={MONO}>{d.key_tag}</span>,
+            width: 100,
+          },
+          { id: 'alg', header: 'Alg', cell: (d) => d.algorithm, width: 70 },
+          { id: 'dt', header: 'Digest type', cell: (d) => d.digest_type, width: 110 },
+          {
+            id: 'rr', header: 'Resource record',
+            cell: (d) => (
+              <span style={MONO} title={d.digest}>{d.rr}</span>
+            ),
+          },
+          {
+            id: 'copy', header: '',
+            cell: (d) => (
+              <Button
+                iconName="copy" variant="inline-icon"
+                ariaLabel={`Copy DS record for key tag ${d.key_tag}`}
+                onClick={() => copy(d.rr)}
+              />
+            ),
+            width: 60,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" color="text-status-inactive" padding="m">
+            No DS records (only KSKs produce DS; check the keys table above).
+          </Box>
+        }
+      />
     </SpaceBetween>
   );
 }
