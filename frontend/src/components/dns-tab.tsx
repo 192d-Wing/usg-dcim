@@ -288,6 +288,9 @@ function ZonesListView({
   );
   const zones = zonesQ.data ?? [];
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [selected, setSelected] = useState<DnsZone[]>([]);
   const [filterText, setFilterText] = useState('');
 
@@ -306,14 +309,32 @@ function ZonesListView({
     setSelected([]);
   }
 
-  async function removeSelected() {
+  // For single-zone deletes the operator types the FQDN to confirm
+  // (matches the unsign-zone pattern); for bulk delete they type
+  // `delete N zones` since typing every FQDN would be unworkable.
+  const requiredConfirm = selected.length === 1
+    ? selected[0].name
+    : `delete ${selected.length} zones`;
+
+  function openDelete() {
     if (selected.length === 0) return;
-    if (!window.confirm(`Delete ${selected.length} zone(s)?`)) return;
+    setDeleteText('');
+    setDeleteOpen(true);
+  }
+
+  async function confirmDelete() {
+    if (deleteText !== requiredConfirm) return;
+    setDeleting(true);
     try {
       await Promise.all(selected.map((z) => http.delete(`/dns/zones/${z.id}`)));
-      toast.success('Zones removed');
+      toast.success(`Removed ${selected.length} zone${selected.length === 1 ? '' : 's'}`);
+      setDeleteOpen(false);
       await refresh();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -348,7 +369,7 @@ function ZonesListView({
                 {canWrite && (
                   <Button
                     disabled={selected.length === 0}
-                    onClick={removeSelected}
+                    onClick={openDelete}
                   >
                     Delete
                   </Button>
@@ -431,6 +452,64 @@ function ZonesListView({
           size="medium"
         >
           <ZoneForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
+        </Modal>
+      )}
+      {canWrite && (
+        <Modal
+          visible={deleteOpen}
+          onDismiss={() => setDeleteOpen(false)}
+          header={selected.length === 1 ? 'Delete hosted zone' : `Delete ${selected.length} hosted zones`}
+          size="medium"
+          footer={
+            <Box float="right">
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button onClick={() => setDeleteOpen(false)} disabled={deleting}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="primary"
+                  disabled={deleteText !== requiredConfirm}
+                  loading={deleting}
+                  onClick={confirmDelete}
+                >
+                  {selected.length === 1 ? 'Delete zone' : `Delete ${selected.length} zones`}
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          <SpaceBetween size="m">
+            <Box>
+              This permanently removes the {selected.length === 1 ? 'zone' : 'zones'} and every record
+              attached. Records projected from IPAM/DHCP are dropped along
+              with the zone — they won't be re-projected until the zone is
+              re-created.
+            </Box>
+            {selected.length > 1 && (
+              <Box>
+                <Box variant="awsui-key-label">Zones to delete</Box>
+                <ul style={{ margin: 0, fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+                  {selected.map((z) => <li key={z.id}>{z.name}</li>)}
+                </ul>
+              </Box>
+            )}
+            <FormField
+              label={
+                selected.length === 1 ? (
+                  <span>To confirm, type <span style={MONO}>{selected[0].name}</span> below.</span>
+                ) : (
+                  <span>To confirm, type <span style={MONO}>{requiredConfirm}</span> below.</span>
+                )
+              }
+            >
+              <Input
+                value={deleteText}
+                onChange={({ detail }) => setDeleteText(detail.value)}
+                placeholder={requiredConfirm}
+                autoFocus
+              />
+            </FormField>
+          </SpaceBetween>
         </Modal>
       )}
     </>
