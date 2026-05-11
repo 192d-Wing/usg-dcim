@@ -45,6 +45,7 @@ from ..models.dns import (
     DnsServer,
     DnsServerMetricsSample,
     DnsServerRole,
+    DnsView,
     DnsZone,
     DnsZoneKind,
 )
@@ -77,6 +78,9 @@ from ..schemas.dns import (
     DnsRecordOut,
     DnsRecordUpdate,
     DnsRenderStatus,
+    DnsViewCreate,
+    DnsViewOut,
+    DnsViewUpdate,
     DnsServerCreate,
     DnsServerOut,
     DnsServerUpdate,
@@ -102,6 +106,7 @@ _BIND_NOT_FOUND = "anycast/bgp binding not found"
 _FORWARDER_NOT_FOUND = "dns forwarder not found"
 _BLOCKLIST_NOT_FOUND = "dns blocklist not found"
 _BLOCKLIST_ENTRY_NOT_FOUND = "dns blocklist entry not found"
+_VIEW_NOT_FOUND = "dns view not found"
 
 
 async def _touch_zone(db: AsyncSession, zone_id: UUID) -> None:
@@ -412,6 +417,7 @@ async def create_record(
         name=payload.name, type=payload.type, ttl=payload.ttl,
         data=normalized_data,
         source=DnsRecordSource.manual,
+        view_id=payload.view_id,
         description=payload.description,
     )
     db.add(obj)
@@ -1065,6 +1071,87 @@ async def delete_blocklist_entry(
     await audit.record(
         db, principal, action="dns_blocklist_entry.delete",
         target_type="dns_blocklist", target_id=str(blocklist_id),
+        metadata=snapshot,
+    )
+    await db.commit()
+
+
+# ----------------------- Views (split-horizon) -----------------------
+@router.get("/views", response_model=Page[DnsViewOut])
+async def list_views(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(DnsView)
+    if fabric_id is not None:
+        stmt = stmt.where(DnsView.fabric_id == fabric_id)
+    return await paginate(
+        db, stmt, model=DnsView, params=params, out_model=DnsViewOut,
+    )
+
+
+@router.post("/views", response_model=DnsViewOut, status_code=201)
+async def create_view(
+    payload: DnsViewCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    obj = DnsView(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_view.create",
+        target_type="dns_view", target_id=str(obj.id),
+        metadata={"name": payload.name, "match_cidrs": payload.match_cidrs},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/views/{view_id}", response_model=DnsViewOut)
+async def update_view(
+    view_id: UUID,
+    payload: DnsViewUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsView, view_id)
+    if obj is None:
+        raise NotFoundError(_VIEW_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="dns_view.update",
+        target_type="dns_view", target_id=str(view_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/views/{view_id}", status_code=204)
+async def delete_view(
+    view_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsView, view_id)
+    if obj is None:
+        raise NotFoundError(_VIEW_NOT_FOUND)
+    # ON DELETE SET NULL on dns_records.view_id keeps records around
+    # but un-scopes them — they revert to the default-view answer.
+    snapshot = {"name": obj.name, "match_cidrs": list(obj.match_cidrs or [])}
+    await db.execute(delete(DnsView).where(DnsView.id == view_id))
+    await audit.record(
+        db, principal, action="dns_view.delete",
+        target_type="dns_view", target_id=str(view_id),
         metadata=snapshot,
     )
     await db.commit()

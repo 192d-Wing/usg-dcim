@@ -158,6 +158,10 @@ class DnsRecordBase(BaseModel):
     type: DnsRecordType
     ttl: int | None = None
     data: dict
+    # When set, this record is only emitted to clients matching the
+    # named DnsView's CIDR list (split-horizon). NULL = served as the
+    # default fallback to every client.
+    view_id: UUID | None = None
     description: str | None = None
 
 
@@ -169,6 +173,7 @@ class DnsRecordUpdate(BaseModel):
     name: str | None = None
     ttl: int | None = None
     data: dict | None = None
+    view_id: UUID | None = None
     description: str | None = None
 
 
@@ -258,6 +263,34 @@ class DnsBlocklistEntryBulk(BaseModel):
 
 
 class DnsBlocklistEntryOut(DnsBlocklistEntryBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- DnsView ----------
+
+class DnsViewBase(BaseModel):
+    name: str
+    fabric_id: UUID
+    match_cidrs: list[str] = Field(default_factory=list)
+    priority: int = 100
+    description: str | None = None
+
+
+class DnsViewCreate(DnsViewBase):
+    pass
+
+
+class DnsViewUpdate(BaseModel):
+    name: str | None = None
+    match_cidrs: list[str] | None = None
+    priority: int | None = None
+    description: str | None = None
+
+
+class DnsViewOut(DnsViewBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     created_at: datetime

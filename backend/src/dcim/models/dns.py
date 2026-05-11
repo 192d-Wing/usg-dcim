@@ -169,6 +169,12 @@ class DnsRecord(UUIDPrimaryKey, Timestamped, Base):
     ipam_address_id: Mapped[UUID | None] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("ip_addresses.id"),
     )
+    # Optional split-horizon binding — when set, this record is only
+    # served to clients matching the view's CIDR list. NULL = visible
+    # to every view (the default fallback answer).
+    view_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("dns_views.id", ondelete="SET NULL"),
+    )
     description: Mapped[str | None] = mapped_column(String(512))
 
 
@@ -195,6 +201,34 @@ class AnycastGroup(UUIDPrimaryKey, Timestamped, Base):
     # actionable.
     anycast_ipv4: Mapped[str | None] = mapped_column(INET)
     anycast_ipv6: Mapped[str | None] = mapped_column(INET)
+    description: Mapped[str | None] = mapped_column(String(512))
+
+
+class DnsView(UUIDPrimaryKey, Timestamped, Base):
+    """A split-horizon view — same FQDN, different answers depending
+    on the client subnet. Records can be bound to a view via
+    DnsRecord.view_id; records with view_id IS NULL are the "default
+    view" answer served to anyone not matching a specific view."""
+
+    __tablename__ = "dns_views"
+    __table_args__ = (
+        UniqueConstraint("fabric_id", "name", name="uq_dns_view_fabric_name"),
+        Index("ix_dns_views_fabric", "fabric_id"),
+    )
+
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Stored as JSON array of CIDR strings. Postgres has a CIDR[] type
+    # we could use, but JSON keeps the schema portable + lets us add
+    # IPv4 and IPv6 entries to the same row without extra plumbing.
+    match_cidrs: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    # When two views could match a client, the higher-priority view
+    # wins. Lower numbers = higher priority; defaults to 100 so
+    # operators can stack new views without shuffling.
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     description: Mapped[str | None] = mapped_column(String(512))
 
 

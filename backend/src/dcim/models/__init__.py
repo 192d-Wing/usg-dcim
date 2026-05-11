@@ -35,6 +35,7 @@ from .dns import (
     DnsServer,
     DnsServerMetricsSample,
     DnsServerRole,
+    DnsView,
     DnsZone,
     DnsZoneKind,
 )
@@ -116,6 +117,7 @@ __all__ = [
     "DnsServer",
     "DnsServerMetricsSample",
     "DnsServerRole",
+    "DnsView",
     "DnsZone",
     "DnsZoneKind",
     "Fabric",

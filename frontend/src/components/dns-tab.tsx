@@ -70,6 +70,16 @@ type DnsRecord = {
   data: Record<string, any>;
   source: DnsRecordSource;
   ipam_address_id: string | null;
+  view_id: string | null;
+};
+
+type DnsView = {
+  id: string;
+  name: string;
+  fabric_id: string;
+  match_cidrs: string[];
+  priority: number;
+  description: string | null;
 };
 
 type DnsServer = {
@@ -212,6 +222,11 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
             id: 'blocklists',
             label: 'Blocklists',
             content: <BlocklistsPanel fabricId={fabricId} canWrite={canWrite} />,
+          },
+          {
+            id: 'views',
+            label: 'Views',
+            content: <ViewsPanel fabricId={fabricId} canWrite={canWrite} />,
           },
         ]}
       />
@@ -473,6 +488,7 @@ function ZoneDetailView({
     },
     source: 'manual',
     ipam_address_id: null,
+    view_id: null,
   } : null, [zone]);
 
   const filtered = useMemo(() => {
@@ -2479,6 +2495,224 @@ function BulkPatternForm({
                 borderRadius: 6,
               }}
             />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
+  );
+}
+
+// ----------------------- Views (split-horizon) -----------------------
+
+function ViewsPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const viewsQ = useQuery({
+    queryKey: ['dns-views', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: DnsView[] }>(`/dns/views?fabric_id=${fabricId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const views = viewsQ.data ?? [];
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editView, setEditView] = useState<DnsView | null>(null);
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-views', fabricId] });
+  }
+
+  async function remove(v: DnsView) {
+    if (!window.confirm(`Delete view ${v.name}? Records bound to it become default-view answers.`)) return;
+    try {
+      await http.delete(`/dns/views/${v.id}`);
+      await refresh();
+      toast.success('View removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <>
+      <Table<DnsView>
+        variant="container"
+        loading={viewsQ.isLoading}
+        loadingText="Loading views…"
+        items={views}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${views.length})`}
+            actions={canWrite && (
+              <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                Create view
+              </Button>
+            )}
+            description="Split-horizon answer sets — clients matching a view's CIDRs see a different answer for the same FQDN."
+          >
+            Views
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (v) => v.name },
+          { id: 'priority', header: 'Priority', cell: (v) => v.priority, width: 100 },
+          {
+            id: 'cidrs', header: 'Match CIDRs',
+            cell: (v) => (
+              <span style={MONO}>
+                {(v.match_cidrs ?? []).join(', ')
+                 || <Box color="text-status-inactive">none — matches no clients</Box>}
+              </span>
+            ),
+          },
+          {
+            id: 'description', header: 'Description',
+            cell: (v) => v.description || <Box color="text-status-inactive">—</Box>,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (v: DnsView) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditView(v)} ariaLabel={`Edit ${v.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(v)} ariaLabel={`Delete ${v.name}`} />
+              </SpaceBetween>
+            ),
+            width: 110,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" padding="l">
+            <SpaceBetween size="xs">
+              <b>No split-horizon views</b>
+              <Box color="text-status-inactive" fontSize="body-s">
+                Without views, every record is served to every client. Create
+                a view to deliver different answers to specific CIDRs (e.g.
+                an internal-only set of records to the management plane).
+              </Box>
+              {canWrite && (
+                <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                  Create view
+                </Button>
+              )}
+            </SpaceBetween>
+          </Box>
+        }
+      />
+      {canWrite && (
+        <>
+          <Modal
+            visible={createOpen}
+            onDismiss={() => setCreateOpen(false)}
+            header="New view"
+            size="medium"
+          >
+            <ViewForm
+              fabricId={fabricId}
+              onSaved={async () => { setCreateOpen(false); await refresh(); }}
+            />
+          </Modal>
+          <Modal
+            visible={editView !== null}
+            onDismiss={() => setEditView(null)}
+            header="Edit view"
+            size="medium"
+          >
+            {editView && (
+              <ViewForm
+                fabricId={fabricId}
+                view={editView}
+                onSaved={async () => { setEditView(null); await refresh(); }}
+              />
+            )}
+          </Modal>
+        </>
+      )}
+    </>
+  );
+}
+
+function ViewForm({
+  fabricId, view, onSaved,
+}: {
+  fabricId: string;
+  view?: DnsView;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(view?.name ?? '');
+  const [cidrs, setCidrs] = useState((view?.match_cidrs ?? []).join('\n'));
+  const [priority, setPriority] = useState(String(view?.priority ?? 100));
+  const [description, setDescription] = useState(view?.description ?? '');
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) {
+      toast.error('Name required');
+      return;
+    }
+    setBusy(true);
+    try {
+      const body: Record<string, unknown> = {
+        name: name.trim(),
+        match_cidrs: cidrs.split(/\r?\n/).map((s) => s.trim()).filter(Boolean),
+        priority: Number(priority) || 100,
+        description: description.trim() || null,
+      };
+      if (view) {
+        await http.patch(`/dns/views/${view.id}`, body);
+        toast.success('View updated');
+      } else {
+        body.fabric_id = fabricId;
+        await http.post('/dns/views', body);
+        toast.success('View created');
+      }
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={busy}>
+            {busy ? 'Saving…' : view ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <ColumnLayout columns={2}>
+            <FormField label="Name">
+              <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="internal" />
+            </FormField>
+            <FormField
+              label="Priority"
+              description="Lower = wins when multiple views match a client."
+            >
+              <Input type="number" value={priority} onChange={({ detail }) => setPriority(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <FormField
+            label="Match CIDRs"
+            description="One per line. IPv4 or IPv6. Empty list matches no clients (view becomes inert)."
+          >
+            <textarea
+              value={cidrs}
+              onChange={(e) => setCidrs(e.target.value)}
+              rows={6}
+              placeholder={'10.0.0.0/8\n192.168.0.0/16'}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
+            />
+          </FormField>
+          <FormField label="Description (optional)">
+            <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
           </FormField>
         </SpaceBetween>
       </Form>
