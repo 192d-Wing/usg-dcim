@@ -138,6 +138,10 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
       )}
 
       {fabricId && (
+        <AnycastGroupsPanel fabricId={fabricId} canWrite={canWrite} />
+      )}
+
+      {fabricId && (
         <ServersPanel fabricId={fabricId} canWrite={canWrite} />
       )}
     </div>
@@ -644,6 +648,128 @@ const bgpSchema = z.object({
   md5_password: z.string().optional(),
 });
 
+function AnycastGroupsPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+  // Same query keys as ServersPanel — react-query dedupes the fetch.
+  const groupsQ = useQuery({
+    queryKey: ['anycast-groups', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: AnycastGroup[] }>(`/dns/anycast-groups?fabric_id=${fabricId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const serversQ = useQuery({
+    queryKey: ['dns-servers', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: DnsServer[] }>(`/dns/servers?fabric_id=${fabricId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const groups = groupsQ.data ?? [];
+  const servers = serversQ.data ?? [];
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editGroup, setEditGroup] = useState<AnycastGroup | null>(null);
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['anycast-groups', fabricId] });
+  }
+
+  async function remove(g: AnycastGroup) {
+    // Backend already refuses if any DnsServer is bound; we surface the
+    // count up-front so the operator doesn't have to read the toast.
+    const bound = servers.filter((s) => s.anycast_group_id === g.id).length;
+    if (bound > 0) {
+      toast.error(`${bound} DNS server(s) still bound; unbind before deleting`);
+      return;
+    }
+    if (!window.confirm(`Delete anycast group ${g.name}?`)) return;
+    try {
+      await http.delete(`/dns/anycast-groups/${g.id}`);
+      await refresh();
+      toast.success('Anycast group removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <Card>
+      <CardContent className="p-0">
+        <div className="flex items-center justify-between border-b p-3">
+          <h3 className="text-sm font-semibold">Anycast groups</h3>
+          {canWrite && (
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add anycast group</Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader><DialogTitle>New anycast group</DialogTitle></DialogHeader>
+                <AnycastForm
+                  fabricId={fabricId}
+                  onSaved={async () => { setCreateOpen(false); await refresh(); }}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Service</TableHead>
+              <TableHead>Anycast v4</TableHead>
+              <TableHead>Anycast v6</TableHead>
+              <TableHead>Bound servers</TableHead>
+              {canWrite && <TableHead className="w-20" />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {groups.length === 0 && !groupsQ.isLoading && (
+              <TableRow><TableCell colSpan={canWrite ? 6 : 5} className="text-muted-foreground">
+                No anycast groups in this fabric yet.
+              </TableCell></TableRow>
+            )}
+            {groups.map((g) => {
+              const boundCount = servers.filter((s) => s.anycast_group_id === g.id).length;
+              return (
+                <TableRow key={g.id}>
+                  <TableCell className="font-medium">{g.name}</TableCell>
+                  <TableCell><Badge variant="secondary" className="text-[10px]">{g.service}</Badge></TableCell>
+                  <TableCell className="font-mono text-xs">{g.anycast_ipv4 ?? '—'}</TableCell>
+                  <TableCell className="font-mono text-xs">{g.anycast_ipv6 ?? '—'}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {boundCount === 0 ? '—' : `${boundCount} server${boundCount === 1 ? '' : 's'}`}
+                  </TableCell>
+                  {canWrite && (
+                    <TableCell>
+                      <Button size="sm" variant="ghost" onClick={() => setEditGroup(g)} title="Edit anycast group">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => remove(g)} title="Delete anycast group">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  )}
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </CardContent>
+      <Dialog open={editGroup !== null} onOpenChange={(o) => { if (!o) setEditGroup(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit anycast group</DialogTitle></DialogHeader>
+          {editGroup && (
+            <AnycastForm
+              fabricId={fabricId}
+              group={editGroup}
+              onSaved={async () => { setEditGroup(null); await refresh(); }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+
 function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
   const qc = useQueryClient();
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 500 } });
@@ -674,7 +800,6 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
 
   const [serverOpen, setServerOpen] = useState(false);
   const [editServer, setEditServer] = useState<DnsServer | null>(null);
-  const [anycastOpen, setAnycastOpen] = useState(false);
   const [bgpOpen, setBgpOpen] = useState(false);
 
   async function refreshServers() {
@@ -696,15 +821,6 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
           <h3 className="text-sm font-semibold">DNS servers + anycast</h3>
           {canWrite && (
             <div className="flex gap-2">
-              <Dialog open={anycastOpen} onOpenChange={setAnycastOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Anycast group</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader><DialogTitle>New anycast group</DialogTitle></DialogHeader>
-                  <AnycastForm fabricId={fabricId} onSaved={async () => { setAnycastOpen(false); await qc.invalidateQueries({ queryKey: ['anycast-groups', fabricId] }); }} />
-                </DialogContent>
-              </Dialog>
               <Dialog open={bgpOpen} onOpenChange={setBgpOpen}>
                 <DialogTrigger asChild>
                   <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> BGP peer</Button>
@@ -984,19 +1100,43 @@ function ServerForm({
   );
 }
 
-function AnycastForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void }) {
+function AnycastForm({
+  fabricId, group, onSaved,
+}: {
+  fabricId: string;
+  /** When set, the form patches an existing group. Service + fabric
+   * are immutable post-create (changing them would silently drop the
+   * binding from every DnsServer that points here). */
+  group?: AnycastGroup;
+  onSaved: () => void;
+}) {
+  const editing = !!group;
   const form = useForm<z.infer<typeof anycastSchema>>({
     resolver: zodResolver(anycastSchema),
-    defaultValues: { name: '', service: 'dns_recursive', anycast_ipv4: '', anycast_ipv6: '' },
+    defaultValues: {
+      name: group?.name ?? '',
+      service: group?.service ?? 'dns_recursive',
+      anycast_ipv4: group?.anycast_ipv4 ?? '',
+      anycast_ipv6: group?.anycast_ipv6 ?? '',
+    },
   });
   async function onSubmit(v: z.infer<typeof anycastSchema>) {
     try {
-      await http.post('/dns/anycast-groups', {
-        name: v.name, fabric_id: fabricId, service: v.service,
-        anycast_ipv4: v.anycast_ipv4 || null,
-        anycast_ipv6: v.anycast_ipv6 || null,
-      });
-      toast.success('Anycast group created');
+      if (editing && group) {
+        await http.patch(`/dns/anycast-groups/${group.id}`, {
+          name: v.name,
+          anycast_ipv4: v.anycast_ipv4 || null,
+          anycast_ipv6: v.anycast_ipv6 || null,
+        });
+        toast.success('Anycast group updated');
+      } else {
+        await http.post('/dns/anycast-groups', {
+          name: v.name, fabric_id: fabricId, service: v.service,
+          anycast_ipv4: v.anycast_ipv4 || null,
+          anycast_ipv6: v.anycast_ipv6 || null,
+        });
+        toast.success('Anycast group created');
+      }
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
@@ -1009,7 +1149,7 @@ function AnycastForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => v
         <FormField control={form.control} name="service" render={({ field }) => (
           <FormItem>
             <FormLabel>Service</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange}>
+            <Select value={field.value} onValueChange={field.onChange} disabled={editing}>
               <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
               <SelectContent>
                 <SelectItem value="dns_recursive">DNS recursive</SelectItem>
@@ -1017,6 +1157,9 @@ function AnycastForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => v
                 <SelectItem value="log">Log (reserved)</SelectItem>
               </SelectContent>
             </Select>
+            {editing && (
+              <p className="text-xs text-muted-foreground">Service is immutable after creation.</p>
+            )}
           </FormItem>
         )} />
         <div className="grid grid-cols-2 gap-3">
@@ -1029,7 +1172,7 @@ function AnycastForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => v
         </div>
         <p className="text-xs text-muted-foreground">At least one of v4 / v6 must be set.</p>
         <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
         </Button>
       </form>
     </Form>
