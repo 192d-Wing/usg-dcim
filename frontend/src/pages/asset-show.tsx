@@ -1,20 +1,27 @@
+// Asset detail — Cloudscape ContentLayout with field grid, telemetry
+// sources Table, recharts series cards, IP allocations, recent alerts.
+
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
-import { ArrowLeft, ArchiveX } from 'lucide-react';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Header from '@cloudscape-design/components/header';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import Spinner from '@cloudscape-design/components/spinner';
+import StatusIndicator, { StatusIndicatorProps } from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { hasCapability } from '@/lib/access-control-provider';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import { FreshnessBadge } from '@/components/freshness-badge';
 import { AssetCablesPanel } from '@/components/asset-cables-panel';
 import { DecommissionDialog } from '@/components/decommission-dialog';
 import { formatDate } from '@/lib/utils';
@@ -44,6 +51,18 @@ type AssetDetail = {
   }[];
 };
 
+function freshnessType(s: string): StatusIndicatorProps.Type {
+  if (s === 'current') return 'success';
+  if (s === 'estimated') return 'warning';
+  if (s === 'stale') return 'error';
+  return 'pending';
+}
+function sevType(s: string): StatusIndicatorProps.Type {
+  if (s === 'critical' || s === 'major') return 'error';
+  if (s === 'minor' || s === 'warning') return 'warning';
+  return 'success';
+}
+
 export function AssetShowPage() {
   const { id = '' } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -59,207 +78,187 @@ export function AssetShowPage() {
 
   if (detail.isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-72" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-60 w-full" />
-      </div>
+      <ContentLayout header={<Header variant="h1">Loading…</Header>}>
+        <Box textAlign="center" padding="xl"><Spinner size="large" /></Box>
+      </ContentLayout>
     );
   }
-  if (!detail.data?.asset) return <p className="text-sm text-muted-foreground">Failed to load asset.</p>;
+  if (!detail.data?.asset) {
+    return (
+      <ContentLayout header={<Header variant="h1">Asset</Header>}>
+        <Box color="text-status-error">Failed to load asset.</Box>
+      </ContentLayout>
+    );
+  }
 
   const a = detail.data.asset;
   const sources = detail.data.telemetry_sources ?? [];
   const alerts = detail.data.recent_alerts ?? [];
   const ips = detail.data.ip_addresses ?? [];
+  const canDecommission = canWrite && a.lifecycle_state !== 'decommissioned' && a.lifecycle_state !== 'retired';
 
   return (
-    <div className="space-y-6">
-      <Button
-        variant="ghost" size="sm"
-        onClick={() => (a.rack_id ? nav(`/racks/${a.rack_id}`) : nav('/racks'))}
-        className="-ml-2"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back to rack
-      </Button>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          description={[
+            a.kind,
+            a.hostname ?? 'no hostname',
+            a.mgmt_ip,
+          ].filter(Boolean).join(' · ')}
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => (a.rack_id ? nav(`/racks/${a.rack_id}`) : nav('/racks'))} iconName="angle-left">
+                Back to rack
+              </Button>
+              {canDecommission && (
+                <Button onClick={() => setDecomOpen(true)} iconName="remove">
+                  Decommission
+                </Button>
+              )}
+              {a.lifecycle_state === 'active'
+                ? <StatusIndicator type="success">{a.lifecycle_state}</StatusIndicator>
+                : <StatusIndicator type="warning">{a.lifecycle_state}</StatusIndicator>}
+            </SpaceBetween>
+          }
+        >
+          {a.name}
+        </Header>
+      }
+    >
+      <SpaceBetween size="l">
+        <DecommissionDialog
+          asset={{
+            id: a.id, name: a.name, kind: a.kind,
+            serial: a.serial, lifecycle_state: a.lifecycle_state,
+          }}
+          open={decomOpen}
+          onOpenChange={setDecomOpen}
+          onDecommissioned={() => qc.invalidateQueries({ queryKey: ['asset-detail', id] })}
+        />
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{a.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {a.kind}
-            {a.hostname ? ` · ${a.hostname}` : ' · no hostname'}
-            {a.mgmt_ip ? ` · ${a.mgmt_ip}` : ''}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant={a.lifecycle_state === 'active' ? 'success' : 'warning'}>{a.lifecycle_state}</Badge>
-          {canWrite && a.lifecycle_state !== 'decommissioned' && a.lifecycle_state !== 'retired' && (
-            <Button variant="outline" size="sm" onClick={() => setDecomOpen(true)}>
-              <ArchiveX className="h-4 w-4" /> Decommission
-            </Button>
-          )}
-        </div>
-      </div>
+        <Container header={<Header variant="h2">Details</Header>}>
+          <ColumnLayout columns={6} variant="text-grid">
+            <Field label="Manufacturer" value={a.manufacturer ?? '—'} />
+            <Field label="Model" value={a.model ?? '—'} />
+            <Field label="Serial" value={a.serial ?? '—'} mono />
+            <Field label="Firmware" value={a.firmware ?? '—'} />
+            <Field
+              label="Mgmt"
+              value={`${a.mgmt_protocol ?? '—'} ${a.mgmt_ip ?? ''}${a.mgmt_port ? ':' + a.mgmt_port : ''}`}
+            />
+            <Field
+              label="Rack position"
+              value={a.rack_position_u ? `U${a.rack_position_u} (${a.rack_units}U)` : '—'}
+            />
+          </ColumnLayout>
+        </Container>
 
-      <DecommissionDialog
-        asset={{
-          id: a.id, name: a.name, kind: a.kind,
-          serial: a.serial, lifecycle_state: a.lifecycle_state,
-        }}
-        open={decomOpen}
-        onOpenChange={setDecomOpen}
-        onDecommissioned={() => qc.invalidateQueries({ queryKey: ['asset-detail', id] })}
-      />
+        <Table
+          variant="container"
+          header={<Header variant="h2">Telemetry sources</Header>}
+          items={sources}
+          trackBy="metric"
+          columnDefinitions={[
+            { id: 'metric', header: 'Metric', cell: (s) => <span style={{ fontWeight: 500 }}>{s.metric}</span> },
+            { id: 'value', header: 'Last value', cell: (s) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{s.last_value ?? '—'}</span> },
+            { id: 'unit', header: 'Unit', cell: (s) => s.unit ?? '' },
+            {
+              id: 'reading', header: 'Last reading',
+              cell: (s) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{formatDate(s.last_reading_at)}</Box>,
+            },
+            { id: 'source', header: 'Source', cell: (s) => s.source_system ?? '—' },
+            {
+              id: 'freshness', header: 'Freshness',
+              cell: (s) => <StatusIndicator type={freshnessType(s.freshness)}>{s.freshness}</StatusIndicator>,
+              width: 130,
+            },
+          ]}
+          empty={<Box textAlign="center" color="inherit" padding="m">No telemetry has been ingested for this asset yet.</Box>}
+        />
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <FieldCard label="Manufacturer" value={a.manufacturer ?? '—'} />
-        <FieldCard label="Model" value={a.model ?? '—'} />
-        <FieldCard label="Serial" value={a.serial ?? '—'} mono />
-        <FieldCard label="Firmware" value={a.firmware ?? '—'} />
-        <FieldCard label="Mgmt" value={`${a.mgmt_protocol ?? '—'} ${a.mgmt_ip ?? ''}${a.mgmt_port ? ':' + a.mgmt_port : ''}`} />
-        <FieldCard label="Rack position" value={a.rack_position_u ? `U${a.rack_position_u} (${a.rack_units}U)` : '—'} />
-      </div>
+        {sources.slice(0, 4).map((s) => (
+          <SeriesChart key={s.metric} siteId={a.site_id} assetId={a.id} metric={s.metric} unit={s.unit} />
+        ))}
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Telemetry sources</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          {sources.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">No telemetry has been ingested for this asset yet.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Metric</TableHead>
-                  <TableHead>Last value</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Last reading</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Freshness</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sources.map((s) => (
-                  <TableRow key={s.metric}>
-                    <TableCell className="font-medium">{s.metric}</TableCell>
-                    <TableCell className="tabular-nums">{s.last_value ?? '—'}</TableCell>
-                    <TableCell>{s.unit ?? ''}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(s.last_reading_at)}</TableCell>
-                    <TableCell>{s.source_system ?? '—'}</TableCell>
-                    <TableCell><FreshnessBadge state={s.freshness} /></TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+        <Table
+          variant="container"
+          header={<Header variant="h2">IP addresses</Header>}
+          items={ips}
+          trackBy="id"
+          columnDefinitions={[
+            {
+              id: 'address', header: 'Address',
+              cell: (ip) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{ip.address}</span>,
+            },
+            { id: 'role', header: 'Role', cell: (ip) => <Badge>{ip.role}</Badge>, width: 110 },
+            {
+              id: 'source', header: 'Source',
+              cell: (ip) => <Badge color={ip.source === 'dhcp' ? 'severity-medium' : 'grey'}>{ip.source}</Badge>,
+              width: 110,
+            },
+            {
+              id: 'status', header: 'Status',
+              cell: (ip) => ip.status === 'active'
+                ? <StatusIndicator type="success">{ip.status}</StatusIndicator>
+                : <StatusIndicator type="stopped">{ip.status}</StatusIndicator>,
+              width: 120,
+            },
+            { id: 'dns', header: 'DNS', cell: (ip) => <Box variant="span" color="text-status-inactive">{ip.dns_name ?? '—'}</Box> },
+            {
+              id: 'lease', header: 'DHCP lease ends',
+              cell: (ip) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{ip.dhcp_lease_expires_at ? formatDate(ip.dhcp_lease_expires_at) : '—'}</Box>,
+            },
+          ]}
+          empty={<Box textAlign="center" color="inherit" padding="m">No IP allocations bound to this asset.</Box>}
+        />
 
-      {sources.slice(0, 4).map((s) => (
-        <SeriesChart key={s.metric} siteId={a.site_id} assetId={a.id} metric={s.metric} unit={s.unit} />
-      ))}
+        <AssetCablesPanel assetId={a.id} portCount={a.port_count} />
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">IP addresses</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          {ips.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">
-              No IP allocations bound to this asset.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Address</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>DNS</TableHead>
-                  <TableHead>DHCP lease ends</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {ips.map((ip) => (
-                  <TableRow key={ip.id}>
-                    <TableCell className="font-mono text-xs">{ip.address}</TableCell>
-                    <TableCell><Badge variant="secondary">{ip.role}</Badge></TableCell>
-                    <TableCell>
-                      <Badge variant={ip.source === 'dhcp' ? 'warning' : 'outline'}>
-                        {ip.source}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={ip.status === 'active' ? 'success' : 'secondary'}>
-                        {ip.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{ip.dns_name ?? '—'}</TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {ip.dhcp_lease_expires_at ? formatDate(ip.dhcp_lease_expires_at) : '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <AssetCablesPanel assetId={a.id} portCount={a.port_count} />
-
-      <Card>
-        <CardHeader><CardTitle className="text-base">Recent alerts</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          {alerts.length === 0 ? (
-            <p className="p-4 text-sm text-muted-foreground">No alerts have fired for this asset.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Summary</TableHead>
-                  <TableHead>First seen</TableHead>
-                  <TableHead>Last seen</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {alerts.map((al) => (
-                  <TableRow key={al.id}>
-                    <TableCell><Badge variant={sevVariant(al.severity)}>{al.severity}</Badge></TableCell>
-                    <TableCell>{al.state}</TableCell>
-                    <TableCell>{al.summary}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(al.first_seen_at)}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(al.last_seen_at)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+        <Table
+          variant="container"
+          header={<Header variant="h2">Recent alerts</Header>}
+          items={alerts}
+          trackBy="id"
+          columnDefinitions={[
+            {
+              id: 'severity', header: 'Severity',
+              cell: (al) => <StatusIndicator type={sevType(al.severity)}>{al.severity}</StatusIndicator>,
+              width: 120,
+            },
+            { id: 'state', header: 'State', cell: (al) => al.state, width: 120 },
+            { id: 'summary', header: 'Summary', cell: (al) => al.summary },
+            {
+              id: 'first', header: 'First seen',
+              cell: (al) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{formatDate(al.first_seen_at)}</Box>,
+            },
+            {
+              id: 'last', header: 'Last seen',
+              cell: (al) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{formatDate(al.last_seen_at)}</Box>,
+            },
+          ]}
+          empty={<Box textAlign="center" color="inherit" padding="m">No alerts have fired for this asset.</Box>}
+        />
+      </SpaceBetween>
+    </ContentLayout>
   );
 }
 
-function FieldCard({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function Field({ label, value, mono }: Readonly<{ label: string; value: string; mono?: boolean }>) {
   return (
-    <Card>
-      <CardContent className="space-y-1 p-4">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className={mono ? 'font-mono text-sm' : 'text-sm'}>{value}</div>
-      </CardContent>
-    </Card>
+    <Box>
+      <Box variant="awsui-key-label">{label}</Box>
+      <Box variant="span">
+        {mono
+          ? <span style={{ fontFamily: 'ui-monospace, monospace' }}>{value}</span>
+          : value}
+      </Box>
+    </Box>
   );
 }
 
-function sevVariant(s: string): 'critical' | 'warning' | 'success' {
-  if (s === 'critical' || s === 'major') return 'critical';
-  if (s === 'minor' || s === 'warning') return 'warning';
-  return 'success';
-}
-
-function SeriesChart({ siteId, assetId, metric, unit }: { siteId: string; assetId: string; metric: string; unit: string | null }) {
+function SeriesChart({ siteId, assetId, metric, unit }: Readonly<{ siteId: string; assetId: string; metric: string; unit: string | null }>) {
   const series = useQuery({
     queryKey: ['series', siteId, assetId, metric],
     queryFn: async () => {
@@ -274,35 +273,37 @@ function SeriesChart({ siteId, assetId, metric, unit }: { siteId: string; assetI
   });
   const points = series.data ?? [];
   if (points.length === 0) return null;
-
   const data = points.map((p) => ({ ts: new Date(p.ts).getTime(), value: p.value }));
   const last = data[data.length - 1];
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm">{metric}</CardTitle>
-        <span className="text-xs text-muted-foreground">
-          last: <span className="font-mono">{last.value}{unit ? ` ${unit}` : ''}</span> · {data.length} pts (1h)
-        </span>
-      </CardHeader>
-      <CardContent className="h-40 px-2 pt-0 pb-2">
+    <Container
+      header={
+        <Header
+          variant="h3"
+          description={`last: ${last.value}${unit ? ` ${unit}` : ''} · ${data.length} pts (1h)`}
+        >
+          <span style={{ fontFamily: 'ui-monospace, monospace' }}>{metric}</span>
+        </Header>
+      }
+    >
+      <div style={{ height: 160 }}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 5, right: 16, left: 0, bottom: 0 }}>
-            <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" />
+            <CartesianGrid stroke="#444" strokeDasharray="3 3" />
             <XAxis
               dataKey="ts" tickFormatter={(v) => new Date(v).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              fontSize={11} stroke="hsl(var(--muted-foreground))"
+              fontSize={11} stroke="#888"
             />
-            <YAxis fontSize={11} stroke="hsl(var(--muted-foreground))" width={40} />
+            <YAxis fontSize={11} stroke="#888" width={40} />
             <Tooltip
               labelFormatter={(v) => new Date(v as number).toLocaleString()}
-              contentStyle={{ background: 'hsl(var(--popover))', border: '1px solid hsl(var(--border))', borderRadius: 6 }}
+              contentStyle={{ background: '#1b1b1b', border: '1px solid #444', borderRadius: 6 }}
             />
-            <Line type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="value" stroke="#5dade2" strokeWidth={1.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
-      </CardContent>
-    </Card>
+      </div>
+    </Container>
   );
 }

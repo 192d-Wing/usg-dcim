@@ -1,31 +1,34 @@
+// Rack detail — Cloudscape chrome around the existing visualization +
+// panels. RackVisualization keeps its inline styles since it has its
+// own coordinate-driven layout that doesn't depend on Tailwind.
+
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useUpdate } from '@refinedev/core';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
-import { ArrowLeft, Pencil, Plus, ChevronsUpDown, MoveRight } from 'lucide-react';
+import { toast } from 'sonner';
+
+import Alert from '@cloudscape-design/components/alert';
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import SegmentedControl from '@cloudscape-design/components/segmented-control';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import Spinner from '@cloudscape-design/components/spinner';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { hasCapability } from '@/lib/access-control-provider';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Badge } from '@/components/ui/badge';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 import { RackVisualization } from '@/components/rack-visualization';
 import { RackHeightPicker } from '@/components/rack-height-picker';
 import { useStencilCatalog } from '@/components/stencil';
@@ -34,7 +37,6 @@ import { PowerChainPanel, type PduSummary, type PerAsset } from '@/components/po
 import { MoveAssetDialog } from '@/components/move-asset-dialog';
 import { CablePanel } from '@/components/cable-panel';
 import { ForecastPanel } from '@/components/forecast-panel';
-import { toast } from 'sonner';
 
 type RackDetail = {
   rack: {
@@ -76,13 +78,18 @@ export function RackShowPage() {
 
   if (detail.isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-9 w-72" />
-        <Skeleton className="h-[760px] w-full" />
-      </div>
+      <ContentLayout header={<Header variant="h1">Loading…</Header>}>
+        <Box textAlign="center" padding="xl"><Spinner size="large" /></Box>
+      </ContentLayout>
     );
   }
-  if (detail.isError || !detail.data?.rack) return <p className="text-sm text-muted-foreground">Failed to load rack.</p>;
+  if (detail.isError || !detail.data?.rack) {
+    return (
+      <ContentLayout header={<Header variant="h1">Rack</Header>}>
+        <Box color="text-status-error">Failed to load rack.</Box>
+      </ContentLayout>
+    );
+  }
 
   const r = detail.data.rack;
   const assets = detail.data.assets ?? [];
@@ -95,209 +102,194 @@ export function RackShowPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <Button variant="ghost" size="sm" onClick={() => nav('/racks')} className="-ml-2">
-          <ArrowLeft className="h-4 w-4" /> All racks
-        </Button>
-      </div>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          description={[
+            `${r.u_height}U`,
+            r.max_kw ? `${r.max_kw} kW max` : 'unrated',
+            `${assets.length} devices`,
+            r.serial && `SN ${r.serial}`,
+          ].filter(Boolean).join(' · ')}
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => nav('/racks')} iconName="angle-left">All racks</Button>
+              <SegmentedControl
+                selectedId={mode}
+                onChange={({ detail }) => setMode(detail.selectedId as 'stencil' | 'block')}
+                options={[{ id: 'stencil', text: 'Stencil' }, { id: 'block', text: 'Block' }]}
+              />
+              {canWrite && (
+                <>
+                  <Button variant="primary" iconName="add-plus" onClick={() => setAddOpen(true)}>
+                    Add device
+                  </Button>
+                  <Button iconName="edit" onClick={() => setEditOpen(true)}>Edit rack</Button>
+                </>
+              )}
+            </SpaceBetween>
+          }
+        >
+          {r.code} · {r.name}
+        </Header>
+      }
+    >
+      <SpaceBetween size="l">
+        {detail.data.capacity && <CapacityPanel capacity={detail.data.capacity} />}
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{r.code} · {r.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {r.u_height}U · {r.max_kw ? `${r.max_kw} kW max` : 'unrated'} · {assets.length} devices
-            {r.serial && <> · SN {r.serial}</>}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Tabs value={mode} onValueChange={(v) => setMode(v as 'stencil' | 'block')}>
-            <TabsList>
-              <TabsTrigger value="stencil">Stencil</TabsTrigger>
-              <TabsTrigger value="block">Block</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          {canWrite && (
-            <>
-              <Dialog open={addOpen} onOpenChange={setAddOpen}>
-                <DialogTrigger asChild>
-                  <Button><Plus className="h-4 w-4" /> Add device</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader><DialogTitle>Add device to rack</DialogTitle></DialogHeader>
-                  <NewAssetForm
-                    siteId={r.site_id}
-                    rackId={r.id}
-                    uHeight={r.u_height}
-                    occupiedSlots={occupied}
-                    onCreated={async () => {
-                      setAddOpen(false);
-                      toast.success('Device added');
-                      await qc.invalidateQueries({ queryKey: ['rack-detail', id] });
-                    }}
-                  />
-                </DialogContent>
-              </Dialog>
-              <Dialog open={editOpen} onOpenChange={setEditOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline"><Pencil className="h-4 w-4" /> Edit rack</Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader><DialogTitle>Edit rack</DialogTitle></DialogHeader>
-                  <EditRackForm
-                    rack={r}
-                    assets={assets}
-                    onSaved={async () => {
-                      setEditOpen(false);
-                      await qc.invalidateQueries({ queryKey: ['rack-detail', id] });
-                    }}
-                  />
-                </DialogContent>
-              </Dialog>
-            </>
-          )}
-        </div>
-      </div>
+        <ForecastPanel rackId={id} />
 
-      {detail.data.capacity && <CapacityPanel capacity={detail.data.capacity} />}
-
-      <ForecastPanel rackId={id} />
-
-      <Card>
-        <CardContent className="p-6">
+        <Container header={<Header variant="h2">Layout</Header>}>
           <RackVisualization rackId={id} uHeight={r.u_height} assets={assets as any} mode={mode} />
-        </CardContent>
-      </Card>
+        </Container>
 
-      {detail.data.power_chain && (
-        <PowerChainPanel
+        {detail.data.power_chain && (
+          <PowerChainPanel
+            rackId={id}
+            pdus={detail.data.power_chain.pdus}
+            perAsset={detail.data.power_chain.per_asset}
+            assets={assets.map((a) => ({
+              id: a.id, name: a.name, kind: a.kind,
+              pdu_side: a.pdu_side, psu_count: a.psu_count,
+              redundancy: a.redundancy,
+            }))}
+          />
+        )}
+
+        <CablePanel
           rackId={id}
-          pdus={detail.data.power_chain.pdus}
-          perAsset={detail.data.power_chain.per_asset}
-          assets={assets.map((a) => ({
+          siteId={r.site_id}
+          rackAssets={assets.map((a) => ({
             id: a.id, name: a.name, kind: a.kind,
-            pdu_side: a.pdu_side, psu_count: a.psu_count,
-            redundancy: a.redundancy,
+            port_count: a.port_count ?? null,
           }))}
         />
-      )}
 
-      <CablePanel
-        rackId={id}
-        siteId={r.site_id}
-        rackAssets={assets.map((a) => ({
-          id: a.id, name: a.name, kind: a.kind,
-          port_count: a.port_count ?? null,
-        }))}
-      />
+        <Table
+          variant="container"
+          header={<Header variant="h2" counter={`(${assets.length})`}>Devices</Header>}
+          items={assets}
+          trackBy="id"
+          onRowClick={({ detail }) => nav(`/assets/${detail.item.id}`)}
+          columnDefinitions={[
+            {
+              id: 'u', header: 'U',
+              cell: (a) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{a.rack_position_u ?? '—'}</span>,
+              width: 60,
+            },
+            { id: 'name', header: 'Name', cell: (a) => <span style={{ fontWeight: 500 }}>{a.name}</span> },
+            {
+              id: 'host', header: 'Hostname',
+              cell: (a) => <Box variant="span" color="text-status-inactive">{a.hostname ?? '—'}</Box>,
+            },
+            { id: 'kind', header: 'Kind', cell: (a) => <Badge>{a.kind}</Badge>, width: 100 },
+            { id: 'mfr', header: 'Manufacturer', cell: (a) => a.manufacturer ?? '—' },
+            { id: 'model', header: 'Model', cell: (a) => a.model ?? '—' },
+            {
+              id: 'serial', header: 'Serial',
+              cell: (a) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{a.serial ?? '—'}</span>,
+            },
+            {
+              id: 'alerts', header: 'Alerts',
+              cell: (a) => a.open_alerts > 0
+                ? <Badge color="red">{String(a.open_alerts)}</Badge>
+                : <Box variant="span" color="text-status-inactive">0</Box>,
+              width: 90,
+            },
+            {
+              id: 'state', header: 'State',
+              cell: (a) => a.lifecycle_state === 'active'
+                ? <StatusIndicator type="success">{a.lifecycle_state}</StatusIndicator>
+                : <StatusIndicator type="warning">{a.lifecycle_state}</StatusIndicator>,
+              width: 120,
+            },
+            ...(canWrite ? [{
+              id: 'actions', header: '',
+              cell: (a: RackDetail['assets'][number]) => (
+                <Button
+                  iconName="copy"
+                  variant="inline-icon"
+                  onClick={(e: any) => { e?.stopPropagation?.(); setMoving(a); }}
+                  ariaLabel={`Move ${a.name}`}
+                />
+              ),
+              width: 80,
+            }] : []),
+          ]}
+          empty={<Box textAlign="center" color="inherit" padding="m">No devices in this rack.</Box>}
+        />
 
-      <Card>
-        <CardHeader><CardTitle className="text-base">Devices</CardTitle></CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">U</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Hostname</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>Manufacturer</TableHead>
-                <TableHead>Model</TableHead>
-                <TableHead>Serial</TableHead>
-                <TableHead className="w-20">Alerts</TableHead>
-                <TableHead className="w-24">State</TableHead>
-                {canWrite && <TableHead className="w-20" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {assets.length === 0 && (
-                <TableRow><TableCell colSpan={canWrite ? 10 : 9} className="text-muted-foreground">No devices in this rack.</TableCell></TableRow>
-              )}
-              {assets.map((a) => (
-                <TableRow key={a.id} onClick={() => nav(`/assets/${a.id}`)} className="cursor-pointer">
-                  <TableCell className="tabular-nums">{a.rack_position_u ?? '—'}</TableCell>
-                  <TableCell className="font-medium">{a.name}</TableCell>
-                  <TableCell className="text-muted-foreground">{a.hostname ?? '—'}</TableCell>
-                  <TableCell><Badge variant="secondary">{a.kind}</Badge></TableCell>
-                  <TableCell>{a.manufacturer ?? '—'}</TableCell>
-                  <TableCell>{a.model ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs">{a.serial ?? '—'}</TableCell>
-                  <TableCell>{a.open_alerts > 0 ? <Badge variant="critical">{a.open_alerts}</Badge> : <span className="text-muted-foreground">0</span>}</TableCell>
-                  <TableCell><Badge variant={a.lifecycle_state === 'active' ? 'success' : 'warning'}>{a.lifecycle_state}</Badge></TableCell>
-                  {canWrite && (
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        size="sm" variant="ghost"
-                        onClick={() => setMoving(a)}
-                        title="Move to another rack"
-                      >
-                        <MoveRight className="h-3.5 w-3.5" /> Move
-                      </Button>
-                    </TableCell>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-      <MoveAssetDialog
-        asset={moving ? {
-          id: moving.id,
-          name: moving.name,
-          site_id: r.site_id,
-          rack_id: r.id,
-          rack_position_u: moving.rack_position_u,
-          rack_units: moving.rack_units,
-          face: (moving.face ?? 'front') as 'front' | 'rear',
-        } : null}
-        open={moving !== null}
-        onOpenChange={(o) => { if (!o) setMoving(null); }}
-        onMoved={() => qc.invalidateQueries({ queryKey: ['rack-detail', id] })}
-      />
-    </div>
+        <MoveAssetDialog
+          asset={moving ? {
+            id: moving.id,
+            name: moving.name,
+            site_id: r.site_id,
+            rack_id: r.id,
+            rack_position_u: moving.rack_position_u,
+            rack_units: moving.rack_units,
+            face: (moving.face ?? 'front') as 'front' | 'rear',
+          } : null}
+          open={moving !== null}
+          onOpenChange={(o) => { if (!o) setMoving(null); }}
+          onMoved={() => qc.invalidateQueries({ queryKey: ['rack-detail', id] })}
+        />
+
+        {canWrite && (
+          <Modal visible={addOpen} onDismiss={() => setAddOpen(false)} header="Add device to rack" size="medium">
+            <NewAssetForm
+              siteId={r.site_id}
+              rackId={r.id}
+              uHeight={r.u_height}
+              occupiedSlots={occupied}
+              onCreated={async () => {
+                setAddOpen(false);
+                toast.success('Device added');
+                await qc.invalidateQueries({ queryKey: ['rack-detail', id] });
+              }}
+            />
+          </Modal>
+        )}
+        {canWrite && (
+          <Modal visible={editOpen} onDismiss={() => setEditOpen(false)} header="Edit rack" size="medium">
+            <EditRackForm
+              rack={r}
+              assets={assets}
+              onSaved={async () => {
+                setEditOpen(false);
+                await qc.invalidateQueries({ queryKey: ['rack-detail', id] });
+              }}
+            />
+          </Modal>
+        )}
+      </SpaceBetween>
+    </ContentLayout>
   );
 }
 
-// ----- Edit Rack form -----
-const editSchema = z.object({
-  name: z.string().min(1),
-  u_height: z.coerce.number().min(1).max(60),
-  max_kw: z.string().optional(),
-  serial: z.string().optional(),
-});
-
 function EditRackForm({
   rack, assets, onSaved,
-}: {
+}: Readonly<{
   rack: RackDetail['rack'];
   assets: RackDetail['assets'];
   onSaved: () => void;
-}) {
+}>) {
   const updateMutation = useUpdate();
   const isPending = (updateMutation as any).isPending ?? (updateMutation as any).isLoading ?? false;
   const update = updateMutation.mutate;
-  const form = useForm<z.infer<typeof editSchema>>({
-    resolver: zodResolver(editSchema),
-    defaultValues: {
-      name: rack.name,
-      u_height: rack.u_height,
-      max_kw: rack.max_kw?.toString() ?? '',
-      serial: rack.serial ?? '',
-    },
-  });
+  const [name, setName] = useState(rack.name);
+  const [uHeight, setUHeight] = useState(rack.u_height);
+  const [maxKw, setMaxKw] = useState(rack.max_kw?.toString() ?? '');
+  const [serial, setSerial] = useState(rack.serial ?? '');
 
-  // Live preview: which placed devices would fall outside the new envelope?
-  const candidate = Number(form.watch('u_height')) || rack.u_height;
   const orphans = assets.filter(
-    (a) => a.rack_position_u && (a.rack_position_u + Math.max(1, a.rack_units || 1) - 1) > candidate,
+    (a) => a.rack_position_u && (a.rack_position_u + Math.max(1, a.rack_units || 1) - 1) > uHeight,
   );
 
-  function onSubmit(v: z.infer<typeof editSchema>) {
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
     if (orphans.length > 0) {
-      toast.error(
-        `${orphans.length} device(s) would be orphaned at U${candidate}: ${orphans.slice(0, 3).map((a) => a.name).join(', ')}${orphans.length > 3 ? '…' : ''}`,
-      );
+      toast.error(`${orphans.length} device(s) would be orphaned at U${uHeight}`);
       return;
     }
     update(
@@ -305,10 +297,9 @@ function EditRackForm({
         resource: 'inventory/racks',
         id: rack.id,
         values: {
-          name: v.name,
-          u_height: v.u_height,
-          max_kw: v.max_kw ? Number(v.max_kw) : null,
-          serial: v.serial || null,
+          name, u_height: uHeight,
+          max_kw: maxKw ? Number(maxKw) : null,
+          serial: serial || null,
         },
         successNotification: false,
       },
@@ -320,90 +311,78 @@ function EditRackForm({
   }
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="u_height" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Rack height</FormLabel>
-            <FormControl>
-              <RackHeightPicker value={Number(field.value) || 42} onChange={field.onChange} />
-            </FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        {orphans.length > 0 && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs">
-            <p className="font-medium text-destructive">
-              {orphans.length} device(s) would be orphaned at {candidate}U
-            </p>
-            <ul className="mt-1 list-disc pl-5 text-muted-foreground">
-              {orphans.slice(0, 5).map((a) => (
-                <li key={a.id}>
-                  {a.name} (U{a.rack_position_u}{(a.rack_units || 1) > 1 ? `–U${(a.rack_position_u || 0) + (a.rack_units || 1) - 1}` : ''})
-                </li>
-              ))}
-              {orphans.length > 5 && <li>…and {orphans.length - 5} more</li>}
-            </ul>
-            <p className="mt-2 text-muted-foreground">Move them to lower U positions before shrinking the rack.</p>
-          </div>
-        )}
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="max_kw" render={({ field }) => (
-            <FormItem><FormLabel>Max kW</FormLabel><FormControl><Input type="number" step="0.1" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="serial" render={({ field }) => (
-            <FormItem><FormLabel>Serial</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <Button type="submit" disabled={isPending || orphans.length > 0}>
-          {isPending ? 'Saving…' : 'Save'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={isPending} disabled={orphans.length > 0}>
+            {isPending ? 'Saving…' : 'Save'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name">
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} />
+          </FormField>
+          <FormField label="Rack height">
+            <RackHeightPicker value={uHeight} onChange={(v) => setUHeight(v)} />
+          </FormField>
+          {orphans.length > 0 && (
+            <Alert type="error" header={`${orphans.length} device(s) would be orphaned at ${uHeight}U`}>
+              <ul style={{ marginTop: 4, paddingLeft: 20 }}>
+                {orphans.slice(0, 5).map((a) => (
+                  <li key={a.id}>
+                    {a.name} (U{a.rack_position_u}{(a.rack_units || 1) > 1 ? `–U${(a.rack_position_u || 0) + (a.rack_units || 1) - 1}` : ''})
+                  </li>
+                ))}
+                {orphans.length > 5 && <li>…and {orphans.length - 5} more</li>}
+              </ul>
+              Move them to lower U positions before shrinking the rack.
+            </Alert>
+          )}
+          <ColumnLayout columns={2}>
+            <FormField label="Max kW">
+              <Input type="number" value={maxKw} onChange={({ detail }) => setMaxKw(detail.value)} />
+            </FormField>
+            <FormField label="Serial">
+              <Input value={serial} onChange={({ detail }) => setSerial(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
-// ----- New Asset form (rack-scoped) -----
 const KINDS = ['server', 'switch', 'router', 'pdu', 'ups', 'crac', 'sensor', 'storage', 'chassis', 'blade', 'patch_panel', 'other'] as const;
-
-const newAssetSchema = z.object({
-  name: z.string().min(1, 'Name required'),
-  hostname: z.string().optional(),
-  kind: z.enum(KINDS),
-  manufacturer: z.string().optional(),
-  model: z.string().optional(),
-  serial: z.string().optional(),
-  rack_position_u: z.string().optional(),
-  rack_units: z.coerce.number().min(1).max(60).default(1),
-  port_count: z.string().optional(),
-});
+const KIND_OPTS: SelectProps.Option[] = KINDS.map((k) => ({ value: k, label: k }));
 
 function NewAssetForm({
   siteId, rackId, uHeight, occupiedSlots, onCreated,
-}: {
+}: Readonly<{
   siteId: string;
   rackId: string;
   uHeight: number;
   occupiedSlots: Set<number>;
   onCreated: () => void;
-}) {
+}>) {
   const catalog = useStencilCatalog();
-  const form = useForm<z.infer<typeof newAssetSchema>>({
-    resolver: zodResolver(newAssetSchema),
-    defaultValues: { name: '', kind: 'server', rack_units: 1 },
-  });
+  const [name, setName] = useState('');
+  const [hostname, setHostname] = useState('');
+  const [kindOpt, setKindOpt] = useState<SelectProps.Option>(KIND_OPTS[0]);
+  const [manufacturer, setManufacturer] = useState('');
+  const [model, setModel] = useState('');
+  const [serial, setSerial] = useState('');
+  const [positionUStr, setPositionUStr] = useState('');
+  const [units, setUnits] = useState('1');
+  const [portCount, setPortCount] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const manufacturer = form.watch('manufacturer') ?? '';
-  const model = form.watch('model') ?? '';
-  const positionUStr = form.watch('rack_position_u') ?? '';
-  const units = form.watch('rack_units') ?? 1;
   const positionU = positionUStr ? Number(positionUStr) : null;
+  const unitsN = Number(units) || 1;
   const collisions: number[] = [];
   if (positionU) {
-    for (let u = positionU; u < positionU + units; u++) {
+    for (let u = positionU; u < positionU + unitsN; u++) {
       if (occupiedSlots.has(u)) collisions.push(u);
     }
   }
@@ -412,130 +391,121 @@ function NewAssetForm({
   );
 
   function applyStencil(s: { manufacturer: string; model: string; u: number; kind_hint?: string }) {
-    form.setValue('manufacturer', s.manufacturer);
-    form.setValue('model', s.model);
-    if (s.kind_hint) form.setValue('kind', s.kind_hint as any);
-    if (s.u > 0) form.setValue('rack_units', s.u);
+    setManufacturer(s.manufacturer);
+    setModel(s.model);
+    if (s.kind_hint) {
+      const found = KIND_OPTS.find((k) => k.value === s.kind_hint);
+      if (found) setKindOpt(found);
+    }
+    if (s.u > 0) setUnits(String(s.u));
   }
 
-  async function onSubmit(v: z.infer<typeof newAssetSchema>) {
-    if (collisions.length) {
-      toast.error(`Slots already occupied: U${collisions.join(', U')}`);
-      return;
-    }
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Name required';
+    if (collisions.length > 0) errs.position = `Slots already occupied: U${collisions.join(', U')}`;
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/inventory/assets', {
         site_id: siteId,
         rack_id: rackId,
-        name: v.name,
-        hostname: v.hostname || null,
-        kind: v.kind,
-        manufacturer: v.manufacturer || null,
-        model: v.model || null,
-        serial: v.serial || null,
+        name,
+        hostname: hostname || null,
+        kind: kindOpt.value,
+        manufacturer: manufacturer || null,
+        model: model || null,
+        serial: serial || null,
         rack_position_u: positionU,
-        rack_units: v.rack_units,
-        port_count: v.port_count ? Number(v.port_count) : null,
+        rack_units: unitsN,
+        port_count: portCount ? Number(portCount) : null,
         lifecycle_state: 'active',
         metadata_json: {},
       });
       onCreated();
     } catch (err: any) {
       toast.error(err?.message ?? 'failed to create asset');
+    } finally {
+      setSubmitting(false);
     }
   }
 
+  const vendors = Array.from(new Set((catalog.data?.stencils ?? []).map((s) => s.manufacturer))).sort();
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Name</FormLabel>
-            <FormControl><Input placeholder="e.g. R01-server9" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="hostname" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Hostname (optional)</FormLabel>
-            <FormControl><Input {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="manufacturer" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Manufacturer</FormLabel>
-              <FormControl>
-                <Input list="vendor-list" placeholder="Dell, HPE, Cisco…" {...field} />
-              </FormControl>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Adding…' : 'Add device'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. R01-server9" />
+          </FormField>
+          <FormField label="Hostname (optional)">
+            <Input value={hostname} onChange={({ detail }) => setHostname(detail.value)} />
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Manufacturer">
+              <Input value={manufacturer} onChange={({ detail }) => setManufacturer(detail.value)} placeholder="Dell, HPE, Cisco…" />
               <datalist id="vendor-list">
-                {Array.from(new Set((catalog.data?.stencils ?? []).map((s) => s.manufacturer))).sort().map((v) => (
-                  <option key={v} value={v} />
-                ))}
+                {vendors.map((v) => <option key={v} value={v} />)}
               </datalist>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="model" render={({ field }) => (
-            <FormItem><FormLabel>Model</FormLabel><FormControl><Input placeholder="PowerEdge R750…" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        {vendorMatches.length > 0 && model.length === 0 && (
-          <div className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-            <span className="self-center mr-1">Stencils for {manufacturer}:</span>
-            {vendorMatches.slice(0, 6).map((s) => (
-              <Button
-                key={`${s.manufacturer}-${s.model}`}
-                type="button" variant="outline" size="sm"
-                onClick={() => applyStencil(s)}
-              >
-                <ChevronsUpDown className="h-3 w-3" /> {s.model} ({s.u}U)
-              </Button>
-            ))}
-          </div>
-        )}
-        <div className="grid grid-cols-3 gap-3">
-          <FormField control={form.control} name="kind" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Kind</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>{KINDS.map((k) => <SelectItem key={k} value={k}>{k}</SelectItem>)}</SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="rack_position_u" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Position U (1–{uHeight})</FormLabel>
-              <FormControl><Input type="number" min={1} max={uHeight} placeholder="leave blank if unplaced" {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="rack_units" render={({ field }) => (
-            <FormItem><FormLabel>Size (U)</FormLabel><FormControl><Input type="number" min={1} max={uHeight} {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        {form.watch('kind') === 'patch_panel' && (
-          <FormField control={form.control} name="port_count" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Port count</FormLabel>
-              <FormControl><Input type="number" min={1} max={576} placeholder="e.g. 24, 48" {...field} /></FormControl>
-              <FormMessage />
-            </FormItem>
-          )} />
-        )}
-        <FormField control={form.control} name="serial" render={({ field }) => (
-          <FormItem><FormLabel>Serial (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        {collisions.length > 0 && (
-          <p className="text-xs font-medium text-warning">Conflict: U{collisions.join(', U')} already occupied.</p>
-        )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Adding…' : 'Add device'}
-        </Button>
-      </form>
-    </Form>
+            </FormField>
+            <FormField label="Model">
+              <Input value={model} onChange={({ detail }) => setModel(detail.value)} placeholder="PowerEdge R750…" />
+            </FormField>
+          </ColumnLayout>
+          {vendorMatches.length > 0 && model.length === 0 && (
+            <Box>
+              <Box variant="awsui-key-label">Stencils for {manufacturer}</Box>
+              <SpaceBetween size="xxs" direction="horizontal">
+                {vendorMatches.slice(0, 6).map((s) => (
+                  <Button
+                    key={`${s.manufacturer}-${s.model}`}
+                    onClick={() => applyStencil(s)}
+                  >
+                    {s.model} ({s.u}U)
+                  </Button>
+                ))}
+              </SpaceBetween>
+            </Box>
+          )}
+          <ColumnLayout columns={3}>
+            <FormField label="Kind">
+              <Select selectedOption={kindOpt} onChange={({ detail }) => setKindOpt(detail.selectedOption)}
+                options={KIND_OPTS} expandToViewport />
+            </FormField>
+            <FormField label={`Position U (1–${uHeight})`} errorText={errors.position}>
+              <Input
+                type="number" value={positionUStr}
+                onChange={({ detail }) => setPositionUStr(detail.value)}
+                placeholder="leave blank if unplaced"
+              />
+            </FormField>
+            <FormField label="Size (U)">
+              <Input type="number" value={units} onChange={({ detail }) => setUnits(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          {kindOpt.value === 'patch_panel' && (
+            <FormField label="Port count">
+              <Input
+                type="number" value={portCount}
+                onChange={({ detail }) => setPortCount(detail.value)}
+                placeholder="e.g. 24, 48"
+              />
+            </FormField>
+          )}
+          <FormField label="Serial (optional)">
+            <Input value={serial} onChange={({ detail }) => setSerial(detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
