@@ -41,13 +41,22 @@ dns:
   # Defaults to derive from ingest_url's origin; override if the DNS
   # endpoints live behind a different host.
   api_base: http://host.docker.internal:8000
+  # CoreDNS Prometheus scrape — the collector pushes interval deltas
+  # to /api/v1/dns/servers/{id}/metrics for the Servers tab dashboard.
+  metrics_enabled: true
+  metrics_interval_seconds: 60
   servers:
     - id: 00000000-0000-0000-0000-000000000000   # auth DnsServer
       role: auth
       output_dir: /var/lib/dcim-dns/auth
       coredns_pidfile: /var/lib/dcim-dns/auth/coredns.pid
+      # When the collector shares dns-net with the coredns pods, scrape
+      # via service name. Otherwise leave the default 127.0.0.1:9153
+      # (works for host-networked deployments).
+      metrics_url: http://coredns-auth:9153/metrics
     - id: 00000000-0000-0000-0000-000000000000   # recursive DnsServer
       role: recursive
       output_dir: /var/lib/dcim-dns/recursive
       coredns_pidfile: /var/lib/dcim-dns/recursive/coredns.pid
       gobgp_pidfile: /var/lib/dcim-dns/recursive/gobgp.pid
+      metrics_url: http://coredns-recursive:9153/metrics

@@ -24,6 +24,13 @@ services:
     pid: "host"
     environment:
       PYTHONUNBUFFERED: "1"
+    # Sit on dns-net so the metrics-scrape loop can reach both CoreDNS
+    # pods by their service names (`http://coredns-auth:9153/metrics`
+    # etc.). The default-bridge connection to central api still works
+    # via the host-gateway shortcut below.
+    networks:
+      dns-net: {}
+      default: {}
     # Talk back to the central API. When the central stack runs on the
     # same Docker engine, `host.docker.internal` resolves to the host's
     # IP and the central api is published on :8000.

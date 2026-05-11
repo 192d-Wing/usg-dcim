@@ -22,7 +22,7 @@ Layout:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -43,6 +43,7 @@ from ..models.dns import (
     DnsRecordSource,
     DnsRecordType,
     DnsServer,
+    DnsServerMetricsSample,
     DnsServerRole,
     DnsZone,
     DnsZoneKind,
@@ -70,6 +71,8 @@ from ..schemas.dns import (
     DnsForwarderCreate,
     DnsForwarderOut,
     DnsForwarderUpdate,
+    DnsMetricsSampleIn,
+    DnsMetricsSampleOut,
     DnsRecordCreate,
     DnsRecordOut,
     DnsRecordUpdate,
@@ -649,6 +652,67 @@ async def post_render_status(
         server.coredns_version = payload.coredns_version
     await db.commit()
     return {"server_id": str(server_id), "status": payload.status}
+
+
+@router.post(
+    "/servers/{server_id}/metrics",
+    response_model=DnsMetricsSampleOut, status_code=201,
+)
+async def post_server_metrics(
+    server_id: UUID,
+    payload: DnsMetricsSampleIn,
+    _: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Collector posts one sample (interval delta) per scrape. Skip
+    audit on this path — high-volume cron telemetry isn't a meaningful
+    audit event."""
+    server = await db.get(DnsServer, server_id)
+    if server is None:
+        raise NotFoundError(_SERVER_NOT_FOUND)
+    obj = DnsServerMetricsSample(
+        server_id=server_id,
+        observed_at=payload.observed_at or datetime.now(UTC),
+        interval_seconds=payload.interval_seconds,
+        queries=payload.queries,
+        nxdomain=payload.nxdomain,
+        servfail=payload.servfail,
+        noerror=payload.noerror,
+        p50_ms=payload.p50_ms,
+        p95_ms=payload.p95_ms,
+    )
+    db.add(obj)
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.get(
+    "/servers/{server_id}/metrics",
+    response_model=list[DnsMetricsSampleOut],
+)
+async def list_server_metrics(
+    server_id: UUID,
+    minutes: int = Query(60, ge=1, le=24 * 60),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recent metrics samples for one server, oldest-first so the UI
+    can chart them directly. Window defaults to one hour."""
+    if (await db.get(DnsServer, server_id)) is None:
+        raise NotFoundError(_SERVER_NOT_FOUND)
+    cutoff = datetime.now(UTC) - timedelta(minutes=minutes)
+    rows = (
+        await db.execute(
+            select(DnsServerMetricsSample)
+            .where(
+                DnsServerMetricsSample.server_id == server_id,
+                DnsServerMetricsSample.observed_at >= cutoff,
+            )
+            .order_by(DnsServerMetricsSample.observed_at.asc())
+        )
+    ).scalars().all()
+    return rows
 
 
 # ----------------------- Anycast groups -----------------------

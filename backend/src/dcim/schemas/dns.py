@@ -264,6 +264,35 @@ class DnsBlocklistEntryOut(DnsBlocklistEntryBase):
     updated_at: datetime
 
 
+# ---------- DnsServerMetricsSample ----------
+
+class DnsMetricsSampleIn(BaseModel):
+    """One scrape from the collector. observed_at defaults to now()
+    on the server side if missing — collectors usually omit it."""
+    observed_at: datetime | None = None
+    interval_seconds: int = Field(ge=1)
+    queries: int = Field(ge=0, default=0)
+    nxdomain: int = Field(ge=0, default=0)
+    servfail: int = Field(ge=0, default=0)
+    noerror: int = Field(ge=0, default=0)
+    p50_ms: float | None = None
+    p95_ms: float | None = None
+
+
+class DnsMetricsSampleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    server_id: UUID
+    observed_at: datetime
+    interval_seconds: int
+    queries: int
+    nxdomain: int
+    servfail: int
+    noerror: int
+    p50_ms: float | None
+    p95_ms: float | None
+
+
 # ---------- DnsForwarder ----------
 
 class DnsForwarderBase(BaseModel):

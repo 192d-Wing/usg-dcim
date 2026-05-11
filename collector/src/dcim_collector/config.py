@@ -82,6 +82,10 @@ class DnsServerConfig(BaseModel):
     output_dir: str
     coredns_pidfile: str
     gobgp_pidfile: str | None = None  # only set when role=recursive
+    # Prometheus scrape URL for this server's CoreDNS process. CoreDNS
+    # binds the prometheus plugin on :9153 in both our auth and
+    # recursive Corefiles; override if the operator changes it.
+    metrics_url: str = "http://127.0.0.1:9153/metrics"
 
 
 class DnsAgentConfig(BaseModel):
@@ -91,6 +95,13 @@ class DnsAgentConfig(BaseModel):
     # origin so most operators don't have to set this twice.
     api_base: str | None = None
     servers: list[DnsServerConfig] = Field(default_factory=list)
+    # How often to scrape CoreDNS Prometheus metrics. Independent of
+    # bundle polling because we don't want the bundle cadence to
+    # dictate metrics resolution (or vice-versa).
+    metrics_interval_seconds: int = 60
+    # Whether to scrape metrics at all. Set to false on air-gapped
+    # collectors where outbound metrics push isn't wanted.
+    metrics_enabled: bool = True
 
 
 class CollectorConfig(BaseModel):

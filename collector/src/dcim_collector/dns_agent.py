@@ -195,6 +195,174 @@ async def _server_loop(
         await asyncio.sleep(cfg.dns.poll_interval_seconds)
 
 
+_PROM_LINE_RE = None  # populated lazily; cheap to inline-parse
+
+
+def _parse_prom_line(line: str) -> tuple[str, dict[str, str], float] | None:
+    """Decode one Prometheus text-format line into (name, labels, value).
+    Returns None for comments, blanks, and unparseable lines."""
+    line = line.strip()
+    if not line or line.startswith("#"):
+        return None
+    try:
+        metric_part, value_part = line.rsplit(" ", 1)
+        value = float(value_part)
+    except ValueError:
+        return None
+    name, _, label_blob = metric_part.partition("{")
+    labels: dict[str, str] = {}
+    if label_blob:
+        for item in label_blob.rstrip("}").split(","):
+            if "=" not in item:
+                continue
+            k, _, v = item.partition("=")
+            labels[k.strip()] = v.strip().strip('"')
+    return name, labels, value
+
+
+_RCODE_KEYS = {"NOERROR": "noerror", "NXDOMAIN": "nxdomain", "SERVFAIL": "servfail"}
+
+
+def _absorb_metric(counters: dict, name: str, labels: dict, value: float) -> None:
+    """Fold one parsed sample into the running counters dict."""
+    if name == "coredns_dns_requests_total":
+        counters["requests_total"] += int(value)
+        return
+    if name == "coredns_dns_responses_total":
+        key = _RCODE_KEYS.get(labels.get("rcode", "").upper())
+        if key:
+            counters[key] += int(value)
+        return
+    if name == "coredns_dns_request_duration_seconds_bucket":
+        try:
+            le = float(labels.get("le", "+Inf"))
+        except ValueError:
+            return
+        counters["duration_buckets"][le] = (
+            counters["duration_buckets"].get(le, 0) + int(value)
+        )
+        return
+    if name == "coredns_dns_request_duration_seconds_count":
+        counters["duration_count"] += int(value)
+
+
+def _parse_prom_text(text: str) -> dict:
+    """Minimal Prometheus text-format parser. Only the CoreDNS series
+    we care about — request count, responses by rcode, and the
+    request-duration histogram for p50/p95 — are extracted; everything
+    else is ignored. Multi-line samples for the same series (different
+    label combos) are summed."""
+    counters: dict[str, dict] = {
+        "requests_total": 0,
+        "noerror": 0,
+        "nxdomain": 0,
+        "servfail": 0,
+        "duration_buckets": {},  # {le_seconds: cumulative_count}
+        "duration_count": 0,
+    }
+    for raw in text.splitlines():
+        parsed = _parse_prom_line(raw)
+        if parsed is None:
+            continue
+        name, labels, value = parsed
+        _absorb_metric(counters, name, labels, value)
+    return counters
+
+
+def _percentile_from_buckets(buckets: dict, total: int, percentile: float) -> float | None:
+    """Linearly interpolate a percentile across Prometheus histogram
+    buckets (the standard Prometheus approach). `buckets` is
+    `{le_seconds: cumulative_count}`. Returns None when there isn't
+    enough data to make a meaningful estimate."""
+    if total < 5 or not buckets:
+        return None
+    sorted_buckets = sorted(buckets.items())
+    target = total * percentile
+    prev_le = 0.0
+    prev_count = 0.0
+    for le, count in sorted_buckets:
+        if count >= target:
+            if le == float("inf"):
+                return None
+            span = count - prev_count
+            if span <= 0:
+                return le * 1000.0
+            frac = (target - prev_count) / span
+            return (prev_le + frac * (le - prev_le)) * 1000.0
+        prev_le, prev_count = le, count
+    return None
+
+
+async def _metrics_loop(
+    cfg: CollectorConfig, server: DnsServerConfig, token: str | None,
+) -> None:
+    """Per-server scrape loop. Polls the server's Prometheus endpoint,
+    diffs against the previous scrape to get per-interval deltas, then
+    posts to central. First cycle establishes the baseline and posts
+    nothing."""
+    api_base = _api_base(cfg)
+    interval = cfg.dns.metrics_interval_seconds
+    prev: dict | None = None
+    log.info(
+        "dns_metrics_loop_start",
+        server_id=str(server.id), metrics_url=server.metrics_url,
+    )
+    # No-auth client for the local scrape so we don't send mTLS certs
+    # to localhost. Token client is reused for the central POST.
+    while True:
+        try:
+            async with httpx.AsyncClient(timeout=10) as scrape:
+                r = await scrape.get(server.metrics_url)
+                r.raise_for_status()
+                snap = _parse_prom_text(r.text)
+            if prev is None:
+                prev = snap
+            else:
+                # Counter resets (CoreDNS restart) appear as a smaller
+                # current value — clamp to 0 instead of going negative.
+                delta = {
+                    "queries": max(0, snap["requests_total"] - prev["requests_total"]),
+                    "noerror": max(0, snap["noerror"] - prev["noerror"]),
+                    "nxdomain": max(0, snap["nxdomain"] - prev["nxdomain"]),
+                    "servfail": max(0, snap["servfail"] - prev["servfail"]),
+                }
+                # Latency percentiles are computed from the *current*
+                # snapshot's histogram — they're already cumulative
+                # and converge quickly under load.
+                p50 = _percentile_from_buckets(
+                    snap["duration_buckets"], snap["duration_count"], 0.50,
+                )
+                p95 = _percentile_from_buckets(
+                    snap["duration_buckets"], snap["duration_count"], 0.95,
+                )
+                payload = {
+                    "interval_seconds": interval,
+                    **delta,
+                    "p50_ms": p50,
+                    "p95_ms": p95,
+                }
+                async with _client(cfg, token) as push:
+                    url = f"{api_base}/api/v1/dns/servers/{server.id}/metrics"
+                    resp = await push.post(url, json=payload, timeout=10)
+                    if resp.status_code >= 400:
+                        log.warning(
+                            "dns_metrics_push_failed",
+                            server_id=str(server.id), status=resp.status_code,
+                        )
+                prev = snap
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "dns_metrics_cycle_failed",
+                server_id=str(server.id), err=str(e),
+            )
+            # Drop the baseline so the next successful scrape doesn't
+            # produce a delta across a long failure window.
+            prev = None
+        await asyncio.sleep(interval)
+
+
 async def run_dns_agent(cfg: CollectorConfig) -> None:
     """Spawn one polling loop per configured DnsServer. Returns when
     cancelled (typically at collector shutdown)."""
@@ -213,6 +381,11 @@ async def run_dns_agent(cfg: CollectorConfig) -> None:
         asyncio.create_task(_server_loop(cfg, s, token))
         for s in cfg.dns.servers
     ]
+    if cfg.dns.metrics_enabled:
+        tasks.extend(
+            asyncio.create_task(_metrics_loop(cfg, s, token))
+            for s in cfg.dns.servers
+        )
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:

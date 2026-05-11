@@ -30,9 +30,11 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -194,6 +196,44 @@ class AnycastGroup(UUIDPrimaryKey, Timestamped, Base):
     anycast_ipv4: Mapped[str | None] = mapped_column(INET)
     anycast_ipv6: Mapped[str | None] = mapped_column(INET)
     description: Mapped[str | None] = mapped_column(String(512))
+
+
+class DnsServerMetricsSample(UUIDPrimaryKey, Timestamped, Base):
+    """One scrape of a DnsServer's CoreDNS Prometheus endpoint.
+
+    Stored as per-interval deltas (not raw cumulative counters) so the
+    UI can show "what happened in this window" without doing diffs.
+    Collector computes the diff locally between successive scrapes.
+    """
+
+    __tablename__ = "dns_server_metrics_samples"
+    __table_args__ = (
+        Index("ix_dns_metrics_server_observed", "server_id", "observed_at"),
+    )
+
+    server_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dns_servers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    # Size of the interval this sample summarises, in seconds. Lets
+    # the UI compute QPS without assuming a fixed scrape cadence.
+    interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Total request count over the interval, plus per-rcode breakdowns
+    # for the ones operators care about most. Anything not enumerated
+    # is folded into noerror (NOERROR is the long tail of success).
+    queries: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    nxdomain: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    servfail: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    noerror: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    # Response-time percentiles from CoreDNS's duration histogram, in
+    # milliseconds. Nullable so the collector can omit them when the
+    # histogram has too few samples to be meaningful.
+    p50_ms: Mapped[float | None] = mapped_column(Float)
+    p95_ms: Mapped[float | None] = mapped_column(Float)
 
 
 class DnsBlocklistAction(str, enum.Enum):

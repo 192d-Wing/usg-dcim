@@ -32,6 +32,7 @@ import Spinner from '@cloudscape-design/components/spinner';
 import Table from '@cloudscape-design/components/table';
 import Tabs from '@cloudscape-design/components/tabs';
 import TextFilter from '@cloudscape-design/components/text-filter';
+import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
   colorBackgroundContainerContent, colorBorderDividerDefault,
 } from '@cloudscape-design/design-tokens';
@@ -2609,6 +2610,11 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
             width: 220,
           },
           {
+            id: 'metrics', header: 'QPS (last hour)',
+            cell: (s) => <ServerMetricsCell serverId={s.id} />,
+            width: 240,
+          },
+          {
             id: 'announced_peer', header: 'Announced to peer',
             cell: (s) => s.role === 'recursive'
               ? <BindingsCell server={s} peers={peers} asnsById={asnsById} mode="peer" canWrite={canWrite} />
@@ -2694,6 +2700,73 @@ function RenderStatusCell({ server }: { server: DnsServer }) {
         {ok ? 'OK' : 'Down'}
       </StatusIndicator>
     </span>
+  );
+}
+
+// Per-server inline sparkline of QPS over the last hour, plus the
+// most recent NXDOMAIN%. Each cell fires its own /metrics fetch with
+// a 30s staleTime so a Servers tab with N rows produces N polling
+// streams rather than one — acceptable while N stays small.
+type MetricsSample = {
+  observed_at: string;
+  interval_seconds: number;
+  queries: number;
+  nxdomain: number;
+  servfail: number;
+  noerror: number;
+  p50_ms: number | null;
+  p95_ms: number | null;
+};
+
+function ServerMetricsCell({ serverId }: { serverId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['dns-server-metrics', serverId],
+    queryFn: async () => (
+      await http.get<MetricsSample[]>(`/dns/servers/${serverId}/metrics?minutes=60`)
+    ).data ?? [],
+    refetchInterval: 30_000,
+    staleTime: 25_000,
+  });
+  const samples = data ?? [];
+  if (isLoading) {
+    return <Box color="text-status-inactive" fontSize="body-s">…</Box>;
+  }
+  if (samples.length === 0) {
+    return <Box color="text-status-inactive" fontSize="body-s">No samples yet</Box>;
+  }
+  const chartData = samples.map((s) => ({
+    t: new Date(s.observed_at).getTime(),
+    qps: s.interval_seconds > 0 ? s.queries / s.interval_seconds : 0,
+  }));
+  const last = samples[samples.length - 1];
+  const lastQps = chartData[chartData.length - 1].qps;
+  const nxRate = last.queries > 0 ? (last.nxdomain / last.queries) * 100 : 0;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, height: 32, minWidth: 80 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData}>
+            <XAxis dataKey="t" hide />
+            <YAxis hide domain={[0, 'dataMax + 1']} />
+            <Tooltip
+              labelFormatter={(t) => new Date(Number(t)).toISOString().replace(/\.\d{3}Z$/, 'Z')}
+              formatter={(v: number) => [`${v.toFixed(2)} qps`, 'QPS']}
+            />
+            <Line
+              type="monotone" dataKey="qps"
+              stroke="currentColor" strokeWidth={1.5}
+              dot={false} isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, lineHeight: 1.2 }}>
+        <div>{lastQps.toFixed(1)} qps</div>
+        <div style={{ color: 'var(--color-text-status-inactive)' }}>
+          NX {nxRate.toFixed(1)}%
+        </div>
+      </div>
+    </div>
   );
 }
 
