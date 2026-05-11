@@ -14,7 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Plus, Trash2, RefreshCw, Globe, FileText } from 'lucide-react';
+import { Plus, Pencil, Trash2, RefreshCw, Globe, FileText } from 'lucide-react';
 import { http } from '@/lib/http';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -673,8 +673,21 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
   const peers = peersQ.data ?? [];
 
   const [serverOpen, setServerOpen] = useState(false);
+  const [editServer, setEditServer] = useState<DnsServer | null>(null);
   const [anycastOpen, setAnycastOpen] = useState(false);
   const [bgpOpen, setBgpOpen] = useState(false);
+
+  async function refreshServers() {
+    await qc.invalidateQueries({ queryKey: ['dns-servers', fabricId] });
+  }
+  async function removeServer(s: DnsServer) {
+    if (!window.confirm(`Delete DNS server ${s.name}?`)) return;
+    try {
+      await http.delete(`/dns/servers/${s.id}`);
+      await refreshServers();
+      toast.success('DNS server removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
 
   return (
     <Card>
@@ -720,14 +733,16 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
               <TableHead>Site</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Unicast IP</TableHead>
-              <TableHead>Anycast</TableHead>
+              <TableHead>Anycast v4</TableHead>
+              <TableHead>Anycast v6</TableHead>
               <TableHead>Last render</TableHead>
               <TableHead>BGP peers</TableHead>
+              {canWrite && <TableHead className="w-20" />}
             </TableRow>
           </TableHeader>
           <TableBody>
             {servers.length === 0 && !serversQ.isLoading && (
-              <TableRow><TableCell colSpan={7} className="text-muted-foreground">No DNS servers yet.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={canWrite ? 9 : 8} className="text-muted-foreground">No DNS servers yet.</TableCell></TableRow>
             )}
             {servers.map((s) => {
               const ag = anycast.find((a) => a.id === s.anycast_group_id);
@@ -737,9 +752,8 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
                   <TableCell className="text-xs">{sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}</TableCell>
                   <TableCell><Badge variant={s.role === 'recursive' ? 'default' : 'secondary'}>{s.role}</Badge></TableCell>
                   <TableCell className="font-mono text-xs">{s.unicast_ip}</TableCell>
-                  <TableCell className="font-mono text-xs">
-                    {ag ? `${ag.anycast_ipv4 ?? ''}${ag.anycast_ipv6 ? ` / ${ag.anycast_ipv6}` : ''}` : '—'}
-                  </TableCell>
+                  <TableCell className="font-mono text-xs">{ag?.anycast_ipv4 ?? '—'}</TableCell>
+                  <TableCell className="font-mono text-xs">{ag?.anycast_ipv6 ?? '—'}</TableCell>
                   <TableCell>
                     <RenderStatusBadge server={s} />
                   </TableCell>
@@ -748,12 +762,36 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
                       ? <BindingsCell server={s} peers={peers} canWrite={canWrite} />
                       : <span className="text-xs text-muted-foreground">—</span>}
                   </TableCell>
+                  {canWrite && (
+                    <TableCell>
+                      <Button size="sm" variant="ghost" onClick={() => setEditServer(s)} title="Edit DNS server">
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => removeServer(s)} title="Delete DNS server">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  )}
                 </TableRow>
               );
             })}
           </TableBody>
         </Table>
       </CardContent>
+      <Dialog open={editServer !== null} onOpenChange={(o) => { if (!o) setEditServer(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit DNS server</DialogTitle></DialogHeader>
+          {editServer && (
+            <ServerForm
+              fabricId={fabricId}
+              sites={sites}
+              anycast={anycast}
+              server={editServer}
+              onSaved={async () => { setEditServer(null); await refreshServers(); }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -831,25 +869,54 @@ function BindingsCell({
 }
 
 function ServerForm({
-  fabricId, sites, anycast, onSaved,
-}: { fabricId: string; sites: Site[]; anycast: AnycastGroup[]; onSaved: () => void }) {
+  fabricId, sites, anycast, server, onSaved,
+}: {
+  fabricId: string;
+  sites: Site[];
+  anycast: AnycastGroup[];
+  /** When set, the form patches an existing server. Otherwise creates. */
+  server?: DnsServer;
+  onSaved: () => void;
+}) {
   const NONE = '__none__';
+  const editing = !!server;
   const form = useForm<z.infer<typeof serverSchema>>({
     resolver: zodResolver(serverSchema),
-    defaultValues: { name: '', site_id: '', role: 'auth', unicast_ip: '', anycast_group_id: NONE },
+    defaultValues: {
+      name: server?.name ?? '',
+      site_id: server?.site_id ?? '',
+      role: server?.role ?? 'auth',
+      unicast_ip: server?.unicast_ip ?? '',
+      anycast_group_id: server?.anycast_group_id ?? NONE,
+    },
   });
+  // role is locked when editing (changing it would invalidate the
+  // server's bundle — easier to delete + recreate). We still display
+  // it so the operator knows what they're looking at.
   const role = form.watch('role');
   async function onSubmit(v: z.infer<typeof serverSchema>) {
     try {
-      await http.post('/dns/servers', {
-        name: v.name,
-        site_id: v.site_id,
-        fabric_id: fabricId,
-        role: v.role,
-        unicast_ip: v.unicast_ip,
-        anycast_group_id: v.role === 'recursive' && v.anycast_group_id !== NONE ? v.anycast_group_id : null,
-      });
-      toast.success('DNS server created');
+      if (editing && server) {
+        // PATCH: only the fields the operator can change. site_id +
+        // role + fabric_id are immutable post-create.
+        await http.patch(`/dns/servers/${server.id}`, {
+          name: v.name,
+          unicast_ip: v.unicast_ip,
+          anycast_group_id: server.role === 'recursive' && v.anycast_group_id && v.anycast_group_id !== NONE
+            ? v.anycast_group_id : null,
+        });
+        toast.success('DNS server updated');
+      } else {
+        await http.post('/dns/servers', {
+          name: v.name,
+          site_id: v.site_id,
+          fabric_id: fabricId,
+          role: v.role,
+          unicast_ip: v.unicast_ip,
+          anycast_group_id: v.role === 'recursive' && v.anycast_group_id !== NONE ? v.anycast_group_id : null,
+        });
+        toast.success('DNS server created');
+      }
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
@@ -863,25 +930,31 @@ function ServerForm({
           <FormField control={form.control} name="site_id" render={({ field }) => (
             <FormItem>
               <FormLabel>Site</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select value={field.value} onValueChange={field.onChange} disabled={editing}>
                 <FormControl><SelectTrigger><SelectValue placeholder="Pick a site" /></SelectTrigger></FormControl>
                 <SelectContent>
                   {sites.map((s) => <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {editing && (
+                <p className="text-xs text-muted-foreground">Site is immutable after creation.</p>
+              )}
               <FormMessage />
             </FormItem>
           )} />
           <FormField control={form.control} name="role" render={({ field }) => (
             <FormItem>
               <FormLabel>Role</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select value={field.value} onValueChange={field.onChange} disabled={editing}>
                 <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                 <SelectContent>
                   <SelectItem value="auth">Authoritative</SelectItem>
                   <SelectItem value="recursive">Recursive</SelectItem>
                 </SelectContent>
               </Select>
+              {editing && (
+                <p className="text-xs text-muted-foreground">Role is immutable after creation.</p>
+              )}
             </FormItem>
           )} />
         </div>
@@ -904,7 +977,7 @@ function ServerForm({
           )} />
         )}
         <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
         </Button>
       </form>
     </Form>
