@@ -11,9 +11,9 @@ import { authProvider } from '@/lib/auth-provider';
 import { accessControlProvider } from '@/lib/access-control-provider';
 
 import { Shell } from '@/components/layout/cloudscape-shell';
-import { Toaster } from '@/components/ui/sonner';
-import { TooltipProvider } from '@/components/ui/tooltip';
-import { Skeleton } from '@/components/ui/skeleton';
+import { Toaster } from 'sonner';
+import Box from '@cloudscape-design/components/box';
+import Spinner from '@cloudscape-design/components/spinner';
 
 // Eagerly imported: small + on the critical path. Login is the unauth
 // fallback; the dashboard is the index landing.
@@ -46,75 +46,71 @@ const queryClient = new QueryClient({
 
 function PageFallback() {
   return (
-    <div className="space-y-4">
-      <Skeleton className="h-8 w-72" />
-      <Skeleton className="h-40 w-full" />
-      <Skeleton className="h-60 w-full" />
-    </div>
+    <Box padding="l" textAlign="center" color="text-status-inactive">
+      <Spinner /> Loading…
+    </Box>
   );
 }
 
 export function App() {
   return (
     <BrowserRouter>
-      <TooltipProvider>
-        <Refine
-          dataProvider={dataProvider}
-          authProvider={authProvider}
-          accessControlProvider={accessControlProvider}
-          routerProvider={routerProvider}
-          options={{
-            syncWithLocation: true,
-            warnWhenUnsavedChanges: true,
-            disableTelemetry: true,
-            reactQuery: { clientConfig: queryClient },
-          }}
-          resources={[
-            { name: 'inventory/sites', list: '/sites', show: '/sites/:id', meta: { label: 'Sites' } },
-            { name: 'inventory/racks', list: '/racks', show: '/racks/:id', create: '/racks/new', meta: { label: 'Racks' } },
-            { name: 'inventory/assets', show: '/assets/:id' },
-            { name: 'alerts', list: '/alerts' },
-            { name: 'collectors', list: '/collectors' },
-          ]}
-        >
-          <Routes>
-            <Route element={
-              <Authenticated key="auth-required" fallback={<CatchAllNavigate to="/login" />}>
-                <Shell />
-              </Authenticated>
-            }>
-              <Route index element={<DashboardPage />} />
-              <Route element={<Suspense fallback={<PageFallback />}><Outlet /></Suspense>}>
-                <Route path="/sites" element={<SitesListPage />} />
-                <Route path="/sites/:id" element={<SiteShowPage />} />
-                <Route path="/racks" element={<RacksListPage />} />
-                <Route path="/racks/new" element={<RackCreatePage />} />
-                <Route path="/racks/:id" element={<RackShowPage />} />
-                <Route path="/assets/:id" element={<AssetShowPage />} />
-                <Route path="/capacity" element={<CapacityPage />} />
-                <Route path="/alerts" element={<AlertsPage />} />
-                <Route path="/alerts/rules" element={<AlertRulesPage />} />
-                <Route path="/maintenance" element={<MaintenancePage />} />
-                <Route path="/collectors" element={<CollectorsPage />} />
-                <Route path="/settings/tokens" element={<TokensPage />} />
-                <Route path="/audit" element={<AuditPage />} />
-                <Route path="/import" element={<ImportPage />} />
-                <Route path="/admin" element={<AdminPage />} />
-                <Route path="/settings/notifications" element={<NotificationsPage />} />
-                <Route path="/ipam" element={<IpamPage />} />
-              </Route>
+      <Refine
+        dataProvider={dataProvider}
+        authProvider={authProvider}
+        accessControlProvider={accessControlProvider}
+        routerProvider={routerProvider}
+        options={{
+          syncWithLocation: true,
+          warnWhenUnsavedChanges: true,
+          disableTelemetry: true,
+          reactQuery: { clientConfig: queryClient },
+        }}
+        resources={[
+          { name: 'inventory/sites', list: '/sites', show: '/sites/:id', meta: { label: 'Sites' } },
+          { name: 'inventory/racks', list: '/racks', show: '/racks/:id', create: '/racks/new', meta: { label: 'Racks' } },
+          { name: 'inventory/assets', show: '/assets/:id' },
+          { name: 'alerts', list: '/alerts' },
+          { name: 'collectors', list: '/collectors' },
+        ]}
+      >
+        <Routes>
+          <Route element={
+            <Authenticated key="auth-required" fallback={<CatchAllNavigate to="/login" />}>
+              <Shell />
+            </Authenticated>
+          }>
+            <Route index element={<DashboardPage />} />
+            <Route element={<Suspense fallback={<PageFallback />}><Outlet /></Suspense>}>
+              <Route path="/sites" element={<SitesListPage />} />
+              <Route path="/sites/:id" element={<SiteShowPage />} />
+              <Route path="/racks" element={<RacksListPage />} />
+              <Route path="/racks/new" element={<RackCreatePage />} />
+              <Route path="/racks/:id" element={<RackShowPage />} />
+              <Route path="/assets/:id" element={<AssetShowPage />} />
+              <Route path="/capacity" element={<CapacityPage />} />
+              <Route path="/alerts" element={<AlertsPage />} />
+              <Route path="/alerts/rules" element={<AlertRulesPage />} />
+              <Route path="/maintenance" element={<MaintenancePage />} />
+              <Route path="/collectors" element={<CollectorsPage />} />
+              <Route path="/settings/tokens" element={<TokensPage />} />
+              <Route path="/audit" element={<AuditPage />} />
+              <Route path="/import" element={<ImportPage />} />
+              <Route path="/admin" element={<AdminPage />} />
+              <Route path="/settings/notifications" element={<NotificationsPage />} />
+              <Route path="/ipam" element={<IpamPage />} />
             </Route>
-            <Route element={
-              <Authenticated key="auth-fallback" fallback={<Outlet />}>
-                <NavigateToResource resource="inventory/sites" />
-              </Authenticated>
-            }>
-              <Route path="/login" element={<LoginPage />} />
-            </Route>
-          </Routes>
-          <Toaster />
-        </Refine>
-      </TooltipProvider>
+          </Route>
+          <Route element={
+            <Authenticated key="auth-fallback" fallback={<Outlet />}>
+              <NavigateToResource resource="inventory/sites" />
+            </Authenticated>
+          }>
+            <Route path="/login" element={<LoginPage />} />
+          </Route>
+        </Routes>
+        <Toaster theme="dark" />
+      </Refine>
     </BrowserRouter>
   );
 }
