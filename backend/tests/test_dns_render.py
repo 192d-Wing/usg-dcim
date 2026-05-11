@@ -127,6 +127,39 @@ def test_corefile_recursive_falls_back_to_default_upstreams():
     assert "prod.dcim.mil:53" not in cf
 
 
+def test_corefile_recursive_emits_conditional_forwarders():
+    # Conditional forwarders create their own `<pattern>:53` blocks
+    # routed to operator-declared upstreams, distinct from both the
+    # apex stub-forward and the catch-all global upstreams.
+    cf = render_corefile_recursive(
+        fabric_apexes=["prod.dcim.mil"],
+        auth_unicast_ip="10.42.0.53",
+        upstream_resolvers=["1.1.1.1"],
+        conditional_forwarders=[
+            ("aws.internal.", ["10.250.0.2", "10.250.0.3"]),
+            ("corp.example.", ["10.7.0.53:5353"]),
+        ],
+    )
+    assert "aws.internal.:53 {" in cf
+    assert "forward . 10.250.0.2 10.250.0.3" in cf
+    assert "corp.example.:53 {" in cf
+    assert "forward . 10.7.0.53:5353" in cf
+    # Apex + catch-all still present.
+    assert "prod.dcim.mil:53 {" in cf
+    assert ".:53 {" in cf
+
+
+def test_corefile_recursive_skips_empty_forwarder():
+    # An entry with no upstreams shouldn't emit a half-formed forward
+    # block — would be a Corefile parse error.
+    cf = render_corefile_recursive(
+        fabric_apexes=[], auth_unicast_ip=None,
+        upstream_resolvers=["1.1.1.1"],
+        conditional_forwarders=[("broken.example.", [])],
+    )
+    assert "broken.example.:53" not in cf
+
+
 def test_gobgp_config_has_neighbor_and_anycast_network():
     server = SimpleNamespace(unicast_ip="10.42.0.53", id=uuid4())
     peer = SimpleNamespace(local_asn=65000, peer_asn=65001, peer_ip="10.42.255.1", md5_password=None)

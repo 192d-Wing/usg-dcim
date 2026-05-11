@@ -181,6 +181,34 @@ class AnycastGroup(UUIDPrimaryKey, Timestamped, Base):
     description: Mapped[str | None] = mapped_column(String(512))
 
 
+class DnsForwarder(UUIDPrimaryKey, Timestamped, Base):
+    """Per-zone conditional forwarder for the recursive CoreDNS. Each
+    row emits one extra `<pattern>:53 { forward . <upstreams…> }` block
+    in the rendered recursive Corefile, in addition to the global
+    upstreams. Useful when a fabric needs to route specific zones (eg.
+    `aws.internal.`) to a non-default resolver."""
+
+    __tablename__ = "dns_forwarders"
+    __table_args__ = (
+        UniqueConstraint(
+            "fabric_id", "zone_pattern", name="uq_dns_forwarder_fabric_zone",
+        ),
+        Index("ix_dns_forwarders_fabric", "fabric_id"),
+    )
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
+    )
+    # Trailing dot is normalized in by the schema layer so the renderer
+    # can rely on a canonical form.
+    zone_pattern: Mapped[str] = mapped_column(String(253), nullable=False)
+    # Stored as a JSON array of "ip" or "ip:port" strings — gives the
+    # operator multiple resolvers without forcing a separate table.
+    upstreams: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    description: Mapped[str | None] = mapped_column(String(512))
+
+
 class BgpPeer(UUIDPrimaryKey, Timestamped, Base):
     """A BGP neighbor — typically the leaf or top-of-rack a service's
     anycast sidecar peers with. First-class so anycast services beyond

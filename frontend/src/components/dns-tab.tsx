@@ -84,6 +84,15 @@ type AnycastGroup = {
   anycast_ipv6: string | null;
 };
 
+type DnsForwarder = {
+  id: string;
+  name: string;
+  fabric_id: string;
+  zone_pattern: string;
+  upstreams: string[];
+  description: string | null;
+};
+
 type BgpPeer = {
   id: string;
   name: string;
@@ -160,6 +169,11 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
             id: 'anycast',
             label: 'Anycast groups',
             content: <AnycastGroupsPanel fabricId={fabricId} canWrite={canWrite} />,
+          },
+          {
+            id: 'forwarders',
+            label: 'Forwarders',
+            content: <ForwardersPanel fabricId={fabricId} canWrite={canWrite} />,
           },
         ]}
       />
@@ -1333,6 +1347,251 @@ function AnycastGroupsPanel({ fabricId, canWrite }: { fabricId: string; canWrite
         )}
       </Modal>
     </>
+  );
+}
+
+// ----------------------- Servers -----------------------
+
+// ----------------------- Conditional forwarders -----------------------
+
+function ForwardersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const forwardersQ = useQuery({
+    queryKey: ['dns-forwarders', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: DnsForwarder[] }>(`/dns/forwarders?fabric_id=${fabricId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const forwarders = forwardersQ.data ?? [];
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editFwd, setEditFwd] = useState<DnsForwarder | null>(null);
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-forwarders', fabricId] });
+  }
+
+  async function remove(f: DnsForwarder) {
+    if (!window.confirm(`Delete forwarder ${f.name} (${f.zone_pattern})?`)) return;
+    try {
+      await http.delete(`/dns/forwarders/${f.id}`);
+      await refresh();
+      toast.success('Forwarder removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <>
+      <Table<DnsForwarder>
+        variant="container"
+        loading={forwardersQ.isLoading}
+        loadingText="Loading forwarders…"
+        items={forwarders}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${forwarders.length})`}
+            actions={canWrite && (
+              <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                Create forwarder
+              </Button>
+            )}
+            description="Route specific zones from the recursive resolver to alternate upstreams (e.g. cloud-private resolvers, partner DNS)."
+          >
+            Conditional forwarders
+          </Header>
+        }
+        columnDefinitions={[
+          { id: 'name', header: 'Name', cell: (f) => f.name },
+          {
+            id: 'zone_pattern', header: 'Zone pattern',
+            cell: (f) => <span style={MONO}>{f.zone_pattern}</span>,
+            width: 240,
+          },
+          {
+            id: 'upstreams', header: 'Upstreams',
+            cell: (f) => (
+              <span style={MONO}>
+                {(f.upstreams ?? []).join(', ') || <Box color="text-status-inactive">—</Box>}
+              </span>
+            ),
+          },
+          {
+            id: 'description', header: 'Description',
+            cell: (f) => f.description || <Box color="text-status-inactive">—</Box>,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (f: DnsForwarder) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditFwd(f)} ariaLabel={`Edit ${f.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(f)} ariaLabel={`Delete ${f.name}`} />
+              </SpaceBetween>
+            ),
+            width: 110,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" padding="l">
+            <SpaceBetween size="xs">
+              <b>No conditional forwarders</b>
+              <Box color="text-status-inactive" fontSize="body-s">
+                The recursive resolver forwards every query that doesn't match a
+                local zone to the configured global upstreams. Add a forwarder
+                to route a specific zone (e.g. <span style={MONO}>aws.internal.</span>)
+                elsewhere.
+              </Box>
+              {canWrite && (
+                <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                  Create forwarder
+                </Button>
+              )}
+            </SpaceBetween>
+          </Box>
+        }
+      />
+      {canWrite && (
+        <>
+          <Modal
+            visible={createOpen}
+            onDismiss={() => setCreateOpen(false)}
+            header="New conditional forwarder"
+            size="medium"
+          >
+            <ForwarderForm
+              fabricId={fabricId}
+              onSaved={async () => { setCreateOpen(false); await refresh(); }}
+            />
+          </Modal>
+          <Modal
+            visible={editFwd !== null}
+            onDismiss={() => setEditFwd(null)}
+            header="Edit forwarder"
+            size="medium"
+          >
+            {editFwd && (
+              <ForwarderForm
+                fabricId={fabricId}
+                forwarder={editFwd}
+                onSaved={async () => { setEditFwd(null); await refresh(); }}
+              />
+            )}
+          </Modal>
+        </>
+      )}
+    </>
+  );
+}
+
+function ForwarderForm({
+  fabricId, forwarder, onSaved,
+}: {
+  fabricId: string;
+  forwarder?: DnsForwarder;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(forwarder?.name ?? '');
+  const [zonePattern, setZonePattern] = useState(forwarder?.zone_pattern ?? '');
+  // Operator types one upstream per line — easier than fiddling with a
+  // chip-style multi-input and gives them room to paste a list.
+  const [upstreamsRaw, setUpstreamsRaw] = useState((forwarder?.upstreams ?? []).join('\n'));
+  const [description, setDescription] = useState(forwarder?.description ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
+    if (!zonePattern.trim()) errs.zone_pattern = 'Required (e.g. aws.internal)';
+    const upstreams = upstreamsRaw
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (upstreams.length === 0) errs.upstreams = 'At least one upstream is required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
+    try {
+      if (forwarder) {
+        await http.patch(`/dns/forwarders/${forwarder.id}`, {
+          name, zone_pattern: zonePattern, upstreams, description: description || null,
+        });
+        toast.success('Forwarder updated');
+      } else {
+        await http.post('/dns/forwarders', {
+          name, fabric_id: fabricId, zone_pattern: zonePattern, upstreams,
+          description: description || null,
+        });
+        toast.success('Forwarder created');
+      }
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : forwarder ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <ColumnLayout columns={2}>
+            <FormField label="Name" errorText={errors.name}>
+              <Input
+                value={name}
+                onChange={({ detail }) => setName(detail.value)}
+                placeholder="aws-vpc-resolver"
+              />
+            </FormField>
+            <FormField
+              label="Zone pattern"
+              description="Trailing dot is added automatically"
+              errorText={errors.zone_pattern}
+            >
+              <Input
+                value={zonePattern}
+                onChange={({ detail }) => setZonePattern(detail.value)}
+                placeholder="aws.internal"
+              />
+            </FormField>
+          </ColumnLayout>
+          <FormField
+            label="Upstreams"
+            description="One per line. Use ip or ip:port."
+            errorText={errors.upstreams}
+          >
+            <textarea
+              value={upstreamsRaw}
+              onChange={(e) => setUpstreamsRaw(e.target.value)}
+              placeholder={'10.250.0.2\n10.250.0.3'}
+              rows={4}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 13,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
+            />
+          </FormField>
+          <FormField label="Description (optional)">
+            <Input
+              value={description}
+              onChange={({ detail }) => setDescription(detail.value)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 

@@ -31,6 +31,7 @@ from ..models.dns import (
     AnycastBgpBinding,
     AnycastGroup,
     BgpPeer,
+    DnsForwarder,
     DnsRecord,
     DnsRecordSource,
     DnsRecordType,
@@ -153,10 +154,19 @@ def render_corefile_recursive(
     fabric_apexes: Iterable[str],
     auth_unicast_ip: str | None,
     upstream_resolvers: Iterable[str],
+    conditional_forwarders: Iterable[tuple[str, list[str]]] = (),
 ) -> str:
     """Recursive Corefile: forward `*.<apex>` for each fabric apex to
-    the local auth pod, forward everything else to operator upstreams,
-    plus cache/log/errors/prometheus/health."""
+    the local auth pod, route operator-configured zone patterns to
+    their declared upstreams, forward everything else to global
+    upstreams, plus cache/log/errors/prometheus/health.
+
+    `conditional_forwarders` is an iterable of `(zone_pattern,
+    [upstream, …])` tuples. Each tuple becomes its own `<pattern>:53`
+    block — these win over the catch-all but lose to the apex stubs
+    (CoreDNS picks the most-specific match for a query name, so apex
+    blocks above are still consulted first for in-zone queries).
+    """
     upstream_list = " ".join(upstream_resolvers) or "1.1.1.1 8.8.8.8"
     blocks = []
     if auth_unicast_ip:
@@ -170,6 +180,21 @@ def render_corefile_recursive(
                 f"    errors\n"
                 f"}}"
             )
+    # Operator-defined zone forwarders. Sorted on the pattern for a
+    # deterministic Corefile across renders.
+    for pattern, upstreams in sorted(
+        conditional_forwarders, key=lambda t: t[0],
+    ):
+        if not upstreams:
+            continue
+        forward_targets = " ".join(upstreams)
+        blocks.append(
+            f"{pattern}:53 {{\n"
+            f"    forward . {forward_targets}\n"
+            f"    log\n"
+            f"    errors\n"
+            f"}}"
+        )
     blocks.append(
         ".:53 {\n"
         f"    forward . {upstream_list}\n"
@@ -302,6 +327,20 @@ async def _local_auth_unicast_ip(db: AsyncSession, server: DnsServer) -> str | N
     return str(auth.unicast_ip).split("/", 1)[0] if auth else None
 
 
+async def _fabric_forwarders(
+    db: AsyncSession, fabric_id: UUID,
+) -> list[tuple[str, list[str]]]:
+    """Conditional forwarders configured for this fabric — emitted as
+    extra Corefile blocks ahead of the catch-all `.:53`."""
+    rows = (
+        await db.execute(
+            select(DnsForwarder.zone_pattern, DnsForwarder.upstreams)
+            .where(DnsForwarder.fabric_id == fabric_id)
+        )
+    ).all()
+    return [(p, list(u or [])) for p, u in rows]
+
+
 async def _fabric_apex_names(db: AsyncSession, fabric_id: UUID) -> list[str]:
     """Every apex zone bound to this fabric. Multiple are allowed — the
     recursive Corefile emits a stub-forward per apex."""
@@ -380,6 +419,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         # Recursive: assemble forwarders + a stub per fabric apex.
         apex_names = await _fabric_apex_names(db, server.fabric_id)
         local_auth_ip = await _local_auth_unicast_ip(db, server)
+        forwarders = await _fabric_forwarders(db, server.fabric_id)
         # Operator-configured upstreams aren't modeled per-fabric yet
         # (deferred to a Fabric.dns_upstreams field). Default to public
         # quad-eight / cloudflare for the v1 plumbing.
@@ -388,6 +428,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             fabric_apexes=apex_names,
             auth_unicast_ip=local_auth_ip,
             upstream_resolvers=upstreams,
+            conditional_forwarders=forwarders,
         )
         zone_files = {}
         # `anycast` gates whether we emit a gobgpd config at all — the

@@ -196,6 +196,41 @@ class AnycastGroupOut(AnycastGroupBase):
     updated_at: datetime
 
 
+# ---------- DnsForwarder ----------
+
+class DnsForwarderBase(BaseModel):
+    name: str
+    fabric_id: UUID
+    # Canonicalize with a trailing dot so the recursive Corefile gets a
+    # deterministic key — CoreDNS treats `aws.internal` and
+    # `aws.internal.` as different zone names.
+    zone_pattern: Annotated[str, BeforeValidator(
+        lambda v: v if not isinstance(v, str) or v.endswith(".") else f"{v}.",
+    )]
+    upstreams: list[str] = Field(default_factory=list, min_length=1)
+    description: str | None = None
+
+
+class DnsForwarderCreate(DnsForwarderBase):
+    pass
+
+
+class DnsForwarderUpdate(BaseModel):
+    name: str | None = None
+    zone_pattern: Annotated[str | None, BeforeValidator(
+        lambda v: v if v is None or not isinstance(v, str) or v.endswith(".") else f"{v}.",
+    )] = None
+    upstreams: list[str] | None = None
+    description: str | None = None
+
+
+class DnsForwarderOut(DnsForwarderBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
 # ---------- BgpPeer ----------
 
 class BgpPeerBase(BaseModel):

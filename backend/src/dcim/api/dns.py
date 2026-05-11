@@ -36,6 +36,7 @@ from ..models.dns import (
     AnycastBgpBinding,
     AnycastGroup,
     BgpPeer,
+    DnsForwarder,
     DnsRecord,
     DnsRecordSource,
     DnsServer,
@@ -57,6 +58,9 @@ from ..schemas.dns import (
     BgpPeerOut,
     BgpPeerUpdate,
     DnsBundle,
+    DnsForwarderCreate,
+    DnsForwarderOut,
+    DnsForwarderUpdate,
     DnsRecordCreate,
     DnsRecordOut,
     DnsRecordUpdate,
@@ -83,6 +87,7 @@ _SERVER_NOT_FOUND = "dns server not found"
 _ANYCAST_NOT_FOUND = "anycast group not found"
 _BGP_NOT_FOUND = "bgp peer not found"
 _BIND_NOT_FOUND = "anycast/bgp binding not found"
+_FORWARDER_NOT_FOUND = "dns forwarder not found"
 
 
 # ----------------------- Zones -----------------------
@@ -600,6 +605,98 @@ async def delete_anycast_group(
     await audit.record(
         db, principal, action="anycast_group.delete",
         target_type="anycast_group", target_id=str(group_id),
+    )
+    await db.commit()
+
+
+# ----------------------- Conditional forwarders -----------------------
+@router.get("/forwarders", response_model=Page[DnsForwarderOut])
+async def list_forwarders(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(DnsForwarder)
+    if fabric_id is not None:
+        stmt = stmt.where(DnsForwarder.fabric_id == fabric_id)
+    return await paginate(
+        db, stmt, model=DnsForwarder, params=params, out_model=DnsForwarderOut,
+    )
+
+
+@router.post("/forwarders", response_model=DnsForwarderOut, status_code=201)
+async def create_forwarder(
+    payload: DnsForwarderCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    if not payload.upstreams:
+        raise ValidationError("at least one upstream is required")
+    obj = DnsForwarder(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_forwarder.create",
+        target_type="dns_forwarder", target_id=str(obj.id),
+        metadata={
+            "name": payload.name,
+            "zone_pattern": payload.zone_pattern,
+            "upstreams": payload.upstreams,
+        },
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/forwarders/{forwarder_id}", response_model=DnsForwarderOut)
+async def update_forwarder(
+    forwarder_id: UUID,
+    payload: DnsForwarderUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsForwarder, forwarder_id)
+    if obj is None:
+        raise NotFoundError(_FORWARDER_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    if "upstreams" in diff and diff["upstreams"] is not None and not diff["upstreams"]:
+        raise ValidationError("at least one upstream is required")
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="dns_forwarder.update",
+        target_type="dns_forwarder", target_id=str(forwarder_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/forwarders/{forwarder_id}", status_code=204)
+async def delete_forwarder(
+    forwarder_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsForwarder, forwarder_id)
+    if obj is None:
+        raise NotFoundError(_FORWARDER_NOT_FOUND)
+    # Snapshot before deletion so the audit row stands on its own.
+    snapshot = {
+        "name": obj.name,
+        "zone_pattern": obj.zone_pattern,
+        "upstreams": list(obj.upstreams or []),
+    }
+    await db.execute(delete(DnsForwarder).where(DnsForwarder.id == forwarder_id))
+    await audit.record(
+        db, principal, action="dns_forwarder.delete",
+        target_type="dns_forwarder", target_id=str(forwarder_id),
+        metadata=snapshot,
     )
     await db.commit()
 
