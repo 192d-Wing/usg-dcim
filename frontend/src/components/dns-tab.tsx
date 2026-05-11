@@ -1076,6 +1076,8 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
     enabled: zone.signed === true,
   });
   const [busy, setBusy] = useState(false);
+  const [unsignOpen, setUnsignOpen] = useState(false);
+  const [unsignText, setUnsignText] = useState('');
 
   async function enable() {
     if (!window.confirm(`Generate KSK + ZSK for ${zone.name} and mark it signed?`)) return;
@@ -1121,20 +1123,18 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
     } catch (err: any) { toast.error(err?.message ?? 'delete failed'); }
   }
 
-  async function unsign() {
-    const ok = window.confirm(
-      `Unsign ${zone.name}?\n\n` +
-      'This deletes every DNSSEC key for this zone and clears the ' +
-      'signed flag. Withdraw the DS record from the parent zone\'s ' +
-      'operator BEFORE running this — otherwise cached validators ' +
-      'will SERVFAIL until their TTLs expire.\n\n' +
-      'You can re-enable DNSSEC later; new keys will be generated.',
-    );
-    if (!ok) return;
+  function openUnsign() {
+    setUnsignText('');
+    setUnsignOpen(true);
+  }
+
+  async function confirmUnsign() {
+    if (unsignText !== zone.name) return;
     setBusy(true);
     try {
       await http.post(`/dns/zones/${zone.id}/disable-dnssec`, {});
       toast.success('Zone unsigned');
+      setUnsignOpen(false);
       await qc.invalidateQueries({ queryKey: ['dns-zone', zone.id] });
       await qc.invalidateQueries({ queryKey: ['dns-keys', zone.id] });
       await qc.invalidateQueries({ queryKey: ['dns-ds', zone.id] });
@@ -1207,7 +1207,7 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
                 <Button iconName="refresh" loading={busy} onClick={() => rotate('zsk')}>
                   Rotate ZSK
                 </Button>
-                <Button iconName="remove" loading={busy} onClick={unsign}>
+                <Button iconName="remove" loading={busy} onClick={openUnsign}>
                   Unsign zone
                 </Button>
               </SpaceBetween>
@@ -1344,6 +1344,56 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
           </Box>
         }
       />
+
+      <Modal
+        visible={unsignOpen}
+        onDismiss={() => setUnsignOpen(false)}
+        header="Unsign zone"
+        size="medium"
+        footer={
+          <Box float="right">
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setUnsignOpen(false)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={unsignText !== zone.name}
+                loading={busy}
+                onClick={confirmUnsign}
+              >
+                Unsign zone
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box>
+            This deletes every DNSSEC key for this zone and clears the
+            signed flag. <b>Withdraw the DS record from the parent
+            zone's operator BEFORE running this</b> — otherwise cached
+            validators will SERVFAIL until their TTLs expire.
+          </Box>
+          <Box color="text-status-inactive" fontSize="body-s">
+            You can re-enable DNSSEC later; new keys will be generated.
+          </Box>
+          <FormField
+            label={
+              <span>
+                To confirm, type <span style={MONO}>{zone.name}</span> below.
+              </span>
+            }
+          >
+            <Input
+              value={unsignText}
+              onChange={({ detail }) => setUnsignText(detail.value)}
+              placeholder={zone.name}
+              autoFocus
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
     </SpaceBetween>
   );
 }
