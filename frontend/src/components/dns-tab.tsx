@@ -897,6 +897,7 @@ function ZoneDetailView({
             content: (
               <ZoneActivityTab
                 zoneId={zone.id}
+                fabricId={zone.fabric_id}
                 recordIds={records.map((r) => r.id)}
               />
             ),
@@ -1006,7 +1007,13 @@ type AuditEntry = {
   metadata_json: Record<string, unknown>;
 };
 
-function ZoneActivityTab({ zoneId, recordIds }: { zoneId: string; recordIds: string[] }) {
+function ZoneActivityTab({
+  zoneId, fabricId, recordIds,
+}: {
+  zoneId: string;
+  fabricId: string;
+  recordIds: string[];
+}) {
   const [openEntry, setOpenEntry] = useState<AuditEntry | null>(null);
   const zoneEvents = useQuery({
     queryKey: ['audit', 'dns_zone', zoneId],
@@ -1025,18 +1032,76 @@ function ZoneActivityTab({ zoneId, recordIds }: { zoneId: string; recordIds: str
       `/audit/log?target_type=dns_record&target_ids=${recordIds.join(',')}&page_size=500`,
     )).data.items ?? [],
   });
+  // Fabric-scoped helpers — views, blocklists, forwarders, and
+  // health-checks all affect this zone indirectly. We don't have a
+  // direct zone-id link on those rows, so we resolve the fabric's
+  // entity ids first then query audit by target_ids — same shape we
+  // used for record-level events.
+  const viewsQ = useQuery({
+    queryKey: ['dns-views', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: { id: string }[] }>(`/dns/views?fabric_id=${fabricId}&page_size=500`)
+    ).data.items ?? [],
+  });
+  const blocklistsQ = useQuery({
+    queryKey: ['dns-blocklists', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: { id: string }[] }>(`/dns/blocklists?fabric_id=${fabricId}&page_size=500`)
+    ).data.items ?? [],
+  });
+  const forwardersQ = useQuery({
+    queryKey: ['dns-forwarders', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: { id: string }[] }>(`/dns/forwarders?fabric_id=${fabricId}&page_size=500`)
+    ).data.items ?? [],
+  });
+  const checksQ = useQuery({
+    queryKey: ['dns-health-checks', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: { id: string }[] }>(`/dns/health-checks?fabric_id=${fabricId}&page_size=500`)
+    ).data.items ?? [],
+  });
+  const fabricEvents = useQuery({
+    // Fold all fabric-scoped target ids into one combined query so
+    // the page makes one extra round-trip instead of four.
+    queryKey: [
+      'audit', 'dns-fabric', fabricId,
+      (viewsQ.data ?? []).map((x) => x.id).join(','),
+      (blocklistsQ.data ?? []).map((x) => x.id).join(','),
+      (forwardersQ.data ?? []).map((x) => x.id).join(','),
+      (checksQ.data ?? []).map((x) => x.id).join(','),
+    ],
+    enabled: !viewsQ.isLoading && !blocklistsQ.isLoading && !forwardersQ.isLoading && !checksQ.isLoading,
+    queryFn: async () => {
+      const ids = [
+        ...(viewsQ.data ?? []).map((x) => x.id),
+        ...(blocklistsQ.data ?? []).map((x) => x.id),
+        ...(forwardersQ.data ?? []).map((x) => x.id),
+        ...(checksQ.data ?? []).map((x) => x.id),
+      ];
+      if (ids.length === 0) return [] as AuditEntry[];
+      const r = await http.get<{ items: AuditEntry[] }>(
+        `/audit/log?target_ids=${ids.join(',')}&page_size=500`,
+      );
+      return r.data.items ?? [];
+    },
+  });
 
   const entries = useMemo(() => {
     const merged = [
       ...(zoneEvents.data ?? []),
       ...(recordEvents.data ?? []),
+      ...(fabricEvents.data ?? []),
     ];
-    return merged.sort(
+    // De-dupe in case the same row matched on more than one filter.
+    const byId = new Map<string, AuditEntry>();
+    for (const e of merged) byId.set(e.id, e);
+    return Array.from(byId.values()).sort(
       (a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime(),
     );
-  }, [zoneEvents.data, recordEvents.data]);
+  }, [zoneEvents.data, recordEvents.data, fabricEvents.data]);
 
-  const loading = zoneEvents.isLoading || recordEvents.isLoading;
+  const loading = zoneEvents.isLoading || recordEvents.isLoading || fabricEvents.isLoading;
 
   return (
     <>
