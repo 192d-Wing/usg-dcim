@@ -60,6 +60,8 @@ import CsSegmentedControl from '@cloudscape-design/components/segmented-control'
 import CsBadge from '@cloudscape-design/components/badge';
 import CsBreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
 import CsCards from '@cloudscape-design/components/cards';
+import CsForm from '@cloudscape-design/components/form';
+import CsCheckbox from '@cloudscape-design/components/checkbox';
 
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
@@ -610,47 +612,65 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
 }
 
 function FabricForm({ onSaved }: { onSaved: () => void }) {
-  const form = useForm<z.infer<typeof fabricSchema>>({
-    resolver: zodResolver(fabricSchema),
-    defaultValues: { name: '', slug: '', description: '', enclave: '', classification: '' },
-  });
-  async function onSubmit(v: z.infer<typeof fabricSchema>) {
+  const [name, setName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [enclave, setEnclave] = useState('');
+  const [classification, setClassification] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Name required';
+    if (!slug.trim() || !/^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/.test(slug)) {
+      errs.slug = 'lowercase alphanumeric + hyphens';
+    }
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/ipam/fabrics', {
-        name: v.name, slug: v.slug,
-        description: v.description || null,
-        enclave: v.enclave || null,
-        classification: v.classification || null,
+        name, slug,
+        description: description || null,
+        enclave: enclave || null,
+        classification: classification || null,
       });
       toast.success('Fabric created (with default VRF)');
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); } finally { setSubmitting(false); }
   }
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. Production" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="slug" render={({ field }) => (
-          <FormItem><FormLabel>Slug</FormLabel><FormControl><Input placeholder="prod" className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="enclave" render={({ field }) => (
-            <FormItem><FormLabel>Enclave</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="classification" render={({ field }) => (
-            <FormItem><FormLabel>Classification</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Create'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          <CsFormField label="Name" errorText={errors.name}>
+            <CsInput value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. Production" />
+          </CsFormField>
+          <CsFormField label="Slug" errorText={errors.slug}>
+            <CsInput value={slug} onChange={({ detail }) => setSlug(detail.value)} placeholder="prod" />
+          </CsFormField>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="Enclave">
+              <CsInput value={enclave} onChange={({ detail }) => setEnclave(detail.value)} />
+            </CsFormField>
+            <CsFormField label="Classification">
+              <CsInput value={classification} onChange={({ detail }) => setClassification(detail.value)} />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsFormField label="Description">
+            <CsInput value={description} onChange={({ detail }) => setDescription(detail.value)} />
+          </CsFormField>
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
 
@@ -747,40 +767,52 @@ function VrfsTab({
 }
 
 function VrfForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void }) {
-  const form = useForm<z.infer<typeof vrfSchema>>({
-    resolver: zodResolver(vrfSchema),
-    defaultValues: { name: '', rd: '', description: '' },
-  });
-  async function onSubmit(v: z.infer<typeof vrfSchema>) {
+  const [name, setName] = useState('');
+  const [rd, setRd] = useState('');
+  const [description, setDescription] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Name required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/ipam/vrfs', {
-        fabric_id: fabricId,
-        name: v.name,
-        rd: v.rd || null,
-        description: v.description || null,
+        fabric_id: fabricId, name,
+        rd: rd || null,
+        description: description || null,
         is_default: false,
       });
       toast.success('VRF created');
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); } finally { setSubmitting(false); }
   }
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. mgmt" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="rd" render={({ field }) => (
-          <FormItem><FormLabel>Route distinguisher (optional)</FormLabel><FormControl><Input placeholder="e.g. 65000:100" className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Create'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          <CsFormField label="Name" errorText={errors.name}>
+            <CsInput value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. mgmt" />
+          </CsFormField>
+          <CsFormField label="Route distinguisher (optional)">
+            <CsInput value={rd} onChange={({ detail }) => setRd(detail.value)} placeholder="e.g. 65000:100" />
+          </CsFormField>
+          <CsFormField label="Description">
+            <CsInput value={description} onChange={({ detail }) => setDescription(detail.value)} />
+          </CsFormField>
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
 
@@ -1471,91 +1503,89 @@ function SupernetForm({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
   const purposeLocked = !!parent?.purpose && !editing;
+  const purposeOptions: CsSelectProps.Option[] = [
+    { value: PURPOSE_NONE, label: '(unset)' },
+    ...PURPOSES.map((p) => ({ value: p, label: p })),
+  ];
+  const siteOptions: CsSelectProps.Option[] = [
+    { value: NONE, label: '(unassigned)' },
+    ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
+  ];
+
+  // form.watch() values
+  const prefixV = form.watch('prefix') ?? '';
+  const nameV = form.watch('name') ?? '';
+  const siteV = form.watch('site_id') ?? NONE;
+  const purposeV = form.watch('purpose') ?? PURPOSE_NONE;
+  const descV = form.watch('description') ?? '';
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        {parent && !editing && (
-          <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            Carving inside <span className="font-mono">{parent.prefix}</span>.
-            Prefix must fit inside the parent.
-          </p>
-        )}
-        <FormField control={form.control} name="prefix" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Prefix (CIDR)</FormLabel>
-            <FormControl>
-              <Input
-                placeholder="e.g. 10.0.0.0/8 or 2001:db8::/32"
-                className="font-mono"
-                disabled={editing}
-                {...field}
+    <form onSubmit={form.handleSubmit(onSubmit)}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          {parent && !editing && (
+            <CsBox color="text-status-inactive" fontSize="body-s">
+              Carving inside <span style={{ fontFamily: 'ui-monospace, monospace' }}>{parent.prefix}</span>.
+              Prefix must fit inside the parent.
+            </CsBox>
+          )}
+          <CsFormField
+            label="Prefix (CIDR)"
+            description={editing ? 'Prefix is immutable after creation. Delete + recreate to change it.' : undefined}
+            errorText={form.formState.errors.prefix?.message as string | undefined}
+          >
+            <CsInput
+              disabled={editing}
+              value={prefixV}
+              onChange={({ detail }) => form.setValue('prefix', detail.value)}
+              placeholder="e.g. 10.0.0.0/8 or 2001:db8::/32"
+            />
+          </CsFormField>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="Name">
+              <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
+            </CsFormField>
+            <CsFormField label="Site (optional)">
+              <CsSelect
+                selectedOption={siteOptions.find((o) => o.value === siteV) ?? siteOptions[0]}
+                onChange={({ detail }) => form.setValue('site_id', detail.selectedOption.value!)}
+                options={siteOptions}
+                expandToViewport
               />
-            </FormControl>
-            {editing && (
-              <p className="text-xs text-muted-foreground">
-                Prefix is immutable after creation. Delete + recreate to change it.
-              </p>
-            )}
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="name" render={({ field }) => (
-            <FormItem><FormLabel>Name</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="site_id" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Site (optional)</FormLabel>
-              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={NONE}>(unassigned)</SelectItem>
-                  {sites.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="purpose" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Purpose</FormLabel>
-              <Select
-                value={field.value}
-                onValueChange={field.onChange}
+            </CsFormField>
+          </CsColumnLayout>
+          <CsColumnLayout columns={2}>
+            <CsFormField
+              label="Purpose"
+              description={
+                purposeLocked
+                  ? `Locked to ${parent?.purpose} — parent's purpose.`
+                  : editing
+                    ? 'Setting a purpose locks every subnet under this supernet to the same purpose.'
+                    : undefined
+              }
+            >
+              <CsSelect
+                selectedOption={purposeOptions.find((o) => o.value === purposeV) ?? purposeOptions[0]}
+                onChange={({ detail }) => form.setValue('purpose', detail.selectedOption.value!)}
+                options={purposeOptions}
                 disabled={purposeLocked}
-              >
-                <FormControl><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={PURPOSE_NONE}>(unset)</SelectItem>
-                  {PURPOSES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {purposeLocked && (
-                <p className="text-xs text-muted-foreground">
-                  Locked to <span className="font-mono">{parent?.purpose}</span> — parent's purpose.
-                </p>
-              )}
-              {editing && !purposeLocked && (
-                <p className="text-xs text-muted-foreground">
-                  Setting a purpose locks every subnet under this supernet to the same purpose.
-                </p>
-              )}
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="description" render={({ field }) => (
-            <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+                expandToViewport
+              />
+            </CsFormField>
+            <CsFormField label="Description">
+              <CsInput value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
+            </CsFormField>
+          </CsColumnLayout>
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
 
@@ -1661,105 +1691,98 @@ function SubnetForm({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
   const purposeLocked = !!parentPurpose;
+  const siteOptions: CsSelectProps.Option[] = [
+    { value: NONE, label: '(unassigned)' },
+    ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
+  ];
+  const purposeOptions: CsSelectProps.Option[] = [
+    { value: PURPOSE_NONE, label: '(unset)' },
+    ...PURPOSES.map((p) => ({ value: p, label: p })),
+  ];
+  const vniOptions: CsSelectProps.Option[] = [
+    { value: NONE, label: '(none)' },
+    ...l2Vnis.map((v) => ({
+      value: v.id,
+      label: `${v.vni}${v.name ? ` · ${v.name}` : ''}${v.vlan_id ? ` · vlan ${v.vlan_id}` : ''}`,
+    })),
+  ];
+  const prefixV = form.watch('prefix') ?? '';
+  const siteV = form.watch('site_id') ?? NONE;
+  const purposeV = form.watch('purpose') ?? PURPOSE_NONE;
+  const vlanV = form.watch('vlan_id') ?? '';
+  const gatewayV = form.watch('gateway') ?? '';
+  const vniV = form.watch('vni_id') ?? NONE;
+  const nameV = form.watch('name') ?? '';
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="prefix" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Prefix (CIDR, must be inside the supernet)</FormLabel>
-            <FormControl>
-              <Input
-                placeholder="e.g. 10.0.5.0/24 or 2001:db8:1::/48"
-                className="font-mono"
-                disabled={editing}
-                {...field}
+    <form onSubmit={form.handleSubmit(onSubmit)}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          <CsFormField
+            label="Prefix (CIDR, must be inside the supernet)"
+            description={editing ? 'Prefix is immutable after creation. Delete + recreate to change it.' : undefined}
+            errorText={form.formState.errors.prefix?.message as string | undefined}
+          >
+            <CsInput
+              disabled={editing}
+              value={prefixV}
+              onChange={({ detail }) => form.setValue('prefix', detail.value)}
+              placeholder="e.g. 10.0.5.0/24 or 2001:db8:1::/48"
+            />
+          </CsFormField>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="Site">
+              <CsSelect
+                selectedOption={siteOptions.find((o) => o.value === siteV) ?? siteOptions[0]}
+                onChange={({ detail }) => form.setValue('site_id', detail.selectedOption.value!)}
+                options={siteOptions}
+                expandToViewport
               />
-            </FormControl>
-            {editing && (
-              <p className="text-xs text-muted-foreground">
-                Prefix is immutable after creation. Delete + recreate to change it.
-              </p>
-            )}
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="site_id" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Site</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={NONE}>(unassigned)</SelectItem>
-                  {sites.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="purpose" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Purpose</FormLabel>
-              <Select
-                value={field.value}
-                onValueChange={field.onChange}
+            </CsFormField>
+            <CsFormField
+              label="Purpose"
+              description={purposeLocked ? `Locked to ${parentPurpose} — parent supernet's purpose.` : undefined}
+            >
+              <CsSelect
+                selectedOption={purposeOptions.find((o) => o.value === purposeV) ?? purposeOptions[0]}
+                onChange={({ detail }) => form.setValue('purpose', detail.selectedOption.value!)}
+                options={purposeOptions}
                 disabled={purposeLocked}
-              >
-                <FormControl><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={PURPOSE_NONE}>(unset)</SelectItem>
-                  {PURPOSES.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {purposeLocked && (
-                <p className="text-xs text-muted-foreground">
-                  Locked to <span className="font-mono">{parentPurpose}</span> — parent supernet's purpose.
-                </p>
-              )}
-              <FormMessage />
-            </FormItem>
-          )} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="vlan_id" render={({ field }) => (
-            <FormItem><FormLabel>VLAN</FormLabel><FormControl><Input type="number" min={1} max={4094} {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="gateway" render={({ field }) => (
-            <FormItem><FormLabel>Gateway (optional)</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="vni_id" render={({ field }) => (
-          <FormItem>
-            <FormLabel>L2 VNI (optional)</FormLabel>
-            <Select value={field.value ?? NONE} onValueChange={field.onChange}>
-              <FormControl><SelectTrigger><SelectValue placeholder="—" /></SelectTrigger></FormControl>
-              <SelectContent>
-                <SelectItem value={NONE}>(none)</SelectItem>
-                {l2Vnis.map((v) => (
-                  <SelectItem key={v.id} value={v.id}>
-                    {v.vni}{v.name ? ` · ${v.name}` : ''}
-                    {v.vlan_id ? ` · vlan ${v.vlan_id}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Bind this subnet to an L2 VNI to track which broadcast domain it rides.
-              Only L2 VNIs in this fabric are eligible.
-            </p>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+                expandToViewport
+              />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="VLAN">
+              <CsInput type="number" value={vlanV} onChange={({ detail }) => form.setValue('vlan_id', detail.value)} />
+            </CsFormField>
+            <CsFormField label="Gateway (optional)">
+              <CsInput value={gatewayV} onChange={({ detail }) => form.setValue('gateway', detail.value)} />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsFormField
+            label="L2 VNI (optional)"
+            description="Bind this subnet to an L2 VNI to track which broadcast domain it rides. Only L2 VNIs in this fabric are eligible."
+          >
+            <CsSelect
+              selectedOption={vniOptions.find((o) => o.value === vniV) ?? vniOptions[0]}
+              onChange={({ detail }) => form.setValue('vni_id', detail.selectedOption.value!)}
+              options={vniOptions}
+              expandToViewport
+            />
+          </CsFormField>
+          <CsFormField label="Name (optional)">
+            <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
+          </CsFormField>
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
 
@@ -2407,74 +2430,76 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
 }
 
 function DhcpForm({ fabrics, onSaved }: { fabrics: Fabric[]; onSaved: () => void }) {
-  const form = useForm<z.infer<typeof dhcpSchema>>({
-    resolver: zodResolver(dhcpSchema),
-    defaultValues: {
-      name: '', fabric_id: '', kea_url: '',
-      auth_username: '', auth_password: '', enabled: true,
-    },
-  });
-  async function onSubmit(v: z.infer<typeof dhcpSchema>) {
+  const fabricOpts: CsSelectProps.Option[] = fabrics.map((f) => ({ value: f.id, label: f.name }));
+  const [name, setName] = useState('');
+  const [fabricOpt, setFabricOpt] = useState<CsSelectProps.Option | null>(null);
+  const [keaUrl, setKeaUrl] = useState('');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [enabled, setEnabled] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Name required';
+    if (!fabricOpt?.value) errs.fabric = 'Fabric required';
+    if (!keaUrl.trim()) errs.kea_url = 'URL required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/ipam/dhcp/servers', {
-        name: v.name, fabric_id: v.fabric_id, kea_url: v.kea_url,
-        auth_username: v.auth_username || null,
-        auth_password: v.auth_password || null,
-        enabled: v.enabled,
+        name, fabric_id: fabricOpt!.value, kea_url: keaUrl,
+        auth_username: authUsername || null,
+        auth_password: authPassword || null,
+        enabled,
       });
       toast.success('DHCP server registered');
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); } finally { setSubmitting(false); }
   }
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. kea-prod-east" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <FormField control={form.control} name="fabric_id" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Fabric</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange}>
-              <FormControl><SelectTrigger><SelectValue placeholder="Pick a fabric" /></SelectTrigger></FormControl>
-              <SelectContent>
-                {fabrics.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="kea_url" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Kea Control Agent URL</FormLabel>
-            <FormControl><Input type="url" placeholder="http://kea-ctrl-agent:8000" className="font-mono" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="auth_username" render={({ field }) => (
-            <FormItem><FormLabel>Username (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="auth_password" render={({ field }) => (
-            <FormItem><FormLabel>Password (optional)</FormLabel><FormControl><Input type="password" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="enabled" render={({ field }) => (
-          <FormItem className="flex items-center gap-3 space-y-0">
-            <FormControl>
-              <input
-                type="checkbox" className="h-4 w-4"
-                checked={field.value} onChange={(e) => field.onChange(e.target.checked)}
-              />
-            </FormControl>
-            <FormLabel className="!mt-0 text-sm font-normal">Enabled (sync every 5 minutes)</FormLabel>
-          </FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Register'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Register'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          <CsFormField label="Name" errorText={errors.name}>
+            <CsInput value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. kea-prod-east" />
+          </CsFormField>
+          <CsFormField label="Fabric" errorText={errors.fabric}>
+            <CsSelect
+              placeholder="Pick a fabric"
+              selectedOption={fabricOpt}
+              onChange={({ detail }) => setFabricOpt(detail.selectedOption)}
+              options={fabricOpts}
+              expandToViewport
+            />
+          </CsFormField>
+          <CsFormField label="Kea Control Agent URL" errorText={errors.kea_url}>
+            <CsInput type="url" value={keaUrl} onChange={({ detail }) => setKeaUrl(detail.value)}
+              placeholder="http://kea-ctrl-agent:8000" />
+          </CsFormField>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="Username (optional)">
+              <CsInput value={authUsername} onChange={({ detail }) => setAuthUsername(detail.value)} />
+            </CsFormField>
+            <CsFormField label="Password (optional)">
+              <CsInput type="password" value={authPassword} onChange={({ detail }) => setAuthPassword(detail.value)} />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsCheckbox checked={enabled} onChange={({ detail }) => setEnabled(detail.checked)}>
+            Enabled (sync every 5 minutes)
+          </CsCheckbox>
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
 
@@ -2677,53 +2702,66 @@ function OverlayForm({
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
+  const kindOptions: CsSelectProps.Option[] = [
+    { value: 'vxlan', label: 'VXLAN' },
+    { value: 'geneve', label: 'GENEVE' },
+  ];
+  const vrfOptions: CsSelectProps.Option[] = [
+    { value: NONE, label: '(none)' },
+    ...vrfs.map((v) => ({ value: v.id, label: v.name })),
+  ];
+  const nameV = form.watch('name') ?? '';
+  const udpV = form.watch('udp_port') ?? '';
+  const mtuV = form.watch('mtu') ?? '';
+  const vrfV = form.watch('underlay_vrf_id') ?? NONE;
+  const descV = form.watch('description') ?? '';
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name</FormLabel><FormControl><Input placeholder="e.g. evpn-fabric-east" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormItem>
-            <FormLabel>Kind</FormLabel>
-            <Select value={kind} onValueChange={(v) => syncPort(v as 'vxlan' | 'geneve')}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="vxlan">VXLAN</SelectItem>
-                <SelectItem value="geneve">GENEVE</SelectItem>
-              </SelectContent>
-            </Select>
-          </FormItem>
-          <FormField control={form.control} name="udp_port" render={({ field }) => (
-            <FormItem><FormLabel>UDP port</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="mtu" render={({ field }) => (
-            <FormItem><FormLabel>MTU (optional)</FormLabel><FormControl><Input type="number" placeholder="9000" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="underlay_vrf_id" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Underlay VRF (optional)</FormLabel>
-              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={NONE}>(none)</SelectItem>
-                  {vrfs.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={form.handleSubmit(onSubmit)}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          <CsFormField label="Name" errorText={form.formState.errors.name?.message as string | undefined}>
+            <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)}
+              placeholder="e.g. evpn-fabric-east" />
+          </CsFormField>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="Kind">
+              <CsSelect
+                selectedOption={kindOptions.find((o) => o.value === kind) ?? kindOptions[0]}
+                onChange={({ detail }) => syncPort(detail.selectedOption.value as 'vxlan' | 'geneve')}
+                options={kindOptions}
+                expandToViewport
+              />
+            </CsFormField>
+            <CsFormField label="UDP port">
+              <CsInput type="number" value={udpV} onChange={({ detail }) => form.setValue('udp_port', detail.value)} />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="MTU (optional)">
+              <CsInput type="number" value={mtuV} onChange={({ detail }) => form.setValue('mtu', detail.value)} placeholder="9000" />
+            </CsFormField>
+            <CsFormField label="Underlay VRF (optional)">
+              <CsSelect
+                selectedOption={vrfOptions.find((o) => o.value === vrfV) ?? vrfOptions[0]}
+                onChange={({ detail }) => form.setValue('underlay_vrf_id', detail.selectedOption.value!)}
+                options={vrfOptions}
+                expandToViewport
+              />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsFormField label="Description">
+            <CsInput value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
+          </CsFormField>
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
 
@@ -2846,61 +2884,70 @@ function VniForm({ overlayId, onSaved }: { overlayId: string; onSaved: () => voi
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
+  const kindOptions: CsSelectProps.Option[] = [
+    { value: 'l2', label: 'L2 (broadcast domain)' },
+    { value: 'l3', label: 'L3 (tenant VRF)' },
+  ];
+  const vrfOptions: CsSelectProps.Option[] = [
+    { value: NONE, label: '(unset)' },
+    ...vrfs.map((v) => ({ value: v.id, label: v.name })),
+  ];
+  const vniV = form.watch('vni') ?? '';
+  const nameV = form.watch('name') ?? '';
+  const vlanV = form.watch('vlan_id') ?? '';
+  const rtV = form.watch('evpn_route_target') ?? '';
+  const vrfV = form.watch('vrf_id') ?? NONE;
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="vni" render={({ field }) => (
-            <FormItem><FormLabel>VNI (1..16777214)</FormLabel><FormControl><Input type="number" min={1} max={16777214} {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-          <FormField control={form.control} name="kind" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Kind</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value="l2">L2 (broadcast domain)</SelectItem>
-                  <SelectItem value="l3">L3 (tenant VRF)</SelectItem>
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="name" render={({ field }) => (
-          <FormItem><FormLabel>Name (optional)</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        {kind === 'l2' && (
-          <div className="grid grid-cols-2 gap-3">
-            <FormField control={form.control} name="vlan_id" render={({ field }) => (
-              <FormItem><FormLabel>Mapped VLAN (optional)</FormLabel><FormControl><Input type="number" min={1} max={4094} {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-            <FormField control={form.control} name="evpn_route_target" render={({ field }) => (
-              <FormItem><FormLabel>EVPN RT (optional)</FormLabel><FormControl><Input placeholder="65000:10010" className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-            )} />
-          </div>
-        )}
-        {kind === 'l3' && (
-          <FormField control={form.control} name="vrf_id" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Tenant VRF</FormLabel>
-              <Select value={field.value ?? NONE} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue placeholder="Pick a VRF" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  <SelectItem value={NONE}>(unset)</SelectItem>
-                  {vrfs.map((v) => <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">L3 VNIs map a tenant VRF — required.</p>
-              <FormMessage />
-            </FormItem>
-          )} />
-        )}
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={form.handleSubmit(onSubmit)}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          <CsColumnLayout columns={2}>
+            <CsFormField label="VNI (1..16777214)">
+              <CsInput type="number" value={vniV} onChange={({ detail }) => form.setValue('vni', detail.value)} />
+            </CsFormField>
+            <CsFormField label="Kind">
+              <CsSelect
+                selectedOption={kindOptions.find((o) => o.value === kind) ?? kindOptions[0]}
+                onChange={({ detail }) => form.setValue('kind', detail.selectedOption.value as 'l2' | 'l3')}
+                options={kindOptions}
+                expandToViewport
+              />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsFormField label="Name (optional)">
+            <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
+          </CsFormField>
+          {kind === 'l2' && (
+            <CsColumnLayout columns={2}>
+              <CsFormField label="Mapped VLAN (optional)">
+                <CsInput type="number" value={vlanV} onChange={({ detail }) => form.setValue('vlan_id', detail.value)} />
+              </CsFormField>
+              <CsFormField label="EVPN RT (optional)">
+                <CsInput value={rtV} onChange={({ detail }) => form.setValue('evpn_route_target', detail.value)}
+                  placeholder="65000:10010" />
+              </CsFormField>
+            </CsColumnLayout>
+          )}
+          {kind === 'l3' && (
+            <CsFormField label="Tenant VRF" description="L3 VNIs map a tenant VRF — required.">
+              <CsSelect
+                selectedOption={vrfOptions.find((o) => o.value === vrfV) ?? vrfOptions[0]}
+                onChange={({ detail }) => form.setValue('vrf_id', detail.selectedOption.value!)}
+                options={vrfOptions}
+                expandToViewport
+              />
+            </CsFormField>
+          )}
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
 
@@ -3008,47 +3055,51 @@ function VtepForm({
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
+  const assetOptions: CsSelectProps.Option[] =
+    assets.map((a) => ({ value: a.id, label: a.name }));
+  const roleOptions: CsSelectProps.Option[] = (['leaf', 'spine', 'border', 'other'] as const).map((r) => ({ value: r, label: r }));
+  const assetV = form.watch('asset_id') ?? '';
+  const roleV = form.watch('role') ?? 'leaf';
+  const loopV = form.watch('loopback_ip') ?? '';
+  const descV = form.watch('description') ?? '';
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="asset_id" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Asset</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange}>
-              <FormControl><SelectTrigger><SelectValue placeholder="Pick an asset" /></SelectTrigger></FormControl>
-              <SelectContent>
-                {assets.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="role" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Role</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>
-                  {(['leaf', 'spine', 'border', 'other'] as const).map((r) => (
-                    <SelectItem key={r} value={r}>{r}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="loopback_ip" render={({ field }) => (
-            <FormItem><FormLabel>Loopback IP (optional)</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="description" render={({ field }) => (
-          <FormItem><FormLabel>Description</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={form.handleSubmit(onSubmit)}>
+      <CsForm
+        actions={
+          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+            {form.formState.isSubmitting ? 'Saving…' : 'Create'}
+          </CsButton>
+        }
+      >
+        <CsSpaceBetween size="m">
+          <CsFormField label="Asset" errorText={form.formState.errors.asset_id?.message as string | undefined}>
+            <CsSelect
+              placeholder="Pick an asset"
+              selectedOption={assetOptions.find((o) => o.value === assetV) ?? null}
+              onChange={({ detail }) => form.setValue('asset_id', detail.selectedOption.value!)}
+              options={assetOptions}
+              expandToViewport
+            />
+          </CsFormField>
+          <CsColumnLayout columns={2}>
+            <CsFormField label="Role">
+              <CsSelect
+                selectedOption={roleOptions.find((o) => o.value === roleV) ?? roleOptions[0]}
+                onChange={({ detail }) => form.setValue('role', detail.selectedOption.value as 'leaf' | 'spine' | 'border' | 'other')}
+                options={roleOptions}
+                expandToViewport
+              />
+            </CsFormField>
+            <CsFormField label="Loopback IP (optional)">
+              <CsInput value={loopV} onChange={({ detail }) => form.setValue('loopback_ip', detail.value)} />
+            </CsFormField>
+          </CsColumnLayout>
+          <CsFormField label="Description">
+            <CsInput value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
+          </CsFormField>
+        </CsSpaceBetween>
+      </CsForm>
+    </form>
   );
 }
