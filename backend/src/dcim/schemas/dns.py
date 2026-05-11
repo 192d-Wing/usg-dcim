@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_field
 
 from ..models.dns import (
     AnycastService,
@@ -68,6 +68,15 @@ class DnsZoneOut(DnsZoneBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+    @computed_field
+    @property
+    def serial(self) -> int:
+        """SOA serial number — derived from the zone's last-modified
+        timestamp so it always moves forward when records change. Read-
+        only: operators don't set this directly. Mirrors the value the
+        renderer emits in the zone file's SOA RR."""
+        return int(self.updated_at.timestamp())
 
 
 # ---------- DnsRecord.data discriminated union ----------

@@ -52,6 +52,10 @@ type DnsZone = {
   soa_retry: number;
   soa_expire: number;
   soa_minimum: number;
+  // Serial is a derived, read-only value the backend computes from the
+  // zone's updated_at timestamp. Surfaced here so operators can verify
+  // it without inspecting the rendered zone file.
+  serial: number;
 };
 
 type DnsRecord = {
@@ -430,6 +434,7 @@ function ZoneDetailView({
     data: {
       mname: `${zone.soa_mname}.${zone.name}.`,
       rname: `${zone.soa_rname}.${zone.name}.`,
+      serial: zone.serial,
       refresh: zone.soa_refresh,
       retry: zone.soa_retry,
       expire: zone.soa_expire,
@@ -546,6 +551,14 @@ function ZoneDetailView({
             { label: 'Default TTL', value: <span style={MONO}>{zone.default_ttl}</span> },
             { label: 'Records', value: records.length },
             { label: 'Hosted zone ID', value: <span style={MONO}>{zone.id.slice(0, 8)}…</span> },
+            {
+              label: 'Serial',
+              value: (
+                <span style={MONO} title="Auto-incremented on every record change">
+                  {zone.serial}
+                </span>
+              ),
+            },
             { label: 'Description', value: zone.description || <Box color="text-status-inactive">—</Box> },
           ]}
         />
@@ -1088,8 +1101,8 @@ function formatRdata(r: DnsRecord): string {
     case 'SRV': return `${d.priority ?? 0} ${d.weight ?? 0} ${d.port ?? 0} ${d.target ?? ''}`;
     case 'CAA': return `${d.flags ?? 0} ${d.tag ?? ''} "${d.value ?? ''}"`;
     case 'SOA':
-      // BIND-style one-line summary: mname rname refresh retry expire min
-      return `${d.mname ?? ''} ${d.rname ?? ''} ${d.refresh ?? 0} ${d.retry ?? 0} ${d.expire ?? 0} ${d.minimum ?? 0}`;
+      // BIND-style one-line summary: mname rname serial refresh retry expire min
+      return `${d.mname ?? ''} ${d.rname ?? ''} ${d.serial ?? 0} ${d.refresh ?? 0} ${d.retry ?? 0} ${d.expire ?? 0} ${d.minimum ?? 0}`;
     default: return JSON.stringify(d);
   }
 }
@@ -1179,11 +1192,12 @@ function SoaEditForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) 
               onChange={({ detail }) => setDefaultTtl(detail.value)}
             />
           </FormField>
-          <Box color="text-status-inactive" fontSize="body-s">
-            The SOA serial is derived from the zone's last-modified
-            timestamp — any record add/edit/delete bumps it automatically,
-            so you don't manage it by hand.
-          </Box>
+          <FormField
+            label="Serial number"
+            description="Read-only. Auto-incremented from the zone's last-modified timestamp on every record change."
+          >
+            <Input type="number" value={String(zone.serial)} readOnly disabled />
+          </FormField>
         </SpaceBetween>
       </Form>
     </form>
