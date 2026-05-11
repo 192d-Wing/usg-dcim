@@ -2306,6 +2306,21 @@ function RecordForm({
           {(['A', 'AAAA', 'CNAME', 'NS', 'PTR'] as RecordType[]).includes(type) && (
             <FormField
               label={type === 'A' || type === 'AAAA' ? 'IP address' : 'Target FQDN'}
+              description={
+                type === 'NS' && zone.kind === 'apex'
+                  ? (
+                    <>
+                      Use NS records on an apex zone to <b>delegate</b>{' '}
+                      a child subdomain to another nameserver. Set the{' '}
+                      <i>Record name</i> to the child label
+                      (e.g. <span style={MONO}>dev</span> delegates{' '}
+                      <span style={MONO}>dev.{zone.name}</span>) and{' '}
+                      <i>Target FQDN</i> to that nameserver
+                      (e.g. <span style={MONO}>ns1.team.example.</span>).
+                    </>
+                  )
+                  : undefined
+              }
               errorText={errors.target}
             >
               <Input value={target} onChange={({ detail }) => setTarget(detail.value)} />
