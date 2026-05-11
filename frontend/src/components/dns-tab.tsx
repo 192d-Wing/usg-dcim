@@ -1121,6 +1121,30 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
     } catch (err: any) { toast.error(err?.message ?? 'delete failed'); }
   }
 
+  async function unsign() {
+    const ok = window.confirm(
+      `Unsign ${zone.name}?\n\n` +
+      'This deletes every DNSSEC key for this zone and clears the ' +
+      'signed flag. Withdraw the DS record from the parent zone\'s ' +
+      'operator BEFORE running this — otherwise cached validators ' +
+      'will SERVFAIL until their TTLs expire.\n\n' +
+      'You can re-enable DNSSEC later; new keys will be generated.',
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      await http.post(`/dns/zones/${zone.id}/disable-dnssec`, {});
+      toast.success('Zone unsigned');
+      await qc.invalidateQueries({ queryKey: ['dns-zone', zone.id] });
+      await qc.invalidateQueries({ queryKey: ['dns-keys', zone.id] });
+      await qc.invalidateQueries({ queryKey: ['dns-ds', zone.id] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'unsign failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copy(text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -1133,29 +1157,34 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
   if (!zone.signed) {
     return (
       <Container
-        header={<Header variant="h2">DNSSEC</Header>}
+        header={
+          <Header
+            variant="h2"
+            description="This zone is currently unsigned."
+            actions={canWrite && (
+              <Button
+                variant="primary" loading={busy}
+                onClick={enable} iconName="security"
+              >
+                Sign zone
+              </Button>
+            )}
+          >
+            DNSSEC
+          </Header>
+        }
       >
-        <SpaceBetween size="m">
-          <Box>
-            This zone is <b>unsigned</b>. Enabling DNSSEC generates a
-            key-signing key (KSK) and a zone-signing key (ZSK), both
-            ECDSAP256SHA256 by default. You'll then upload the DS
-            record below to the parent zone's operator to chain trust.
-          </Box>
-          {canWrite && (
-            <Button
-              variant="primary" loading={busy}
-              onClick={enable} iconName="security"
-            >
-              Enable DNSSEC
-            </Button>
-          )}
+        <Box>
+          Signing generates a key-signing key (KSK) and a zone-signing
+          key (ZSK), both ECDSAP256SHA256 by default. After signing
+          you'll upload the DS record this page exposes to the parent
+          zone's operator to chain trust.
           {!canWrite && (
             <Box color="text-status-inactive" fontSize="body-s">
               You don't have permission to enable DNSSEC on this zone.
             </Box>
           )}
-        </SpaceBetween>
+        </Box>
       </Container>
     );
   }
@@ -1167,7 +1196,23 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
     <SpaceBetween size="m">
       <Container
         header={
-          <Header variant="h2" description="Key roster and parent-zone DS records.">
+          <Header
+            variant="h2"
+            description="Key roster and parent-zone DS records."
+            actions={canWrite && (
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button iconName="refresh" loading={busy} onClick={() => rotate('ksk')}>
+                  Rotate KSK
+                </Button>
+                <Button iconName="refresh" loading={busy} onClick={() => rotate('zsk')}>
+                  Rotate ZSK
+                </Button>
+                <Button iconName="remove" loading={busy} onClick={unsign}>
+                  Unsign zone
+                </Button>
+              </SpaceBetween>
+            )}
+          >
             DNSSEC — {zone.name}
           </Header>
         }
@@ -1191,23 +1236,7 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
         header={
           <Header
             counter={`(${keys.length})`}
-            actions={canWrite && (
-              <SpaceBetween size="xs" direction="horizontal">
-                <Button
-                  iconName="refresh" loading={busy}
-                  onClick={() => rotate('ksk')}
-                >
-                  Rotate KSK
-                </Button>
-                <Button
-                  iconName="refresh" loading={busy}
-                  onClick={() => rotate('zsk')}
-                >
-                  Rotate ZSK
-                </Button>
-              </SpaceBetween>
-            )}
-            description="Rotation generates a fresh key and retires the previous one. Retired keys hang around until you purge them so cached validators keep verifying."
+            description="Rotation lives in the top action bar. Retired keys hang around until you purge them so cached validators keep verifying."
           >
             Keys
           </Header>

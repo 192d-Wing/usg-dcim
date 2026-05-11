@@ -472,6 +472,36 @@ async def list_ds_records(
     return dns_svc.render_ds_records(zone, keys)
 
 
+@router.post("/zones/{zone_id}/disable-dnssec", status_code=204)
+async def disable_dnssec(
+    zone_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unsign a zone: delete every DnsKey for it and clear the signed
+    flag. Reversible — calling /enable-dnssec again regenerates fresh
+    keys, but operators should withdraw the DS from the parent first
+    so cached validators don't bog-down on an unsignable RRset."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    if not zone.signed:
+        return
+    keys = list((
+        await db.execute(select(DnsKey).where(DnsKey.zone_id == zone_id))
+    ).scalars().all())
+    retired_tags = [k.key_tag for k in keys]
+    await db.execute(delete(DnsKey).where(DnsKey.zone_id == zone_id))
+    zone.signed = False
+    await _touch_zone(db, zone_id)
+    await audit.record(
+        db, principal, action="dns_zone.disable_dnssec",
+        target_type="dns_zone", target_id=str(zone_id),
+        metadata={"retired_key_tags": retired_tags},
+    )
+    await db.commit()
+
+
 @router.post(
     "/zones/{zone_id}/rotate-key/{role}",
     response_model=list[DnsKeyOut],
