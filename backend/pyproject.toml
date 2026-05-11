@@ -25,6 +25,7 @@ dependencies = [
     "tenacity>=8.2",
     "pyyaml>=6.0",
     "click>=8.1",
+    "dnspython>=2.6",
 ]
 
 [project.optional-dependencies]

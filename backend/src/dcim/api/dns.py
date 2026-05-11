@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import BaseModel, ValidationError as PydanticValidationError
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +39,7 @@ from ..models.dns import (
     DnsForwarder,
     DnsRecord,
     DnsRecordSource,
+    DnsRecordType,
     DnsServer,
     DnsServerRole,
     DnsZone,
@@ -253,6 +254,107 @@ async def preview_zone(
         "name": zone.name,
         "text": dns_svc.render_zone_file(zone, records),
         "record_count": len(records),
+    }
+
+
+class _ImportPayload(BaseModel):
+    text: str
+    # Dry-run returns the parsed view without committing. Useful for
+    # the UI's import preview / diff.
+    dry_run: bool = False
+    # When true, also adopt SOA timers from the imported file. Off by
+    # default so a paste from a public zone doesn't quietly overwrite
+    # our 60s defaults.
+    update_soa: bool = False
+
+
+@router.post("/zones/{zone_id}/import")
+async def import_zone_records(
+    zone_id: UUID,
+    payload: _ImportPayload,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Parse a BIND-format zone file and bulk-insert its records into
+    the target zone, replacing existing `source=manual` rows.
+
+    IPAM-projected rows are left alone — they're owned by the sync job.
+    DNSSEC types (DNSKEY/RRSIG/NSEC*) and unsupported directives
+    ($INCLUDE, $GENERATE) become warnings rather than errors so the
+    operator can still see what didn't import."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    try:
+        parsed = dns_svc.parse_bind_zone(payload.text, default_zone=zone.name + ".")
+    except dns_svc.BindImportError as e:
+        raise ValidationError(str(e)) from None
+
+    if payload.dry_run:
+        return {
+            "zone_id": str(zone_id),
+            "would_add": len(parsed["records"]),
+            "would_replace_manual": True,
+            "warnings": parsed["warnings"],
+            "parsed": parsed,
+        }
+
+    # Replace existing manual rows; preserve IPAM-projected ones.
+    existing = (
+        await db.execute(
+            select(DnsRecord).where(
+                DnsRecord.zone_id == zone_id,
+                DnsRecord.source == DnsRecordSource.manual,
+            )
+        )
+    ).scalars().all()
+    removed = len(existing)
+    for r in existing:
+        await db.delete(r)
+    await db.flush()
+
+    added = 0
+    for r in parsed["records"]:
+        try:
+            rtype = DnsRecordType(r["type"])
+        except ValueError:
+            parsed["warnings"].append(f"unknown record type {r['type']} skipped")
+            continue
+        db.add(DnsRecord(
+            zone_id=zone_id, name=r["name"], type=rtype,
+            ttl=r["ttl"], data=r["data"],
+            source=DnsRecordSource.manual,
+        ))
+        added += 1
+
+    if payload.update_soa:
+        soa = parsed["soa"]
+        zone.soa_mname = soa["mname"].rstrip(".").split(".", 1)[0] or zone.soa_mname
+        zone.soa_rname = soa["rname"].rstrip(".").split(".", 1)[0] or zone.soa_rname
+        zone.soa_refresh = soa["refresh"]
+        zone.soa_retry = soa["retry"]
+        zone.soa_expire = soa["expire"]
+        zone.soa_minimum = soa["minimum"]
+        zone.default_ttl = parsed.get("default_ttl") or zone.default_ttl
+
+    await _touch_zone(db, zone_id)
+    await audit.record(
+        db, principal, action="dns_zone.import_bind",
+        target_type="dns_zone", target_id=str(zone_id),
+        site_id=zone.site_id,
+        metadata={
+            "added": added,
+            "removed_manual": removed,
+            "update_soa": payload.update_soa,
+            "warnings": parsed["warnings"],
+        },
+    )
+    await db.commit()
+    return {
+        "zone_id": str(zone_id),
+        "added": added,
+        "removed_manual": removed,
+        "warnings": parsed["warnings"],
     }
 
 

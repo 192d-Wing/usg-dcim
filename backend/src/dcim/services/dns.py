@@ -534,3 +534,168 @@ async def sync_ipam_records_for_zone(
         )
     await db.flush()
     return (added, removed)
+
+
+# ---------- BIND zone file parsing ----------
+
+# Record types we can ingest from a BIND file. DNSSEC types (DNSKEY,
+# RRSIG, NSEC, NSEC3*, DS, CDNSKEY, CDS, TLSA, SSHFP, etc.) are skipped
+# in v1; #1 in the DNS roadmap signs zones internally from key
+# material, so importing existing RRSIGs would create state we can't
+# regenerate.
+_SUPPORTED_IMPORT_TYPES = {
+    "A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA", "PTR",
+}
+
+
+class BindImportError(Exception):
+    """Raised when the operator's zone file can't be parsed at all."""
+
+
+def _bind_label_for(name, origin) -> str:
+    """Translate a dnspython Name into the bare label DnsRecord stores
+    (`@` at apex, otherwise the label relative to origin). Falls back
+    to the fully qualified form if relativization fails."""
+    if origin and name == origin:
+        return "@"
+    if origin:
+        try:
+            return name.relativize(origin).to_text()
+        except Exception:
+            return name.to_text(omit_final_dot=True)
+    return name.to_text(omit_final_dot=True)
+
+
+def _bind_soa_payload(rdata) -> dict:
+    return {
+        "mname": rdata.mname.to_text(omit_final_dot=True),
+        "rname": rdata.rname.to_text(omit_final_dot=True),
+        "refresh": int(rdata.refresh),
+        "retry": int(rdata.retry),
+        "expire": int(rdata.expire),
+        "minimum": int(rdata.minimum),
+    }
+
+
+def _convert_rr(label: str, rtype: str, ttl: int, rdata) -> tuple[dict | None, str | None]:
+    """Convert one non-SOA rdata into either a record dict or a warning
+    string. Returns `(record, None)` on success, `(None, warning)` when
+    the row should be skipped."""
+    if rtype not in _SUPPORTED_IMPORT_TYPES:
+        return None, f"skipped unsupported type {rtype} for {label}"
+    data = _rdata_to_record_data(rtype, rdata)
+    if data is None:
+        return None, f"skipped malformed {rtype} record for {label}"
+    return {
+        "name": label, "type": rtype,
+        "ttl": int(ttl) if ttl else None,
+        "data": data,
+    }, None
+
+
+def parse_bind_zone(
+    text: str,
+    *,
+    default_zone: str | None = None,
+) -> dict:
+    """Parse a BIND zone file and return a normalized payload:
+
+        {
+          "zone_name": "prod.dcim.mil.",
+          "soa": {"mname": ..., "rname": ..., "refresh": ..., ...},
+          "default_ttl": 300,
+          "records": [ {"name": "leaf-01", "type": "A", "ttl": None,
+                        "data": {...}}, ... ],
+          "warnings": ["skipped DNSKEY at apex (line 12)", ...],
+        }
+
+    Records are normalized to the same JSON shapes the API/UI uses, so
+    the import endpoint can hand them straight to the DB layer. Lines
+    we can't ingest (unsupported types, $INCLUDE, $GENERATE) become
+    warnings; structural errors (unbalanced parens, no SOA, malformed
+    rdata) raise BindImportError.
+    """
+    # Imported lazily — keeps `dnspython` out of cold-path imports for
+    # non-DNS code paths and out of the API server's startup budget.
+    import dns.exception
+    import dns.rdatatype
+    import dns.zone
+
+    try:
+        z = dns.zone.from_text(
+            text, origin=default_zone, check_origin=False, relativize=False,
+        )
+    except dns.exception.DNSException as e:
+        raise BindImportError(f"zone parse failed: {e}") from e
+
+    zone_name = z.origin.to_text() if z.origin else (default_zone or "")
+    soa_payload: dict | None = None
+    default_ttl: int | None = None
+    records: list[dict] = []
+    warnings: list[str] = []
+
+    for name, ttl, rdata in z.iterate_rdatas():
+        rtype = dns.rdatatype.to_text(rdata.rdtype)
+        label = _bind_label_for(name, z.origin)
+        if rtype == "SOA":
+            soa_payload = _bind_soa_payload(rdata)
+            if default_ttl is None:
+                default_ttl = int(rdata.minimum)
+            continue
+        record, warning = _convert_rr(label, rtype, ttl, rdata)
+        if record is not None:
+            records.append(record)
+        elif warning is not None:
+            warnings.append(warning)
+
+    if soa_payload is None:
+        raise BindImportError("zone has no SOA record")
+    return {
+        "zone_name": zone_name,
+        "soa": soa_payload,
+        "default_ttl": default_ttl or 60,
+        "records": records,
+        "warnings": warnings,
+    }
+
+
+def _rdata_to_record_data(rtype: str, rdata) -> dict | None:
+    """Translate a parsed dnspython rdata object into the JSON shape
+    DnsRecord.data uses. Returns None if the rdata can't be coerced —
+    caller emits a warning and skips the row."""
+    try:
+        if rtype in ("A", "AAAA"):
+            return {"target": rdata.address}
+        if rtype in ("CNAME", "NS", "PTR"):
+            return {"target": rdata.target.to_text(omit_final_dot=True)}
+        if rtype == "MX":
+            return {
+                "priority": int(rdata.preference),
+                "target": rdata.exchange.to_text(omit_final_dot=True),
+            }
+        if rtype == "TXT":
+            # dnspython stores TXT as a tuple of bytes-segments; join
+            # and decode for the JSON column. Multi-segment TXT (>255
+            # chars) collapse to one logical string.
+            parts = [s.decode("utf-8", errors="replace") for s in rdata.strings]
+            return {"text": "".join(parts)}
+        if rtype == "SRV":
+            return {
+                "priority": int(rdata.priority),
+                "weight": int(rdata.weight),
+                "port": int(rdata.port),
+                "target": rdata.target.to_text(omit_final_dot=True),
+            }
+        if rtype == "CAA":
+            return {
+                "flags": int(rdata.flags),
+                "tag": rdata.tag.decode() if isinstance(rdata.tag, bytes) else rdata.tag,
+                "value": (
+                    rdata.value.decode("utf-8", errors="replace")
+                    if isinstance(rdata.value, bytes)
+                    else rdata.value
+                ),
+            }
+    except Exception:
+        return None
+    return None

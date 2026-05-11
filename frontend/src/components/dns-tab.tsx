@@ -415,6 +415,7 @@ function ZoneDetailView({
   const records = recordsQ.data ?? [];
   const [createOpen, setCreateOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [soaOpen, setSoaOpen] = useState(false);
   const [selected, setSelected] = useState<DnsRecord[]>([]);
   const [filterText, setFilterText] = useState('');
@@ -609,6 +610,11 @@ function ZoneDetailView({
                   Export
                 </Button>
                 {canWrite && (
+                  <Button onClick={() => setImportOpen(true)} iconName="upload">
+                    Import
+                  </Button>
+                )}
+                {canWrite && (
                   <Button
                     disabled={selected.length === 0}
                     onClick={removeSelected}
@@ -746,6 +752,19 @@ function ZoneDetailView({
           <SoaEditForm
             zone={zone}
             onSaved={async () => { setSoaOpen(false); await refresh(); }}
+          />
+        </Modal>
+      )}
+      {canWrite && (
+        <Modal
+          visible={importOpen}
+          onDismiss={() => setImportOpen(false)}
+          header={<span>Import zone file: <span style={MONO}>{zone.name}</span></span>}
+          size="large"
+        >
+          <ZoneImportForm
+            zone={zone}
+            onSaved={async () => { setImportOpen(false); await refresh(); }}
           />
         </Modal>
       )}
@@ -1201,6 +1220,166 @@ function SoaEditForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) 
         </SpaceBetween>
       </Form>
     </form>
+  );
+}
+
+
+// Slim BIND-format import. The user pastes a zone file (or drops one
+// in via the file picker); a dry-run first shows what would change,
+// then the operator confirms to commit. IPAM-projected records stay
+// untouched — they're owned by the sync job.
+type ImportPreview = {
+  zone_id: string;
+  would_add: number;
+  would_replace_manual: boolean;
+  warnings: string[];
+  parsed: {
+    zone_name: string;
+    soa: Record<string, unknown>;
+    records: { name: string; type: string }[];
+  };
+};
+
+function ZoneImportForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
+  const [text, setText] = useState('');
+  const [updateSoa, setUpdateSoa] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+
+  function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => setText(String(reader.result ?? ''));
+    reader.readAsText(f);
+  }
+
+  async function dryRun() {
+    if (!text.trim()) {
+      toast.error('Paste a zone file or pick one first');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await http.post<ImportPreview>(
+        `/dns/zones/${zone.id}/import`,
+        { text, dry_run: true, update_soa: updateSoa },
+      );
+      setPreview(r.data);
+    } catch (err: any) {
+      toast.error(err?.message ?? 'parse failed');
+      setPreview(null);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function commit() {
+    if (!preview) return;
+    setBusy(true);
+    try {
+      const r = await http.post<{ added: number; removed_manual: number; warnings: string[] }>(
+        `/dns/zones/${zone.id}/import`,
+        { text, dry_run: false, update_soa: updateSoa },
+      );
+      toast.success(`Imported ${r.data.added} record(s); replaced ${r.data.removed_manual} manual row(s)`);
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'import failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Form
+      actions={
+        <SpaceBetween size="xs" direction="horizontal">
+          {preview && (
+            <Button variant="primary" onClick={commit} loading={busy}>
+              Import {preview.would_add} record(s)
+            </Button>
+          )}
+          {!preview && (
+            <Button variant="primary" onClick={dryRun} loading={busy}>
+              Preview
+            </Button>
+          )}
+        </SpaceBetween>
+      }
+    >
+      <SpaceBetween size="m">
+        <FormField
+          label="Zone file (BIND format)"
+          description="Paste the contents directly or pick a .zone file."
+        >
+          <SpaceBetween size="xs">
+            <input type="file" accept=".zone,.txt,text/plain" onChange={onPickFile} />
+            <textarea
+              value={text}
+              onChange={(e) => { setText(e.target.value); setPreview(null); }}
+              rows={10}
+              placeholder={'$ORIGIN example.com.\n$TTL 60\n@ IN SOA …\n…'}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
+            />
+          </SpaceBetween>
+        </FormField>
+        <FormField
+          label="Also adopt SOA timers from the file"
+          description="Off by default — public zones often ship with multi-hour timers that don't fit DCIM's push-driven model."
+        >
+          <input
+            type="checkbox"
+            checked={updateSoa}
+            onChange={(e) => setUpdateSoa(e.target.checked)}
+          />
+        </FormField>
+        {preview && (
+          <Container header={<Header variant="h3">Preview</Header>}>
+            <SpaceBetween size="s">
+              <KeyValuePairs
+                columns={3}
+                items={[
+                  { label: 'Records to add', value: preview.would_add },
+                  { label: 'Replaces manual', value: 'all existing source=manual rows' },
+                  { label: 'Warnings', value: preview.warnings.length },
+                ]}
+              />
+              {preview.warnings.length > 0 && (
+                <Box>
+                  <Box variant="awsui-key-label">Warnings</Box>
+                  <ul style={{ margin: 0, fontSize: 12 }}>
+                    {preview.warnings.map((w, i) => <li key={i}>{w}</li>)}
+                  </ul>
+                </Box>
+              )}
+              {preview.parsed.records.length > 0 && (
+                <Box>
+                  <Box variant="awsui-key-label">First 10 records</Box>
+                  <pre style={{
+                    maxHeight: '30vh', overflow: 'auto', padding: 8,
+                    fontFamily: 'ui-monospace, monospace', fontSize: 11, margin: 0,
+                    background: colorBackgroundContainerContent,
+                    border: `1px solid ${colorBorderDividerDefault}`,
+                    borderRadius: 6,
+                  }}>
+                    {preview.parsed.records.slice(0, 10).map((r) =>
+                      `${r.name}\t${r.type}`).join('\n')}
+                  </pre>
+                </Box>
+              )}
+            </SpaceBetween>
+          </Container>
+        )}
+      </SpaceBetween>
+    </Form>
   );
 }
 
