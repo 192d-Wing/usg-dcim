@@ -3,6 +3,22 @@
 from .alerts import Alert, AlertRule, MaintenanceWindow
 from .audit import AuditLog
 from .auth import ApiToken, Permission, Role, RoleScope, User, UserRole
+from .bgp import (
+    AddressFamilyV4V6,
+    Asn,
+    AsnKind,
+    CommunityKind,
+    CommunityList,
+    CommunityListEntry,
+    PolicyAction,
+    PrefixList,
+    PrefixListEntry,
+    RouteMap,
+    RouteMapEntry,
+    TcpAoAlgorithm,
+    TcpAoKey,
+    TcpAoKeyChain,
+)
 from .collectors import Collector, CollectorHeartbeat
 from .dns import (
     AnycastBgpBinding,
@@ -55,16 +71,20 @@ from .ipam import (
     VtepVniMembership,
 )
 from .notifications import ChannelKind, NotificationChannel
+from .organization import Organization
 from .power import Outlet, PowerConnection
 from .telemetry_meta import TelemetrySource
 
 __all__ = [
+    "AddressFamilyV4V6",
     "Alert",
     "AlertRule",
     "AnycastBgpBinding",
     "AnycastGroup",
     "AnycastService",
     "ApiToken",
+    "Asn",
+    "AsnKind",
     "Asset",
     "AssetFace",
     "AssetMount",
@@ -77,6 +97,9 @@ __all__ = [
     "Circuit",
     "Collector",
     "CollectorHeartbeat",
+    "CommunityKind",
+    "CommunityList",
+    "CommunityListEntry",
     "DhcpServer",
     "DnsRecord",
     "DnsRecordSource",
@@ -92,24 +115,33 @@ __all__ = [
     "IpAddressStatus",
     "MaintenanceWindow",
     "NotificationChannel",
+    "Organization",
     "Outlet",
     "Overlay",
     "OverlayKind",
     "PduSide",
     "Permission",
+    "PolicyAction",
     "PowerConnection",
     "PowerFeed",
+    "PrefixList",
+    "PrefixListEntry",
     "Rack",
     "Region",
     "Role",
     "RoleScope",
     "Room",
+    "RouteMap",
+    "RouteMapEntry",
     "Row",
     "Site",
     "SiteGroup",
     "SiteGroupMembership",
     "Subnet",
     "Supernet",
+    "TcpAoAlgorithm",
+    "TcpAoKey",
+    "TcpAoKeyChain",
     "TelemetrySource",
     "User",
     "UserRole",

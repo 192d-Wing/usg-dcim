@@ -23,6 +23,8 @@ import { formatDate } from '@/lib/utils';
 import { CapacityBar } from '@/components/capacity-bar';
 import { toast } from 'sonner';
 import { DnsTab } from '@/components/dns-tab';
+import { BgpPeersTab } from '@/components/bgp-peers-tab';
+import { OrganizationsTab } from '@/components/organizations-tab';
 
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
@@ -220,6 +222,8 @@ export function IpamPage() {
           { id: 'overlays', label: 'Overlays / VNI', content: <OverlaysTab canWrite={!!canWrite} /> },
           { id: 'dns', label: 'DNS', content: <DnsTab canWrite={!!canWrite} /> },
           { id: 'dhcp', label: 'DHCP servers', content: <DhcpServersTab canWrite={!!canWrite} /> },
+          { id: 'bgp', label: 'BGP peers', content: <BgpPeersTab canWrite={!!canWrite} /> },
+          { id: 'orgs', label: 'Organizations', content: <OrganizationsTab canWrite={!!canWrite} /> },
         ]}
       />
     </ContentLayout>
