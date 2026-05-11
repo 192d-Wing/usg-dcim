@@ -3,56 +3,121 @@
 Brings up the on-site CoreDNS deployment driven by central DCIM:
 
 - **collector** — polls `/api/v1/dns/servers/{id}/bundle` for each
-  configured DnsServer, writes Corefile + zone files (+ gobgp.yaml when
-  recursive) into the shared `dns-state` volume, and signals reloads.
-- **coredns-auth** — authoritative for the per-site zone (and loads the
-  fabric-wide bundle for resilience). Listens on the management IP.
+  configured `DnsServer`, writes Corefile + zone files (+ `gobgp.yaml`
+  when recursive) into the shared `dns-state` volume, and signals
+  reloads.
+- **coredns-auth** — authoritative for the per-site zone (and loads
+  the fabric-wide bundle for resilience). Listens on the management IP.
 - **coredns-recursive** — forwards `*.<fabric_apex>` to the local
   authoritative pod and everything else to operator upstreams. Listens
   on the per-fabric anycast IP via host networking.
 - **gobgp** — advertises the anycast `/32` and `/128` (when set) to
   the BGP peers DCIM has configured for this site.
 
-## Prereqs
+## Running it locally next to central
 
-1. Register the two `DnsServer` rows (one `auth`, one `recursive`) at this
-   site in DCIM. Note the server UUIDs.
-2. Register the `BgpPeer` rows for the site's leaf(s).
-3. Bind the recursive `DnsServer` to those `BgpPeer` rows via the
-   AnycastBgpBinding endpoint.
-4. Issue the collector an API token (or provision mTLS) with
-   `inventory:read` + `inventory:write`.
+The compose project is named `site42` so it doesn't clash with the
+central `docker` project on the same Docker engine.
 
-## Collector config snippet
+### 1. In central, create the rows the site needs
 
-Add this to the collector YAML before bringing the bundle up:
+Through the UI or the API, with `inventory:write`:
 
-```yaml
-dns:
-  enabled: true
-  poll_interval_seconds: 30
-  api_base: https://dcim.example.mil
-  servers:
-    - id: <auth dns_server uuid>
-      role: auth
-      output_dir: /var/lib/dcim-dns/auth
-      coredns_pidfile: /var/lib/dcim-dns/auth/coredns.pid
-    - id: <recursive dns_server uuid>
-      role: recursive
-      output_dir: /var/lib/dcim-dns/recursive
-      coredns_pidfile: /var/lib/dcim-dns/recursive/coredns.pid
-      gobgp_pidfile: /var/lib/dcim-dns/recursive/gobgp.pid
-```
+- A **Fabric** + a **VRF** (default VRF is auto-created).
+- A **Site** (`IPAM → Sites`).
+- An **AnycastGroup** for the fabric (`IPAM → DNS → Anycast groups`).
+  Set `anycast_ipv4` to something safe on your lab subnet.
+- A **BGP peer** at the site (`IPAM → BGP peers → Peers`). Local AS
+  defaults to the seeded `AS 4200000000`; peer AS is whatever your
+  leaf/ToR speaks.
+- Two **DnsServer** rows: one `auth`, one `recursive`. Bind the
+  recursive one to the AnycastGroup + a BGP peer via the
+  `Announced to peer` Multiselect on the DNS server Edit modal.
+- A **Collector** row (`Collectors`) → take the issued bearer token.
 
-## Bring it up
+Note the UUIDs of: the Collector, the Site, the auth `DnsServer`,
+and the recursive `DnsServer`.
+
+### 2. Drop the config + token into this directory
 
 ```bash
-COLLECTOR_CONFIG=/etc/dcim/site42-collector.yaml docker compose up -d
+cp collector.yaml.example collector.yaml
+# fill in the four UUIDs in collector.yaml
+echo "$ISSUED_BEARER_TOKEN" > token
+chmod 0600 token
 ```
 
-Check the collector logs for `dns_bundle_applied`; that's the signal the
-first render succeeded. From a client on the same VLAN:
+### 3. Bring it up
 
 ```bash
-dig @<anycast-ip> leaf-01.site42.prod.dcim.mil
+docker compose -p site42 \
+  -f infra/docker/site-dns/docker-compose.yml \
+  up -d --build
 ```
+
+`-p site42` is the project name — change it per site so multiple site
+stacks can coexist on one Docker host.
+
+### 4. Verify
+
+```bash
+# Collector log should show dns_bundle_applied within ~30s
+docker compose -p site42 -f infra/docker/site-dns/docker-compose.yml \
+  logs -f collector | grep -iE "bundle|render"
+
+# CoreDNS auth answers a record from a site zone
+dig @127.0.0.1 -p 5353 leaf-01.site42.prod.dcim.mil
+
+# Recursive forwards an external name
+dig @<anycast-ip> example.com
+```
+
+## How the pieces talk
+
+```text
+                  central DCIM (compose project "docker")
+                  ┌───────────────────────────────────┐
+                  │  api: 0.0.0.0:8000                │
+                  └────────────────┬──────────────────┘
+                                   │ http(s)
+                  host.docker.internal:8000
+                                   │
+   site42 compose project          │
+   ┌───────────────────────────────┼───────────────────┐
+   │ collector ────polls /dns/...─►│                   │
+   │     │                                             │
+   │     │ writes Corefile + zones + gobgp.yaml        │
+   │     ▼                                             │
+   │ /var/lib/dcim-dns/  (shared volume)               │
+   │     │                                             │
+   │     ├── auth/         ───► coredns-auth           │
+   │     └── recursive/    ───► coredns-recursive      │
+   │                       ───► gobgp                  │
+   └───────────────────────────────────────────────────┘
+```
+
+The collector container reaches central via `host.docker.internal` —
+the `extra_hosts: host-gateway` mapping in the compose file is what
+makes that DNS name resolve on Linux. On macOS/Windows Desktop the
+mapping is built-in but the entry is harmless.
+
+The four service containers share the host PID namespace so the
+collector can `kill -SIGUSR1 <coredns-pid>` to trigger zone reload
+and `kill -SIGHUP <gobgp-pid>` to trigger BGP config reload. PIDs are
+read from the pidfiles each container drops on the shared volume.
+
+## Auth
+
+The collector uses the existing enrollment flow — it presents the
+bearer token from `/etc/dcim/token` on every request to
+`ingest_url` and `/api/v1/dns/...`. The CoreDNS / GoBGP containers
+don't talk to central directly; they only read the bundle the
+collector dropped on the shared volume. Single credential, single
+audit trail.
+
+## Production
+
+The compose stack is the local development surface. Production
+deployments use the per-site collector + CoreDNS pods deployed via
+the Helm chart pattern in `infra/helm/`. The same `dns:` block in
+the collector config drives both.

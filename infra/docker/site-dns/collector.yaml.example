@@ -1,0 +1,53 @@
+# Site collector config — pointed at the central DCIM running on the
+# same Docker engine. Copy this to `collector.yaml` in the same dir
+# and fill in the UUIDs (collector_id, site_id, DnsServer ids) you
+# created in central before bringing the bundle up.
+
+# UUID of the Collector row central issued at enrollment.
+collector_id: 00000000-0000-0000-0000-000000000000
+
+# Site this collector reports for. Pre-create the Site row in central
+# (IPAM → Sites or Site Show) and paste its UUID here.
+site_id: 00000000-0000-0000-0000-000000000000
+
+# Telemetry ingest endpoint. `host.docker.internal:8000` reaches the
+# central api when both compose projects run on the same Docker engine.
+# The `extra_hosts: host-gateway` mapping in docker-compose.yml is what
+# makes that resolution work on Linux.
+ingest_url: http://host.docker.internal:8000/ingest
+
+# Bearer token central issued to this collector. Read from a file rather
+# than embedded inline so the operator can rotate without re-templating.
+api_token_file: /etc/dcim/token
+
+heartbeat_interval_seconds: 30
+buffer_path: /var/lib/dcim-collector/buffer.db
+
+# No mTLS for the local dev path. Production deployments toggle this on
+# and mount the leaf cert + CA bundle.
+mtls:
+  enabled: false
+
+# No SNMP/IPMI/Redfish devices on the site bundle by default. Operators
+# extend this list once they catalog real assets at this site.
+devices: []
+
+# DNS agent — polls /api/v1/dns/servers/{id}/bundle for each entry and
+# writes Corefile + zone files (+ gobgp.yaml when recursive) into the
+# matching output_dir, then signals the matching pids to reload.
+dns:
+  enabled: true
+  poll_interval_seconds: 30
+  # Defaults to derive from ingest_url's origin; override if the DNS
+  # endpoints live behind a different host.
+  api_base: http://host.docker.internal:8000
+  servers:
+    - id: 00000000-0000-0000-0000-000000000000   # auth DnsServer
+      role: auth
+      output_dir: /var/lib/dcim-dns/auth
+      coredns_pidfile: /var/lib/dcim-dns/auth/coredns.pid
+    - id: 00000000-0000-0000-0000-000000000000   # recursive DnsServer
+      role: recursive
+      output_dir: /var/lib/dcim-dns/recursive
+      coredns_pidfile: /var/lib/dcim-dns/recursive/coredns.pid
+      gobgp_pidfile: /var/lib/dcim-dns/recursive/gobgp.pid

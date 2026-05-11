@@ -1,7 +1,11 @@
 # Site DNS bundle: collector + two CoreDNS pods (auth + recursive) + GoBGP sidecar.
 #
 # Operators bring this up at each site with:
-#   COLLECTOR_CONFIG=/path/to/collector.yaml docker compose -f docker-compose.yml up -d
+#   docker compose -p site42 -f infra/docker/site-dns/docker-compose.yml up -d
+#
+# `-p site42` keeps the volume + container names from clashing with the
+# central stack so you can run both compose projects side-by-side on
+# the same Docker engine for end-to-end testing.
 #
 # The collector polls the central DCIM for the current bundle and writes
 # Corefiles + zone files into the shared `dns-state` volume. CoreDNS pods
@@ -11,10 +15,20 @@
 
 services:
   collector:
-    image: ghcr.io/192d-wing/usg-dcim-collector:latest
+    # Build from the same local source as the central stack. Drop the
+    # `build:` block and uncomment `image:` once a registry build exists.
+    build:
+      context: ../../../collector
+      dockerfile: Dockerfile
+    # image: ghcr.io/192d-wing/usg-dcim-collector:latest
     pid: "host"
     environment:
       PYTHONUNBUFFERED: "1"
+    # Talk back to the central API. When the central stack runs on the
+    # same Docker engine, `host.docker.internal` resolves to the host's
+    # IP and the central api is published on :8000.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ${COLLECTOR_CONFIG:-./collector.yaml}:/etc/dcim/collector.yaml:ro
       - collector-buffer:/var/lib/dcim-collector
@@ -24,7 +38,6 @@ services:
   coredns-auth:
     image: coredns/coredns:1.11.3
     pid: "host"
-    network_mode: "host"
     command:
       - "-conf"
       - "/etc/coredns/Corefile"
@@ -41,6 +54,10 @@ services:
   coredns-recursive:
     image: coredns/coredns:1.11.3
     pid: "host"
+    # Host networking on the recursive pod so it can bind the anycast
+    # IP brought up by the GoBGP sidecar. For local two-stack testing
+    # this is fine because no real announcement happens — gobgp peers
+    # with nothing and the address sits on a dummy loopback.
     network_mode: "host"
     command:
       - "-conf"
@@ -48,9 +65,6 @@ services:
       - "-pidfile"
       - "/var/lib/dcim-dns/recursive/coredns.pid"
     volumes:
-      # Separate sub-tree from auth; the collector writes a different
-      # Corefile here (forwarders + apex stub) and the recursive pod
-      # binds to the anycast IP via host networking.
       - dns-state:/var/lib/dcim-dns
       - dns-state:/etc/coredns
     restart: unless-stopped
