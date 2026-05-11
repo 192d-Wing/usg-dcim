@@ -37,6 +37,9 @@ from ..models.dns import (
     DnsForwarder,
     DnsHealthCheck,
     DnsHealthCheckStatus,
+    DnsKey,
+    DnsKeyAlgorithm,
+    DnsKeyRole,
     DnsRecord,
     DnsRecordSource,
     DnsRecordType,
@@ -137,6 +140,143 @@ async def _probe_http(
     if 200 <= r.status_code < 400:
         return DnsHealthCheckStatus.healthy, None
     return DnsHealthCheckStatus.unhealthy, f"http {r.status_code}"
+
+
+# ---------- DNSSEC ----------
+
+# Algorithm-number ↔ enum mapping per IANA DNS Security Algorithm
+# Numbers (https://www.iana.org/assignments/dns-sec-alg-numbers/).
+_DNSSEC_ALG_NUMBER = {
+    DnsKeyAlgorithm.rsasha256: 8,
+    DnsKeyAlgorithm.ecdsap256sha256: 13,
+    DnsKeyAlgorithm.ed25519: 15,
+}
+
+
+def _key_flags(role: DnsKeyRole) -> int:
+    """DNSKEY flags field: ZSK = 256, KSK = 257 (KSK adds the
+    Secure Entry Point bit). RFC 4034 §2.1.1."""
+    return 257 if role == DnsKeyRole.ksk else 256
+
+
+def _key_tag_from_dnskey(flags: int, algorithm: int, public_key_b64: str) -> int:
+    """RFC 4034 Appendix B keytag algorithm — sum of 16-bit words over
+    the DNSKEY rdata, with the high byte of word zero given an extra
+    multiplier."""
+    import base64
+    pubkey = base64.b64decode(public_key_b64)
+    protocol = 3  # always 3 for DNSSEC
+    rdata = (
+        flags.to_bytes(2, "big")
+        + bytes([protocol, algorithm])
+        + pubkey
+    )
+    acc = 0
+    for i, b in enumerate(rdata):
+        acc += b << 8 if i % 2 == 0 else b
+    acc += (acc >> 16) & 0xFFFF
+    return acc & 0xFFFF
+
+
+def generate_dnssec_keypair(
+    zone_name: str, role: DnsKeyRole,
+    algorithm: DnsKeyAlgorithm = DnsKeyAlgorithm.ecdsap256sha256,
+) -> dict:
+    """Produce one DNSSEC key (KSK or ZSK) for a zone. Returns a dict
+    of the fields a DnsKey row needs. Defaults to ECDSAP256 — short
+    keys, ubiquitous resolver support.
+
+    Lazily imports `cryptography` so the import cost only lands when
+    an operator actually enables DNSSEC."""
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
+
+    if algorithm == DnsKeyAlgorithm.ecdsap256sha256:
+        priv = ec.generate_private_key(ec.SECP256R1())
+        pub_numbers = priv.public_key().public_numbers()
+        # RFC 6605: ECDSAP256 public key is the raw x || y, 64 bytes.
+        pub_bytes = (
+            pub_numbers.x.to_bytes(32, "big")
+            + pub_numbers.y.to_bytes(32, "big")
+        )
+    elif algorithm == DnsKeyAlgorithm.ed25519:
+        priv = ed25519.Ed25519PrivateKey.generate()
+        pub_bytes = priv.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+    elif algorithm == DnsKeyAlgorithm.rsasha256:
+        priv = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pub_numbers = priv.public_key().public_numbers()
+        # RFC 3110 wire format: 1-byte exponent length, exponent,
+        # modulus. Operators of RSA zones rarely show up but we keep
+        # parity for catalog completeness.
+        e = pub_numbers.e
+        e_bytes = e.to_bytes((e.bit_length() + 7) // 8, "big")
+        n_bytes = pub_numbers.n.to_bytes(
+            (pub_numbers.n.bit_length() + 7) // 8, "big",
+        )
+        pub_bytes = bytes([len(e_bytes)]) + e_bytes + n_bytes
+    else:
+        raise ValueError(f"unsupported dnssec algorithm {algorithm}")
+
+    pem = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("ascii")
+    pub_b64 = base64.b64encode(pub_bytes).decode("ascii")
+    tag = _key_tag_from_dnskey(
+        flags=_key_flags(role),
+        algorithm=_DNSSEC_ALG_NUMBER[algorithm],
+        public_key_b64=pub_b64,
+    )
+    return {
+        "role": role,
+        "algorithm": algorithm,
+        "private_pem": pem,
+        "public_key_b64": pub_b64,
+        "key_tag": tag,
+        # zone_name is informational — caller binds the actual zone_id.
+        "_zone": zone_name,
+    }
+
+
+def render_ds_records(zone: DnsZone, keys: Iterable[DnsKey]) -> list[dict]:
+    """Compute DS records for the zone's KSK(s). DS = digest of the
+    canonical owner name (lowercased FQDN with trailing dot) plus the
+    DNSKEY rdata, hashed with SHA-256 (DS digest type 2). Operators
+    upload these to the parent zone's operator."""
+    import base64
+    import hashlib
+    out: list[dict] = []
+    fqdn = zone.name.rstrip(".") + "."
+    # DNS canonical wire-format encoding of the owner name.
+    name_wire = b""
+    for label in fqdn.split(".")[:-1]:
+        name_wire += bytes([len(label)]) + label.lower().encode("ascii")
+    name_wire += b"\x00"
+    for key in keys:
+        if key.role != DnsKeyRole.ksk or key.retired_at is not None:
+            continue
+        alg = _DNSSEC_ALG_NUMBER[key.algorithm]
+        rdata = (
+            _key_flags(key.role).to_bytes(2, "big")
+            + bytes([3, alg])  # protocol=3, algorithm
+            + base64.b64decode(key.public_key_b64)
+        )
+        digest = hashlib.sha256(name_wire + rdata).hexdigest().upper()
+        out.append({
+            "key_tag": key.key_tag,
+            "algorithm": alg,
+            "digest_type": 2,  # SHA-256
+            "digest": digest,
+            # BIND DS RR presentation form, ready to paste into the
+            # parent zone's operator portal.
+            "rr": f"{fqdn} IN DS {key.key_tag} {alg} 2 {digest}",
+        })
+    return out
 
 
 async def probe_health_check(

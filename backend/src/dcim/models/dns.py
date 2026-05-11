@@ -135,6 +135,9 @@ class DnsZone(UUIDPrimaryKey, Timestamped, Base):
     soa_expire: Mapped[int] = mapped_column(Integer, nullable=False, default=1800)
     soa_minimum: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
     default_ttl: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    # DNSSEC: when true, the renderer emits the dnssec plugin and
+    # includes DNSKEY records. Keys live in dns_keys (KSK + ZSK).
+    signed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class DnsRecord(UUIDPrimaryKey, Timestamped, Base):
@@ -209,6 +212,69 @@ class AnycastGroup(UUIDPrimaryKey, Timestamped, Base):
     anycast_ipv4: Mapped[str | None] = mapped_column(INET)
     anycast_ipv6: Mapped[str | None] = mapped_column(INET)
     description: Mapped[str | None] = mapped_column(String(512))
+
+
+class DnsKeyRole(str, enum.Enum):
+    """KSK signs the DNSKEY rrset (its DS lives in the parent zone);
+    ZSK signs everything else. Standard BIND/NIST-recommended split."""
+
+    ksk = "ksk"
+    zsk = "zsk"
+
+
+class DnsKeyAlgorithm(str, enum.Enum):
+    """RFC 8624 SHOULD/MAY algorithms. v1 ships ECDSAP256SHA256 only —
+    short keys, broad resolver support; we surface the enum so RSA can
+    drop in without a schema change."""
+
+    ecdsap256sha256 = "ecdsap256sha256"
+    ed25519 = "ed25519"
+    rsasha256 = "rsasha256"
+
+
+class DnsKey(UUIDPrimaryKey, Timestamped, Base):
+    """A DNSSEC key bound to a zone. Public + private halves live in
+    Postgres for v1 (encrypted-at-rest column hardening deferred);
+    operators export the DS via /dns/zones/{id}/ds-records and upload
+    to the parent zone's operator."""
+
+    __tablename__ = "dns_keys"
+    __table_args__ = (
+        Index("ix_dns_keys_zone", "zone_id"),
+    )
+
+    zone_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dns_zones.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[DnsKeyRole] = mapped_column(
+        Enum(
+            DnsKeyRole, name="dns_key_role",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+    )
+    algorithm: Mapped[DnsKeyAlgorithm] = mapped_column(
+        Enum(
+            DnsKeyAlgorithm, name="dns_key_algorithm",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+    )
+    # PEM-serialized private key (TODO: encrypt-at-rest before any
+    # production deployment).
+    private_pem: Mapped[str] = mapped_column(String, nullable=False)
+    # Base64-encoded public-key bytes per RFC 4034 §2.1.1 — same form
+    # as the DNSKEY rdata's "Public Key" field.
+    public_key_b64: Mapped[str] = mapped_column(String, nullable=False)
+    # DNSSEC key tag (RFC 4034 Appendix B); cached so we don't
+    # recompute on every render.
+    key_tag: Mapped[int] = mapped_column(Integer, nullable=False)
+    active_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+    )
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class DnsHealthCheckProtocol(str, enum.Enum):

@@ -40,6 +40,8 @@ from ..models.dns import (
     DnsBlocklistEntry,
     DnsForwarder,
     DnsHealthCheck,
+    DnsKey,
+    DnsKeyRole,
     DnsRecord,
     DnsRecordSource,
     DnsRecordType,
@@ -73,9 +75,11 @@ from ..schemas.dns import (
     DnsForwarderCreate,
     DnsForwarderOut,
     DnsForwarderUpdate,
+    DnsDsRecordOut,
     DnsHealthCheckCreate,
     DnsHealthCheckOut,
     DnsHealthCheckUpdate,
+    DnsKeyOut,
     DnsMetricsSampleIn,
     DnsMetricsSampleOut,
     DnsRecordCreate,
@@ -379,6 +383,93 @@ async def import_zone_records(
         "removed_manual": removed,
         "warnings": parsed["warnings"],
     }
+
+
+# ----------------------- DNSSEC -----------------------
+@router.post("/zones/{zone_id}/enable-dnssec", response_model=list[DnsKeyOut])
+async def enable_dnssec(
+    zone_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a KSK + ZSK for the zone, flip `signed=true`, and
+    return the new key roster. Idempotent: if keys already exist, the
+    response just lists them — operators rotate via a separate
+    endpoint (deferred)."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    existing = list((
+        await db.execute(select(DnsKey).where(DnsKey.zone_id == zone_id))
+    ).scalars().all())
+    if existing:
+        if not zone.signed:
+            zone.signed = True
+            await db.commit()
+        return existing
+    now = datetime.now(UTC)
+    keys: list[DnsKey] = []
+    for role in (DnsKeyRole.ksk, DnsKeyRole.zsk):
+        material = dns_svc.generate_dnssec_keypair(zone.name, role)
+        keys.append(DnsKey(
+            zone_id=zone_id,
+            role=material["role"],
+            algorithm=material["algorithm"],
+            private_pem=material["private_pem"],
+            public_key_b64=material["public_key_b64"],
+            key_tag=material["key_tag"],
+            active_from=now,
+        ))
+    for k in keys:
+        db.add(k)
+    zone.signed = True
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_zone.enable_dnssec",
+        target_type="dns_zone", target_id=str(zone_id),
+        metadata={
+            "ksk_tag": next(k.key_tag for k in keys if k.role == DnsKeyRole.ksk),
+            "zsk_tag": next(k.key_tag for k in keys if k.role == DnsKeyRole.zsk),
+        },
+    )
+    await db.commit()
+    for k in keys:
+        await db.refresh(k)
+    return keys
+
+
+@router.get("/zones/{zone_id}/keys", response_model=list[DnsKeyOut])
+async def list_zone_keys(
+    zone_id: UUID,
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    if (await db.get(DnsZone, zone_id)) is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    rows = (
+        await db.execute(
+            select(DnsKey).where(DnsKey.zone_id == zone_id)
+            .order_by(DnsKey.role.asc(), DnsKey.active_from.desc()),
+        )
+    ).scalars().all()
+    return rows
+
+
+@router.get("/zones/{zone_id}/ds-records", response_model=list[DnsDsRecordOut])
+async def list_ds_records(
+    zone_id: UUID,
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """DS records for active KSKs — the operator uploads these to the
+    parent zone's operator to chain the trust anchor."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    keys = (
+        await db.execute(select(DnsKey).where(DnsKey.zone_id == zone_id))
+    ).scalars().all()
+    return dns_svc.render_ds_records(zone, keys)
 
 
 # ----------------------- Records -----------------------

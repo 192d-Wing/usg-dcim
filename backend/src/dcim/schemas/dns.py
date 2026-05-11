@@ -20,6 +20,8 @@ from ..models.dns import (
     DnsBlocklistAction,
     DnsHealthCheckProtocol,
     DnsHealthCheckStatus,
+    DnsKeyAlgorithm,
+    DnsKeyRole,
     DnsRecordSource,
     DnsRecordType,
     DnsServerRole,
@@ -69,6 +71,7 @@ class DnsZoneUpdate(BaseModel):
 class DnsZoneOut(DnsZoneBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    signed: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -273,6 +276,32 @@ class DnsBlocklistEntryOut(DnsBlocklistEntryBase):
     id: UUID
     created_at: datetime
     updated_at: datetime
+
+
+# ---------- DnsKey / DNSSEC ----------
+
+class DnsKeyOut(BaseModel):
+    """Public-facing key view — never returns private_pem."""
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    zone_id: UUID
+    role: DnsKeyRole
+    algorithm: DnsKeyAlgorithm
+    public_key_b64: str
+    key_tag: int
+    active_from: datetime
+    retired_at: datetime | None
+    created_at: datetime
+
+
+class DnsDsRecordOut(BaseModel):
+    """Operator-facing DS record — uploaded to the parent zone's
+    operator to chain the trust anchor."""
+    key_tag: int
+    algorithm: int
+    digest_type: int
+    digest: str
+    rr: str
 
 
 # ---------- DnsHealthCheck ----------
