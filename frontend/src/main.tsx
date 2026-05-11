@@ -1,7 +1,16 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
+// Cloudscape global stylesheet must load before our own utility CSS so
+// our Tailwind utilities can still override it where they need to (the
+// app shell is Cloudscape; page bodies still mix shadcn during the
+// migration). applyDensity sets compact mode globally — DCIM tables are
+// dense and the comfortable defaults waste vertical space.
+import '@cloudscape-design/global-styles/index.css';
+import { applyDensity, Density } from '@cloudscape-design/global-styles';
 import './globals.css';
+
+applyDensity(Density.Compact);
 
 // Surface render-time errors as readable text instead of a blank screen so
 // container deploys are diagnosable without DevTools. The boundary catches

@@ -1,20 +1,32 @@
+// Audit log page — Cloudscape canary.
+//
+// Server-side filters: action / site / target_type / target_id.
+// Client-side filter:  actor_label (free-text "contains").
+// Selecting one or more rows reveals the diff/metadata/request detail
+// panel below the table — same information the prior shadcn version
+// surfaced via inline row expansion, modeled with Cloudscape's
+// selection API instead of the tree-shaped expandableRows.
+
 import { useMemo, useState } from 'react';
 import { useTable, useList } from '@refinedev/core';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, ScrollText } from 'lucide-react';
+
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Pagination from '@cloudscape-design/components/pagination';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from '@/components/ui/input';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 
 type AuditEntry = {
   id: string;
@@ -34,23 +46,24 @@ type AuditEntry = {
 };
 type Site = { id: string; code: string; name: string };
 
-const ALL = '__all__';
+const ALL_OPTION: SelectProps.Option = { value: '__all__', label: 'All' };
 
 export function AuditPage() {
-  const [action, setAction] = useState(ALL);
-  const [siteId, setSiteId] = useState(ALL);
+  const [actionOpt, setActionOpt] = useState<SelectProps.Option>(ALL_OPTION);
+  const [siteOpt, setSiteOpt] = useState<SelectProps.Option>(ALL_OPTION);
   const [targetType, setTargetType] = useState('');
   const [targetId, setTargetId] = useState('');
   const [actorLabel, setActorLabel] = useState('');
+  const [selected, setSelected] = useState<AuditEntry[]>([]);
 
   const filters = useMemo(() => {
     const f: { field: string; operator: 'eq' | 'contains'; value: string }[] = [];
-    if (action !== ALL) f.push({ field: 'action', operator: 'eq', value: action });
-    if (siteId !== ALL) f.push({ field: 'site_id', operator: 'eq', value: siteId });
+    if (actionOpt.value !== ALL_OPTION.value) f.push({ field: 'action', operator: 'eq', value: actionOpt.value! });
+    if (siteOpt.value !== ALL_OPTION.value) f.push({ field: 'site_id', operator: 'eq', value: siteOpt.value! });
     if (targetType) f.push({ field: 'target_type', operator: 'eq', value: targetType });
     if (targetId) f.push({ field: 'target_id', operator: 'eq', value: targetId });
     return f;
-  }, [action, siteId, targetType, targetId]);
+  }, [actionOpt, siteOpt, targetType, targetId]);
 
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<AuditEntry>({
     resource: 'audit/log',
@@ -59,7 +72,7 @@ export function AuditPage() {
   });
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
   const sites = sitesRes.result.data ?? [];
-  const sitesById = new Map(sites.map((s) => [s.id, s]));
+  const sitesById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
 
   const actions = useQuery({
     queryKey: ['audit-actions'],
@@ -67,210 +80,236 @@ export function AuditPage() {
     staleTime: 60_000,
   });
 
-  let data = result.data ?? [];
-  const total = result.total ?? 0;
-  // actor_label is a free-text needle filtered client-side — saves another endpoint param.
+  // Server returns up to pageSize rows; actor_label needle filters
+  // client-side to save a backend round-trip on a low-cardinality column.
+  let rows = result.data ?? [];
   if (actorLabel) {
     const needle = actorLabel.toLowerCase();
-    data = data.filter((a) => (a.actor_label ?? '').toLowerCase().includes(needle));
+    rows = rows.filter((a) => (a.actor_label ?? '').toLowerCase().includes(needle));
   }
+  const total = result.total ?? 0;
+
+  const actionOptions: SelectProps.Option[] = [
+    ALL_OPTION,
+    ...(actions.data ?? []).map((a) => ({ value: a, label: a })),
+  ];
+  const siteOptions: SelectProps.Option[] = [
+    ALL_OPTION,
+    ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
+  ];
+
+  // Only show detail for selected rows that actually carry detail —
+  // otherwise selecting a "fail with no diff" row leaves an empty card.
+  const detailRows = selected.filter(hasDetail);
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-          <ScrollText className="h-5 w-5" /> Audit log
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {total.toLocaleString()} entries match the current filter
-        </p>
-      </div>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          description={`${total.toLocaleString()} entries match the current filter`}
+        >
+          Audit log
+        </Header>
+      }
+    >
+      <SpaceBetween size="l">
+        <Container>
+          <ColumnLayout columns={5}>
+            <FormField label="Action">
+              <Select
+                selectedOption={actionOpt}
+                onChange={({ detail }) => { setActionOpt(detail.selectedOption); setCurrentPage(1); }}
+                options={actionOptions}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="Site">
+              <Select
+                selectedOption={siteOpt}
+                onChange={({ detail }) => { setSiteOpt(detail.selectedOption); setCurrentPage(1); }}
+                options={siteOptions}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="Target type">
+              <Input
+                value={targetType}
+                onChange={({ detail }) => { setTargetType(detail.value); setCurrentPage(1); }}
+                placeholder="asset, rack, site…"
+              />
+            </FormField>
+            <FormField label="Target id">
+              <Input
+                value={targetId}
+                onChange={({ detail }) => { setTargetId(detail.value); setCurrentPage(1); }}
+                placeholder="exact uuid"
+              />
+            </FormField>
+            <FormField label="Actor (contains)">
+              <Input
+                value={actorLabel}
+                onChange={({ detail }) => setActorLabel(detail.value)}
+                placeholder="email or label"
+              />
+            </FormField>
+          </ColumnLayout>
+        </Container>
 
-      <Card>
-        <CardContent className="grid gap-3 p-4 md:grid-cols-5">
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Action</label>
-            <Select value={action} onValueChange={(v) => { setAction(v); setCurrentPage(1); }}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All actions</SelectItem>
-                {(actions.data ?? []).map((a) => (
-                  <SelectItem key={a} value={a}>{a}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Site</label>
-            <Select value={siteId} onValueChange={(v) => { setSiteId(v); setCurrentPage(1); }}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All sites</SelectItem>
-                {sites.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.code} · {s.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Target type</label>
-            <Input
-              value={targetType}
-              onChange={(e) => { setTargetType(e.target.value); setCurrentPage(1); }}
-              placeholder="asset, rack, site…"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Target id</label>
-            <Input
-              value={targetId}
-              onChange={(e) => { setTargetId(e.target.value); setCurrentPage(1); }}
-              placeholder="exact uuid"
-              className="font-mono text-xs"
-            />
-          </div>
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Actor (contains)</label>
-            <Input
-              value={actorLabel}
-              onChange={(e) => setActorLabel(e.target.value)}
-              placeholder="email or label"
-            />
-          </div>
-        </CardContent>
-      </Card>
+        <Table<AuditEntry>
+          variant="container"
+          loading={tableQuery.isLoading}
+          loadingText="Loading audit entries…"
+          items={rows}
+          trackBy="id"
+          selectionType="multi"
+          selectedItems={selected}
+          onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
+          ariaLabels={{
+            selectionGroupLabel: 'Audit entry selection',
+            allItemsSelectionLabel: ({ selectedItems }) =>
+              `${selectedItems.length} entries selected`,
+            itemSelectionLabel: (_data, item) => `Select ${item.action}`,
+          }}
+          columnDefinitions={[
+            {
+              id: 'when',
+              header: 'When',
+              cell: (e) => <span style={{ fontSize: 12 }}>{formatDate(e.occurred_at)}</span>,
+              width: 180,
+            },
+            {
+              id: 'actor',
+              header: 'Actor',
+              cell: (e) => (
+                <Box variant="span">
+                  {e.actor_label ?? <Box variant="span" color="text-status-inactive">—</Box>}
+                  {e.actor_token_id && (
+                    <Box variant="span" margin={{ left: 'xs' }}>
+                      <StatusIndicator type="info">token</StatusIndicator>
+                    </Box>
+                  )}
+                </Box>
+              ),
+            },
+            {
+              id: 'action',
+              header: 'Action',
+              cell: (e) => <code style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{e.action}</code>,
+            },
+            {
+              id: 'target',
+              header: 'Target',
+              cell: (e) => e.target_type
+                ? <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+                    {e.target_type}{e.target_id ? `:${e.target_id.slice(0, 8)}…` : ''}
+                  </span>
+                : <Box variant="span" color="text-status-inactive">—</Box>,
+            },
+            {
+              id: 'site',
+              header: 'Site',
+              cell: (e) => {
+                if (!e.site_id) return <Box variant="span" color="text-status-inactive">—</Box>;
+                const s = sitesById.get(e.site_id);
+                return <span style={{ fontSize: 12 }}>{s ? s.code : `${e.site_id.slice(0, 8)}…`}</span>;
+              },
+            },
+            {
+              id: 'result',
+              header: 'Result',
+              cell: (e) => e.success
+                ? <StatusIndicator type="success">ok</StatusIndicator>
+                : <StatusIndicator type="error">fail</StatusIndicator>,
+              width: 100,
+            },
+          ]}
+          empty={
+            <Box textAlign="center" color="inherit" padding="m">
+              No entries match this filter.
+            </Box>
+          }
+          pagination={
+            pageCount > 1 ? (
+              <Pagination
+                currentPageIndex={currentPage}
+                pagesCount={pageCount}
+                onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+              />
+            ) : undefined
+          }
+        />
 
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-44">When</TableHead>
-                  <TableHead>Actor</TableHead>
-                  <TableHead>Action</TableHead>
-                  <TableHead>Target</TableHead>
-                  <TableHead>Site</TableHead>
-                  <TableHead className="w-20">Result</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-muted-foreground">
-                      No entries match this filter.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {data.map((e) => <AuditRow key={e.id} entry={e} sitesById={sitesById} />)}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage <= 1}>Prev</Button>
-          <span>page {currentPage} of {pageCount}</span>
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage >= pageCount}>Next</Button>
-        </div>
-      )}
-    </div>
+        {detailRows.length > 0 && (
+          <SpaceBetween size="s">
+            <Header
+              variant="h3"
+              actions={<Button onClick={() => setSelected([])}>Clear</Button>}
+            >
+              Detail ({detailRows.length})
+            </Header>
+            {detailRows.map((e) => <DetailPanel key={e.id} entry={e} />)}
+          </SpaceBetween>
+        )}
+      </SpaceBetween>
+    </ContentLayout>
   );
 }
 
-function AuditRow({ entry, sitesById }: { entry: AuditEntry; sitesById: Map<string, Site> }) {
-  const [open, setOpen] = useState(false);
-  const hasDetail = (
-    Object.keys(entry.diff_json ?? {}).length > 0
-    || Object.keys(entry.metadata_json ?? {}).length > 0
-    || !!entry.actor_ip
-    || !!entry.request_id
-  );
-  const site = entry.site_id ? sitesById.get(entry.site_id) : null;
-
+function hasDetail(e: AuditEntry): boolean {
   return (
-    <>
-      <TableRow
-        className={hasDetail ? 'cursor-pointer hover:bg-accent/40' : ''}
-        onClick={() => hasDetail && setOpen(!open)}
-      >
-        <TableCell className="text-xs">
-          <div>{formatDate(entry.occurred_at)}</div>
-        </TableCell>
-        <TableCell className="text-sm">
-          {entry.actor_label ?? <span className="text-muted-foreground">—</span>}
-          {entry.actor_token_id && (
-            <Badge variant="outline" className="ml-1.5 text-[10px]">token</Badge>
-          )}
-        </TableCell>
-        <TableCell>
-          <code className="font-mono text-xs">{entry.action}</code>
-        </TableCell>
-        <TableCell className="text-xs">
-          {entry.target_type ? (
-            <span className="font-mono">
-              {entry.target_type}{entry.target_id ? `:${entry.target_id.slice(0, 8)}…` : ''}
-            </span>
-          ) : <span className="text-muted-foreground">—</span>}
-        </TableCell>
-        <TableCell className="text-xs">
-          {site ? `${site.code}` : entry.site_id ? `${entry.site_id.slice(0, 8)}…` : <span className="text-muted-foreground">—</span>}
-        </TableCell>
-        <TableCell>
-          <div className="flex items-center gap-1">
-            <Badge variant={entry.success ? 'success' : 'critical'}>
-              {entry.success ? 'ok' : 'fail'}
-            </Badge>
-            {hasDetail && (
-              open ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                   : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+    Object.keys(e.diff_json ?? {}).length > 0
+    || Object.keys(e.metadata_json ?? {}).length > 0
+    || !!e.actor_ip
+    || !!e.request_id
+  );
+}
+
+function DetailPanel({ entry }: Readonly<{ entry: AuditEntry }>) {
+  return (
+    <Container
+      header={
+        <Header
+          variant="h3"
+          description={<code style={{ fontFamily: 'ui-monospace, monospace' }}>{entry.action}</code>}
+        >
+          {entry.target_type
+            ? `${entry.target_type}:${(entry.target_id ?? '').slice(0, 8)}…`
+            : 'detail'}
+        </Header>
+      }
+    >
+      <ColumnLayout columns={2} variant="text-grid">
+        {(entry.actor_ip || entry.request_id) && (
+          <Box>
+            <Box variant="awsui-key-label">Request</Box>
+            {entry.actor_ip && (
+              <div>IP: <code style={{ fontFamily: 'ui-monospace, monospace' }}>{entry.actor_ip}</code></div>
             )}
-          </div>
-        </TableCell>
-      </TableRow>
-      {open && hasDetail && (
-        <TableRow>
-          <TableCell colSpan={6} className="bg-muted/30">
-            <div className="grid gap-3 text-xs md:grid-cols-2">
-              {(entry.actor_ip || entry.request_id) && (
-                <div className="space-y-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Request
-                  </div>
-                  {entry.actor_ip && <div>IP: <span className="font-mono">{entry.actor_ip}</span></div>}
-                  {entry.request_id && <div>Request id: <span className="font-mono">{entry.request_id}</span></div>}
-                </div>
-              )}
-              {Object.keys(entry.diff_json ?? {}).length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Diff
-                  </div>
-                  <pre className="overflow-x-auto rounded-md bg-background p-2 font-mono text-[11px]">
-                    {JSON.stringify(entry.diff_json, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {Object.keys(entry.metadata_json ?? {}).length > 0 && (
-                <div className="space-y-1 md:col-span-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Metadata
-                  </div>
-                  <pre className="overflow-x-auto rounded-md bg-background p-2 font-mono text-[11px]">
-                    {JSON.stringify(entry.metadata_json, null, 2)}
-                  </pre>
-                </div>
-              )}
-            </div>
-          </TableCell>
-        </TableRow>
-      )}
-    </>
+            {entry.request_id && (
+              <div>Request id: <code style={{ fontFamily: 'ui-monospace, monospace' }}>{entry.request_id}</code></div>
+            )}
+          </Box>
+        )}
+        {Object.keys(entry.diff_json ?? {}).length > 0 && (
+          <Box>
+            <Box variant="awsui-key-label">Diff</Box>
+            <pre style={{
+              overflowX: 'auto', fontFamily: 'ui-monospace, monospace',
+              fontSize: 11, margin: 0,
+            }}>{JSON.stringify(entry.diff_json, null, 2)}</pre>
+          </Box>
+        )}
+        {Object.keys(entry.metadata_json ?? {}).length > 0 && (
+          <Box>
+            <Box variant="awsui-key-label">Metadata</Box>
+            <pre style={{
+              overflowX: 'auto', fontFamily: 'ui-monospace, monospace',
+              fontSize: 11, margin: 0,
+            }}>{JSON.stringify(entry.metadata_json, null, 2)}</pre>
+          </Box>
+        )}
+      </ColumnLayout>
+    </Container>
   );
 }

@@ -10,7 +10,7 @@ import { dataProvider } from '@/lib/data-provider';
 import { authProvider } from '@/lib/auth-provider';
 import { accessControlProvider } from '@/lib/access-control-provider';
 
-import { Shell } from '@/components/layout/shell';
+import { Shell } from '@/components/layout/cloudscape-shell';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Skeleton } from '@/components/ui/skeleton';
