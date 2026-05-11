@@ -187,6 +187,72 @@ class AnycastGroup(UUIDPrimaryKey, Timestamped, Base):
     description: Mapped[str | None] = mapped_column(String(512))
 
 
+class DnsBlocklistAction(str, enum.Enum):
+    """What the recursive does when a query matches a blocklist entry.
+
+    - block:    return NXDOMAIN (request never reaches a real resolver)
+    - sinkhole: return a canned A/AAAA pointing at a captive landing IP
+    """
+
+    block = "block"
+    sinkhole = "sinkhole"
+
+
+class DnsBlocklist(UUIDPrimaryKey, Timestamped, Base):
+    """A named bucket of patterns the recursive should refuse or
+    redirect. Patterns roll into one `template` block in the recursive
+    Corefile per blocklist. Useful for threat-feed integrations (one
+    blocklist per feed) and ad-hoc operator rules."""
+
+    __tablename__ = "dns_blocklists"
+    __table_args__ = (
+        UniqueConstraint("fabric_id", "name", name="uq_dns_blocklist_fabric_name"),
+        Index("ix_dns_blocklists_fabric", "fabric_id"),
+    )
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
+    )
+    action: Mapped[DnsBlocklistAction] = mapped_column(
+        Enum(
+            DnsBlocklistAction, name="dns_blocklist_action",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+    )
+    # When action=sinkhole, A queries are answered with sink_ipv4 and
+    # AAAA with sink_ipv6. At least one must be set; the renderer skips
+    # AFs with no sink.
+    sink_ipv4: Mapped[str | None] = mapped_column(INET)
+    sink_ipv6: Mapped[str | None] = mapped_column(INET)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512))
+
+
+class DnsBlocklistEntry(UUIDPrimaryKey, Timestamped, Base):
+    """One pattern in a blocklist. Patterns are DNS-name shapes; the
+    only wildcard is leading `*.` (matches one-or-more labels). The
+    renderer compiles them into a regex alternation for CoreDNS's
+    template plugin."""
+
+    __tablename__ = "dns_blocklist_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "blocklist_id", "pattern",
+            name="uq_dns_blocklist_entry_pattern",
+        ),
+        Index("ix_dns_blocklist_entries_blocklist", "blocklist_id"),
+    )
+
+    blocklist_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("dns_blocklists.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    pattern: Mapped[str] = mapped_column(String(253), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512))
+
+
 class DnsForwarder(UUIDPrimaryKey, Timestamped, Base):
     """Per-zone conditional forwarder for the recursive CoreDNS. Each
     row emits one extra `<pattern>:53 { forward . <upstreams…> }` block

@@ -36,6 +36,8 @@ from ..models.dns import (
     AnycastBgpBinding,
     AnycastGroup,
     BgpPeer,
+    DnsBlocklist,
+    DnsBlocklistEntry,
     DnsForwarder,
     DnsRecord,
     DnsRecordSource,
@@ -58,6 +60,12 @@ from ..schemas.dns import (
     BgpPeerCreate,
     BgpPeerOut,
     BgpPeerUpdate,
+    DnsBlocklistCreate,
+    DnsBlocklistEntryBulk,
+    DnsBlocklistEntryCreate,
+    DnsBlocklistEntryOut,
+    DnsBlocklistOut,
+    DnsBlocklistUpdate,
     DnsBundle,
     DnsForwarderCreate,
     DnsForwarderOut,
@@ -89,6 +97,8 @@ _ANYCAST_NOT_FOUND = "anycast group not found"
 _BGP_NOT_FOUND = "bgp peer not found"
 _BIND_NOT_FOUND = "anycast/bgp binding not found"
 _FORWARDER_NOT_FOUND = "dns forwarder not found"
+_BLOCKLIST_NOT_FOUND = "dns blocklist not found"
+_BLOCKLIST_ENTRY_NOT_FOUND = "dns blocklist entry not found"
 
 
 async def _touch_zone(db: AsyncSession, zone_id: UUID) -> None:
@@ -811,6 +821,185 @@ async def delete_forwarder(
     await audit.record(
         db, principal, action="dns_forwarder.delete",
         target_type="dns_forwarder", target_id=str(forwarder_id),
+        metadata=snapshot,
+    )
+    await db.commit()
+
+
+# ----------------------- Blocklists -----------------------
+@router.get("/blocklists", response_model=Page[DnsBlocklistOut])
+async def list_blocklists(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(DnsBlocklist)
+    if fabric_id is not None:
+        stmt = stmt.where(DnsBlocklist.fabric_id == fabric_id)
+    return await paginate(
+        db, stmt, model=DnsBlocklist, params=params, out_model=DnsBlocklistOut,
+    )
+
+
+@router.post("/blocklists", response_model=DnsBlocklistOut, status_code=201)
+async def create_blocklist(
+    payload: DnsBlocklistCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    if payload.action.value == "sinkhole" and payload.sink_ipv4 is None and payload.sink_ipv6 is None:
+        raise ValidationError("sinkhole blocklist needs at least one sink IP")
+    obj = DnsBlocklist(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_blocklist.create",
+        target_type="dns_blocklist", target_id=str(obj.id),
+        metadata={"name": payload.name, "action": payload.action.value},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/blocklists/{blocklist_id}", response_model=DnsBlocklistOut)
+async def update_blocklist(
+    blocklist_id: UUID,
+    payload: DnsBlocklistUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsBlocklist, blocklist_id)
+    if obj is None:
+        raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="dns_blocklist.update",
+        target_type="dns_blocklist", target_id=str(blocklist_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/blocklists/{blocklist_id}", status_code=204)
+async def delete_blocklist(
+    blocklist_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsBlocklist, blocklist_id)
+    if obj is None:
+        raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    snapshot = {"name": obj.name, "action": obj.action.value}
+    # ON DELETE CASCADE on dns_blocklist_entries cleans up children.
+    await db.execute(delete(DnsBlocklist).where(DnsBlocklist.id == blocklist_id))
+    await audit.record(
+        db, principal, action="dns_blocklist.delete",
+        target_type="dns_blocklist", target_id=str(blocklist_id),
+        metadata=snapshot,
+    )
+    await db.commit()
+
+
+@router.get("/blocklists/{blocklist_id}/entries", response_model=Page[DnsBlocklistEntryOut])
+async def list_blocklist_entries(
+    blocklist_id: UUID,
+    params: PageParams = Depends(PageParams.from_query),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    if (await db.get(DnsBlocklist, blocklist_id)) is None:
+        raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    stmt = select(DnsBlocklistEntry).where(DnsBlocklistEntry.blocklist_id == blocklist_id)
+    return await paginate(
+        db, stmt, model=DnsBlocklistEntry,
+        params=params, out_model=DnsBlocklistEntryOut,
+    )
+
+
+@router.post(
+    "/blocklists/{blocklist_id}/entries",
+    response_model=DnsBlocklistEntryOut, status_code=201,
+)
+async def create_blocklist_entry(
+    blocklist_id: UUID,
+    payload: DnsBlocklistEntryCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    if (await db.get(DnsBlocklist, blocklist_id)) is None:
+        raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    obj = DnsBlocklistEntry(blocklist_id=blocklist_id, **payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_blocklist_entry.create",
+        target_type="dns_blocklist", target_id=str(blocklist_id),
+        metadata={"pattern": payload.pattern},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.post("/blocklists/{blocklist_id}/entries/bulk")
+async def bulk_add_blocklist_entries(
+    blocklist_id: UUID,
+    payload: DnsBlocklistEntryBulk,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Idempotent bulk insert for threat-feed style imports. Existing
+    (blocklist, pattern) pairs are silently skipped via the unique
+    constraint; the response reports the net adds."""
+    if (await db.get(DnsBlocklist, blocklist_id)) is None:
+        raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    # Dedup within the payload first so the audit count is honest.
+    incoming = {p.strip().lower() for p in payload.patterns if p.strip()}
+    if not incoming:
+        return {"added": 0, "skipped": 0}
+    existing = (
+        await db.execute(
+            select(DnsBlocklistEntry.pattern)
+            .where(DnsBlocklistEntry.blocklist_id == blocklist_id)
+        )
+    ).scalars().all()
+    existing_set = set(existing)
+    to_add = sorted(incoming - existing_set)
+    for pat in to_add:
+        db.add(DnsBlocklistEntry(blocklist_id=blocklist_id, pattern=pat))
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_blocklist_entry.bulk_add",
+        target_type="dns_blocklist", target_id=str(blocklist_id),
+        metadata={"added": len(to_add), "skipped": len(incoming) - len(to_add)},
+    )
+    await db.commit()
+    return {"added": len(to_add), "skipped": len(incoming) - len(to_add)}
+
+
+@router.delete("/blocklists/{blocklist_id}/entries/{entry_id}", status_code=204)
+async def delete_blocklist_entry(
+    blocklist_id: UUID,
+    entry_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsBlocklistEntry, entry_id)
+    if obj is None or obj.blocklist_id != blocklist_id:
+        raise NotFoundError(_BLOCKLIST_ENTRY_NOT_FOUND)
+    snapshot = {"pattern": obj.pattern}
+    await db.execute(delete(DnsBlocklistEntry).where(DnsBlocklistEntry.id == entry_id))
+    await audit.record(
+        db, principal, action="dns_blocklist_entry.delete",
+        target_type="dns_blocklist", target_id=str(blocklist_id),
         metadata=snapshot,
     )
     await db.commit()

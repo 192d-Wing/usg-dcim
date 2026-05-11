@@ -103,6 +103,24 @@ type DnsForwarder = {
   description: string | null;
 };
 
+type DnsBlocklist = {
+  id: string;
+  name: string;
+  fabric_id: string;
+  action: 'block' | 'sinkhole';
+  sink_ipv4: string | null;
+  sink_ipv6: string | null;
+  enabled: boolean;
+  description: string | null;
+};
+
+type DnsBlocklistEntry = {
+  id: string;
+  blocklist_id: string;
+  pattern: string;
+  description: string | null;
+};
+
 type BgpPeer = {
   id: string;
   name: string;
@@ -186,6 +204,11 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
             id: 'forwarders',
             label: 'Forwarders',
             content: <ForwardersPanel fabricId={fabricId} canWrite={canWrite} />,
+          },
+          {
+            id: 'blocklists',
+            label: 'Blocklists',
+            content: <BlocklistsPanel fabricId={fabricId} canWrite={canWrite} />,
           },
         ]}
       />
@@ -1961,6 +1984,494 @@ function ForwarderForm({
             <Input
               value={description}
               onChange={({ detail }) => setDescription(detail.value)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
+  );
+}
+
+// ----------------------- Blocklists -----------------------
+
+function BlocklistsPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const blocklistsQ = useQuery({
+    queryKey: ['dns-blocklists', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: DnsBlocklist[] }>(`/dns/blocklists?fabric_id=${fabricId}&page_size=200`)
+    ).data.items ?? [],
+  });
+  const blocklists = blocklistsQ.data ?? [];
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editBl, setEditBl] = useState<DnsBlocklist | null>(null);
+  const opened = blocklists.find((b) => b.id === openId) ?? null;
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-blocklists', fabricId] });
+  }
+
+  async function remove(b: DnsBlocklist) {
+    if (!window.confirm(`Delete blocklist ${b.name}? Entries are removed too.`)) return;
+    try {
+      await http.delete(`/dns/blocklists/${b.id}`);
+      if (openId === b.id) setOpenId(null);
+      await refresh();
+      toast.success('Blocklist removed');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  async function toggleEnabled(b: DnsBlocklist) {
+    try {
+      await http.patch(`/dns/blocklists/${b.id}`, { enabled: !b.enabled });
+      await refresh();
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  if (opened) {
+    return (
+      <BlocklistDetailView
+        blocklist={opened}
+        onBack={() => setOpenId(null)}
+        canWrite={canWrite}
+      />
+    );
+  }
+
+  return (
+    <>
+      <Table<DnsBlocklist>
+        variant="container"
+        loading={blocklistsQ.isLoading}
+        loadingText="Loading blocklists…"
+        items={blocklists}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${blocklists.length})`}
+            actions={canWrite && (
+              <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                Create blocklist
+              </Button>
+            )}
+            description="DNS-layer block / sinkhole rules applied at the recursive resolver. Click a name to manage its patterns."
+          >
+            Blocklists
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'name', header: 'Name',
+            cell: (b) => (
+              <Link
+                href={`#blocklist-${b.id}`}
+                onFollow={(e) => { e.preventDefault(); setOpenId(b.id); }}
+              >
+                {b.name}
+              </Link>
+            ),
+          },
+          {
+            id: 'action', header: 'Action',
+            cell: (b) => b.action === 'block'
+              ? <Badge color="red">Block (NXDOMAIN)</Badge>
+              : <Badge color="severity-medium">Sinkhole</Badge>,
+            width: 200,
+          },
+          {
+            id: 'sink', header: 'Sink target',
+            cell: (b) => b.action === 'sinkhole'
+              ? (
+                <span style={MONO}>
+                  {[b.sink_ipv4, b.sink_ipv6].filter(Boolean).join(', ') || '—'}
+                </span>
+              )
+              : <Box color="text-status-inactive">—</Box>,
+          },
+          {
+            id: 'enabled', header: 'Status',
+            cell: (b) => b.enabled
+              ? <StatusIndicator type="success">Enabled</StatusIndicator>
+              : <StatusIndicator type="stopped">Disabled</StatusIndicator>,
+            width: 130,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (b: DnsBlocklist) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button
+                  iconName={b.enabled ? 'status-stopped' : 'status-positive'}
+                  variant="inline-icon"
+                  onClick={() => toggleEnabled(b)}
+                  ariaLabel={`${b.enabled ? 'Disable' : 'Enable'} ${b.name}`}
+                />
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditBl(b)} ariaLabel={`Edit ${b.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(b)} ariaLabel={`Delete ${b.name}`} />
+              </SpaceBetween>
+            ),
+            width: 140,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" padding="l">
+            <SpaceBetween size="xs">
+              <b>No blocklists</b>
+              <Box color="text-status-inactive" fontSize="body-s">
+                A blocklist groups patterns the recursive should refuse (NXDOMAIN)
+                or redirect to a sinkhole IP. Useful for ingesting threat feeds.
+              </Box>
+              {canWrite && (
+                <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                  Create blocklist
+                </Button>
+              )}
+            </SpaceBetween>
+          </Box>
+        }
+      />
+      {canWrite && (
+        <>
+          <Modal
+            visible={createOpen}
+            onDismiss={() => setCreateOpen(false)}
+            header="New blocklist"
+            size="medium"
+          >
+            <BlocklistForm
+              fabricId={fabricId}
+              onSaved={async () => { setCreateOpen(false); await refresh(); }}
+            />
+          </Modal>
+          <Modal
+            visible={editBl !== null}
+            onDismiss={() => setEditBl(null)}
+            header="Edit blocklist"
+            size="medium"
+          >
+            {editBl && (
+              <BlocklistForm
+                fabricId={fabricId}
+                blocklist={editBl}
+                onSaved={async () => { setEditBl(null); await refresh(); }}
+              />
+            )}
+          </Modal>
+        </>
+      )}
+    </>
+  );
+}
+
+function BlocklistForm({
+  fabricId, blocklist, onSaved,
+}: {
+  fabricId: string;
+  blocklist?: DnsBlocklist;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(blocklist?.name ?? '');
+  const [actionOpt, setActionOpt] = useState<SelectProps.Option>(
+    { value: blocklist?.action ?? 'block',
+      label: blocklist?.action === 'sinkhole' ? 'Sinkhole' : 'Block (NXDOMAIN)' },
+  );
+  const [sinkV4, setSinkV4] = useState(blocklist?.sink_ipv4 ?? '');
+  const [sinkV6, setSinkV6] = useState(blocklist?.sink_ipv6 ?? '');
+  const [description, setDescription] = useState(blocklist?.description ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const isSinkhole = actionOpt.value === 'sinkhole';
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Required';
+    if (isSinkhole && !sinkV4.trim() && !sinkV6.trim()) {
+      errs.sink = 'At least one sink IP required for sinkhole';
+    }
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
+    try {
+      const body: Record<string, unknown> = {
+        name,
+        action: actionOpt.value,
+        sink_ipv4: isSinkhole && sinkV4.trim() ? sinkV4.trim() : null,
+        sink_ipv6: isSinkhole && sinkV6.trim() ? sinkV6.trim() : null,
+        description: description.trim() || null,
+      };
+      if (blocklist) {
+        await http.patch(`/dns/blocklists/${blocklist.id}`, body);
+        toast.success('Blocklist updated');
+      } else {
+        body.fabric_id = fabricId;
+        await http.post('/dns/blocklists', body);
+        toast.success('Blocklist created');
+      }
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : blocklist ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <ColumnLayout columns={2}>
+            <FormField label="Name" errorText={errors.name}>
+              <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="malware-feed-2026" />
+            </FormField>
+            <FormField label="Action">
+              <Select
+                selectedOption={actionOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setActionOpt(detail.selectedOption);
+                }}
+                options={[
+                  { value: 'block', label: 'Block (NXDOMAIN)' },
+                  { value: 'sinkhole', label: 'Sinkhole' },
+                ]}
+                expandToViewport
+              />
+            </FormField>
+          </ColumnLayout>
+          {isSinkhole && (
+            <ColumnLayout columns={2}>
+              <FormField label="Sink IPv4" errorText={errors.sink}>
+                <Input value={sinkV4} onChange={({ detail }) => setSinkV4(detail.value)} placeholder="10.0.0.250" />
+              </FormField>
+              <FormField label="Sink IPv6">
+                <Input value={sinkV6} onChange={({ detail }) => setSinkV6(detail.value)} placeholder="fd00::dead" />
+              </FormField>
+            </ColumnLayout>
+          )}
+          <FormField label="Description (optional)">
+            <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
+  );
+}
+
+function BlocklistDetailView({
+  blocklist, onBack, canWrite,
+}: {
+  blocklist: DnsBlocklist;
+  onBack: () => void;
+  canWrite: boolean;
+}) {
+  const qc = useQueryClient();
+  const entriesQ = useQuery({
+    queryKey: ['dns-blocklist-entries', blocklist.id],
+    queryFn: async () => (
+      await http.get<{ items: DnsBlocklistEntry[] }>(
+        `/dns/blocklists/${blocklist.id}/entries?page_size=500`,
+      )
+    ).data.items ?? [],
+  });
+  const entries = entriesQ.data ?? [];
+  const [filterText, setFilterText] = useState('');
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const filtered = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    if (!q) return entries;
+    return entries.filter((e) => e.pattern.toLowerCase().includes(q));
+  }, [entries, filterText]);
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-blocklist-entries', blocklist.id] });
+  }
+
+  async function remove(e: DnsBlocklistEntry) {
+    if (!window.confirm(`Delete pattern "${e.pattern}"?`)) return;
+    try {
+      await http.delete(`/dns/blocklists/${blocklist.id}/entries/${e.id}`);
+      await refresh();
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <SpaceBetween size="m">
+      <div>
+        <Link
+          href="#blocklists"
+          onFollow={(e) => { e.preventDefault(); onBack(); }}
+        >
+          ← Blocklists
+        </Link>
+      </div>
+      <Container
+        header={<Header variant="h2">{blocklist.name}</Header>}
+      >
+        <KeyValuePairs
+          columns={3}
+          items={[
+            {
+              label: 'Action',
+              value: blocklist.action === 'block'
+                ? <Badge color="red">Block (NXDOMAIN)</Badge>
+                : <Badge color="severity-medium">Sinkhole</Badge>,
+            },
+            {
+              label: 'Status',
+              value: blocklist.enabled
+                ? <StatusIndicator type="success">Enabled</StatusIndicator>
+                : <StatusIndicator type="stopped">Disabled</StatusIndicator>,
+            },
+            {
+              label: 'Sink',
+              value: blocklist.action === 'sinkhole'
+                ? (
+                  <span style={MONO}>
+                    {[blocklist.sink_ipv4, blocklist.sink_ipv6].filter(Boolean).join(', ') || '—'}
+                  </span>
+                )
+                : <Box color="text-status-inactive">—</Box>,
+            },
+            {
+              label: 'Description',
+              value: blocklist.description || <Box color="text-status-inactive">—</Box>,
+            },
+          ]}
+        />
+      </Container>
+      <Table<DnsBlocklistEntry>
+        variant="container"
+        loading={entriesQ.isLoading}
+        loadingText="Loading entries…"
+        items={filtered}
+        trackBy="id"
+        filter={
+          <TextFilter
+            filteringText={filterText}
+            filteringPlaceholder="Filter patterns"
+            filteringAriaLabel="Filter patterns"
+            onChange={({ detail }) => setFilterText(detail.filteringText)}
+            countText={`${filtered.length} match${filtered.length === 1 ? '' : 'es'}`}
+          />
+        }
+        header={
+          <Header
+            counter={`(${entries.length})`}
+            actions={canWrite && (
+              <Button variant="primary" onClick={() => setBulkOpen(true)}>
+                Add patterns
+              </Button>
+            )}
+          >
+            Patterns
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'pattern', header: 'Pattern',
+            cell: (e) => <span style={MONO}>{e.pattern}</span>,
+          },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            cell: (e: DnsBlocklistEntry) => (
+              <Button
+                iconName="remove"
+                variant="inline-icon"
+                onClick={() => remove(e)}
+                ariaLabel={`Delete ${e.pattern}`}
+              />
+            ),
+            width: 80,
+          }] : []),
+        ]}
+        empty={
+          <Box textAlign="center" color="text-status-inactive" padding="m">
+            No patterns yet. Use "Add patterns" to paste a list.
+          </Box>
+        }
+      />
+      {canWrite && (
+        <Modal
+          visible={bulkOpen}
+          onDismiss={() => setBulkOpen(false)}
+          header="Add patterns"
+          size="medium"
+        >
+          <BulkPatternForm
+            blocklistId={blocklist.id}
+            onSaved={async () => { setBulkOpen(false); await refresh(); }}
+          />
+        </Modal>
+      )}
+    </SpaceBetween>
+  );
+}
+
+function BulkPatternForm({
+  blocklistId, onSaved,
+}: { blocklistId: string; onSaved: () => void }) {
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const patterns = text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    if (patterns.length === 0) {
+      toast.error('Paste at least one pattern');
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await http.post<{ added: number; skipped: number }>(
+        `/dns/blocklists/${blocklistId}/entries/bulk`,
+        { patterns },
+      );
+      toast.success(`Added ${r.data.added}; skipped ${r.data.skipped} duplicate(s)`);
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={busy}>
+            {busy ? 'Adding…' : 'Add'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField
+            label="Patterns"
+            description={
+              <>One per line. Use <span style={MONO}>*.</span> for leading wildcards
+              (e.g. <span style={MONO}>*.evil.example</span>). Bare names match exactly.</>
+            }
+          >
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              rows={12}
+              placeholder={'*.malware.example\nads.tracker.example\nphish-domain.example'}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
             />
           </FormField>
         </SpaceBetween>

@@ -160,6 +160,36 @@ def test_corefile_recursive_skips_empty_forwarder():
     assert "broken.example.:53" not in cf
 
 
+def test_corefile_recursive_emits_blocklist_templates():
+    # Block + sinkhole live as `template` directives inside the
+    # catch-all .:53 block, ahead of the forward.
+    cf = render_corefile_recursive(
+        fabric_apexes=[], auth_unicast_ip=None,
+        upstream_resolvers=["1.1.1.1"],
+        blocklists=[
+            {
+                "action": "block",
+                "patterns": ["evil.example", "*.malware.example"],
+                "sink_ipv4": None, "sink_ipv6": None,
+            },
+            {
+                "action": "sinkhole",
+                "patterns": ["ads.example"],
+                "sink_ipv4": "10.0.0.250", "sink_ipv6": None,
+            },
+        ],
+    )
+    assert "template ANY ANY {" in cf
+    assert "rcode NXDOMAIN" in cf
+    # Wildcard patterns expand to `.+\.<body>\.?$`.
+    assert r"^.+\.malware\.example\.?$" in cf
+    # Sinkhole block (v4 only — v6 sink absent).
+    assert "template IN A {" in cf
+    assert "10 IN A 10.0.0.250" not in cf  # answer line is templated
+    assert "10.0.0.250" in cf
+    assert "template IN AAAA" not in cf
+
+
 def test_gobgp_config_has_neighbor_and_anycast_network():
     server = SimpleNamespace(unicast_ip="10.42.0.53", id=uuid4())
     peer = SimpleNamespace(local_asn=65000, peer_asn=65001, peer_ip="10.42.255.1", md5_password=None)

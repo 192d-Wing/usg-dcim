@@ -17,6 +17,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_fie
 
 from ..models.dns import (
     AnycastService,
+    DnsBlocklistAction,
     DnsRecordSource,
     DnsRecordType,
     DnsServerRole,
@@ -203,6 +204,60 @@ class AnycastGroupUpdate(BaseModel):
 
 
 class AnycastGroupOut(AnycastGroupBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- DnsBlocklist ----------
+
+class DnsBlocklistBase(BaseModel):
+    name: str
+    fabric_id: UUID
+    action: DnsBlocklistAction
+    sink_ipv4: InetStrOpt = None
+    sink_ipv6: InetStrOpt = None
+    enabled: bool = True
+    description: str | None = None
+
+
+class DnsBlocklistCreate(DnsBlocklistBase):
+    pass
+
+
+class DnsBlocklistUpdate(BaseModel):
+    name: str | None = None
+    action: DnsBlocklistAction | None = None
+    sink_ipv4: str | None = None
+    sink_ipv6: str | None = None
+    enabled: bool | None = None
+    description: str | None = None
+
+
+class DnsBlocklistOut(DnsBlocklistBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class DnsBlocklistEntryBase(BaseModel):
+    blocklist_id: UUID
+    pattern: str
+    description: str | None = None
+
+
+class DnsBlocklistEntryCreate(BaseModel):
+    pattern: str
+    description: str | None = None
+
+
+class DnsBlocklistEntryBulk(BaseModel):
+    patterns: list[str] = Field(default_factory=list, min_length=1)
+
+
+class DnsBlocklistEntryOut(DnsBlocklistEntryBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     created_at: datetime

@@ -31,6 +31,9 @@ from ..models.dns import (
     AnycastBgpBinding,
     AnycastGroup,
     BgpPeer,
+    DnsBlocklist,
+    DnsBlocklistAction,
+    DnsBlocklistEntry,
     DnsForwarder,
     DnsRecord,
     DnsRecordSource,
@@ -149,23 +152,76 @@ def render_corefile_auth(zone_names: Iterable[str], *, zones_dir: str) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
+def _pattern_to_regex(pattern: str) -> str:
+    """Translate one DNS-name pattern into a regex fragment for CoreDNS
+    `template match`. Only `*.` (leading-label wildcard) is supported;
+    every other character is escaped so dots in domain names don't
+    accidentally match anything."""
+    p = pattern.strip().rstrip(".").lower()
+    wildcard_head = p.startswith("*.")
+    body = p[2:] if wildcard_head else p
+    escaped = body.replace(".", r"\.")
+    if wildcard_head:
+        # Match any non-empty sequence of labels followed by the body.
+        return rf"^.+\.{escaped}\.?$"
+    return rf"^{escaped}\.?$"
+
+
+def _render_blocklist_template(
+    *, action: str, patterns: list[str],
+    sink_ipv4: str | None, sink_ipv6: str | None,
+) -> list[str]:
+    """Compile one blocklist into zero, one, or two CoreDNS `template`
+    snippets. Returns the indented lines ready to drop into the
+    catch-all block — empty list if nothing renderable (no patterns,
+    or sinkhole with no sink IPs)."""
+    if not patterns:
+        return []
+    regex = "|".join(f"({_pattern_to_regex(p)})" for p in patterns)
+    if action == "block":
+        return [
+            "    template ANY ANY {",
+            f"        match {regex}",
+            "        rcode NXDOMAIN",
+            "    }",
+        ]
+    if action == "sinkhole":
+        lines: list[str] = []
+        if sink_ipv4:
+            lines += [
+                "    template IN A {",
+                f"        match {regex}",
+                f'        answer "{{{{ .Name }}}} 60 IN A {sink_ipv4}"',
+                "    }",
+            ]
+        if sink_ipv6:
+            lines += [
+                "    template IN AAAA {",
+                f"        match {regex}",
+                f'        answer "{{{{ .Name }}}} 60 IN AAAA {sink_ipv6}"',
+                "    }",
+            ]
+        return lines
+    return []
+
+
 def render_corefile_recursive(
     *,
     fabric_apexes: Iterable[str],
     auth_unicast_ip: str | None,
     upstream_resolvers: Iterable[str],
     conditional_forwarders: Iterable[tuple[str, list[str]]] = (),
+    blocklists: Iterable[dict] = (),
 ) -> str:
     """Recursive Corefile: forward `*.<apex>` for each fabric apex to
     the local auth pod, route operator-configured zone patterns to
-    their declared upstreams, forward everything else to global
-    upstreams, plus cache/log/errors/prometheus/health.
+    their declared upstreams, apply blocklist `template` rules at the
+    catch-all, and forward everything else to global upstreams.
 
-    `conditional_forwarders` is an iterable of `(zone_pattern,
-    [upstream, …])` tuples. Each tuple becomes its own `<pattern>:53`
-    block — these win over the catch-all but lose to the apex stubs
-    (CoreDNS picks the most-specific match for a query name, so apex
-    blocks above are still consulted first for in-zone queries).
+    `blocklists` is an iterable of dicts of the form
+    `{"action": "block"|"sinkhole", "patterns": [str, ...],
+      "sink_ipv4": str|None, "sink_ipv6": str|None}` — typically built
+    by the caller from DnsBlocklist + DnsBlocklistEntry rows.
     """
     upstream_list = " ".join(upstream_resolvers) or "1.1.1.1 8.8.8.8"
     blocks = []
@@ -195,16 +251,26 @@ def render_corefile_recursive(
             f"    errors\n"
             f"}}"
         )
-    blocks.append(
-        ".:53 {\n"
-        f"    forward . {upstream_list}\n"
-        "    cache 300\n"
-        "    log\n"
-        "    errors\n"
-        "    prometheus :9153\n"
-        "    health :8080\n"
-        "}"
-    )
+    # Blocklist `template` directives live inside the catch-all block —
+    # they run at the recursive layer before any upstream forward. The
+    # match regex is the OR of every pattern in the list.
+    template_lines: list[str] = []
+    for bl in blocklists:
+        template_lines += _render_blocklist_template(
+            action=bl.get("action", "block"),
+            patterns=list(bl.get("patterns") or []),
+            sink_ipv4=bl.get("sink_ipv4"),
+            sink_ipv6=bl.get("sink_ipv6"),
+        )
+    catchall_lines = [".:53 {", *template_lines,
+                      f"    forward . {upstream_list}",
+                      "    cache 300",
+                      "    log",
+                      "    errors",
+                      "    prometheus :9153",
+                      "    health :8080",
+                      "}"]
+    blocks.append("\n".join(catchall_lines))
     return "\n\n".join(blocks) + "\n"
 
 
@@ -341,6 +407,49 @@ async def _fabric_forwarders(
     return [(p, list(u or [])) for p, u in rows]
 
 
+async def _fabric_blocklists(
+    db: AsyncSession, fabric_id: UUID,
+) -> list[dict]:
+    """Enabled blocklists for this fabric, each shaped for the
+    Corefile renderer. Patterns are gathered in one extra query so the
+    n+1 doesn't grow with the number of blocklists."""
+    lists = list((
+        await db.execute(
+            select(DnsBlocklist).where(
+                DnsBlocklist.fabric_id == fabric_id,
+                DnsBlocklist.enabled.is_(True),
+            )
+        )
+    ).scalars().all())
+    if not lists:
+        return []
+    ids = [bl.id for bl in lists]
+    entry_rows = (
+        await db.execute(
+            select(DnsBlocklistEntry.blocklist_id, DnsBlocklistEntry.pattern)
+            .where(DnsBlocklistEntry.blocklist_id.in_(ids))
+        )
+    ).all()
+    patterns_by_id: dict[UUID, list[str]] = {bid: [] for bid in ids}
+    for bid, pat in entry_rows:
+        patterns_by_id[bid].append(pat)
+    return [
+        {
+            "action": bl.action.value,
+            "patterns": sorted(patterns_by_id[bl.id]),
+            "sink_ipv4": (
+                str(bl.sink_ipv4).split("/", 1)[0]
+                if bl.sink_ipv4 is not None else None
+            ),
+            "sink_ipv6": (
+                str(bl.sink_ipv6).split("/", 1)[0]
+                if bl.sink_ipv6 is not None else None
+            ),
+        }
+        for bl in lists
+    ]
+
+
 async def _fabric_apex_names(db: AsyncSession, fabric_id: UUID) -> list[str]:
     """Every apex zone bound to this fabric. Multiple are allowed — the
     recursive Corefile emits a stub-forward per apex."""
@@ -420,6 +529,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         apex_names = await _fabric_apex_names(db, server.fabric_id)
         local_auth_ip = await _local_auth_unicast_ip(db, server)
         forwarders = await _fabric_forwarders(db, server.fabric_id)
+        blocklists = await _fabric_blocklists(db, server.fabric_id)
         # Operator-configured upstreams aren't modeled per-fabric yet
         # (deferred to a Fabric.dns_upstreams field). Default to public
         # quad-eight / cloudflare for the v1 plumbing.
@@ -429,6 +539,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             auth_unicast_ip=local_auth_ip,
             upstream_resolvers=upstreams,
             conditional_forwarders=forwarders,
+            blocklists=blocklists,
         )
         zone_files = {}
         # `anycast` gates whether we emit a gobgpd config at all — the
