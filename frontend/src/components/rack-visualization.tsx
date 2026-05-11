@@ -6,12 +6,14 @@ import {
 } from '@dnd-kit/core';
 import { useUpdate } from '@refinedev/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { resolveStencil, Stencil, useStencilCatalog } from './stencil';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { hasCapability } from '@/lib/access-control-provider';
-import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import SegmentedControl from '@cloudscape-design/components/segmented-control';
+
+import { resolveStencil, Stencil, useStencilCatalog } from './stencil';
+import { hasCapability } from '@/lib/access-control-provider';
 
 export type VizAsset = {
   id: string;
@@ -38,16 +40,30 @@ const KIND_COLOR: Record<string, string> = {
 };
 const colorFor = (k: string) => KIND_COLOR[k] ?? KIND_COLOR.other;
 
-type Props = {
+type Props = Readonly<{
   rackId: string;
   uHeight: number;
   assets: VizAsset[];
   mode?: StyleMode;
   uPx?: number;
-};
+}>;
 
 const VERT_W = 22;
 const RACK_BODY_W = 240;
+
+function ringColorFor(r: VizAsset['redundancy']): string | null {
+  if (r === 'redundant') return 'var(--color-text-status-success, #037f0c)';
+  if (r === 'single') return 'var(--color-text-status-warning, #b25b00)';
+  if (r === 'unpowered') return 'var(--color-text-status-error, #d91515)';
+  return null;
+}
+
+function sideColorFor(side: VizAsset['pdu_side']): string {
+  if (side === 'A') return '#3b82f6';
+  if (side === 'B') return '#ef4444';
+  if (side === 'C') return '#a855f7';
+  return '#737373';
+}
 
 export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', uPx = 18 }: Props) {
   const navigate = useNavigate();
@@ -165,39 +181,46 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
 
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragMove={onDragMove} onDragEnd={onDragEnd}>
-      <div className="flex items-start gap-6">
-        <div className="space-y-3">
-          <div className="flex items-center justify-between gap-3" style={{ width: fullW }}>
-            <Tabs value={face} onValueChange={(v) => setFace(v as 'front' | 'rear')}>
-              <TabsList>
-                <TabsTrigger value="front">Front</TabsTrigger>
-                <TabsTrigger value="rear">Rear</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              {face} view
-            </span>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 24 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, width: fullW }}>
+            <SegmentedControl
+              selectedId={face}
+              onChange={({ detail }) => setFace(detail.selectedId as 'front' | 'rear')}
+              options={[
+                { id: 'front', text: 'Front' },
+                { id: 'rear', text: 'Rear' },
+              ]}
+            />
+            <Box variant="awsui-key-label">{face} view</Box>
           </div>
 
-          <div className="relative" style={{ width: fullW, height: totalH + 4 }}>
+          <div style={{ position: 'relative', width: fullW, height: totalH + 4 }}>
             <VerticalPduStrip
               x={0} height={totalH} width={VERT_W}
               pdus={verticalLeft} onClick={(id) => navigate(`/assets/${id}`)}
             />
 
             <div
-              className="absolute rounded-md border-2 bg-secondary"
               style={{
+                position: 'absolute',
                 left: VERT_W + 4, top: 0, width: RACK_BODY_W, height: totalH,
-                borderColor: 'hsl(var(--border))',
-                boxShadow: 'inset 0 0 0 4px hsl(var(--card))',
+                borderRadius: 6,
+                border: '2px solid var(--color-border-divider-default, #e9ebed)',
+                background: 'var(--color-background-container-content, #fafafa)',
+                boxShadow: 'inset 0 0 0 4px var(--color-background-container-header, #fff)',
               }}
             >
               {Array.from({ length: uHeight }, (_, i) => uHeight - i).map((u) => (
                 <div
                   key={u}
-                  className="absolute -left-7 w-6 text-right text-[10px] text-muted-foreground"
-                  style={{ bottom: (u - 1) * uPx, height: uPx, lineHeight: `${uPx}px` }}
+                  style={{
+                    position: 'absolute',
+                    left: -28, width: 24, textAlign: 'right',
+                    fontSize: 10,
+                    color: 'var(--color-text-status-inactive, #757575)',
+                    bottom: (u - 1) * uPx, height: uPx, lineHeight: `${uPx}px`,
+                  }}
                 >
                   U{u}
                 </div>
@@ -237,10 +260,15 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
                   return (
                     <div
                       key={`ghost-${a.id}`}
-                      className="pointer-events-none absolute rounded-sm border border-dashed border-white/15"
                       style={{
-                        left: 4, right: 4, bottom: (a.rack_position_u! - 1) * uPx, height: span * uPx - 1,
-                        background: 'rgba(255,255,255,0.02)',
+                        pointerEvents: 'none',
+                        position: 'absolute',
+                        borderRadius: 2,
+                        border: '1px dashed rgba(0,0,0,0.15)',
+                        left: 4, right: 4,
+                        bottom: (a.rack_position_u! - 1) * uPx,
+                        height: span * uPx - 1,
+                        background: 'rgba(0,0,0,0.02)',
                       }}
                       title={`${a.name} (on ${a.face === 'rear' ? 'rear' : 'front'} face)`}
                     />
@@ -252,8 +280,12 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
                 .map((u) => (
                   <div
                     key={`empty-${u}`}
-                    className="pointer-events-none absolute border-t border-dashed border-white/5"
-                    style={{ left: 4, right: 4, bottom: (u - 1) * uPx, height: uPx - 1 }}
+                    style={{
+                      pointerEvents: 'none',
+                      position: 'absolute',
+                      borderTop: '1px dashed rgba(0,0,0,0.05)',
+                      left: 4, right: 4, bottom: (u - 1) * uPx, height: uPx - 1,
+                    }}
                   />
                 ))}
             </div>
@@ -265,21 +297,21 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
           </div>
         </div>
 
-        <div className="flex-1 space-y-4">
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <Box variant="awsui-key-label">
               {mode === 'stencil' ? 'Vendor stencil view' : 'Block view'} · {face} face
-            </h4>
-            <p className="mt-1 text-xs text-muted-foreground">
+            </Box>
+            <Box color="text-status-inactive" fontSize="body-s" padding={{ top: 'xxs' }}>
               {canWrite
-                ? <>Drag a device to a new U position. Toggle Front / Rear to see assets on the other face. Vertical PDUs sit on the side rails. Outline color shows power redundancy: <span className="text-success">green = redundant</span>, <span className="text-warning">yellow = single feed</span>, <span className="text-destructive">red = unpowered</span>.</>
+                ? <>Drag a device to a new U position. Toggle Front / Rear to see assets on the other face. Vertical PDUs sit on the side rails. Outline color shows power redundancy: green = redundant, yellow = single feed, red = unpowered.</>
                 : <>Click a device to open its health page.</>}
-            </p>
+            </Box>
             {mode === 'block' && (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {Object.entries(KIND_COLOR).map(([k, c]) => (
-                  <div key={k} className="flex items-center gap-1.5 text-xs">
-                    <span className="h-3 w-3 rounded-sm" style={{ background: c }} />
+                  <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 2, background: c }} />
                     {k}
                   </div>
                 ))}
@@ -288,20 +320,24 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
           </div>
           {unplaced.length > 0 && (
             <div>
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <Box variant="awsui-key-label">
                 Unplaced on {face} face ({unplaced.length})
-              </h4>
-              <ul className="mt-2 space-y-1 text-sm">
+              </Box>
+              <ul style={{ marginTop: 8, paddingLeft: 16, fontSize: 14, listStyle: 'disc' }}>
                 {unplaced.map((a) => (
                   <li key={a.id}>
                     <button
                       type="button"
                       onClick={() => navigate(`/assets/${a.id}`)}
-                      className="text-primary hover:underline"
+                      style={{
+                        background: 'transparent', border: 'none', padding: 0,
+                        color: 'var(--color-text-link-default, #0972d3)',
+                        textDecoration: 'underline', cursor: 'pointer',
+                      }}
                     >
                       {a.name}
                     </button>{' '}
-                    <span className="text-muted-foreground">· {a.kind}</span>
+                    <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>· {a.kind}</span>
                   </li>
                 ))}
               </ul>
@@ -324,19 +360,22 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
   );
 }
 
-// ----- subcomponents -----
-
 function VerticalPduStrip({
   x, height, width, pdus, onClick,
-}: {
+}: Readonly<{
   x: number; height: number; width: number;
   pdus: VizAsset[]; onClick: (id: string) => void;
-}) {
+}>) {
   if (pdus.length === 0) {
     return (
       <div
-        className="absolute rounded-sm border border-dashed border-border/40"
-        style={{ left: x, top: 0, width, height, background: 'transparent' }}
+        style={{
+          position: 'absolute',
+          left: x, top: 0, width, height,
+          borderRadius: 2,
+          border: '1px dashed var(--color-border-divider-default, #e9ebed)',
+          background: 'transparent',
+        }}
         title="No vertical PDU on this side"
       />
     );
@@ -345,37 +384,61 @@ function VerticalPduStrip({
   return (
     <>
       {pdus.map((p, i) => {
-        const sideColor =
-          p.pdu_side === 'A' ? '#3b82f6' :
-          p.pdu_side === 'B' ? '#ef4444' :
-          p.pdu_side === 'C' ? '#a855f7' :
-          '#737373';
+        const sideColor = sideColorFor(p.pdu_side);
         return (
           <button
             key={p.id}
             type="button"
             onClick={() => onClick(p.id)}
-            className="absolute flex flex-col items-center justify-between rounded-sm border-2 bg-[#1a1d23] p-1 text-[9px] font-bold text-white shadow-md transition-transform hover:scale-[1.02]"
             style={{
-              left: x, top: i * slice, width, height: slice - (i < pdus.length - 1 ? 2 : 0),
-              borderColor: sideColor, cursor: 'pointer',
+              position: 'absolute',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderRadius: 2,
+              border: `2px solid ${sideColor}`,
+              background: '#1a1d23',
+              padding: 4,
+              fontSize: 9,
+              fontWeight: 700,
+              color: '#fff',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+              left: x, top: i * slice,
+              width, height: slice - (i < pdus.length - 1 ? 2 : 0),
+              cursor: 'pointer',
             }}
             title={`${p.name} (vertical, side ${p.pdu_side ?? '—'})`}
           >
             <div
-              className="rounded-sm px-1 py-0.5 text-[8px]"
-              style={{ background: sideColor, color: 'white' }}
+              style={{
+                padding: '2px 4px',
+                borderRadius: 2,
+                fontSize: 8,
+                background: sideColor,
+                color: '#fff',
+              }}
             >
               {p.pdu_side ?? 'PDU'}
             </div>
-            <div className="flex flex-1 flex-col items-center justify-center gap-0.5">
+            <div style={{ display: 'flex', flex: 1, flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
               {Array.from({ length: Math.min(20, Math.max(4, Math.floor((slice - 24) / 8))) }).map((_, k) => (
-                <span key={k} className="h-1 w-1 rounded-full bg-black/70 ring-1 ring-white/20" />
+                <span key={k} style={{
+                  width: 4, height: 4, borderRadius: 999,
+                  background: 'rgba(0,0,0,0.7)',
+                  boxShadow: '0 0 0 1px rgba(255,255,255,0.2)',
+                }} />
               ))}
             </div>
             <div
-              className="overflow-hidden text-[8px] font-semibold leading-none"
-              style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+              style={{
+                overflow: 'hidden',
+                fontSize: 8,
+                fontWeight: 600,
+                lineHeight: 1,
+                writingMode: 'vertical-rl',
+                transform: 'rotate(180deg)',
+              }}
             >
               {p.name.slice(-12)}
             </div>
@@ -388,32 +451,30 @@ function VerticalPduStrip({
 
 function SlotDroppable({
   u, bottom, height, width, showAccept, showReject,
-}: {
+}: Readonly<{
   u: number; bottom: number; height: number; width: number;
   showAccept: boolean; showReject: boolean;
-}) {
+}>) {
   const { isOver, setNodeRef } = useDroppable({ id: `u-${u}` });
+  let background = 'transparent';
+  if (showAccept) background = 'rgba(3, 127, 12, 0.3)';
+  else if (showReject) background = 'rgba(217, 21, 21, 0.25)';
+  else if (isOver) background = 'rgba(9, 114, 211, 0.15)';
   return (
     <div
       ref={setNodeRef}
-      className={cn(
-        'absolute',
-        showAccept && 'bg-success/30',
-        showReject && 'bg-destructive/25',
-        isOver && !showAccept && !showReject && 'bg-primary/15',
-      )}
-      style={{ left: 4, width, bottom, height: height - 1 }}
+      style={{ position: 'absolute', left: 4, width, bottom, height: height - 1, background }}
     />
   );
 }
 
 function DraggableAsset({
   asset, blockH, blockW, bottom, mode, catalog, canDrag, onClick,
-}: {
+}: Readonly<{
   asset: VizAsset; blockH: number; blockW: number; bottom: number;
   mode: StyleMode; catalog: any; canDrag: boolean;
   onClick: () => void;
-}) {
+}>) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: asset.id, disabled: !canDrag,
   });
@@ -422,30 +483,29 @@ function DraggableAsset({
 
   function handleClick(e: React.MouseEvent) { e.preventDefault(); onClick(); }
 
-  const ringColor =
-    asset.redundancy === 'redundant' ? 'hsl(var(--success))' :
-    asset.redundancy === 'single' ? 'hsl(var(--warning))' :
-    asset.redundancy === 'unpowered' ? 'hsl(var(--destructive))' :
-    null;
+  const ring = ringColorFor(asset.redundancy);
+  const powerSuffix = asset.redundancy && asset.redundancy !== 'n/a' ? ` · power: ${asset.redundancy}` : '';
 
   if (mode === 'stencil') {
     const { entry, palette } = resolveStencil(catalog ?? null, {
       manufacturer: asset.manufacturer ?? null,
       model: asset.model ?? null, kind: asset.kind,
     });
+    const stencilTitle = `${asset.name} · ${asset.manufacturer ?? ''} ${asset.model ?? ''}`.trim() + powerSuffix;
     return (
       <button
         ref={setNodeRef} type="button"
         {...listeners} {...attributes}
         onClick={handleClick}
-        className={cn('absolute p-0 transition-transform', !isDragging && 'hover:scale-[1.01]')}
         style={{
+          position: 'absolute',
+          padding: 0,
           left: 4, bottom, width: blockW, height: blockH,
           background: 'transparent', border: 'none', cursor, opacity,
-          outline: ringColor ? `2px solid ${ringColor}` : undefined,
-          outlineOffset: ringColor ? '-2px' : undefined,
+          outline: ring ? `2px solid ${ring}` : undefined,
+          outlineOffset: ring ? -2 : undefined,
         }}
-        title={`${asset.name} · ${asset.manufacturer ?? ''} ${asset.model ?? ''}`.trim() + (asset.redundancy && asset.redundancy !== 'n/a' ? ` · power: ${asset.redundancy}` : '')}
+        title={stencilTitle}
       >
         <Stencil
           asset={{ name: asset.name, manufacturer: asset.manufacturer ?? null, model: asset.model ?? null, kind: asset.kind }}
@@ -463,26 +523,40 @@ function DraggableAsset({
       ref={setNodeRef} type="button"
       {...listeners} {...attributes}
       onClick={handleClick}
-      className={cn('absolute flex items-center justify-between overflow-hidden rounded-sm px-1.5 text-[11px] font-semibold text-slate-900 transition-transform', !isDragging && 'hover:scale-[1.01]')}
       style={{
-        left: 4, right: 4, bottom, height: blockH, background: bg, opacity, cursor,
-        border: asset.open_alerts > 0 ? '2px solid hsl(var(--destructive))' : '1px solid rgba(0,0,0,0.2)',
-        outline: ringColor ? `2px solid ${ringColor}` : undefined,
-        outlineOffset: ringColor ? '-2px' : undefined,
+        position: 'absolute',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        overflow: 'hidden',
+        borderRadius: 2,
+        padding: '0 6px',
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#0f172a',
+        left: 4, right: 4, bottom, height: blockH,
+        background: bg, opacity, cursor,
+        border: asset.open_alerts > 0
+          ? '2px solid var(--color-text-status-error, #d91515)'
+          : '1px solid rgba(0,0,0,0.2)',
+        outline: ring ? `2px solid ${ring}` : undefined,
+        outlineOffset: ring ? -2 : undefined,
       }}
-      title={`${asset.name} · ${asset.kind} · U${asset.rack_position_u}` + (asset.redundancy && asset.redundancy !== 'n/a' ? ` · power: ${asset.redundancy}` : '')}
+      title={`${asset.name} · ${asset.kind} · U${asset.rack_position_u}${powerSuffix}`}
     >
-      <span className="truncate">{asset.name}</span>
-      {asset.open_alerts > 0 && <Badge variant="destructive" className="text-[10px]">{asset.open_alerts}</Badge>}
+      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {asset.name}
+      </span>
+      {asset.open_alerts > 0 && <Badge color="red">{asset.open_alerts}</Badge>}
     </button>
   );
 }
 
 function DragGhost({
   asset, blockW, blockH, mode, catalog,
-}: {
+}: Readonly<{
   asset: VizAsset; blockW: number; blockH: number; mode: StyleMode; catalog: any;
-}) {
+}>) {
   if (mode === 'stencil') {
     const { entry, palette } = resolveStencil(catalog ?? null, {
       manufacturer: asset.manufacturer ?? null, model: asset.model ?? null, kind: asset.kind,
@@ -501,13 +575,27 @@ function DragGhost({
   const bg = colorFor(asset.kind);
   return (
     <div
-      className="flex items-center justify-between overflow-hidden rounded-sm px-1.5 text-[11px] font-semibold text-slate-900 shadow-lg"
       style={{
-        width: blockW, height: blockH, background: bg, opacity: 0.92, transform: 'rotate(0.5deg)',
-        border: asset.open_alerts > 0 ? '2px solid hsl(var(--destructive))' : '1px solid rgba(0,0,0,0.2)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        overflow: 'hidden',
+        borderRadius: 2,
+        padding: '0 6px',
+        fontSize: 11,
+        fontWeight: 600,
+        color: '#0f172a',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+        width: blockW, height: blockH,
+        background: bg, opacity: 0.92, transform: 'rotate(0.5deg)',
+        border: asset.open_alerts > 0
+          ? '2px solid var(--color-text-status-error, #d91515)'
+          : '1px solid rgba(0,0,0,0.2)',
       }}
     >
-      <span className="truncate">{asset.name}</span>
+      <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {asset.name}
+      </span>
     </div>
   );
 }

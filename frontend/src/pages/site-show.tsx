@@ -5,7 +5,6 @@
 
 import { useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { Server, ChevronRight } from 'lucide-react';
 
 import Box from '@cloudscape-design/components/box';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
@@ -202,7 +201,10 @@ export function SiteShowPage() {
               <Container
                 header={<Header variant="h3">Unassigned racks</Header>}
               >
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                <div style={{
+                  display: 'grid', gap: 8,
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                }}>
                   {orphan_racks.map((rk) => (
                     <RackTile key={rk.id} rack={rk} onClick={() => nav(`/racks/${rk.id}`)} />
                   ))}
@@ -321,27 +323,35 @@ function RoomBlock({
 }>) {
   const rackCount = room.rows.reduce((n, rw) => n + rw.racks.length, 0);
   return (
-    <div className="space-y-2 rounded-md border bg-card p-3">
-      <div className="flex items-baseline justify-between gap-2 text-sm">
-        <div className="flex items-baseline gap-2">
-          <ChevronRight className="h-3.5 w-3.5 self-center text-muted-foreground" />
-          <span className="font-medium">{room.code}</span>
-          <span className="text-muted-foreground">{room.name}</span>
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+      padding: 12, borderRadius: 8,
+      border: '1px solid var(--color-border-divider-default, #e9ebed)',
+      background: 'var(--color-background-container-content, #fff)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, fontSize: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>▸</span>
+          <span style={{ fontWeight: 500 }}>{room.code}</span>
+          <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>{room.name}</span>
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
           {room.design_kw ? `${room.design_kw} kW design · ` : ''}{rackCount} rack{rackCount === 1 ? '' : 's'}
         </span>
       </div>
       {room.rows.length === 0 && (
-        <p className="text-xs text-muted-foreground">No rows in this room.</p>
+        <Box color="text-status-inactive" fontSize="body-s">No rows in this room.</Box>
       )}
       {room.rows.map((rw) => (
-        <div key={rw.id} className="space-y-1.5 pl-4">
-          <div className="text-xs text-muted-foreground">
-            Row <span className="font-mono">{rw.code}</span> · {rw.name} · {rw.racks.length} rack{rw.racks.length === 1 ? '' : 's'}
+        <div key={rw.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+            Row <span style={{ fontFamily: 'ui-monospace, monospace' }}>{rw.code}</span> · {rw.name} · {rw.racks.length} rack{rw.racks.length === 1 ? '' : 's'}
           </div>
           {rw.racks.length > 0 && (
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div style={{
+              display: 'grid', gap: 8,
+              gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+            }}>
               {rw.racks.map((rk) => (
                 <RackTile key={rk.id} rack={rk} onClick={() => onRackClick(rk.id)} />
               ))}
@@ -360,15 +370,28 @@ function RackTile({
     <button
       type="button"
       onClick={onClick}
-      className="space-y-1.5 rounded-md border bg-background p-2.5 text-left transition-colors hover:bg-accent/40"
+      style={{
+        display: 'flex', flexDirection: 'column', gap: 6,
+        padding: 10, borderRadius: 8,
+        textAlign: 'left',
+        border: '1px solid var(--color-border-divider-default, #e9ebed)',
+        background: 'var(--color-background-container-content, #fff)',
+        cursor: 'pointer',
+      }}
     >
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="flex items-baseline gap-2">
-          <Server className="h-3.5 w-3.5 self-center text-muted-foreground" />
-          <span className="font-mono text-xs font-medium">{rack.code}</span>
-          <span className="truncate text-xs text-muted-foreground">{rack.name}</span>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, fontWeight: 500 }}>{rack.code}</span>
+          <span style={{
+            fontSize: 12, color: 'var(--color-text-status-inactive, #757575)',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            {rack.name}
+          </span>
         </div>
-        <span className="text-[11px] text-muted-foreground">{rack.asset_count}d</span>
+        <span style={{ fontSize: 11, color: 'var(--color-text-status-inactive, #757575)' }}>
+          {rack.asset_count}d
+        </span>
       </div>
       <CapacityBar
         used={rack.u_used} total={rack.u_height}

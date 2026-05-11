@@ -1,45 +1,58 @@
-import { cn } from '@/lib/utils';
-
-type Props = {
+type Props = Readonly<{
   used: number;
   total: number;
-  /** Optional override of the formatted left/right labels */
   leftLabel?: string;
   rightLabel?: string;
-  /** Pct thresholds for color tiers */
   warnAt?: number;
   critAt?: number;
-  /** Compact mode for use inside small cards */
   compact?: boolean;
-  /** When kw_current is unknown we still want to render the bar greyed out */
   unknown?: boolean;
-};
+}>;
+
+function toneColor(pct: number, warnAt: number, critAt: number, unknown?: boolean): string {
+  if (unknown) return 'var(--color-background-input-disabled, #eaeded)';
+  if (pct >= critAt) return 'var(--color-text-status-error, #d91515)';
+  if (pct >= warnAt) return 'var(--color-text-status-warning, #b25b00)';
+  return 'var(--color-text-status-success, #037f0c)';
+}
 
 export function CapacityBar({
   used, total, leftLabel, rightLabel,
   warnAt = 75, critAt = 90, compact, unknown,
 }: Props) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
-  const tone =
-    unknown ? 'bg-muted' :
-    pct >= critAt ? 'bg-destructive' :
-    pct >= warnAt ? 'bg-warning' :
-    'bg-success';
+  const trackH = compact ? 6 : 8;
+  const labelFontSize = compact ? 11 : 12;
 
   return (
-    <div className={cn('space-y-1', compact && 'space-y-0.5')}>
-      <div className={cn('flex items-baseline justify-between text-xs text-muted-foreground', compact && 'text-[11px]')}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 2 : 4 }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        fontSize: labelFontSize,
+        color: 'var(--color-text-status-inactive, #757575)',
+      }}>
         <span>{leftLabel ?? `${used} / ${total}`}</span>
-        <span className="tabular-nums">{unknown ? '—' : `${pct.toFixed(0)}%`}</span>
+        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+          {unknown ? '—' : `${pct.toFixed(0)}%`}
+        </span>
       </div>
-      <div className={cn('h-2 w-full overflow-hidden rounded-full bg-secondary', compact && 'h-1.5')}>
+      <div style={{
+        height: trackH, width: '100%', overflow: 'hidden', borderRadius: 999,
+        background: 'var(--color-background-input-disabled, #eaeded)',
+      }}>
         <div
-          className={cn('h-full transition-all', tone)}
-          style={{ width: unknown ? '0%' : `${pct}%` }}
+          style={{
+            height: '100%',
+            width: unknown ? '0%' : `${pct}%`,
+            background: toneColor(pct, warnAt, critAt, unknown),
+            transition: 'width 200ms ease',
+          }}
         />
       </div>
       {rightLabel && !compact && (
-        <div className="text-[11px] text-muted-foreground">{rightLabel}</div>
+        <div style={{ fontSize: 11, color: 'var(--color-text-status-inactive, #757575)' }}>
+          {rightLabel}
+        </div>
       )}
     </div>
   );

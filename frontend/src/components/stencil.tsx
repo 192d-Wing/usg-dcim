@@ -67,13 +67,26 @@ export function Stencil({ asset, width, height, palette, entry, alertCount = 0 }
   if (entry?.image_url) {
     return (
       <div
-        className="relative h-full w-full overflow-hidden rounded-sm"
-        style={{ background: '#1a1d23', border: `1px solid ${border}` }}
+        style={{
+          position: 'relative', height: '100%', width: '100%',
+          overflow: 'hidden', borderRadius: 2,
+          background: '#1a1d23', border: `1px solid ${border}`,
+        }}
         title={label}
       >
-        <img src={entry.image_url} alt={label} className="h-full w-full object-fill" />
+        <img
+          src={entry.image_url}
+          alt={label}
+          style={{ height: '100%', width: '100%', objectFit: 'fill' }}
+        />
         {alertCount > 0 && (
-          <span className="absolute right-1 top-1 rounded-full bg-destructive px-1.5 text-[10px] font-semibold text-white">
+          <span style={{
+            position: 'absolute', right: 4, top: 4,
+            padding: '0 6px', borderRadius: 999,
+            fontSize: 10, fontWeight: 600,
+            background: 'var(--color-text-status-error, #d91515)',
+            color: '#fff',
+          }}>
             {alertCount}
           </span>
         )}
@@ -82,7 +95,7 @@ export function Stencil({ asset, width, height, palette, entry, alertCount = 0 }
   }
 
   return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="block">
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block' }}>
       <title>{label}</title>
       <rect x="0" y="0" width={width} height={height} rx="2" fill="#1a1d23" stroke={border} strokeWidth="1" />
       <rect x="0" y="0" width="4" height={height} fill={palette.primary} />

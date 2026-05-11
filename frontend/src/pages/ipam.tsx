@@ -9,59 +9,32 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import {
-  Plus, Pencil, Trash2, GitBranch, ChevronRight, ChevronDown, Send,
-  LayoutGrid, List, Search,
-} from 'lucide-react';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import { CapacityBar } from '@/components/capacity-bar';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger,
-} from '@/components/ui/dialog';
-import {
-  Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { DnsTab } from '@/components/dns-tab';
-// Aliased so the inner FreeSpaceTab + AddressesTab can keep using
-// shadcn Tabs (their grid/table + in-subnets/prefixes mode toggles
-// migrate later) while the outer IPAM chrome runs on Cloudscape.
-import CsTabs from '@cloudscape-design/components/tabs';
+
+import Badge from '@cloudscape-design/components/badge';
+import Box from '@cloudscape-design/components/box';
+import BreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
+import Button from '@cloudscape-design/components/button';
+import Cards from '@cloudscape-design/components/cards';
+import Checkbox from '@cloudscape-design/components/checkbox';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
-import CsHeader from '@cloudscape-design/components/header';
-import CsBox from '@cloudscape-design/components/box';
-// Tab-body Cloudscape primitives. Aliased so they don't collide with
-// the shadcn Button/Table/Badge/Modal-equivalents still in use by the
-// other tabs.
-import CsTable from '@cloudscape-design/components/table';
-import CsButton from '@cloudscape-design/components/button';
-import CsStatusIndicator from '@cloudscape-design/components/status-indicator';
-import CsModal from '@cloudscape-design/components/modal';
-import CsSpaceBetween from '@cloudscape-design/components/space-between';
-import CsSelect, { SelectProps as CsSelectProps } from '@cloudscape-design/components/select';
-import CsInput from '@cloudscape-design/components/input';
-import CsFormField from '@cloudscape-design/components/form-field';
-import CsContainer from '@cloudscape-design/components/container';
-import CsColumnLayout from '@cloudscape-design/components/column-layout';
-import CsSegmentedControl from '@cloudscape-design/components/segmented-control';
-import CsBadge from '@cloudscape-design/components/badge';
-import CsBreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
-import CsCards from '@cloudscape-design/components/cards';
-import CsForm from '@cloudscape-design/components/form';
-import CsCheckbox from '@cloudscape-design/components/checkbox';
+import Form from '@cloudscape-design/components/form';
+import FormField from '@cloudscape-design/components/form-field';
+import Header from '@cloudscape-design/components/header';
+import Input from '@cloudscape-design/components/input';
+import Modal from '@cloudscape-design/components/modal';
+import SegmentedControl from '@cloudscape-design/components/segmented-control';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+import Tabs from '@cloudscape-design/components/tabs';
 
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
@@ -128,6 +101,35 @@ const ROLES = ['mgmt', 'data', 'ipmi', 'vip', 'storage', 'other'];
 const STATUSES = ['active', 'reserved', 'deprecated'];
 const SOURCES = ['static', 'dhcp', 'reservation'];
 
+// Inline styles for the supernet/subnet tree — Cloudscape Table doesn't
+// expose <tr> refs for DnD-Kit, so we keep a native HTML table and color
+// it with Cloudscape design tokens.
+const TREE_TABLE_STYLE: React.CSSProperties = {
+  width: '100%',
+  borderCollapse: 'collapse',
+  fontSize: 14,
+};
+const TREE_TH_STYLE: React.CSSProperties = {
+  textAlign: 'left',
+  padding: '8px 12px',
+  fontSize: 12,
+  fontWeight: 600,
+  color: 'var(--color-text-body-secondary, #5f6b7a)',
+  borderBottom: '1px solid var(--color-border-divider-default, #e9ebed)',
+  background: 'var(--color-background-cell-shaded, #fafafa)',
+};
+const TREE_TD_STYLE: React.CSSProperties = {
+  padding: '8px 12px',
+  borderBottom: '1px solid var(--color-border-divider-default, #e9ebed)',
+  verticalAlign: 'top',
+};
+const SKELETON_STYLE: React.CSSProperties = {
+  height: 16,
+  width: '100%',
+  borderRadius: 4,
+  background: 'var(--color-background-input-disabled, #eaeded)',
+};
+
 export function IpamPage() {
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
   const canRead = identity?.capabilities.includes('inventory:read');
@@ -142,10 +144,10 @@ export function IpamPage() {
 
   if (!canRead) {
     return (
-      <ContentLayout header={<CsHeader variant="h1">IPAM</CsHeader>}>
-        <CsBox color="text-status-inactive">
+      <ContentLayout header={<Header variant="h1">IPAM</Header>}>
+        <Box color="text-status-inactive">
           You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>inventory:read</code>.
-        </CsBox>
+        </Box>
       </ContentLayout>
     );
   }
@@ -165,7 +167,7 @@ export function IpamPage() {
           if (level === 'networks') { setSubnetId(null); }
         }}
       />
-      <div className="mt-3">
+      <div style={{ marginTop: 12 }}>
         {!fabricId && (
           <FabricsTab onSelect={setFabricId} canWrite={!!canWrite} />
         )}
@@ -188,15 +190,15 @@ export function IpamPage() {
   return (
     <ContentLayout
       header={
-        <CsHeader
+        <Header
           variant="h1"
           description="Fabric → VRF → Supernet → Subnet → IP — DHCP leases ingested from Kea"
         >
           IPAM
-        </CsHeader>
+        </Header>
       }
     >
-      <CsTabs
+      <Tabs
         tabs={[
           { id: 'hierarchy', label: 'Hierarchy', content: hierarchyContent },
           {
@@ -242,16 +244,16 @@ type SupernetCandidates = {
 
 type FreeMode = 'in-subnets' | 'prefixes';
 
-const ALL_FABRICS_OPT: CsSelectProps.Option = { value: '__all__', label: 'All fabrics' };
-const FAMILY_OPTS: CsSelectProps.Option[] = [
+const ALL_FABRICS_OPT: SelectProps.Option = { value: '__all__', label: 'All fabrics' };
+const FAMILY_OPTS: SelectProps.Option[] = [
   { value: 'v4', label: 'IPv4' },
   { value: 'v6', label: 'IPv6' },
 ];
 
 function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void }) {
   const [mode, setMode] = useState<FreeMode>('in-subnets');
-  const [fabricOpt, setFabricOpt] = useState<CsSelectProps.Option>(ALL_FABRICS_OPT);
-  const [familyOpt, setFamilyOpt] = useState<CsSelectProps.Option>(FAMILY_OPTS[0]);
+  const [fabricOpt, setFabricOpt] = useState<SelectProps.Option>(ALL_FABRICS_OPT);
+  const [familyOpt, setFamilyOpt] = useState<SelectProps.Option>(FAMILY_OPTS[0]);
   const [minFree, setMinFree] = useState<string>('1');
   const [prefixSize, setPrefixSize] = useState<string>('24');
   const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
@@ -291,17 +293,17 @@ function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void
     enabled: mode === 'prefixes',
   });
 
-  const fabricOptions: CsSelectProps.Option[] = [
+  const fabricOptions: SelectProps.Option[] = [
     ALL_FABRICS_OPT,
     ...fabrics.map((f) => ({ value: f.id, label: f.name })),
   ];
 
   return (
-    <CsSpaceBetween size="l">
-      <CsContainer header={<CsHeader variant="h2">Search</CsHeader>}>
-        <CsSpaceBetween size="m">
-          <CsFormField label="Mode">
-            <CsSegmentedControl
+    <SpaceBetween size="l">
+      <Container header={<Header variant="h2">Search</Header>}>
+        <SpaceBetween size="m">
+          <FormField label="Mode">
+            <SegmentedControl
               selectedId={mode}
               onChange={({ detail }) => setMode(detail.selectedId as FreeMode)}
               options={[
@@ -309,47 +311,47 @@ function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void
                 { id: 'prefixes', text: 'Free prefixes inside supernets' },
               ]}
             />
-          </CsFormField>
-          <CsColumnLayout columns={3}>
-            <CsFormField label="Fabric">
-              <CsSelect
+          </FormField>
+          <ColumnLayout columns={3}>
+            <FormField label="Fabric">
+              <Select
                 selectedOption={fabricOpt}
                 onChange={({ detail }) => setFabricOpt(detail.selectedOption)}
                 options={fabricOptions}
                 expandToViewport
               />
-            </CsFormField>
-            <CsFormField label="Family">
-              <CsSelect
+            </FormField>
+            <FormField label="Family">
+              <Select
                 selectedOption={familyOpt}
                 onChange={({ detail }) => setFamilyOpt(detail.selectedOption)}
                 options={FAMILY_OPTS}
                 expandToViewport
               />
-            </CsFormField>
+            </FormField>
             {mode === 'in-subnets' ? (
-              <CsFormField label="Min free addresses">
-                <CsInput
+              <FormField label="Min free addresses">
+                <Input
                   type="number"
                   value={minFree}
                   onChange={({ detail }) => setMinFree(detail.value)}
                 />
-              </CsFormField>
+              </FormField>
             ) : (
-              <CsFormField
+              <FormField
                 label="Prefix size"
                 description="e.g. 24 for /24, 64 for /64"
               >
-                <CsInput
+                <Input
                   type="number"
                   value={prefixSize}
                   onChange={({ detail }) => setPrefixSize(detail.value)}
                 />
-              </CsFormField>
+              </FormField>
             )}
-          </CsColumnLayout>
-        </CsSpaceBetween>
-      </CsContainer>
+          </ColumnLayout>
+        </SpaceBetween>
+      </Container>
 
       {mode === 'in-subnets' && (
         <SubnetFreeResults
@@ -364,7 +366,7 @@ function FreeSpaceTab({ onSelectSubnet }: { onSelectSubnet: (id: string) => void
           isLoading={prefixSearch.isLoading}
         />
       )}
-    </CsSpaceBetween>
+    </SpaceBetween>
   );
 }
 
@@ -376,13 +378,13 @@ function SubnetFreeResults({
   onSelectSubnet: (id: string) => void;
 }) {
   return (
-    <CsTable<SubnetFreeRow>
+    <Table<SubnetFreeRow>
       variant="container"
       loading={isLoading}
       loadingText="Searching subnets…"
       items={rows}
       trackBy="subnet_id"
-      header={<CsHeader counter={`(${rows.length})`}>Subnets with free space</CsHeader>}
+      header={<Header counter={`(${rows.length})`}>Subnets with free space</Header>}
       onRowClick={({ detail }) => onSelectSubnet(detail.item.subnet_id)}
       columnDefinitions={[
         {
@@ -391,14 +393,14 @@ function SubnetFreeResults({
             <span style={{ fontFamily: 'ui-monospace, monospace' }}>
               {r.prefix}
               {r.name && (
-                <CsBox variant="span" color="text-status-inactive"> · {r.name}</CsBox>
+                <Box variant="span" color="text-status-inactive"> · {r.name}</Box>
               )}
             </span>
           ),
         },
         {
           id: 'purpose', header: 'Purpose',
-          cell: (r) => r.purpose ? <CsBadge>{r.purpose}</CsBadge> : '—',
+          cell: (r) => r.purpose ? <Badge>{r.purpose}</Badge> : '—',
           width: 120,
         },
         {
@@ -417,9 +419,9 @@ function SubnetFreeResults({
         },
       ]}
       empty={
-        <CsBox textAlign="center" color="inherit" padding="m">
+        <Box textAlign="center" color="inherit" padding="m">
           No subnets meet that filter.
-        </CsBox>
+        </Box>
       }
     />
   );
@@ -433,28 +435,28 @@ function PrefixFreeResults({
 }) {
   if (isLoading) {
     return (
-      <CsContainer><CsBox padding="m">Searching supernets…</CsBox></CsContainer>
+      <Container><Box padding="m">Searching supernets…</Box></Container>
     );
   }
   if (groups.length === 0) {
     return (
-      <CsContainer>
-        <CsBox padding="m" color="text-status-inactive">
+      <Container>
+        <Box padding="m" color="text-status-inactive">
           No supernet has free space at that prefix size in this scope.
-        </CsBox>
-      </CsContainer>
+        </Box>
+      </Container>
     );
   }
   // One Container per supernet, each with its prefix + a flat list of
   // candidate Badges. Container's header carries the supernet identity
   // and a counter of candidates.
   return (
-    <CsSpaceBetween size="s">
+    <SpaceBetween size="s">
       {groups.map((g) => (
-        <CsContainer
+        <Container
           key={g.supernet_id}
           header={
-            <CsHeader
+            <Header
               variant="h3"
               counter={`(${g.count})`}
               description={
@@ -462,17 +464,17 @@ function PrefixFreeResults({
               }
             >
               <span style={{ fontFamily: 'ui-monospace, monospace' }}>{g.supernet_prefix}</span>
-            </CsHeader>
+            </Header>
           }
         >
-          <div className="flex flex-wrap gap-1.5">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {g.candidates.map((c) => (
-              <CsBadge key={c}>{c}</CsBadge>
+              <Badge key={c}>{c}</Badge>
             ))}
           </div>
-        </CsContainer>
+        </Container>
       ))}
-    </CsSpaceBetween>
+    </SpaceBetween>
   );
 }
 
@@ -496,7 +498,7 @@ function Breadcrumbs({
   if (vrfId) items.push({ text: 'Networks', href: '#networks', level: 'networks' });
   if (subnetId) items.push({ text: 'Addresses', href: '#addresses', level: null });
   return (
-    <CsBreadcrumbGroup
+    <BreadcrumbGroup
       items={items}
       onFollow={(e) => {
         e.preventDefault();
@@ -531,7 +533,7 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
           container width. Cards renders each fabric as a tile with the
           name as a clickable header and the rest as small key/value
           sections. Scales 1/2/3 per row by viewport. */}
-      <CsCards<Fabric>
+      <Cards<Fabric>
         loading={tableQuery.isLoading}
         loadingText="Loading fabrics…"
         items={data}
@@ -542,24 +544,24 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
           { minWidth: 1100, cards: 3 },
         ]}
         header={
-          <CsHeader
+          <Header
             counter={`(${data.length})`}
             actions={
               canWrite && (
-                <CsButton variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
                   New fabric
-                </CsButton>
+                </Button>
               )
             }
           >
             Fabrics
-          </CsHeader>
+          </Header>
         }
         cardDefinition={{
           header: (f) => (
-            <CsButton variant="inline-link" onClick={() => onSelect(f.id)}>
+            <Button variant="inline-link" onClick={() => onSelect(f.id)}>
               {f.name}
-            </CsButton>
+            </Button>
           ),
           sections: [
             {
@@ -581,31 +583,31 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
               id: 'description',
               header: 'Description',
               content: (f) => (
-                <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+                <Box variant="span" color="text-status-inactive" fontSize="body-s">
                   {f.description ?? '—'}
-                </CsBox>
+                </Box>
               ),
             },
           ],
         }}
         empty={
-          <CsBox textAlign="center" color="inherit" padding="l">
-            <CsSpaceBetween size="xs">
+          <Box textAlign="center" color="inherit" padding="l">
+            <SpaceBetween size="xs">
               <b>No fabrics yet</b>
-              <CsBox variant="p" color="inherit">Create one to start carving supernets and subnets.</CsBox>
-            </CsSpaceBetween>
-          </CsBox>
+              <Box variant="p" color="inherit">Create one to start carving supernets and subnets.</Box>
+            </SpaceBetween>
+          </Box>
         }
       />
       {canWrite && (
-        <CsModal
+        <Modal
           visible={createOpen}
           onDismiss={() => setCreateOpen(false)}
           header="New fabric"
           size="medium"
         >
           <FabricForm onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
-        </CsModal>
+        </Modal>
       )}
     </>
   );
@@ -643,33 +645,33 @@ function FabricForm({ onSaved }: { onSaved: () => void }) {
   }
   return (
     <form onSubmit={onSubmit}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={submitting}>
+          <Button variant="primary" formAction="submit" loading={submitting}>
             {submitting ? 'Saving…' : 'Create'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
-          <CsFormField label="Name" errorText={errors.name}>
-            <CsInput value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. Production" />
-          </CsFormField>
-          <CsFormField label="Slug" errorText={errors.slug}>
-            <CsInput value={slug} onChange={({ detail }) => setSlug(detail.value)} placeholder="prod" />
-          </CsFormField>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="Enclave">
-              <CsInput value={enclave} onChange={({ detail }) => setEnclave(detail.value)} />
-            </CsFormField>
-            <CsFormField label="Classification">
-              <CsInput value={classification} onChange={({ detail }) => setClassification(detail.value)} />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsFormField label="Description">
-            <CsInput value={description} onChange={({ detail }) => setDescription(detail.value)} />
-          </CsFormField>
-        </CsSpaceBetween>
-      </CsForm>
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. Production" />
+          </FormField>
+          <FormField label="Slug" errorText={errors.slug}>
+            <Input value={slug} onChange={({ detail }) => setSlug(detail.value)} placeholder="prod" />
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Enclave">
+              <Input value={enclave} onChange={({ detail }) => setEnclave(detail.value)} />
+            </FormField>
+            <FormField label="Classification">
+              <Input value={classification} onChange={({ detail }) => setClassification(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <FormField label="Description">
+            <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
@@ -700,7 +702,7 @@ function VrfsTab({
 
   return (
     <>
-      <CsTable<Vrf>
+      <Table<Vrf>
         variant="container"
         loading={tableQuery.isLoading}
         loadingText="Loading VRFs…"
@@ -708,27 +710,24 @@ function VrfsTab({
         trackBy="id"
         onRowClick={({ detail }) => onSelect(detail.item.id)}
         header={
-          <CsHeader
+          <Header
             counter={`(${data.length})`}
             actions={
               canWrite && (
-                <CsButton variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
                   New VRF
-                </CsButton>
+                </Button>
               )
             }
           >
             VRFs
-          </CsHeader>
+          </Header>
         }
         columnDefinitions={[
           {
             id: 'name', header: 'Name',
             cell: (v) => (
-              <span style={{ fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                {v.name}
-              </span>
+              <span style={{ fontWeight: 500 }}>{v.name}</span>
             ),
           },
           {
@@ -738,29 +737,29 @@ function VrfsTab({
           },
           {
             id: 'default', header: 'Default',
-            cell: (v) => v.is_default ? <CsBadge>default</CsBadge> : '—',
+            cell: (v) => v.is_default ? <Badge>default</Badge> : '—',
             width: 100,
           },
           {
             id: 'description', header: 'Description',
             cell: (v) => (
-              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
                 {v.description ?? '—'}
-              </CsBox>
+              </Box>
             ),
           },
         ]}
-        empty={<CsBox textAlign="center" color="inherit" padding="m">No VRFs yet.</CsBox>}
+        empty={<Box textAlign="center" color="inherit" padding="m">No VRFs yet.</Box>}
       />
       {canWrite && (
-        <CsModal
+        <Modal
           visible={createOpen}
           onDismiss={() => setCreateOpen(false)}
           header="New VRF"
           size="medium"
         >
           <VrfForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }} />
-        </CsModal>
+        </Modal>
       )}
     </>
   );
@@ -793,25 +792,25 @@ function VrfForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void 
   }
   return (
     <form onSubmit={onSubmit}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={submitting}>
+          <Button variant="primary" formAction="submit" loading={submitting}>
             {submitting ? 'Saving…' : 'Create'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
-          <CsFormField label="Name" errorText={errors.name}>
-            <CsInput value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. mgmt" />
-          </CsFormField>
-          <CsFormField label="Route distinguisher (optional)">
-            <CsInput value={rd} onChange={({ detail }) => setRd(detail.value)} placeholder="e.g. 65000:100" />
-          </CsFormField>
-          <CsFormField label="Description">
-            <CsInput value={description} onChange={({ detail }) => setDescription(detail.value)} />
-          </CsFormField>
-        </CsSpaceBetween>
-      </CsForm>
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. mgmt" />
+          </FormField>
+          <FormField label="Route distinguisher (optional)">
+            <Input value={rd} onChange={({ detail }) => setRd(detail.value)} placeholder="e.g. 65000:100" />
+          </FormField>
+          <FormField label="Description">
+            <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
@@ -968,26 +967,12 @@ function SupernetTreeTab({
   useEffect(() => clearHoverExpand, []);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
+    <SpaceBetween size="s">
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         {canWrite && (
-          <Dialog open={createSupernetOpen} onOpenChange={setCreateSupernetOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> New supernet</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>New supernet</DialogTitle></DialogHeader>
-              <SupernetForm
-                fabricId={fabricId} vrfId={vrfId}
-                sites={sites}
-                onSaved={async () => {
-                  setCreateSupernetOpen(false);
-                  await tableQuery.refetch();
-                  await qc.invalidateQueries({ queryKey: ['supernet-util'] });
-                }}
-              />
-            </DialogContent>
-          </Dialog>
+          <Button variant="primary" iconName="add-plus" onClick={() => setCreateSupernetOpen(true)}>
+            New supernet
+          </Button>
         )}
       </div>
 
@@ -998,26 +983,25 @@ function SupernetTreeTab({
         onDragEnd={onDragEnd}
         onDragCancel={() => { setDraggingSubnet(null); setHoverTargetId(null); clearHoverExpand(); }}
       >
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-8" />
-                <TableHead>Prefix</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Purpose</TableHead>
-                <TableHead className="w-64">Utilization</TableHead>
-                {canWrite && <TableHead className="w-12" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <Container disableContentPaddings>
+          <table style={TREE_TABLE_STYLE}>
+            <thead>
+              <tr>
+                <th style={{ ...TREE_TH_STYLE, width: 32 }} />
+                <th style={TREE_TH_STYLE}>Prefix</th>
+                <th style={TREE_TH_STYLE}>Name</th>
+                <th style={TREE_TH_STYLE}>Purpose</th>
+                <th style={{ ...TREE_TH_STYLE, width: 260 }}>Utilization</th>
+                {canWrite && <th style={{ ...TREE_TH_STYLE, width: 48 }} />}
+              </tr>
+            </thead>
+            <tbody>
               {data.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={canWrite ? 6 : 5} className="text-muted-foreground">
+                <tr>
+                  <td style={{ ...TREE_TD_STYLE, color: 'var(--color-text-status-inactive, #757575)' }} colSpan={canWrite ? 6 : 5}>
                     No supernets yet.
-                  </TableCell>
-                </TableRow>
+                  </td>
+                </tr>
               )}
               {data.map((sn) => (
                 <SupernetNode
@@ -1037,113 +1021,138 @@ function SupernetTreeTab({
                   onEditSubnet={(s, parentPurpose) => setEditSubnet({ subnet: s, parentPurpose })}
                 />
               ))}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
           {tableQuery.isLoading && (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 2 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
+            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {Array.from({ length: 2 }).map((_, i) => <div key={`s-${i}`} style={SKELETON_STYLE} />)}
             </div>
           )}
-        </CardContent>
-      </Card>
-      <DragOverlay dropAnimation={{ duration: 150 }}>
-        {draggingSubnet ? (
-          <div className="rounded-md border bg-background px-3 py-2 text-sm shadow-lg">
-            <span className="font-mono font-medium">{draggingSubnet.prefix}</span>
-            {draggingSubnet.name && <span className="ml-2 text-muted-foreground">{draggingSubnet.name}</span>}
-            <span className="ml-2 text-xs text-muted-foreground">drop on a supernet to move</span>
-          </div>
-        ) : null}
-      </DragOverlay>
+        </Container>
+        <DragOverlay dropAnimation={{ duration: 150 }}>
+          {draggingSubnet ? (
+            <div style={{
+              padding: '6px 12px',
+              fontSize: 14,
+              borderRadius: 8,
+              background: 'var(--color-background-container-content, #fff)',
+              border: '1px solid var(--color-border-divider-default, #e9ebed)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+            }}>
+              <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 500 }}>
+                {draggingSubnet.prefix}
+              </span>
+              {draggingSubnet.name && (
+                <span style={{ marginLeft: 8, color: 'var(--color-text-status-inactive, #757575)' }}>
+                  {draggingSubnet.name}
+                </span>
+              )}
+              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+                drop on a supernet to move
+              </span>
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
 
-      <Dialog
-        open={createSubnetFor !== null}
-        onOpenChange={(o) => { if (!o) setCreateSubnetFor(null); }}
-      >
-        <DialogContent>
-          <DialogHeader><DialogTitle>New subnet</DialogTitle></DialogHeader>
-          {createSubnetFor && (
-            <SubnetForm
-              supernetId={createSubnetFor.id}
-              fabricId={fabricId}
-              sites={sites}
-              parentPurpose={createSubnetFor.purpose}
-              onSaved={async () => {
-                const sn = createSubnetFor;
-                setCreateSubnetFor(null);
-                if (sn) await refreshSubnets(sn.id);
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+      {canWrite && (
+        <Modal
+          visible={createSupernetOpen}
+          onDismiss={() => setCreateSupernetOpen(false)}
+          header="New supernet"
+          size="medium"
+        >
+          <SupernetForm
+            fabricId={fabricId} vrfId={vrfId}
+            sites={sites}
+            onSaved={async () => {
+              setCreateSupernetOpen(false);
+              await tableQuery.refetch();
+              await qc.invalidateQueries({ queryKey: ['supernet-util'] });
+            }}
+          />
+        </Modal>
+      )}
 
-      <Dialog
-        open={editSupernet !== null}
-        onOpenChange={(o) => { if (!o) setEditSupernet(null); }}
+      <Modal
+        visible={createSubnetFor !== null}
+        onDismiss={() => setCreateSubnetFor(null)}
+        header="New subnet"
+        size="medium"
       >
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit supernet</DialogTitle></DialogHeader>
-          {editSupernet && (
-            <SupernetForm
-              fabricId={fabricId} vrfId={vrfId} supernet={editSupernet}
-              sites={sites}
-              onSaved={async () => { setEditSupernet(null); await refreshSupernets(); }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+        {createSubnetFor && (
+          <SubnetForm
+            supernetId={createSubnetFor.id}
+            fabricId={fabricId}
+            sites={sites}
+            parentPurpose={createSubnetFor.purpose}
+            onSaved={async () => {
+              const sn = createSubnetFor;
+              setCreateSubnetFor(null);
+              if (sn) await refreshSubnets(sn.id);
+            }}
+          />
+        )}
+      </Modal>
 
-      <Dialog
-        open={createSupernetUnder !== null}
-        onOpenChange={(o) => { if (!o) setCreateSupernetUnder(null); }}
+      <Modal
+        visible={editSupernet !== null}
+        onDismiss={() => setEditSupernet(null)}
+        header="Edit supernet"
+        size="medium"
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              New supernet inside {createSupernetUnder?.prefix}
-            </DialogTitle>
-          </DialogHeader>
-          {createSupernetUnder && (
-            <SupernetForm
-              fabricId={fabricId} vrfId={vrfId}
-              parent={createSupernetUnder}
-              sites={sites}
-              onSaved={async () => {
-                const parent = createSupernetUnder;
-                setCreateSupernetUnder(null);
-                await refreshChildren(parent?.id ?? null);
-                await tableQuery.refetch();
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
+        {editSupernet && (
+          <SupernetForm
+            fabricId={fabricId} vrfId={vrfId} supernet={editSupernet}
+            sites={sites}
+            onSaved={async () => { setEditSupernet(null); await refreshSupernets(); }}
+          />
+        )}
+      </Modal>
 
-      <Dialog
-        open={editSubnet !== null}
-        onOpenChange={(o) => { if (!o) setEditSubnet(null); }}
+      <Modal
+        visible={createSupernetUnder !== null}
+        onDismiss={() => setCreateSupernetUnder(null)}
+        header={`New supernet inside ${createSupernetUnder?.prefix ?? ''}`}
+        size="medium"
       >
-        <DialogContent>
-          <DialogHeader><DialogTitle>Edit subnet</DialogTitle></DialogHeader>
-          {editSubnet && (
-            <SubnetForm
-              supernetId={editSubnet.subnet.supernet_id}
-              fabricId={fabricId}
-              sites={sites}
-              subnet={editSubnet.subnet}
-              parentPurpose={editSubnet.parentPurpose}
-              onSaved={async () => {
-                const sid = editSubnet.subnet.supernet_id;
-                setEditSubnet(null);
-                await refreshSubnets(sid);
-              }}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
+        {createSupernetUnder && (
+          <SupernetForm
+            fabricId={fabricId} vrfId={vrfId}
+            parent={createSupernetUnder}
+            sites={sites}
+            onSaved={async () => {
+              const parent = createSupernetUnder;
+              setCreateSupernetUnder(null);
+              await refreshChildren(parent?.id ?? null);
+              await tableQuery.refetch();
+            }}
+          />
+        )}
+      </Modal>
+
+      <Modal
+        visible={editSubnet !== null}
+        onDismiss={() => setEditSubnet(null)}
+        header="Edit subnet"
+        size="medium"
+      >
+        {editSubnet && (
+          <SubnetForm
+            supernetId={editSubnet.subnet.supernet_id}
+            fabricId={fabricId}
+            sites={sites}
+            subnet={editSubnet.subnet}
+            parentPurpose={editSubnet.parentPurpose}
+            onSaved={async () => {
+              const sid = editSubnet.subnet.supernet_id;
+              setEditSubnet(null);
+              await refreshSubnets(sid);
+            }}
+          />
+        )}
+      </Modal>
+    </SpaceBetween>
   );
 }
 
@@ -1152,7 +1161,7 @@ function SupernetNode({
   supernet, depth, expanded, onToggle, sitesById, canWrite,
   draggingSubnet, hoverTargetId,
   onSelectSubnet, onAddSubnet, onAddChildSupernet, onEditSupernet, onEditSubnet,
-}: {
+}: Readonly<{
   supernet: Supernet;
   depth: number;
   expanded: Set<string>;
@@ -1166,11 +1175,8 @@ function SupernetNode({
   onAddChildSupernet: (sn: Supernet) => void;
   onEditSupernet: (sn: Supernet) => void;
   onEditSubnet: (subnet: Subnet, parentPurpose: string | null) => void;
-}) {
+}>) {
   const isOpen = expanded.has(supernet.id);
-  // Lazy-load child supernets only once the row is expanded — keeps the
-  // initial page render to a single query and avoids fanning out into
-  // every nested supernet on mount.
   const childrenQ = useQuery({
     enabled: isOpen,
     queryKey: ['child-supernets', supernet.id],
@@ -1187,13 +1193,8 @@ function SupernetNode({
     ? `site: ${sitesById.get(supernet.site_id)?.code ?? supernet.site_id.slice(0, 8) + '…'}`
     : null;
 
-  // Drop target wiring. We always register so empty supernets can accept
-  // a drag; the visual ring + accept decision use the validity check.
   const { setNodeRef: setDropRef } = useDroppable({ id: `supernet:${supernet.id}` });
 
-  // A drop is "valid" iff the subnet would still fit and isn't already
-  // here. Purpose mismatches are surfaced by the backend (we'd need to
-  // know the whole purpose chain client-side to forecast it perfectly).
   const isDragging = draggingSubnet !== null;
   const isOver = hoverTargetId === supernet.id;
   const isSelf = isDragging && draggingSubnet?.supernet_id === supernet.id;
@@ -1202,54 +1203,59 @@ function SupernetNode({
     : false;
   const isValidTarget = isDragging && !isSelf && fits;
 
-  let ringClass = '';
-  if (isOver && isValidTarget) ringClass = 'ring-2 ring-emerald-500 ring-inset bg-emerald-500/5';
-  else if (isOver && isDragging) ringClass = 'ring-2 ring-rose-500 ring-inset bg-rose-500/5';
-  else if (isValidTarget) ringClass = 'ring-1 ring-emerald-500/40 ring-inset';
+  let rowStyle: React.CSSProperties = { cursor: 'pointer' };
+  if (isOver && isValidTarget) {
+    rowStyle = { ...rowStyle, boxShadow: 'inset 0 0 0 2px var(--color-text-status-success, #037f0c)', background: 'rgba(3, 127, 12, 0.05)' };
+  } else if (isOver && isDragging) {
+    rowStyle = { ...rowStyle, boxShadow: 'inset 0 0 0 2px var(--color-text-status-error, #d91515)', background: 'rgba(217, 21, 21, 0.05)' };
+  } else if (isValidTarget) {
+    rowStyle = { ...rowStyle, boxShadow: 'inset 0 0 0 1px rgba(3, 127, 12, 0.4)' };
+  }
 
   return (
     <Fragment>
-      <TableRow
+      <tr
         ref={setDropRef}
-        className={`cursor-pointer hover:bg-accent/40 ${ringClass}`}
+        style={rowStyle}
         onClick={() => onToggle(supernet.id)}
       >
-        <TableCell className="text-muted-foreground">
-          {isOpen
-            ? <ChevronDown className="h-4 w-4" />
-            : <ChevronRight className="h-4 w-4" />}
-        </TableCell>
-        <TableCell className="font-mono font-medium" style={{ paddingLeft: 16 + indent }}>
-          {depth > 0 && <span className="text-muted-foreground">└─ </span>}
+        <td style={{ ...TREE_TD_STYLE, color: 'var(--color-text-status-inactive, #757575)' }}>
+          <Box>{isOpen ? '▾' : '▸'}</Box>
+        </td>
+        <td style={{ ...TREE_TD_STYLE, paddingLeft: 16 + indent, fontFamily: 'ui-monospace, monospace', fontWeight: 500 }}>
+          {depth > 0 && <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>└─ </span>}
           {supernet.prefix}
-        </TableCell>
-        <TableCell>
+        </td>
+        <td style={TREE_TD_STYLE}>
           <div>{supernet.name ?? '—'}</div>
           {sitePill && (
-            <div className="text-xs text-muted-foreground">{sitePill}</div>
+            <div style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>{sitePill}</div>
           )}
-        </TableCell>
-        <TableCell>
-          {supernet.purpose ? <Badge variant="secondary">{supernet.purpose}</Badge> : '—'}
-        </TableCell>
-        <TableCell><SupernetUtilCell supernetId={supernet.id} /></TableCell>
+        </td>
+        <td style={TREE_TD_STYLE}>
+          {supernet.purpose ? <Badge>{supernet.purpose}</Badge> : '—'}
+        </td>
+        <td style={TREE_TD_STYLE}><SupernetUtilCell supernetId={supernet.id} /></td>
         {canWrite && (
-          <TableCell onClick={(e) => e.stopPropagation()}>
-            <Button size="sm" variant="ghost" onClick={() => onEditSupernet(supernet)} title="Edit supernet">
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-          </TableCell>
+          <td style={TREE_TD_STYLE} onClick={(e) => e.stopPropagation()}>
+            <Button
+              iconName="edit"
+              variant="inline-icon"
+              onClick={() => onEditSupernet(supernet)}
+              ariaLabel="Edit supernet"
+            />
+          </td>
         )}
-      </TableRow>
+      </tr>
       {isOpen && (
         <>
           {childrenQ.isLoading && (
-            <TableRow>
-              <TableCell />
-              <TableCell colSpan={branchSpan} style={{ paddingLeft: 24 + indent }}>
-                <Skeleton className="h-6 w-full" />
-              </TableCell>
-            </TableRow>
+            <tr>
+              <td />
+              <td colSpan={branchSpan} style={{ ...TREE_TD_STYLE, paddingLeft: 24 + indent }}>
+                <div style={SKELETON_STYLE} />
+              </td>
+            </tr>
           )}
           {children.map((child) => (
             <SupernetNode
@@ -1292,20 +1298,18 @@ function SubnetBranch({
   supernetId, depth, parentPurpose, sitesById, canWrite,
   draggingSubnetId,
   onSelectSubnet, onAddSubnet, onAddChildSupernet, onEditSubnet,
-}: {
+}: Readonly<{
   supernetId: string;
   depth: number;
   parentPurpose: string | null;
   sitesById: Map<string, Site>;
   canWrite: boolean;
-  /** When a subnet is being dragged, hide its row in the source branch so
-   * the user doesn't see two copies (the original + the DragOverlay). */
   draggingSubnetId: string | null;
   onSelectSubnet: (subnetId: string) => void;
   onAddSubnet: () => void;
   onAddChildSupernet: () => void;
   onEditSubnet: (subnet: Subnet) => void;
-}) {
+}>) {
   const { data, isLoading } = useQuery({
     queryKey: ['subnets-for-supernet', supernetId],
     queryFn: async () => (
@@ -1313,19 +1317,17 @@ function SubnetBranch({
     ).data.items ?? [],
   });
 
-  // The branch's column count matches the parent table — chevron, prefix,
-  // name, purpose, utilization, and the edit-button column when canWrite.
   const branchSpan = canWrite ? 5 : 4;
   const indent = depth * 16;
 
   if (isLoading) {
     return (
-      <TableRow>
-        <TableCell />
-        <TableCell colSpan={branchSpan} style={{ paddingLeft: 16 + indent }}>
-          <Skeleton className="h-6 w-full" />
-        </TableCell>
-      </TableRow>
+      <tr>
+        <td />
+        <td colSpan={branchSpan} style={{ ...TREE_TD_STYLE, paddingLeft: 16 + indent }}>
+          <div style={SKELETON_STYLE} />
+        </td>
+      </tr>
     );
   }
 
@@ -1345,18 +1347,17 @@ function SubnetBranch({
         />
       ))}
       {canWrite && (
-        <TableRow className="bg-muted/20">
-          <TableCell />
-          <TableCell colSpan={branchSpan} style={{ paddingLeft: 16 + indent }}>
-            <Button size="sm" variant="ghost" onClick={onAddSubnet}>
-              <Plus className="h-3.5 w-3.5" /> Add subnet here
-              {parentPurpose && <span className="ml-1 text-[10px] text-muted-foreground">({parentPurpose})</span>}
+        <tr style={{ background: 'var(--color-background-cell-shaded, #fafafa)' }}>
+          <td />
+          <td colSpan={branchSpan} style={{ ...TREE_TD_STYLE, paddingLeft: 16 + indent }}>
+            <Button iconName="add-plus" variant="link" onClick={onAddSubnet}>
+              Add subnet here{parentPurpose ? ` (${parentPurpose})` : ''}
             </Button>
-            <Button size="sm" variant="ghost" className="ml-2" onClick={onAddChildSupernet}>
-              <Plus className="h-3.5 w-3.5" /> Add child supernet
+            <Button iconName="add-plus" variant="link" onClick={onAddChildSupernet}>
+              Add child supernet
             </Button>
-          </TableCell>
-        </TableRow>
+          </td>
+        </tr>
       )}
     </>
   );
@@ -1365,7 +1366,7 @@ function SubnetBranch({
 function SubnetRow({
   subnet: s, indent, canWrite, isDraggingThis, sitesById,
   onSelectSubnet, onEditSubnet,
-}: {
+}: Readonly<{
   subnet: Subnet;
   indent: number;
   canWrite: boolean;
@@ -1373,32 +1374,31 @@ function SubnetRow({
   sitesById: Map<string, Site>;
   onSelectSubnet: (subnetId: string) => void;
   onEditSubnet: (subnet: Subnet) => void;
-}) {
-  // useDraggable wires this row up to the page-level DndContext. We pass
-  // the subnet object via `data` so the drag handlers don't have to look
-  // it up again on drop.
+}>) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `subnet:${s.id}`,
     data: { subnet: s },
   });
-  // Source row stays in place; the dnd-kit DragOverlay handles the floating
-  // preview. We just dim the row so the user sees what's being moved.
-  const dragClass = isDragging || isDraggingThis ? 'opacity-30' : '';
+  const opacity = isDragging || isDraggingThis ? 0.3 : 1;
   return (
-    <TableRow
+    <tr
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      className={`cursor-pointer bg-muted/20 hover:bg-accent/40 ${dragClass}`}
+      style={{
+        cursor: 'pointer',
+        background: 'var(--color-background-cell-shaded, #fafafa)',
+        opacity,
+      }}
       onClick={() => onSelectSubnet(s.id)}
     >
-      <TableCell />
-      <TableCell className="font-mono" style={{ paddingLeft: 16 + indent }}>
-        <span className="text-muted-foreground">└─</span> {s.prefix}
-      </TableCell>
-      <TableCell className="text-sm">
+      <td style={TREE_TD_STYLE} />
+      <td style={{ ...TREE_TD_STYLE, paddingLeft: 16 + indent, fontFamily: 'ui-monospace, monospace' }}>
+        <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>└─</span> {s.prefix}
+      </td>
+      <td style={TREE_TD_STYLE}>
         <div>{s.name ?? '—'}</div>
-        <div className="text-xs text-muted-foreground">
+        <div style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
           {s.site_id
             ? `site: ${sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}`
             : 'unassigned'}
@@ -1406,19 +1406,22 @@ function SubnetRow({
           {s.gateway ? ` · gw ${s.gateway}` : ''}
           {s.vni_id ? ` · vni ${s.vni_id.slice(0, 8)}…` : ''}
         </div>
-      </TableCell>
-      <TableCell>
-        {s.purpose ? <Badge variant="secondary">{s.purpose}</Badge> : '—'}
-      </TableCell>
-      <TableCell><SubnetUtilCell subnetId={s.id} /></TableCell>
+      </td>
+      <td style={TREE_TD_STYLE}>
+        {s.purpose ? <Badge>{s.purpose}</Badge> : '—'}
+      </td>
+      <td style={TREE_TD_STYLE}><SubnetUtilCell subnetId={s.id} /></td>
       {canWrite && (
-        <TableCell onClick={(e) => e.stopPropagation()}>
-          <Button size="sm" variant="ghost" onClick={() => onEditSubnet(s)} title="Edit subnet">
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-        </TableCell>
+        <td style={TREE_TD_STYLE} onClick={(e) => e.stopPropagation()}>
+          <Button
+            iconName="edit"
+            variant="inline-icon"
+            onClick={() => onEditSubnet(s)}
+            ariaLabel="Edit subnet"
+          />
+        </td>
       )}
-    </TableRow>
+    </tr>
   );
 }
 
@@ -1427,7 +1430,7 @@ function SupernetUtilCell({ supernetId }: { supernetId: string }) {
     queryKey: ['supernet-util', supernetId],
     queryFn: async () => (await http.get<SupernetUtil>(`/ipam/supernets/${supernetId}/utilization`)).data,
   });
-  if (!data) return <Skeleton className="h-4 w-full" />;
+  if (!data) return <Box color="text-status-inactive" fontSize="body-s">…</Box>;
   return (
     <CapacityBar
       used={data.allocated_subnet_addresses}
@@ -1503,11 +1506,11 @@ function SupernetForm({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
   const purposeLocked = !!parent?.purpose && !editing;
-  const purposeOptions: CsSelectProps.Option[] = [
+  const purposeOptions: SelectProps.Option[] = [
     { value: PURPOSE_NONE, label: '(unset)' },
     ...PURPOSES.map((p) => ({ value: p, label: p })),
   ];
-  const siteOptions: CsSelectProps.Option[] = [
+  const siteOptions: SelectProps.Option[] = [
     { value: NONE, label: '(unassigned)' },
     ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
   ];
@@ -1521,47 +1524,47 @@ function SupernetForm({
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+          <Button variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
+        <SpaceBetween size="m">
           {parent && !editing && (
-            <CsBox color="text-status-inactive" fontSize="body-s">
+            <Box color="text-status-inactive" fontSize="body-s">
               Carving inside <span style={{ fontFamily: 'ui-monospace, monospace' }}>{parent.prefix}</span>.
               Prefix must fit inside the parent.
-            </CsBox>
+            </Box>
           )}
-          <CsFormField
+          <FormField
             label="Prefix (CIDR)"
             description={editing ? 'Prefix is immutable after creation. Delete + recreate to change it.' : undefined}
             errorText={form.formState.errors.prefix?.message as string | undefined}
           >
-            <CsInput
+            <Input
               disabled={editing}
               value={prefixV}
               onChange={({ detail }) => form.setValue('prefix', detail.value)}
               placeholder="e.g. 10.0.0.0/8 or 2001:db8::/32"
             />
-          </CsFormField>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="Name">
-              <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
-            </CsFormField>
-            <CsFormField label="Site (optional)">
-              <CsSelect
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Name">
+              <Input value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
+            </FormField>
+            <FormField label="Site (optional)">
+              <Select
                 selectedOption={siteOptions.find((o) => o.value === siteV) ?? siteOptions[0]}
                 onChange={({ detail }) => form.setValue('site_id', detail.selectedOption.value!)}
                 options={siteOptions}
                 expandToViewport
               />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsColumnLayout columns={2}>
-            <CsFormField
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={2}>
+            <FormField
               label="Purpose"
               description={
                 purposeLocked
@@ -1571,20 +1574,20 @@ function SupernetForm({
                     : undefined
               }
             >
-              <CsSelect
+              <Select
                 selectedOption={purposeOptions.find((o) => o.value === purposeV) ?? purposeOptions[0]}
                 onChange={({ detail }) => form.setValue('purpose', detail.selectedOption.value!)}
                 options={purposeOptions}
                 disabled={purposeLocked}
                 expandToViewport
               />
-            </CsFormField>
-            <CsFormField label="Description">
-              <CsInput value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
-            </CsFormField>
-          </CsColumnLayout>
-        </CsSpaceBetween>
-      </CsForm>
+            </FormField>
+            <FormField label="Description">
+              <Input value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
+            </FormField>
+          </ColumnLayout>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
@@ -1606,7 +1609,7 @@ function SubnetUtilCell({ subnetId }: { subnetId: string }) {
     queryKey: ['subnet-util', subnetId],
     queryFn: async () => (await http.get<SubnetUtil>(`/ipam/subnets/${subnetId}/utilization`)).data,
   });
-  if (!data) return <Skeleton className="h-4 w-full" />;
+  if (!data) return <Box color="text-status-inactive" fontSize="body-s">…</Box>;
   return (
     <CapacityBar
       used={data.allocated} total={data.capacity}
@@ -1691,15 +1694,15 @@ function SubnetForm({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
   const purposeLocked = !!parentPurpose;
-  const siteOptions: CsSelectProps.Option[] = [
+  const siteOptions: SelectProps.Option[] = [
     { value: NONE, label: '(unassigned)' },
     ...sites.map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
   ];
-  const purposeOptions: CsSelectProps.Option[] = [
+  const purposeOptions: SelectProps.Option[] = [
     { value: PURPOSE_NONE, label: '(unset)' },
     ...PURPOSES.map((p) => ({ value: p, label: p })),
   ];
-  const vniOptions: CsSelectProps.Option[] = [
+  const vniOptions: SelectProps.Option[] = [
     { value: NONE, label: '(none)' },
     ...l2Vnis.map((v) => ({
       value: v.id,
@@ -1716,72 +1719,72 @@ function SubnetForm({
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+          <Button variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? 'Saving…' : editing ? 'Save' : 'Create'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
-          <CsFormField
+        <SpaceBetween size="m">
+          <FormField
             label="Prefix (CIDR, must be inside the supernet)"
             description={editing ? 'Prefix is immutable after creation. Delete + recreate to change it.' : undefined}
             errorText={form.formState.errors.prefix?.message as string | undefined}
           >
-            <CsInput
+            <Input
               disabled={editing}
               value={prefixV}
               onChange={({ detail }) => form.setValue('prefix', detail.value)}
               placeholder="e.g. 10.0.5.0/24 or 2001:db8:1::/48"
             />
-          </CsFormField>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="Site">
-              <CsSelect
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Site">
+              <Select
                 selectedOption={siteOptions.find((o) => o.value === siteV) ?? siteOptions[0]}
                 onChange={({ detail }) => form.setValue('site_id', detail.selectedOption.value!)}
                 options={siteOptions}
                 expandToViewport
               />
-            </CsFormField>
-            <CsFormField
+            </FormField>
+            <FormField
               label="Purpose"
               description={purposeLocked ? `Locked to ${parentPurpose} — parent supernet's purpose.` : undefined}
             >
-              <CsSelect
+              <Select
                 selectedOption={purposeOptions.find((o) => o.value === purposeV) ?? purposeOptions[0]}
                 onChange={({ detail }) => form.setValue('purpose', detail.selectedOption.value!)}
                 options={purposeOptions}
                 disabled={purposeLocked}
                 expandToViewport
               />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="VLAN">
-              <CsInput type="number" value={vlanV} onChange={({ detail }) => form.setValue('vlan_id', detail.value)} />
-            </CsFormField>
-            <CsFormField label="Gateway (optional)">
-              <CsInput value={gatewayV} onChange={({ detail }) => form.setValue('gateway', detail.value)} />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsFormField
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={2}>
+            <FormField label="VLAN">
+              <Input type="number" value={vlanV} onChange={({ detail }) => form.setValue('vlan_id', detail.value)} />
+            </FormField>
+            <FormField label="Gateway (optional)">
+              <Input value={gatewayV} onChange={({ detail }) => form.setValue('gateway', detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <FormField
             label="L2 VNI (optional)"
             description="Bind this subnet to an L2 VNI to track which broadcast domain it rides. Only L2 VNIs in this fabric are eligible."
           >
-            <CsSelect
+            <Select
               selectedOption={vniOptions.find((o) => o.value === vniV) ?? vniOptions[0]}
               onChange={({ detail }) => form.setValue('vni_id', detail.selectedOption.value!)}
               options={vniOptions}
               expandToViewport
             />
-          </CsFormField>
-          <CsFormField label="Name (optional)">
-            <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
-          </CsFormField>
-        </CsSpaceBetween>
-      </CsForm>
+          </FormField>
+          <FormField label="Name (optional)">
+            <Input value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
@@ -1798,7 +1801,7 @@ const ipSchema = z.object({
   description: z.string().optional(),
 });
 
-function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: boolean }) {
+function AddressesTab({ subnetId, canWrite }: Readonly<{ subnetId: string; canWrite: boolean }>) {
   const qc = useQueryClient();
   const { tableQuery, result } = useTable<IPAddr>({
     resource: 'ipam/addresses',
@@ -1818,7 +1821,7 @@ function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: bool
   const [view, setView] = useState<'table' | 'grid'>('table');
 
   async function remove(ip: IPAddr) {
-    if (!window.confirm(`Release ${ip.address}?`)) return;
+    if (!globalThis.confirm(`Release ${ip.address}?`)) return;
     try {
       await http.delete(`/ipam/addresses/${ip.id}`);
       toast.success('Address released');
@@ -1828,50 +1831,22 @@ function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: bool
   }
 
   return (
-    <div className="space-y-3">
+    <SpaceBetween size="s">
       {util.data && (
-        <Card>
-          <CardContent className="space-y-2 p-4">
+        <Container>
+          <SpaceBetween size="xxs">
             <CapacityBar
               used={util.data.allocated} total={util.data.capacity}
               leftLabel={`${util.data.allocated}/${util.data.capacity} addresses allocated`}
             />
-            <p className="text-xs text-muted-foreground">
+            <Box color="text-status-inactive" fontSize="body-s">
               {util.data.next_available
-                ? <>Next available: <span className="font-mono">{util.data.next_available}</span></>
+                ? <>Next available: <span style={{ fontFamily: 'ui-monospace, monospace' }}>{util.data.next_available}</span></>
                 : 'Subnet is full'}
-            </p>
-          </CardContent>
-        </Card>
+            </Box>
+          </SpaceBetween>
+        </Container>
       )}
-      <div className="flex items-center justify-between gap-2">
-        <Tabs value={view} onValueChange={(v) => setView(v as 'table' | 'grid')}>
-          <TabsList>
-            <TabsTrigger value="table"><List className="h-3.5 w-3.5" /> Table</TabsTrigger>
-            <TabsTrigger value="grid"><LayoutGrid className="h-3.5 w-3.5" /> Grid</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        {canWrite && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button><Plus className="h-4 w-4" /> Allocate IP</Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader><DialogTitle>Allocate IP address</DialogTitle></DialogHeader>
-              <IpForm
-                subnetId={subnetId}
-                suggestedAddress={util.data?.next_available ?? ''}
-                assets={assets}
-                onSaved={async () => {
-                  setCreateOpen(false);
-                  await tableQuery.refetch();
-                  await qc.invalidateQueries({ queryKey: ['subnet-util', subnetId] });
-                }}
-              />
-            </DialogContent>
-          </Dialog>
-        )}
-      </div>
 
       {view === 'grid' && util.data && (
         <IpGrid
@@ -1883,64 +1858,111 @@ function AddressesTab({ subnetId, canWrite }: { subnetId: string; canWrite: bool
       )}
 
       {view === 'table' && (
-      <Card>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Address</TableHead>
-                <TableHead>Asset</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>DNS</TableHead>
-                <TableHead>Lease ends</TableHead>
-                {canWrite && <TableHead className="w-12" />}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.length === 0 && (
-                <TableRow><TableCell colSpan={canWrite ? 8 : 7} className="text-muted-foreground">No allocations yet.</TableCell></TableRow>
-              )}
-              {data.map((ip) => (
-                <TableRow key={ip.id}>
-                  <TableCell className="font-mono">{ip.address}</TableCell>
-                  <TableCell className="text-sm">
-                    {ip.asset_id
-                      ? (assetsById.get(ip.asset_id)?.name ?? ip.asset_id.slice(0, 8) + '…')
-                      : <span className="text-muted-foreground">—</span>}
-                  </TableCell>
-                  <TableCell><Badge variant="secondary">{ip.role}</Badge></TableCell>
-                  <TableCell>
-                    <Badge variant={ip.source === 'dhcp' ? 'warning' : 'outline'}>{ip.source}</Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={ip.status === 'active' ? 'success' : 'secondary'}>{ip.status}</Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">{ip.dns_name ?? '—'}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {ip.dhcp_lease_expires_at ? formatDate(ip.dhcp_lease_expires_at) : '—'}
-                  </TableCell>
+        <Table<IPAddr>
+          variant="container"
+          loading={tableQuery.isLoading}
+          loadingText="Loading addresses…"
+          items={data}
+          trackBy="id"
+          header={
+            <Header
+              counter={`(${data.length})`}
+              actions={
+                <SpaceBetween size="xs" direction="horizontal">
+                  <SegmentedControl
+                    selectedId={view}
+                    onChange={({ detail }) => setView(detail.selectedId as 'table' | 'grid')}
+                    options={[
+                      { id: 'table', text: 'Table' },
+                      { id: 'grid', text: 'Grid' },
+                    ]}
+                  />
                   {canWrite && (
-                    <TableCell>
-                      <Button size="sm" variant="ghost" onClick={() => remove(ip)} title="Release">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
+                    <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                      Allocate IP
+                    </Button>
                   )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          {tableQuery.isLoading && (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                </SpaceBetween>
+              }
+            >
+              Addresses
+            </Header>
+          }
+          columnDefinitions={[
+            { id: 'address', header: 'Address', cell: (ip) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{ip.address}</span> },
+            {
+              id: 'asset', header: 'Asset',
+              cell: (ip) => ip.asset_id
+                ? (assetsById.get(ip.asset_id)?.name ?? ip.asset_id.slice(0, 8) + '…')
+                : <Box color="text-status-inactive">—</Box>,
+            },
+            { id: 'role', header: 'Role', cell: (ip) => <Badge>{ip.role}</Badge>, width: 90 },
+            {
+              id: 'source', header: 'Source',
+              cell: (ip) => <Badge color={ip.source === 'dhcp' ? 'severity-medium' : 'grey'}>{ip.source}</Badge>,
+              width: 110,
+            },
+            {
+              id: 'status', header: 'Status',
+              cell: (ip) => (
+                <StatusIndicator type={ip.status === 'active' ? 'success' : 'info'}>{ip.status}</StatusIndicator>
+              ),
+              width: 110,
+            },
+            {
+              id: 'dns', header: 'DNS',
+              cell: (ip) => ip.dns_name ?? <Box color="text-status-inactive">—</Box>,
+            },
+            {
+              id: 'lease', header: 'Lease ends',
+              cell: (ip) => (
+                <Box color="text-status-inactive" fontSize="body-s">
+                  {ip.dhcp_lease_expires_at ? formatDate(ip.dhcp_lease_expires_at) : '—'}
+                </Box>
+              ),
+              width: 160,
+            },
+            ...(canWrite ? [{
+              id: 'actions', header: '',
+              cell: (ip: IPAddr) => (
+                <Button
+                  iconName="remove"
+                  variant="inline-icon"
+                  onClick={() => remove(ip)}
+                  ariaLabel={`Release ${ip.address}`}
+                />
+              ),
+              width: 60,
+            }] : []),
+          ]}
+          empty={
+            <Box textAlign="center" color="inherit" padding="m">
+              No allocations yet.
+            </Box>
+          }
+        />
       )}
-    </div>
+
+      {canWrite && (
+        <Modal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="Allocate IP address"
+          size="medium"
+        >
+          <IpForm
+            subnetId={subnetId}
+            suggestedAddress={util.data?.next_available ?? ''}
+            assets={assets}
+            onSaved={async () => {
+              setCreateOpen(false);
+              await tableQuery.refetch();
+              await qc.invalidateQueries({ queryKey: ['subnet-util', subnetId] });
+            }}
+          />
+        </Modal>
+      )}
+    </SpaceBetween>
   );
 }
 
@@ -1953,66 +1975,69 @@ const IP_GRID_MAX_CELLS = 1024;
 
 function IpGrid({
   subnetPrefix, capacity, allocated, assetsById,
-}: {
+}: Readonly<{
   subnetPrefix: string;
   capacity: number;
   allocated: IPAddr[];
   assetsById: Map<string, Asset>;
-}) {
-  if (capacity > IP_GRID_MAX_CELLS) {
-    return (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">
-          Grid view is hidden for prefixes larger than /22 (this subnet has{' '}
-          <span className="font-mono">{capacity.toLocaleString()}</span> addresses).
-          Use the table for now — search by address to find a specific allocation.
-        </CardContent>
-      </Card>
-    );
-  }
+}>) {
   const cells = useMemo(
-    () => buildGridCells(subnetPrefix, capacity, allocated),
+    () => (capacity > IP_GRID_MAX_CELLS ? [] : buildGridCells(subnetPrefix, capacity, allocated)),
     [subnetPrefix, capacity, allocated],
   );
+  if (capacity > IP_GRID_MAX_CELLS) {
+    return (
+      <Container>
+        <Box padding="m" color="text-status-inactive" fontSize="body-s">
+          Grid view is hidden for prefixes larger than /22 (this subnet has{' '}
+          <span style={{ fontFamily: 'ui-monospace, monospace' }}>{capacity.toLocaleString()}</span> addresses).
+          Use the table for now — search by address to find a specific allocation.
+        </Box>
+      </Container>
+    );
+  }
   if (cells.length === 0) {
     return (
-      <Card>
-        <CardContent className="p-4 text-sm text-muted-foreground">
+      <Container>
+        <Box padding="m" color="text-status-inactive" fontSize="body-s">
           Couldn't render this prefix as a grid (unparseable CIDR).
-        </CardContent>
-      </Card>
+        </Box>
+      </Container>
     );
   }
   return (
-    <Card>
-      <CardContent className="space-y-3 p-4">
-        <div className="flex items-center gap-3 text-xs text-muted-foreground">
-          <Legend swatch="bg-muted" label="free" />
-          <Legend swatch="bg-primary" label="static" />
-          <Legend swatch="bg-warning" label="dhcp" />
-          <Legend swatch="bg-secondary" label="reservation" />
-          <Legend swatch="bg-muted-foreground/30" label="deprecated" />
-        </div>
+    <Container>
+      <SpaceBetween size="s">
+        <SpaceBetween size="s" direction="horizontal">
+          <Legend color="var(--color-background-input-disabled, #eaeded)" label="free" />
+          <Legend color="var(--color-text-status-success, #037f0c)" label="static" />
+          <Legend color="var(--color-text-status-warning, #b25b00)" label="dhcp" />
+          <Legend color="var(--color-text-status-info, #0972d3)" label="reservation" />
+          <Legend color="var(--color-text-status-inactive, #757575)" label="deprecated" />
+        </SpaceBetween>
         <div
-          className="grid gap-0.5"
-          style={{ gridTemplateColumns: 'repeat(32, minmax(0, 1fr))' }}
+          style={{
+            display: 'grid',
+            gap: 2,
+            gridTemplateColumns: 'repeat(32, minmax(0, 1fr))',
+          }}
         >
           {cells.map((cell) => (
             <IpCell key={cell.address} cell={cell} assetsById={assetsById} />
           ))}
         </div>
-        <p className="text-[10px] text-muted-foreground">
+        <Box color="text-status-inactive" fontSize="body-s">
           Hover a cell for details · {allocated.length} of {capacity} allocated
-        </p>
-      </CardContent>
-    </Card>
+        </Box>
+      </SpaceBetween>
+    </Container>
   );
 }
 
-function Legend({ swatch, label }: { swatch: string; label: string }) {
+function Legend({ color, label }: Readonly<{ color: string; label: string }>) {
   return (
-    <span className="flex items-center gap-1.5">
-      <span className={`inline-block h-3 w-3 rounded-sm ${swatch}`} />
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: 2, background: color }} />
       {label}
     </span>
   );
@@ -2135,12 +2160,11 @@ function compressV6(groups: string[]): string {
 
 function IpCell({
   cell, assetsById,
-}: {
+}: Readonly<{
   cell: IpCellInfo;
   assetsById: Map<string, Asset>;
-}) {
+}>) {
   const ip = cell.ip;
-  const tone = cellTone(ip);
   const asset = ip?.asset_id ? assetsById.get(ip.asset_id) : null;
   const tooltip = ip
     ? [
@@ -2155,122 +2179,139 @@ function IpCell({
   return (
     <span
       title={tooltip}
-      className={`aspect-square rounded-sm ${tone}`}
+      style={{
+        display: 'inline-block',
+        aspectRatio: '1 / 1',
+        borderRadius: 2,
+        background: cellColor(ip),
+      }}
     />
   );
 }
 
-function cellTone(ip: IPAddr | null): string {
-  if (!ip) return 'bg-muted hover:bg-muted-foreground/20';
-  if (ip.status === 'deprecated') return 'bg-muted-foreground/30';
-  if (ip.source === 'dhcp') return 'bg-warning hover:bg-warning/80';
-  if (ip.source === 'reservation') return 'bg-secondary hover:bg-secondary/80';
-  return 'bg-primary hover:bg-primary/80';
+function cellColor(ip: IPAddr | null): string {
+  if (!ip) return 'var(--color-background-input-disabled, #eaeded)';
+  if (ip.status === 'deprecated') return 'var(--color-text-status-inactive, #757575)';
+  if (ip.source === 'dhcp') return 'var(--color-text-status-warning, #b25b00)';
+  if (ip.source === 'reservation') return 'var(--color-text-status-info, #0972d3)';
+  return 'var(--color-text-status-success, #037f0c)';
 }
 
 
 function IpForm({
   subnetId, suggestedAddress, assets, onSaved,
-}: {
+}: Readonly<{
   subnetId: string;
   suggestedAddress: string;
   assets: Asset[];
   onSaved: () => void;
-}) {
+}>) {
   const NONE = '__none__';
-  const form = useForm<z.infer<typeof ipSchema>>({
-    resolver: zodResolver(ipSchema),
-    defaultValues: {
-      address: suggestedAddress,
-      asset_id: NONE,
-      role: 'data',
-      status: 'active',
-      source: 'static',
-      dns_name: '',
-      description: '',
-    },
-  });
-  async function onSubmit(v: z.infer<typeof ipSchema>) {
+  const [address, setAddress] = useState(suggestedAddress);
+  const [assetOpt, setAssetOpt] = useState<SelectProps.Option>({ value: NONE, label: '(reservation / unbound)' });
+  const [roleOpt, setRoleOpt] = useState<SelectProps.Option>({ value: 'data', label: 'data' });
+  const [statusOpt, setStatusOpt] = useState<SelectProps.Option>({ value: 'active', label: 'active' });
+  const [sourceOpt, setSourceOpt] = useState<SelectProps.Option>({ value: 'static', label: 'static' });
+  const [dnsName, setDnsName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const assetOptions: SelectProps.Option[] = [
+    { value: NONE, label: '(reservation / unbound)' },
+    ...assets.slice(0, 200).map((a) => ({ value: a.id, label: a.name })),
+  ];
+  const roleOptions: SelectProps.Option[] = ROLES.map((r) => ({ value: r, label: r }));
+  const sourceOptions: SelectProps.Option[] = SOURCES.map((r) => ({ value: r, label: r }));
+  const statusOptions: SelectProps.Option[] = STATUSES.map((r) => ({ value: r, label: r }));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!address.trim()) errs.address = 'Address required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
     try {
       await http.post('/ipam/addresses', {
         subnet_id: subnetId,
-        address: v.address,
-        asset_id: v.asset_id === NONE ? null : v.asset_id,
-        role: v.role,
-        status: v.status,
-        source: v.source,
-        dns_name: v.dns_name || null,
-        description: v.description || null,
+        address,
+        asset_id: assetOpt.value === NONE ? null : assetOpt.value,
+        role: roleOpt.value,
+        status: statusOpt.value,
+        source: sourceOpt.value,
+        dns_name: dnsName || null,
+        description: null,
       });
       toast.success('IP allocated');
       onSaved();
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setSubmitting(false);
+    }
   }
+
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-        <FormField control={form.control} name="address" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Address</FormLabel>
-            <FormControl><Input placeholder="e.g. 10.0.5.42" className="font-mono" {...field} /></FormControl>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <FormField control={form.control} name="asset_id" render={({ field }) => (
-          <FormItem>
-            <FormLabel>Bound asset (optional)</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange}>
-              <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-              <SelectContent>
-                <SelectItem value={NONE}>(reservation / unbound)</SelectItem>
-                {assets.slice(0, 200).map((a) => (
-                  <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FormMessage />
-          </FormItem>
-        )} />
-        <div className="grid grid-cols-3 gap-3">
-          <FormField control={form.control} name="role" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Role</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>{ROLES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="source" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Source</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>{SOURCES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="status" render={({ field }) => (
-            <FormItem>
-              <FormLabel>Status</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                <SelectContent>{STATUSES.map((r) => <SelectItem key={r} value={r}>{r}</SelectItem>)}</SelectContent>
-              </Select>
-              <FormMessage />
-            </FormItem>
-          )} />
-        </div>
-        <FormField control={form.control} name="dns_name" render={({ field }) => (
-          <FormItem><FormLabel>DNS name (optional)</FormLabel><FormControl><Input className="font-mono" {...field} /></FormControl><FormMessage /></FormItem>
-        )} />
-        <Button type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? 'Saving…' : 'Allocate'}
-        </Button>
-      </form>
-    </Form>
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : 'Allocate'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField label="Address" errorText={errors.address}>
+            <Input value={address} onChange={({ detail }) => setAddress(detail.value)} placeholder="e.g. 10.0.5.42" />
+          </FormField>
+          <FormField label="Bound asset (optional)">
+            <Select
+              selectedOption={assetOpt}
+              onChange={({ detail }) => {
+                if (detail.selectedOption.value) setAssetOpt(detail.selectedOption);
+              }}
+              options={assetOptions}
+              expandToViewport
+            />
+          </FormField>
+          <ColumnLayout columns={3}>
+            <FormField label="Role">
+              <Select
+                selectedOption={roleOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setRoleOpt(detail.selectedOption);
+                }}
+                options={roleOptions}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="Source">
+              <Select
+                selectedOption={sourceOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setSourceOpt(detail.selectedOption);
+                }}
+                options={sourceOptions}
+                expandToViewport
+              />
+            </FormField>
+            <FormField label="Status">
+              <Select
+                selectedOption={statusOpt}
+                onChange={({ detail }) => {
+                  if (detail.selectedOption.value) setStatusOpt(detail.selectedOption);
+                }}
+                options={statusOptions}
+                expandToViewport
+              />
+            </FormField>
+          </ColumnLayout>
+          <FormField label="DNS name (optional)">
+            <Input value={dnsName} onChange={({ detail }) => setDnsName(detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
@@ -2328,29 +2369,29 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <>
-      <CsTable<DhcpServer>
+      <Table<DhcpServer>
         variant="container"
         loading={tableQuery.isLoading}
         loadingText="Loading DHCP servers…"
         items={data}
         trackBy="id"
         header={
-          <CsHeader
+          <Header
             counter={`(${data.length})`}
             actions={
               canWrite && (
-                <CsButton
+                <Button
                   variant="primary"
                   iconName="add-plus"
                   onClick={() => setCreateOpen(true)}
                 >
                   Add Kea server
-                </CsButton>
+                </Button>
               )
             }
           >
             DHCP servers
-          </CsHeader>
+          </Header>
         }
         columnDefinitions={[
           { id: 'name', header: 'Name', cell: (s) => <span style={{ fontWeight: 500 }}>{s.name}</span> },
@@ -2365,9 +2406,9 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
           {
             id: 'last_sync', header: 'Last sync',
             cell: (s) => (
-              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
                 {s.last_sync_at ? formatDate(s.last_sync_at) : 'never'}
-              </CsBox>
+              </Box>
             ),
             width: 200,
           },
@@ -2379,12 +2420,12 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
           {
             id: 'status', header: 'Status',
             cell: (s) => (
-              <CsSpaceBetween size="xxs" direction="horizontal">
-                {s.last_sync_status === 'ok' && <CsStatusIndicator type="success">ok</CsStatusIndicator>}
-                {s.last_sync_status === 'error' && <CsStatusIndicator type="error">error</CsStatusIndicator>}
-                {!s.last_sync_status && <CsStatusIndicator type="pending">pending</CsStatusIndicator>}
-                {!s.enabled && <CsStatusIndicator type="stopped">disabled</CsStatusIndicator>}
-              </CsSpaceBetween>
+              <SpaceBetween size="xxs" direction="horizontal">
+                {s.last_sync_status === 'ok' && <StatusIndicator type="success">ok</StatusIndicator>}
+                {s.last_sync_status === 'error' && <StatusIndicator type="error">error</StatusIndicator>}
+                {!s.last_sync_status && <StatusIndicator type="pending">pending</StatusIndicator>}
+                {!s.enabled && <StatusIndicator type="stopped">disabled</StatusIndicator>}
+              </SpaceBetween>
             ),
             width: 180,
           },
@@ -2394,18 +2435,18 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
             // Inline row actions: sync triggers a synchronous /sync call
             // and refreshes; delete confirms then removes.
             cell: (s: DhcpServer) => (
-              <CsSpaceBetween size="xxs" direction="horizontal">
-                <CsButton iconName="upload" variant="inline-icon" onClick={() => syncNow(s)} ariaLabel={`Sync ${s.name}`} />
-                <CsButton iconName="remove" variant="inline-icon" onClick={() => remove(s)} ariaLabel={`Delete ${s.name}`} />
-              </CsSpaceBetween>
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="upload" variant="inline-icon" onClick={() => syncNow(s)} ariaLabel={`Sync ${s.name}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(s)} ariaLabel={`Delete ${s.name}`} />
+              </SpaceBetween>
             ),
             width: 120,
           }] : []),
         ]}
         empty={
-          <CsBox textAlign="center" color="inherit" padding="m">
+          <Box textAlign="center" color="inherit" padding="m">
             No Kea servers registered.
-          </CsBox>
+          </Box>
         }
       />
       {/* Cloudscape Modal for the create flow. The form inside still
@@ -2413,7 +2454,7 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
           ship a react-hook-form integration and rewriting every form
           input is out of scope for this commit. */}
       {canWrite && (
-        <CsModal
+        <Modal
           visible={createOpen}
           onDismiss={() => setCreateOpen(false)}
           header="Register Kea DHCP server"
@@ -2423,16 +2464,16 @@ function DhcpServersTab({ canWrite }: { canWrite: boolean }) {
             fabrics={fabrics}
             onSaved={async () => { setCreateOpen(false); await tableQuery.refetch(); }}
           />
-        </CsModal>
+        </Modal>
       )}
     </>
   );
 }
 
 function DhcpForm({ fabrics, onSaved }: { fabrics: Fabric[]; onSaved: () => void }) {
-  const fabricOpts: CsSelectProps.Option[] = fabrics.map((f) => ({ value: f.id, label: f.name }));
+  const fabricOpts: SelectProps.Option[] = fabrics.map((f) => ({ value: f.id, label: f.name }));
   const [name, setName] = useState('');
-  const [fabricOpt, setFabricOpt] = useState<CsSelectProps.Option | null>(null);
+  const [fabricOpt, setFabricOpt] = useState<SelectProps.Option | null>(null);
   const [keaUrl, setKeaUrl] = useState('');
   const [authUsername, setAuthUsername] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -2462,43 +2503,43 @@ function DhcpForm({ fabrics, onSaved }: { fabrics: Fabric[]; onSaved: () => void
   }
   return (
     <form onSubmit={onSubmit}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={submitting}>
+          <Button variant="primary" formAction="submit" loading={submitting}>
             {submitting ? 'Saving…' : 'Register'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
-          <CsFormField label="Name" errorText={errors.name}>
-            <CsInput value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. kea-prod-east" />
-          </CsFormField>
-          <CsFormField label="Fabric" errorText={errors.fabric}>
-            <CsSelect
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={errors.name}>
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. kea-prod-east" />
+          </FormField>
+          <FormField label="Fabric" errorText={errors.fabric}>
+            <Select
               placeholder="Pick a fabric"
               selectedOption={fabricOpt}
               onChange={({ detail }) => setFabricOpt(detail.selectedOption)}
               options={fabricOpts}
               expandToViewport
             />
-          </CsFormField>
-          <CsFormField label="Kea Control Agent URL" errorText={errors.kea_url}>
-            <CsInput type="url" value={keaUrl} onChange={({ detail }) => setKeaUrl(detail.value)}
+          </FormField>
+          <FormField label="Kea Control Agent URL" errorText={errors.kea_url}>
+            <Input type="url" value={keaUrl} onChange={({ detail }) => setKeaUrl(detail.value)}
               placeholder="http://kea-ctrl-agent:8000" />
-          </CsFormField>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="Username (optional)">
-              <CsInput value={authUsername} onChange={({ detail }) => setAuthUsername(detail.value)} />
-            </CsFormField>
-            <CsFormField label="Password (optional)">
-              <CsInput type="password" value={authPassword} onChange={({ detail }) => setAuthPassword(detail.value)} />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsCheckbox checked={enabled} onChange={({ detail }) => setEnabled(detail.checked)}>
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Username (optional)">
+              <Input value={authUsername} onChange={({ detail }) => setAuthUsername(detail.value)} />
+            </FormField>
+            <FormField label="Password (optional)">
+              <Input type="password" value={authPassword} onChange={({ detail }) => setAuthPassword(detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <Checkbox checked={enabled} onChange={({ detail }) => setEnabled(detail.checked)}>
             Enabled (sync every 5 minutes)
-          </CsCheckbox>
-        </CsSpaceBetween>
-      </CsForm>
+          </Checkbox>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
@@ -2561,15 +2602,15 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
     await qc.invalidateQueries({ queryKey: ['overlays-for-fabric', fabricId] });
   }
 
-  const fabricOptions: CsSelectProps.Option[] =
+  const fabricOptions: SelectProps.Option[] =
     fabrics.map((f) => ({ value: f.id, label: f.name }));
   const fabricOpt = fabricOptions.find((o) => o.value === fabricId) ?? null;
 
   return (
-    <CsSpaceBetween size="l">
-      <CsContainer header={<CsHeader variant="h2">Fabric</CsHeader>}>
-        <CsFormField label="Fabric">
-          <CsSelect
+    <SpaceBetween size="l">
+      <Container header={<Header variant="h2">Fabric</Header>}>
+        <FormField label="Fabric">
+          <Select
             placeholder="Pick a fabric"
             selectedOption={fabricOpt}
             onChange={({ detail }) => {
@@ -2581,10 +2622,10 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
             options={fabricOptions}
             expandToViewport
           />
-        </CsFormField>
-      </CsContainer>
+        </FormField>
+      </Container>
 
-      <CsTable<Overlay>
+      <Table<Overlay>
         variant="container"
         loading={overlaysQ.isLoading}
         loadingText="Loading overlays…"
@@ -2599,7 +2640,7 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
           allItemsSelectionLabel: () => 'select all',
         }}
         header={
-          <CsHeader
+          <Header
             counter={
               selectedOverlay.length
                 ? `(${selectedOverlay.length}/${overlays.length})`
@@ -2607,19 +2648,19 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
             }
             actions={
               canWrite && fabricId && (
-                <CsButton variant="primary" iconName="add-plus" onClick={() => setCreateOverlayOpen(true)}>
+                <Button variant="primary" iconName="add-plus" onClick={() => setCreateOverlayOpen(true)}>
                   New overlay
-                </CsButton>
+                </Button>
               )
             }
             description="Select an overlay to drill into its VNIs and VTEPs."
           >
             Overlays
-          </CsHeader>
+          </Header>
         }
         columnDefinitions={[
           { id: 'name', header: 'Name', cell: (o) => <span style={{ fontWeight: 500 }}>{o.name}</span> },
-          { id: 'kind', header: 'Kind', cell: (o) => <CsBadge>{o.kind}</CsBadge>, width: 120 },
+          { id: 'kind', header: 'Kind', cell: (o) => <Badge>{o.kind}</Badge>, width: 120 },
           {
             id: 'udp', header: 'UDP port',
             cell: (o) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{o.udp_port}</span>,
@@ -2628,21 +2669,21 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
           { id: 'mtu', header: 'MTU', cell: (o) => o.mtu ?? '—', width: 100 },
         ]}
         empty={
-          <CsBox textAlign="center" color="inherit" padding="m">
+          <Box textAlign="center" color="inherit" padding="m">
             No overlays in this fabric yet.
-          </CsBox>
+          </Box>
         }
       />
 
       {overlayId && (
-        <CsColumnLayout columns={2}>
+        <ColumnLayout columns={2}>
           <VnisPanel overlayId={overlayId} canWrite={canWrite} />
           <VtepsPanel overlayId={overlayId} canWrite={canWrite} />
-        </CsColumnLayout>
+        </ColumnLayout>
       )}
 
       {canWrite && fabricId && (
-        <CsModal
+        <Modal
           visible={createOverlayOpen}
           onDismiss={() => setCreateOverlayOpen(false)}
           header="New overlay"
@@ -2652,9 +2693,9 @@ function OverlaysTab({ canWrite }: { canWrite: boolean }) {
             fabricId={fabricId}
             onSaved={async () => { setCreateOverlayOpen(false); await refreshOverlays(); }}
           />
-        </CsModal>
+        </Modal>
       )}
-    </CsSpaceBetween>
+    </SpaceBetween>
   );
 }
 
@@ -2702,11 +2743,11 @@ function OverlayForm({
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
-  const kindOptions: CsSelectProps.Option[] = [
+  const kindOptions: SelectProps.Option[] = [
     { value: 'vxlan', label: 'VXLAN' },
     { value: 'geneve', label: 'GENEVE' },
   ];
-  const vrfOptions: CsSelectProps.Option[] = [
+  const vrfOptions: SelectProps.Option[] = [
     { value: NONE, label: '(none)' },
     ...vrfs.map((v) => ({ value: v.id, label: v.name })),
   ];
@@ -2718,49 +2759,49 @@ function OverlayForm({
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+          <Button variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
-          <CsFormField label="Name" errorText={form.formState.errors.name?.message as string | undefined}>
-            <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)}
+        <SpaceBetween size="m">
+          <FormField label="Name" errorText={form.formState.errors.name?.message as string | undefined}>
+            <Input value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)}
               placeholder="e.g. evpn-fabric-east" />
-          </CsFormField>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="Kind">
-              <CsSelect
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Kind">
+              <Select
                 selectedOption={kindOptions.find((o) => o.value === kind) ?? kindOptions[0]}
                 onChange={({ detail }) => syncPort(detail.selectedOption.value as 'vxlan' | 'geneve')}
                 options={kindOptions}
                 expandToViewport
               />
-            </CsFormField>
-            <CsFormField label="UDP port">
-              <CsInput type="number" value={udpV} onChange={({ detail }) => form.setValue('udp_port', detail.value)} />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="MTU (optional)">
-              <CsInput type="number" value={mtuV} onChange={({ detail }) => form.setValue('mtu', detail.value)} placeholder="9000" />
-            </CsFormField>
-            <CsFormField label="Underlay VRF (optional)">
-              <CsSelect
+            </FormField>
+            <FormField label="UDP port">
+              <Input type="number" value={udpV} onChange={({ detail }) => form.setValue('udp_port', detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <ColumnLayout columns={2}>
+            <FormField label="MTU (optional)">
+              <Input type="number" value={mtuV} onChange={({ detail }) => form.setValue('mtu', detail.value)} placeholder="9000" />
+            </FormField>
+            <FormField label="Underlay VRF (optional)">
+              <Select
                 selectedOption={vrfOptions.find((o) => o.value === vrfV) ?? vrfOptions[0]}
                 onChange={({ detail }) => form.setValue('underlay_vrf_id', detail.selectedOption.value!)}
                 options={vrfOptions}
                 expandToViewport
               />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsFormField label="Description">
-            <CsInput value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
-          </CsFormField>
-        </CsSpaceBetween>
-      </CsForm>
+            </FormField>
+          </ColumnLayout>
+          <FormField label="Description">
+            <Input value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
@@ -2787,23 +2828,23 @@ function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boole
 
   return (
     <>
-      <CsTable<Vni>
+      <Table<Vni>
         variant="container"
         loading={vnisQ.isLoading}
         loadingText="Loading VNIs…"
         items={vnis}
         trackBy="id"
         header={
-          <CsHeader
+          <Header
             counter={`(${vnis.length})`}
             actions={canWrite && (
-              <CsButton iconName="add-plus" onClick={() => setCreateOpen(true)}>
+              <Button iconName="add-plus" onClick={() => setCreateOpen(true)}>
                 Add VNI
-              </CsButton>
+              </Button>
             )}
           >
             VNIs
-          </CsHeader>
+          </Header>
         }
         columnDefinitions={[
           {
@@ -2811,30 +2852,30 @@ function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boole
             cell: (v) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.vni}</span>,
             width: 100,
           },
-          { id: 'kind', header: 'Kind', cell: (v) => <CsBadge>{v.kind}</CsBadge>, width: 80 },
+          { id: 'kind', header: 'Kind', cell: (v) => <Badge>{v.kind}</Badge>, width: 80 },
           { id: 'name', header: 'Name', cell: (v) => v.name ?? '—' },
           {
             id: 'vlan_rt', header: 'VLAN / RT',
             cell: (v) => (
-              <CsBox variant="span" color="text-status-inactive" fontSize="body-s">
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
                 {v.vlan_id ? `vlan ${v.vlan_id}` : ''}
                 {v.evpn_route_target ? ` · rt ${v.evpn_route_target}` : ''}
                 {v.vrf_id ? ` · vrf bound` : ''}
-              </CsBox>
+              </Box>
             ),
           },
           ...(canWrite ? [{
             id: 'actions', header: '',
             cell: (v: Vni) => (
-              <CsButton iconName="remove" variant="inline-icon" onClick={() => remove(v)} ariaLabel={`Delete VNI ${v.vni}`} />
+              <Button iconName="remove" variant="inline-icon" onClick={() => remove(v)} ariaLabel={`Delete VNI ${v.vni}`} />
             ),
             width: 60,
           }] : []),
         ]}
-        empty={<CsBox textAlign="center" color="inherit" padding="m">No VNIs yet.</CsBox>}
+        empty={<Box textAlign="center" color="inherit" padding="m">No VNIs yet.</Box>}
       />
       {canWrite && (
-        <CsModal
+        <Modal
           visible={createOpen}
           onDismiss={() => setCreateOpen(false)}
           header="New VNI"
@@ -2847,7 +2888,7 @@ function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boole
               await qc.invalidateQueries({ queryKey: ['vnis-for-overlay', overlayId] });
             }}
           />
-        </CsModal>
+        </Modal>
       )}
     </>
   );
@@ -2884,11 +2925,11 @@ function VniForm({ overlayId, onSaved }: { overlayId: string; onSaved: () => voi
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
-  const kindOptions: CsSelectProps.Option[] = [
+  const kindOptions: SelectProps.Option[] = [
     { value: 'l2', label: 'L2 (broadcast domain)' },
     { value: 'l3', label: 'L3 (tenant VRF)' },
   ];
-  const vrfOptions: CsSelectProps.Option[] = [
+  const vrfOptions: SelectProps.Option[] = [
     { value: NONE, label: '(unset)' },
     ...vrfs.map((v) => ({ value: v.id, label: v.name })),
   ];
@@ -2900,53 +2941,53 @@ function VniForm({ overlayId, onSaved }: { overlayId: string; onSaved: () => voi
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+          <Button variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
-          <CsColumnLayout columns={2}>
-            <CsFormField label="VNI (1..16777214)">
-              <CsInput type="number" value={vniV} onChange={({ detail }) => form.setValue('vni', detail.value)} />
-            </CsFormField>
-            <CsFormField label="Kind">
-              <CsSelect
+        <SpaceBetween size="m">
+          <ColumnLayout columns={2}>
+            <FormField label="VNI (1..16777214)">
+              <Input type="number" value={vniV} onChange={({ detail }) => form.setValue('vni', detail.value)} />
+            </FormField>
+            <FormField label="Kind">
+              <Select
                 selectedOption={kindOptions.find((o) => o.value === kind) ?? kindOptions[0]}
                 onChange={({ detail }) => form.setValue('kind', detail.selectedOption.value as 'l2' | 'l3')}
                 options={kindOptions}
                 expandToViewport
               />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsFormField label="Name (optional)">
-            <CsInput value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
-          </CsFormField>
+            </FormField>
+          </ColumnLayout>
+          <FormField label="Name (optional)">
+            <Input value={nameV} onChange={({ detail }) => form.setValue('name', detail.value)} />
+          </FormField>
           {kind === 'l2' && (
-            <CsColumnLayout columns={2}>
-              <CsFormField label="Mapped VLAN (optional)">
-                <CsInput type="number" value={vlanV} onChange={({ detail }) => form.setValue('vlan_id', detail.value)} />
-              </CsFormField>
-              <CsFormField label="EVPN RT (optional)">
-                <CsInput value={rtV} onChange={({ detail }) => form.setValue('evpn_route_target', detail.value)}
+            <ColumnLayout columns={2}>
+              <FormField label="Mapped VLAN (optional)">
+                <Input type="number" value={vlanV} onChange={({ detail }) => form.setValue('vlan_id', detail.value)} />
+              </FormField>
+              <FormField label="EVPN RT (optional)">
+                <Input value={rtV} onChange={({ detail }) => form.setValue('evpn_route_target', detail.value)}
                   placeholder="65000:10010" />
-              </CsFormField>
-            </CsColumnLayout>
+              </FormField>
+            </ColumnLayout>
           )}
           {kind === 'l3' && (
-            <CsFormField label="Tenant VRF" description="L3 VNIs map a tenant VRF — required.">
-              <CsSelect
+            <FormField label="Tenant VRF" description="L3 VNIs map a tenant VRF — required.">
+              <Select
                 selectedOption={vrfOptions.find((o) => o.value === vrfV) ?? vrfOptions[0]}
                 onChange={({ detail }) => form.setValue('vrf_id', detail.selectedOption.value!)}
                 options={vrfOptions}
                 expandToViewport
               />
-            </CsFormField>
+            </FormField>
           )}
-        </CsSpaceBetween>
-      </CsForm>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
@@ -2976,30 +3017,30 @@ function VtepsPanel({ overlayId, canWrite }: { overlayId: string; canWrite: bool
 
   return (
     <>
-      <CsTable<Vtep>
+      <Table<Vtep>
         variant="container"
         loading={vtepsQ.isLoading}
         loadingText="Loading VTEPs…"
         items={vteps}
         trackBy="id"
         header={
-          <CsHeader
+          <Header
             counter={`(${vteps.length})`}
             actions={canWrite && (
-              <CsButton iconName="add-plus" onClick={() => setCreateOpen(true)}>
+              <Button iconName="add-plus" onClick={() => setCreateOpen(true)}>
                 Add VTEP
-              </CsButton>
+              </Button>
             )}
           >
             VTEPs
-          </CsHeader>
+          </Header>
         }
         columnDefinitions={[
           {
             id: 'asset', header: 'Asset',
             cell: (v) => assetsById.get(v.asset_id)?.name ?? v.asset_id.slice(0, 8) + '…',
           },
-          { id: 'role', header: 'Role', cell: (v) => <CsBadge>{v.role}</CsBadge>, width: 100 },
+          { id: 'role', header: 'Role', cell: (v) => <Badge>{v.role}</Badge>, width: 100 },
           {
             id: 'loopback', header: 'Loopback',
             cell: (v) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.loopback_ip ?? '—'}</span>,
@@ -3007,15 +3048,15 @@ function VtepsPanel({ overlayId, canWrite }: { overlayId: string; canWrite: bool
           ...(canWrite ? [{
             id: 'actions', header: '',
             cell: (v: Vtep) => (
-              <CsButton iconName="remove" variant="inline-icon" onClick={() => remove(v)} ariaLabel="Delete VTEP" />
+              <Button iconName="remove" variant="inline-icon" onClick={() => remove(v)} ariaLabel="Delete VTEP" />
             ),
             width: 60,
           }] : []),
         ]}
-        empty={<CsBox textAlign="center" color="inherit" padding="m">No VTEPs yet.</CsBox>}
+        empty={<Box textAlign="center" color="inherit" padding="m">No VTEPs yet.</Box>}
       />
       {canWrite && (
-        <CsModal
+        <Modal
           visible={createOpen}
           onDismiss={() => setCreateOpen(false)}
           header="New VTEP"
@@ -3029,7 +3070,7 @@ function VtepsPanel({ overlayId, canWrite }: { overlayId: string; canWrite: bool
               await qc.invalidateQueries({ queryKey: ['vteps-for-overlay', overlayId] });
             }}
           />
-        </CsModal>
+        </Modal>
       )}
     </>
   );
@@ -3055,9 +3096,9 @@ function VtepForm({
       onSaved();
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
-  const assetOptions: CsSelectProps.Option[] =
+  const assetOptions: SelectProps.Option[] =
     assets.map((a) => ({ value: a.id, label: a.name }));
-  const roleOptions: CsSelectProps.Option[] = (['leaf', 'spine', 'border', 'other'] as const).map((r) => ({ value: r, label: r }));
+  const roleOptions: SelectProps.Option[] = (['leaf', 'spine', 'border', 'other'] as const).map((r) => ({ value: r, label: r }));
   const assetV = form.watch('asset_id') ?? '';
   const roleV = form.watch('role') ?? 'leaf';
   const loopV = form.watch('loopback_ip') ?? '';
@@ -3065,41 +3106,41 @@ function VtepForm({
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)}>
-      <CsForm
+      <Form
         actions={
-          <CsButton variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
+          <Button variant="primary" formAction="submit" loading={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? 'Saving…' : 'Create'}
-          </CsButton>
+          </Button>
         }
       >
-        <CsSpaceBetween size="m">
-          <CsFormField label="Asset" errorText={form.formState.errors.asset_id?.message as string | undefined}>
-            <CsSelect
+        <SpaceBetween size="m">
+          <FormField label="Asset" errorText={form.formState.errors.asset_id?.message as string | undefined}>
+            <Select
               placeholder="Pick an asset"
               selectedOption={assetOptions.find((o) => o.value === assetV) ?? null}
               onChange={({ detail }) => form.setValue('asset_id', detail.selectedOption.value!)}
               options={assetOptions}
               expandToViewport
             />
-          </CsFormField>
-          <CsColumnLayout columns={2}>
-            <CsFormField label="Role">
-              <CsSelect
+          </FormField>
+          <ColumnLayout columns={2}>
+            <FormField label="Role">
+              <Select
                 selectedOption={roleOptions.find((o) => o.value === roleV) ?? roleOptions[0]}
                 onChange={({ detail }) => form.setValue('role', detail.selectedOption.value as 'leaf' | 'spine' | 'border' | 'other')}
                 options={roleOptions}
                 expandToViewport
               />
-            </CsFormField>
-            <CsFormField label="Loopback IP (optional)">
-              <CsInput value={loopV} onChange={({ detail }) => form.setValue('loopback_ip', detail.value)} />
-            </CsFormField>
-          </CsColumnLayout>
-          <CsFormField label="Description">
-            <CsInput value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
-          </CsFormField>
-        </CsSpaceBetween>
-      </CsForm>
+            </FormField>
+            <FormField label="Loopback IP (optional)">
+              <Input value={loopV} onChange={({ detail }) => form.setValue('loopback_ip', detail.value)} />
+            </FormField>
+          </ColumnLayout>
+          <FormField label="Description">
+            <Input value={descV} onChange={({ detail }) => form.setValue('description', detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Form>
     </form>
   );
 }
