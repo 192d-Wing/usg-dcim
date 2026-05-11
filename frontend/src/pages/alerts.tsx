@@ -1,38 +1,56 @@
-import { useTable, useGetIdentity } from '@refinedev/core';
+// Alerts list — Cloudscape Table with state filter (firing /
+// acknowledged / resolved / suppressed) and per-row Ack action when
+// the operator has alerts:ack capability.
+
 import { useState } from 'react';
-import { Link } from 'react-router';
-import { Check, Settings } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
+import { useTable, useGetIdentity } from '@refinedev/core';
+import { useNavigate } from 'react-router';
+import { toast } from 'sonner';
+
+import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Header from '@cloudscape-design/components/header';
+import Pagination from '@cloudscape-design/components/pagination';
+import Select, { SelectProps } from '@cloudscape-design/components/select';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import StatusIndicator, {
+  StatusIndicatorProps,
+} from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
+
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
-import { toast } from 'sonner';
 
 type Alert = {
   id: string; site_id: string; severity: string; state: string;
   summary: string; first_seen_at: string;
 };
 
-function sevVariant(s: string): 'critical' | 'warning' | 'success' {
-  if (s === 'critical' || s === 'major') return 'critical';
+const STATE_OPTIONS: SelectProps.Option[] = [
+  { value: 'firing', label: 'Firing' },
+  { value: 'acknowledged', label: 'Acknowledged' },
+  { value: 'resolved', label: 'Resolved' },
+  { value: 'suppressed', label: 'Suppressed' },
+];
+
+/** Map alert severity to Cloudscape's status palette. critical/major →
+ *  error (red), minor/warning → warning (orange), info → info (blue),
+ *  anything else (cleared, unknown) → success. */
+function sevType(s: string): StatusIndicatorProps.Type {
+  if (s === 'critical' || s === 'major') return 'error';
   if (s === 'minor' || s === 'warning') return 'warning';
+  if (s === 'info') return 'info';
   return 'success';
 }
 
 export function AlertsPage() {
-  const [state, setState] = useState('firing');
+  const navigate = useNavigate();
+  const [stateOpt, setStateOpt] = useState<SelectProps.Option>(STATE_OPTIONS[0]);
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<Alert>({
     resource: 'alerts',
     pagination: { pageSize: 50 },
-    filters: { permanent: [{ field: 'state', operator: 'eq', value: state }] },
+    filters: { permanent: [{ field: 'state', operator: 'eq', value: stateOpt.value! }] },
   });
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
   const canAck = identity?.capabilities.includes('alerts:ack');
@@ -50,75 +68,94 @@ export function AlertsPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Alerts</h1>
-          <p className="text-sm text-muted-foreground">{total} matching</p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild variant="outline">
-            <Link to="/alerts/rules"><Settings className="h-4 w-4" /> Manage rules</Link>
-          </Button>
-          <Select value={state} onValueChange={(v) => { setState(v); setCurrentPage(1); }}>
-            <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="firing">Firing</SelectItem>
-              <SelectItem value="acknowledged">Acknowledged</SelectItem>
-              <SelectItem value="resolved">Resolved</SelectItem>
-              <SelectItem value="suppressed">Suppressed</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="p-4 space-y-2">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}</div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-24">Severity</TableHead>
-                  <TableHead>Site</TableHead>
-                  <TableHead>Summary</TableHead>
-                  <TableHead className="w-44">First seen</TableHead>
-                  <TableHead className="w-24"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.length === 0 && (
-                  <TableRow><TableCell colSpan={5} className="text-muted-foreground">All clear.</TableCell></TableRow>
-                )}
-                {data.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell><Badge variant={sevVariant(a.severity)}>{a.severity}</Badge></TableCell>
-                    <TableCell className="font-mono text-xs">{a.site_id.slice(0, 8)}…</TableCell>
-                    <TableCell>{a.summary}</TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(a.first_seen_at)}</TableCell>
-                    <TableCell>
-                      {state === 'firing' && canAck && (
-                        <Button size="sm" variant="outline" onClick={() => ack(a.id)}>
-                          <Check className="h-4 w-4" /> Ack
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      {pageCount > 1 && (
-        <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage <= 1}>Prev</Button>
-          <span>page {currentPage} of {pageCount}</span>
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage >= pageCount}>Next</Button>
-        </div>
-      )}
-    </div>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          counter={`(${total})`}
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => navigate('/alerts/rules')} iconName="settings">
+                Manage rules
+              </Button>
+              <Select
+                selectedOption={stateOpt}
+                onChange={({ detail }) => { setStateOpt(detail.selectedOption); setCurrentPage(1); }}
+                options={STATE_OPTIONS}
+                expandToViewport
+              />
+            </SpaceBetween>
+          }
+          description="Open and historical alerts. Rules + suppression managed under Manage rules."
+        >
+          Alerts
+        </Header>
+      }
+    >
+      <Table<Alert>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading alerts…"
+        items={data}
+        trackBy="id"
+        columnDefinitions={[
+          {
+            id: 'severity',
+            header: 'Severity',
+            cell: (a) => <StatusIndicator type={sevType(a.severity)}>{a.severity}</StatusIndicator>,
+            width: 120,
+          },
+          {
+            id: 'site',
+            header: 'Site',
+            cell: (a) => (
+              <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+                {a.site_id.slice(0, 8)}…
+              </span>
+            ),
+            width: 140,
+          },
+          {
+            id: 'summary',
+            header: 'Summary',
+            cell: (a) => a.summary,
+          },
+          {
+            id: 'first_seen',
+            header: 'First seen',
+            cell: (a) => (
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                {formatDate(a.first_seen_at)}
+              </Box>
+            ),
+            width: 200,
+          },
+          {
+            id: 'actions',
+            header: '',
+            cell: (a) => stateOpt.value === 'firing' && canAck ? (
+              <Button onClick={() => ack(a.id)} iconName="status-positive">
+                Ack
+              </Button>
+            ) : null,
+            width: 100,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            All clear.
+          </Box>
+        }
+        pagination={
+          pageCount > 1 ? (
+            <Pagination
+              currentPageIndex={currentPage}
+              pagesCount={pageCount}
+              onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+            />
+          ) : undefined
+        }
+      />
+    </ContentLayout>
   );
 }
