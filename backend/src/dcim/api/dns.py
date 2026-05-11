@@ -289,7 +289,17 @@ async def create_record(
     await audit.record(
         db, principal, action="dns_record.create",
         target_type="dns_record", target_id=str(obj.id),
-        metadata={"zone_id": str(payload.zone_id), "name": payload.name, "type": payload.type.value},
+        metadata={
+            "zone_id": str(payload.zone_id),
+            "name": payload.name,
+            "type": payload.type.value,
+            # Snapshot the rdata + TTL at creation so the audit row
+            # alone tells you what was written, without having to
+            # cross-reference the live record (which may have been
+            # edited since or already deleted).
+            "ttl": payload.ttl,
+            "data": normalized_data,
+        },
     )
     await db.commit()
     await db.refresh(obj)
@@ -345,10 +355,20 @@ async def delete_record(
             "ipam-projected records can't be deleted directly; "
             "clear the dns_name on the IPAddress and re-sync",
         )
+    # Snapshot the rdata + identity before the row goes away — the
+    # audit entry needs to stand on its own once the record is gone.
+    snapshot = {
+        "zone_id": str(obj.zone_id),
+        "name": obj.name,
+        "type": obj.type.value,
+        "ttl": obj.ttl,
+        "data": obj.data,
+    }
     await db.execute(delete(DnsRecord).where(DnsRecord.id == record_id))
     await audit.record(
         db, principal, action="dns_record.delete",
         target_type="dns_record", target_id=str(record_id),
+        metadata=snapshot,
     )
     await db.commit()
 
