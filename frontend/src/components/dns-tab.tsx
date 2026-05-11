@@ -41,7 +41,7 @@ type Site = { id: string; code: string; name: string };
 type DnsZone = {
   id: string;
   name: string;
-  kind: 'apex' | 'site';
+  kind: 'apex' | 'site' | 'reverse';
   fabric_id: string;
   site_id: string | null;
   description: string | null;
@@ -208,6 +208,12 @@ function RecordTypeChip({ type }: { type: RecordType }) {
   return <Badge color={RECORD_TYPE_COLOR[type]}>{type}</Badge>;
 }
 
+function ZoneKindBadge({ kind }: { kind: DnsZone['kind'] }) {
+  if (kind === 'apex') return <Badge color="blue">Apex</Badge>;
+  if (kind === 'reverse') return <Badge color="severity-low">Reverse</Badge>;
+  return <Badge>Site</Badge>;
+}
+
 // Build the displayed FQDN for a record like Route 53 does: the
 // left-hand `name` joined to the zone FQDN. `@` collapses to bare zone.
 function fqdn(name: string, zoneName: string): string {
@@ -331,10 +337,8 @@ function ZonesListView({
           },
           {
             id: 'kind', header: 'Type',
-            cell: (z) => z.kind === 'apex'
-              ? <Badge color="blue">Apex</Badge>
-              : <Badge>Site</Badge>,
-            width: 100,
+            cell: (z) => <ZoneKindBadge kind={z.kind} />,
+            width: 110,
           },
           {
             id: 'site', header: 'Site',
@@ -545,9 +549,7 @@ function ZoneDetailView({
           items={[
             {
               label: 'Type',
-              value: zone.kind === 'apex'
-                ? <Badge color="blue">Apex</Badge>
-                : <Badge>Site</Badge>,
+              value: <ZoneKindBadge kind={zone.kind} />,
             },
             { label: 'Default TTL', value: <span style={MONO}>{zone.default_ttl}</span> },
             { label: 'Records', value: records.length },

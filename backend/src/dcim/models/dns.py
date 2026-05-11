@@ -55,6 +55,12 @@ class DnsServerRole(str, enum.Enum):
 class DnsZoneKind(str, enum.Enum):
     apex = "apex"
     site = "site"
+    # IPv4 /24 (in-addr.arpa) or IPv6 /64 (ip6.arpa) reverse zones, one
+    # per (site, classful-or-aligned prefix) combination. Auto-created
+    # and populated by the IPAM projector — operators rarely touch
+    # them, but they show up in the hosted-zones list so PTR rdata is
+    # discoverable.
+    reverse = "reverse"
 
 
 class DnsRecordType(str, enum.Enum):

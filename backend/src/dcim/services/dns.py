@@ -447,46 +447,178 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
 # ---------- IPAM → DNS projection ----------
 
 def _ptr_owner(addr: str) -> str:
-    """Compute the .in-addr.arpa / .ip6.arpa name for a given INET
-    address (with no prefix length). Used by sync-from-ipam to write
-    PTR records into the matching reverse zone."""
+    """Compute the full .in-addr.arpa / .ip6.arpa name for a given
+    INET address (no prefix length). This is the PTR's owner name."""
     a = parse_address(addr)
     if isinstance(a, ipaddress.IPv4Address):
         return ".".join(reversed(str(a).split("."))) + ".in-addr.arpa"
-    # IPv6: each nibble reversed, dot-joined.
     nibbles = a.exploded.replace(":", "")
     return ".".join(reversed(nibbles)) + ".ip6.arpa"
+
+
+def reverse_zone_name(addr: str) -> str:
+    """The reverse-zone *origin* (not the PTR's owner) that the given
+    address belongs to. /24 for IPv4, /64 for IPv6 — the classful or
+    nibble-aligned cuts that don't need RFC 2317 CNAME indirection.
+    Any subnet finer than that just shares the upstream /24 or /64."""
+    a = parse_address(addr)
+    if isinstance(a, ipaddress.IPv4Address):
+        octets = str(a).split(".")
+        return ".".join(reversed(octets[:3])) + ".in-addr.arpa"
+    nibbles = a.exploded.replace(":", "")
+    # /64 = first 16 nibbles, reversed.
+    return ".".join(reversed(nibbles[:16])) + ".ip6.arpa"
+
+
+def _ptr_label_in(owner: str, zone_origin: str) -> str:
+    """Strip the zone origin off a PTR owner to get the relative label
+    we store in DnsRecord.name. Caller guarantees `owner` ends with
+    `.` + `zone_origin`."""
+    suffix = "." + zone_origin
+    if owner.endswith(suffix):
+        return owner[: -len(suffix)]
+    return owner
+
+
+async def _get_or_create_reverse_zone(
+    db: AsyncSession, *, name: str, fabric_id: UUID, site_id: UUID,
+) -> DnsZone:
+    """Find the reverse DnsZone for `name` in this (fabric, site), or
+    create it. Reverse zones get the same SOA defaults as freshly-
+    created site zones."""
+    existing = (
+        await db.execute(
+            select(DnsZone).where(
+                DnsZone.kind == DnsZoneKind.reverse,
+                DnsZone.fabric_id == fabric_id,
+                DnsZone.site_id == site_id,
+                DnsZone.name == name,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+    z = DnsZone(
+        name=name,
+        kind=DnsZoneKind.reverse,
+        fabric_id=fabric_id,
+        site_id=site_id,
+    )
+    db.add(z)
+    await db.flush()
+    return z
+
+
+async def _drop_ipam_records_for_site(
+    db: AsyncSession, forward_zone: DnsZone, reverse_zones: list[DnsZone],
+) -> int:
+    """Delete every `source=ipam` record in the forward zone + each
+    reverse zone, in two queries. Returns the total row count removed."""
+    zone_ids = [forward_zone.id, *(z.id for z in reverse_zones)]
+    existing = (
+        await db.execute(
+            select(DnsRecord).where(
+                DnsRecord.zone_id.in_(zone_ids),
+                DnsRecord.source == DnsRecordSource.ipam,
+            )
+        )
+    ).scalars().all()
+    for r in existing:
+        await db.delete(r)
+    await db.flush()
+    return len(existing)
+
+
+def _forward_label_for(dns_name: str, zone_name: str) -> str:
+    """The bare label we store in DnsRecord.name for the forward A/AAAA
+    row — strips the zone suffix if the operator wrote an FQDN, or
+    collapses to `@` if the name *is* the zone origin."""
+    suffix = "." + zone_name
+    if dns_name.endswith(suffix):
+        return dns_name[: -len(suffix)]
+    if dns_name == zone_name:
+        return "@"
+    return dns_name
+
+
+def _ptr_target_for(ip: IPAddress, forward_zone: DnsZone) -> str:
+    """Prefer the operator's dns_name if it's already absolute,
+    otherwise reassemble label + forward-zone origin into an FQDN."""
+    return (
+        ip.dns_name
+        if ip.dns_name.endswith(".")
+        else f"{ip.dns_name}.{forward_zone.name}."
+    )
+
+
+async def _emit_forward_and_reverse(
+    db: AsyncSession,
+    *,
+    ip: IPAddress,
+    forward_zone: DnsZone,
+    rev_by_name: dict[str, DnsZone],
+) -> UUID | None:
+    """Emit the A/AAAA + matching PTR for one IPAM row. Returns the
+    reverse zone id if a PTR was added (caller tracks touched zones for
+    the SOA-serial bump), or None on invalid input."""
+    addr_str = str(ip.address).split("/", 1)[0]
+    try:
+        a = parse_address(addr_str)
+    except ValueError:
+        return None
+    rtype = DnsRecordType.AAAA if isinstance(a, ipaddress.IPv6Address) else DnsRecordType.A
+    db.add(DnsRecord(
+        zone_id=forward_zone.id,
+        name=_forward_label_for(ip.dns_name, forward_zone.name),
+        type=rtype,
+        data={"target": addr_str},
+        source=DnsRecordSource.ipam,
+        ipam_address_id=ip.id,
+    ))
+    rev_origin = reverse_zone_name(addr_str)
+    rev_zone = rev_by_name.get(rev_origin)
+    if rev_zone is None:
+        rev_zone = await _get_or_create_reverse_zone(
+            db, name=rev_origin,
+            fabric_id=forward_zone.fabric_id, site_id=forward_zone.site_id,
+        )
+        rev_by_name[rev_origin] = rev_zone
+    ptr_label = _ptr_label_in(_ptr_owner(addr_str), rev_origin)
+    db.add(DnsRecord(
+        zone_id=rev_zone.id, name=ptr_label, type=DnsRecordType.PTR,
+        data={"target": _ptr_target_for(ip, forward_zone)},
+        source=DnsRecordSource.ipam,
+        ipam_address_id=ip.id,
+    ))
+    return rev_zone.id
 
 
 async def sync_ipam_records_for_zone(
     db: AsyncSession, zone: DnsZone,
 ) -> tuple[int, int]:
-    """Rebuild `source=ipam` records for a zone. Returns
-    (added, removed). Replaces, never merges — IPAM is the source of
-    truth for these rows.
+    """Rebuild `source=ipam` records for a site zone + every reverse
+    zone derived from the same IPs. Returns (added, removed) totals
+    across all touched zones — replaces, never merges (IPAM is the
+    source of truth for these rows).
 
-    Only site zones get IPAM-projected records in v1. Apex zones are
-    operator-curated (NS-delegations etc.).
+    Reverse zones are auto-created here on demand at the /24 (v4) or
+    /64 (v6) boundary, scoped to the same (fabric, site) as the
+    triggering site zone. Apex zones are skipped (operator-curated).
     """
     if zone.kind != DnsZoneKind.site or zone.site_id is None:
         return (0, 0)
 
-    # Drop existing ipam-projected rows in this zone.
-    existing = (
+    reverse_zones = list((
         await db.execute(
-            select(DnsRecord).where(
-                DnsRecord.zone_id == zone.id,
-                DnsRecord.source == DnsRecordSource.ipam,
+            select(DnsZone).where(
+                DnsZone.kind == DnsZoneKind.reverse,
+                DnsZone.fabric_id == zone.fabric_id,
+                DnsZone.site_id == zone.site_id,
             )
         )
-    ).scalars().all()
-    removed = len(existing)
-    for r in existing:
-        await db.delete(r)
-    await db.flush()
+    ).scalars().all())
+    removed = await _drop_ipam_records_for_site(db, zone, reverse_zones)
 
-    # Walk every IPAddress in every Subnet at the zone's site that has
-    # a dns_name set, and emit A/AAAA records.
     subnet_rows = (
         await db.execute(select(Subnet).where(Subnet.site_id == zone.site_id))
     ).scalars().all()
@@ -502,35 +634,26 @@ async def sync_ipam_records_for_zone(
         )
     ).scalars().all()
 
+    rev_by_name: dict[str, DnsZone] = {z.name: z for z in reverse_zones}
+    touched_zone_ids: set[UUID] = set()
     added = 0
     for ip in ip_rows:
-        addr_str = str(ip.address).split("/", 1)[0]
-        try:
-            a = parse_address(addr_str)
-        except ValueError:
+        rev_zone_id = await _emit_forward_and_reverse(
+            db, ip=ip, forward_zone=zone, rev_by_name=rev_by_name,
+        )
+        if rev_zone_id is None:
             continue
-        rtype = DnsRecordType.AAAA if isinstance(a, ipaddress.IPv6Address) else DnsRecordType.A
-        # Strip the zone suffix from the dns_name if the operator wrote
-        # an FQDN; CoreDNS expects the bare label relative to $ORIGIN.
-        label = ip.dns_name
-        zone_suffix = "." + zone.name
-        if label.endswith(zone_suffix):
-            label = label[: -len(zone_suffix)]
-        elif label == zone.name:
-            label = "@"
-        db.add(DnsRecord(
-            zone_id=zone.id, name=label, type=rtype,
-            data={"target": addr_str},
-            source=DnsRecordSource.ipam,
-            ipam_address_id=ip.id,
-        ))
-        added += 1
+        added += 2  # one A/AAAA + one PTR
+        touched_zone_ids.add(rev_zone_id)
+
+    # SOA serial moves with each zone's updated_at — touch every zone
+    # we actually changed so its bundle etag flips and resolvers
+    # downstream see the new view.
     if added > 0 or removed > 0:
-        # SOA serial moves with zone.updated_at — touch it whenever
-        # this sync changed anything so the bundle etag flips and
-        # downstream resolvers see the new view.
+        touched_zone_ids.add(zone.id)
+    for zid in touched_zone_ids:
         await db.execute(
-            update(DnsZone).where(DnsZone.id == zone.id).values(updated_at=func.now()),
+            update(DnsZone).where(DnsZone.id == zid).values(updated_at=func.now()),
         )
     await db.flush()
     return (added, removed)

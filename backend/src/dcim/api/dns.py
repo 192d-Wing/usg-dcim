@@ -107,7 +107,7 @@ async def list_zones(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
     site_id: UUID | None = Query(None),
-    kind: str | None = Query(None, regex="^(apex|site)$"),
+    kind: str | None = Query(None, regex="^(apex|site|reverse)$"),
     _: Principal = Depends(require_capability(INVENTORY_READ)),
     db: AsyncSession = Depends(get_db),
 ):
