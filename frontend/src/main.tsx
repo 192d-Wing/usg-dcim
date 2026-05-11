@@ -7,10 +7,15 @@ import { App } from './App';
 // migration). applyDensity sets compact mode globally — DCIM tables are
 // dense and the comfortable defaults waste vertical space.
 import '@cloudscape-design/global-styles/index.css';
-import { applyDensity, Density } from '@cloudscape-design/global-styles';
+import { applyDensity, applyMode, Density, Mode } from '@cloudscape-design/global-styles';
 import './globals.css';
 
 applyDensity(Density.Compact);
+// Match Cloudscape's mode to Tailwind's. Our index.html ships with
+// `class="dark"` on <html>, so the page background is dark; without
+// this call, Cloudscape components render in light mode and look like
+// white cards floating on a dark page.
+applyMode(document.documentElement.classList.contains('dark') ? Mode.Dark : Mode.Light);
 
 // Surface render-time errors as readable text instead of a blank screen so
 // container deploys are diagnosable without DevTools. The boundary catches
