@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from .db import async_session
 from .logging_setup import configure_logging
-from .models.dns import DnsZone, DnsZoneKind
+from .models.dns import DnsHealthCheck, DnsZone, DnsZoneKind
 from .models.telemetry_meta import FreshnessState, TelemetrySource
 from .services import alerts as alerts_svc
 from .services import dns as dns_svc
@@ -87,6 +87,29 @@ async def dns_sync_from_ipam(_ctx) -> dict:
     return {"added": total_added, "removed": total_removed, "zones": len(zones)}
 
 
+async def dns_health_checks(_ctx) -> dict:
+    """Probe every enabled DnsHealthCheck and update its status. The
+    bundle renderer reads this status to exclude records bound to
+    unhealthy checks from the rendered zone."""
+    async with async_session() as db:
+        checks = (
+            await db.execute(
+                select(DnsHealthCheck).where(DnsHealthCheck.enabled.is_(True))
+            )
+        ).scalars().all()
+        changed = 0
+        for check in checks:
+            new_status, err = await dns_svc.probe_health_check(check)
+            if check.status != new_status:
+                check.status = new_status
+                changed += 1
+            check.last_checked_at = datetime.now(UTC)
+            check.last_error = err
+        await db.commit()
+    log.info("dns_health_checks", probed=len(checks), changed=changed)
+    return {"probed": len(checks), "changed": changed}
+
+
 async def startup(ctx) -> None:
     configure_logging()
     log.info("worker_startup")
@@ -102,7 +125,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     functions: ClassVar[list] = [
         evaluate_alerts, sweep_collectors, freshness_sweep,
-        dhcp_sync, dhcp_age_out, dns_sync_from_ipam,
+        dhcp_sync, dhcp_age_out, dns_sync_from_ipam, dns_health_checks,
     ]
     cron_jobs: ClassVar[list] = [
         cron(evaluate_alerts, second={0, 30}),
@@ -115,4 +138,8 @@ class WorkerSettings:
         # DNS IPAM-projection: 5 minutes offset from DHCP so a freshly-
         # ingested lease has time to land before its DNS record renders.
         cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))),
+        # Health-check probes run every 30s — finer than the configured
+        # interval_seconds field on individual checks (the function
+        # internally skips checks whose interval hasn't elapsed).
+        cron(dns_health_checks, second={0, 30}),
     ]

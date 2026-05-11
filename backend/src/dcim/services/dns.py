@@ -35,6 +35,8 @@ from ..models.dns import (
     DnsBlocklistAction,
     DnsBlocklistEntry,
     DnsForwarder,
+    DnsHealthCheck,
+    DnsHealthCheckStatus,
     DnsRecord,
     DnsRecordSource,
     DnsRecordType,
@@ -99,11 +101,76 @@ def _format_rdata(rtype: str, data: dict) -> str:
     raise ValueError(f"unknown record type {rtype}")
 
 
-def render_zone_file(zone: DnsZone, records: Iterable[DnsRecord]) -> str:
+async def _probe_tcp(target: str, port: int, timeout: int) -> tuple[DnsHealthCheckStatus, str | None]:
+    import asyncio
+    if port <= 0:
+        return DnsHealthCheckStatus.unhealthy, "tcp probe requires a port"
+    try:
+        fut = asyncio.open_connection(target, port)
+        _, writer = await asyncio.wait_for(fut, timeout=timeout)
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:  # noqa: BLE001
+            pass
+        return DnsHealthCheckStatus.healthy, None
+    except Exception as e:  # noqa: BLE001
+        return DnsHealthCheckStatus.unhealthy, f"tcp probe failed: {e}"[:512]
+
+
+async def _probe_http(
+    proto: str, target: str, port: int, path: str, timeout: int,
+) -> tuple[DnsHealthCheckStatus, str | None]:
+    import httpx
+    url = f"{proto}://{target}:{port}{path or '/'}"
+    try:
+        # Probe targets often use self-signed certs internally;
+        # operators trust the destination if they configured it.
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            verify=False,  # noqa: S501  # NOSONAR: probes are operator-trusted internal targets
+            follow_redirects=False,
+        ) as client:
+            r = await client.get(url)
+    except Exception as e:  # noqa: BLE001
+        return DnsHealthCheckStatus.unhealthy, f"http probe failed: {e}"[:512]
+    if 200 <= r.status_code < 400:
+        return DnsHealthCheckStatus.healthy, None
+    return DnsHealthCheckStatus.unhealthy, f"http {r.status_code}"
+
+
+async def probe_health_check(
+    check: DnsHealthCheck,
+) -> tuple[DnsHealthCheckStatus, str | None]:
+    """Run one probe and return (status, error). Pure async helper —
+    caller is responsible for persisting status + last_checked_at."""
+    target = str(check.target_ip).split("/", 1)[0]
+    proto = check.protocol.value if hasattr(check.protocol, "value") else check.protocol
+    timeout = check.timeout_seconds or 5
+    if proto == "icmp":
+        # Raw sockets need root; skipped in v1.
+        return DnsHealthCheckStatus.unknown, "icmp not supported in worker"
+    if proto == "tcp":
+        return await _probe_tcp(target, check.port or 0, timeout)
+    if proto in ("http", "https"):
+        port = check.port or (443 if proto == "https" else 80)
+        return await _probe_http(proto, target, port, check.path or "/", timeout)
+    return DnsHealthCheckStatus.unknown, "unsupported protocol"
+
+
+def render_zone_file(
+    zone: DnsZone,
+    records: Iterable[DnsRecord],
+    *,
+    unhealthy_check_ids: set | None = None,
+) -> str:
     """Emit a BIND-format zone file. Records are sorted by (name, type)
-    for diffability."""
+    for diffability. Records bound to an unhealthy health check are
+    skipped — the caller hands the (set of unhealthy check ids) so we
+    don't query inside this pure function."""
+    skip = unhealthy_check_ids or set()
     rec_list = sorted(
-        records,
+        (r for r in records if getattr(r, "health_check_id", None) not in skip),
         key=lambda r: (
             r.name or "",
             r.type.value if hasattr(r.type, "value") else r.type,
@@ -511,8 +578,23 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
     if server.role == DnsServerRole.auth:
         zones = await _zones_for_server(db, server)
         records_by_zone = await _records_by_zone(db, zones)
+        # Health-check filter: every record bound to a check in this
+        # set is silently dropped from the rendered zone, so resolvers
+        # downstream stop handing it out until the check recovers.
+        unhealthy = {
+            row[0] for row in (await db.execute(
+                select(DnsHealthCheck.id).where(
+                    DnsHealthCheck.fabric_id == server.fabric_id,
+                    DnsHealthCheck.status == DnsHealthCheckStatus.unhealthy,
+                    DnsHealthCheck.enabled.is_(True),
+                )
+            )).all()
+        }
         zone_files = {
-            _filename_for_zone(z.name): render_zone_file(z, records_by_zone.get(z.id, []))
+            _filename_for_zone(z.name): render_zone_file(
+                z, records_by_zone.get(z.id, []),
+                unhealthy_check_ids=unhealthy,
+            )
             for z in zones
         }
         # Path matches the site-dns compose layout: the dns-state

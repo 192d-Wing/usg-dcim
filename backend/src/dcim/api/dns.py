@@ -39,6 +39,7 @@ from ..models.dns import (
     DnsBlocklist,
     DnsBlocklistEntry,
     DnsForwarder,
+    DnsHealthCheck,
     DnsRecord,
     DnsRecordSource,
     DnsRecordType,
@@ -72,6 +73,9 @@ from ..schemas.dns import (
     DnsForwarderCreate,
     DnsForwarderOut,
     DnsForwarderUpdate,
+    DnsHealthCheckCreate,
+    DnsHealthCheckOut,
+    DnsHealthCheckUpdate,
     DnsMetricsSampleIn,
     DnsMetricsSampleOut,
     DnsRecordCreate,
@@ -107,6 +111,7 @@ _FORWARDER_NOT_FOUND = "dns forwarder not found"
 _BLOCKLIST_NOT_FOUND = "dns blocklist not found"
 _BLOCKLIST_ENTRY_NOT_FOUND = "dns blocklist entry not found"
 _VIEW_NOT_FOUND = "dns view not found"
+_HC_NOT_FOUND = "dns health check not found"
 
 
 async def _touch_zone(db: AsyncSession, zone_id: UUID) -> None:
@@ -418,6 +423,7 @@ async def create_record(
         data=normalized_data,
         source=DnsRecordSource.manual,
         view_id=payload.view_id,
+        health_check_id=payload.health_check_id,
         description=payload.description,
     )
     db.add(obj)
@@ -1153,6 +1159,90 @@ async def delete_view(
         db, principal, action="dns_view.delete",
         target_type="dns_view", target_id=str(view_id),
         metadata=snapshot,
+    )
+    await db.commit()
+
+
+# ----------------------- Health checks -----------------------
+@router.get("/health-checks", response_model=Page[DnsHealthCheckOut])
+async def list_health_checks(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(DnsHealthCheck)
+    if fabric_id is not None:
+        stmt = stmt.where(DnsHealthCheck.fabric_id == fabric_id)
+    return await paginate(
+        db, stmt, model=DnsHealthCheck, params=params, out_model=DnsHealthCheckOut,
+    )
+
+
+@router.post("/health-checks", response_model=DnsHealthCheckOut, status_code=201)
+async def create_health_check(
+    payload: DnsHealthCheckCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    obj = DnsHealthCheck(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_health_check.create",
+        target_type="dns_health_check", target_id=str(obj.id),
+        metadata={
+            "name": payload.name,
+            "target_ip": payload.target_ip,
+            "protocol": payload.protocol.value,
+        },
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/health-checks/{check_id}", response_model=DnsHealthCheckOut)
+async def update_health_check(
+    check_id: UUID,
+    payload: DnsHealthCheckUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsHealthCheck, check_id)
+    if obj is None:
+        raise NotFoundError(_HC_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="dns_health_check.update",
+        target_type="dns_health_check", target_id=str(check_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/health-checks/{check_id}", status_code=204)
+async def delete_health_check(
+    check_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsHealthCheck, check_id)
+    if obj is None:
+        raise NotFoundError(_HC_NOT_FOUND)
+    # ON DELETE SET NULL on dns_records.health_check_id keeps records
+    # but stops gating them.
+    await db.execute(delete(DnsHealthCheck).where(DnsHealthCheck.id == check_id))
+    await audit.record(
+        db, principal, action="dns_health_check.delete",
+        target_type="dns_health_check", target_id=str(check_id),
+        metadata={"name": obj.name, "target_ip": str(obj.target_ip)},
     )
     await db.commit()
 

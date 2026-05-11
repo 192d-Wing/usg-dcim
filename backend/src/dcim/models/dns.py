@@ -175,6 +175,13 @@ class DnsRecord(UUIDPrimaryKey, Timestamped, Base):
     view_id: Mapped[UUID | None] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("dns_views.id", ondelete="SET NULL"),
     )
+    # Optional health check — when set and the check is unhealthy, the
+    # renderer drops this record from the rendered zone. NULL = always
+    # rendered (no health gating).
+    health_check_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dns_health_checks.id", ondelete="SET NULL"),
+    )
     description: Mapped[str | None] = mapped_column(String(512))
 
 
@@ -202,6 +209,66 @@ class AnycastGroup(UUIDPrimaryKey, Timestamped, Base):
     anycast_ipv4: Mapped[str | None] = mapped_column(INET)
     anycast_ipv6: Mapped[str | None] = mapped_column(INET)
     description: Mapped[str | None] = mapped_column(String(512))
+
+
+class DnsHealthCheckProtocol(str, enum.Enum):
+    tcp = "tcp"
+    http = "http"
+    https = "https"
+    icmp = "icmp"
+
+
+class DnsHealthCheckStatus(str, enum.Enum):
+    """Latest observed health state. `unknown` is the start condition
+    before the first probe has run."""
+
+    unknown = "unknown"
+    healthy = "healthy"
+    unhealthy = "unhealthy"
+
+
+class DnsHealthCheck(UUIDPrimaryKey, Timestamped, Base):
+    """A liveness probe operators bind to one or more DnsRecord rows.
+    The probe runs in the central worker (not the collector), so this
+    only works for targets central can reach directly. Records whose
+    health-check is `unhealthy` are excluded from the rendered zone."""
+
+    __tablename__ = "dns_health_checks"
+    __table_args__ = (
+        Index("ix_dns_health_checks_fabric", "fabric_id"),
+    )
+
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("fabrics.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    target_ip: Mapped[str] = mapped_column(INET, nullable=False)
+    protocol: Mapped[DnsHealthCheckProtocol] = mapped_column(
+        Enum(
+            DnsHealthCheckProtocol, name="dns_health_check_protocol",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+    )
+    port: Mapped[int | None] = mapped_column(Integer)
+    # HTTP path for protocol in {http, https}. Default `/` matches most
+    # health-endpoint conventions.
+    path: Mapped[str] = mapped_column(String(255), nullable=False, default="/")
+    interval_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=30)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Observed state — updated by the worker every interval.
+    status: Mapped[DnsHealthCheckStatus] = mapped_column(
+        Enum(
+            DnsHealthCheckStatus, name="dns_health_check_status",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        default=DnsHealthCheckStatus.unknown,
+        nullable=False,
+    )
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(String(512))
 
 
 class DnsView(UUIDPrimaryKey, Timestamped, Base):

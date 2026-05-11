@@ -18,6 +18,8 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_fie
 from ..models.dns import (
     AnycastService,
     DnsBlocklistAction,
+    DnsHealthCheckProtocol,
+    DnsHealthCheckStatus,
     DnsRecordSource,
     DnsRecordType,
     DnsServerRole,
@@ -162,6 +164,9 @@ class DnsRecordBase(BaseModel):
     # named DnsView's CIDR list (split-horizon). NULL = served as the
     # default fallback to every client.
     view_id: UUID | None = None
+    # When set, the renderer drops this record while its health check
+    # is `unhealthy`. NULL = always rendered.
+    health_check_id: UUID | None = None
     description: str | None = None
 
 
@@ -174,6 +179,7 @@ class DnsRecordUpdate(BaseModel):
     ttl: int | None = None
     data: dict | None = None
     view_id: UUID | None = None
+    health_check_id: UUID | None = None
     description: str | None = None
 
 
@@ -265,6 +271,45 @@ class DnsBlocklistEntryBulk(BaseModel):
 class DnsBlocklistEntryOut(DnsBlocklistEntryBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- DnsHealthCheck ----------
+
+class DnsHealthCheckBase(BaseModel):
+    name: str
+    fabric_id: UUID
+    target_ip: InetStr
+    protocol: DnsHealthCheckProtocol
+    port: int | None = None
+    path: str = "/"
+    interval_seconds: int = Field(default=30, ge=5, le=3600)
+    timeout_seconds: int = Field(default=5, ge=1, le=60)
+    enabled: bool = True
+
+
+class DnsHealthCheckCreate(DnsHealthCheckBase):
+    pass
+
+
+class DnsHealthCheckUpdate(BaseModel):
+    name: str | None = None
+    target_ip: str | None = None
+    protocol: DnsHealthCheckProtocol | None = None
+    port: int | None = None
+    path: str | None = None
+    interval_seconds: int | None = None
+    timeout_seconds: int | None = None
+    enabled: bool | None = None
+
+
+class DnsHealthCheckOut(DnsHealthCheckBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    status: DnsHealthCheckStatus
+    last_checked_at: datetime | None
+    last_error: str | None
     created_at: datetime
     updated_at: datetime
 
