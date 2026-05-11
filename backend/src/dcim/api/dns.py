@@ -528,44 +528,13 @@ async def rotate_zone_key(
         raise NotFoundError(_ZONE_NOT_FOUND)
     if not zone.signed:
         raise ValidationError("zone is not signed — enable DNSSEC first")
-    active_keys = list((
-        await db.execute(
-            select(DnsKey).where(
-                DnsKey.zone_id == zone_id,
-                DnsKey.role == role,
-                DnsKey.retired_at.is_(None),
-            )
-        )
-    ).scalars().all())
-    now = datetime.now(UTC)
-    # Inherit the algorithm of the most-recently-active key of this
-    # role; falls back to ECDSAP256 if nothing's been generated yet
-    # (shouldn't happen on a signed zone, but defensive).
-    prior_alg = active_keys[0].algorithm if active_keys else None
-    material = dns_svc.generate_dnssec_keypair(
-        zone.name, role,
-        algorithm=prior_alg or dns_svc.DnsKeyAlgorithm.ecdsap256sha256,
-    )
-    new_key = DnsKey(
-        zone_id=zone_id,
-        role=material["role"],
-        algorithm=material["algorithm"],
-        private_pem=material["private_pem"],
-        public_key_b64=material["public_key_b64"],
-        key_tag=material["key_tag"],
-        active_from=now,
-    )
-    db.add(new_key)
-    for k in active_keys:
-        k.retired_at = now
-    await _touch_zone(db, zone_id)
-    await db.flush()
+    new_key, retired = await dns_svc.rotate_zone_key(db, zone, role)
     await audit.record(
         db, principal, action=f"dns_zone.rotate_{role.value}",
         target_type="dns_zone", target_id=str(zone_id),
         metadata={
             "new_key_tag": new_key.key_tag,
-            "retired_key_tags": [k.key_tag for k in active_keys],
+            "retired_key_tags": [k.key_tag for k in retired],
         },
     )
     await db.commit()

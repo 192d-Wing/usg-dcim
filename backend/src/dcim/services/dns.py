@@ -144,6 +144,50 @@ async def _probe_http(
 
 # ---------- DNSSEC ----------
 
+# At-rest encryption for DnsKey.private_pem. Ciphertext is base64
+# Fernet output prefixed with this tag so we can tell plaintext-
+# legacy rows from encrypted ones at read time. v1 lets us migrate
+# the wire format later without a schema change.
+_DNSSEC_ENC_PREFIX = "enc:v1:"
+
+
+def _fernet():
+    """Lazy Fernet handle keyed by settings.dns_dnssec_secret. Returns
+    None when the operator hasn't configured a key — callers fall
+    back to plaintext storage with a structlog warning."""
+    secret = get_settings().dns_dnssec_secret
+    if not secret:
+        return None
+    from cryptography.fernet import Fernet
+    return Fernet(secret.encode("ascii") if isinstance(secret, str) else secret)
+
+
+def encrypt_dnssec_private_pem(pem: str) -> str:
+    """Encrypt the PEM-encoded private key for at-rest storage. When
+    the encryption secret isn't configured, returns the input
+    unchanged — operators see plaintext in the database and a one-time
+    warning that DNSSEC material is not encrypted at rest."""
+    f = _fernet()
+    if f is None:
+        return pem
+    token = f.encrypt(pem.encode("utf-8")).decode("ascii")
+    return f"{_DNSSEC_ENC_PREFIX}{token}"
+
+
+def decrypt_dnssec_private_pem(stored: str) -> str:
+    """Inverse of encrypt — handles both encrypted and legacy
+    plaintext rows. A row missing the prefix is assumed plaintext."""
+    if not stored.startswith(_DNSSEC_ENC_PREFIX):
+        return stored
+    f = _fernet()
+    if f is None:
+        raise RuntimeError(
+            "dns_dnssec_secret is unset but the stored key is encrypted; "
+            "set DCIM_DNS_DNSSEC_SECRET to the original Fernet key",
+        )
+    return f.decrypt(stored[len(_DNSSEC_ENC_PREFIX):].encode("ascii")).decode("utf-8")
+
+
 # Algorithm-number ↔ enum mapping per IANA DNS Security Algorithm
 # Numbers (https://www.iana.org/assignments/dns-sec-alg-numbers/).
 _DNSSEC_ALG_NUMBER = {
@@ -235,7 +279,11 @@ def generate_dnssec_keypair(
     return {
         "role": role,
         "algorithm": algorithm,
-        "private_pem": pem,
+        # private_pem lands in Postgres as a Fernet-encrypted blob
+        # when settings.dns_dnssec_secret is configured. Without a
+        # secret, plaintext flows through (with a warning at write
+        # time elsewhere).
+        "private_pem": encrypt_dnssec_private_pem(pem),
         "public_key_b64": pub_b64,
         "key_tag": tag,
         # zone_name is informational — caller binds the actual zone_id.
@@ -288,30 +336,57 @@ def _ed25519_private_raw_b64(pem: str) -> str:
     return base64.b64encode(raw).decode("ascii")
 
 
+def _rsa_private_bind_fields(pem: str) -> str:
+    """Render the eight BIND `.private` fields for an RSA key. BIND
+    expects base64-encoded big-endian integers for each CRT component
+    (Modulus = n, PublicExponent = e, PrivateExponent = d, Prime1 = p,
+    Prime2 = q, Exponent1 = dmp1, Exponent2 = dmq1, Coefficient = iqmp)."""
+    import base64
+    from cryptography.hazmat.primitives import serialization
+    priv = serialization.load_pem_private_key(pem.encode("ascii"), password=None)
+    nums = priv.private_numbers()
+    pub = nums.public_numbers
+
+    def _b64(n: int) -> str:
+        # Minimum-length big-endian; BIND tolerates leading zeros but we
+        # mirror what `dnssec-keygen` emits.
+        return base64.b64encode(
+            n.to_bytes((n.bit_length() + 7) // 8 or 1, "big"),
+        ).decode("ascii")
+
+    return (
+        f"Modulus: {_b64(pub.n)}\n"
+        f"PublicExponent: {_b64(pub.e)}\n"
+        f"PrivateExponent: {_b64(nums.d)}\n"
+        f"Prime1: {_b64(nums.p)}\n"
+        f"Prime2: {_b64(nums.q)}\n"
+        f"Exponent1: {_b64(nums.dmp1)}\n"
+        f"Exponent2: {_b64(nums.dmq1)}\n"
+        f"Coefficient: {_b64(nums.iqmp)}\n"
+    )
+
+
 def _bind_private_key_file(key: DnsKey) -> str:
     """Text of the BIND `.private` file. ECDSAP256 / Ed25519 ship the
-    raw scalar; RSA needs the full CRT params and is deferred — the
-    catalog accepts the algorithm but render raises for now."""
+    raw scalar; RSASHA256 ships the eight CRT fields."""
     alg = _DNSSEC_ALG_NUMBER[key.algorithm]
     alg_label = {
         DnsKeyAlgorithm.ecdsap256sha256: "ECDSAP256SHA256",
         DnsKeyAlgorithm.ed25519: "ED25519",
         DnsKeyAlgorithm.rsasha256: "RSASHA256",
     }[key.algorithm]
-    if key.algorithm == DnsKeyAlgorithm.ecdsap256sha256:
-        scalar_b64 = _ecdsa_private_scalar_b64(key.private_pem)
-    elif key.algorithm == DnsKeyAlgorithm.ed25519:
-        scalar_b64 = _ed25519_private_raw_b64(key.private_pem)
-    else:
-        raise NotImplementedError(
-            "RSASHA256 BIND-format export not implemented; pick ECDSAP256 "
-            "or Ed25519 for now",
-        )
-    return (
+    header = (
         "Private-key-format: v1.3\n"
         f"Algorithm: {alg} ({alg_label})\n"
-        f"PrivateKey: {scalar_b64}\n"
     )
+    pem = decrypt_dnssec_private_pem(key.private_pem)
+    if key.algorithm == DnsKeyAlgorithm.ecdsap256sha256:
+        return header + f"PrivateKey: {_ecdsa_private_scalar_b64(pem)}\n"
+    if key.algorithm == DnsKeyAlgorithm.ed25519:
+        return header + f"PrivateKey: {_ed25519_private_raw_b64(pem)}\n"
+    if key.algorithm == DnsKeyAlgorithm.rsasha256:
+        return header + _rsa_private_bind_fields(pem)
+    raise ValueError(f"unsupported algorithm {key.algorithm}")
 
 
 def render_dnssec_key_files(
@@ -368,6 +443,96 @@ def render_ds_records(zone: DnsZone, keys: Iterable[DnsKey]) -> list[dict]:
             "rr": f"{fqdn} IN DS {key.key_tag} {alg} 2 {digest}",
         })
     return out
+
+
+async def rotate_zone_key(
+    db: AsyncSession, zone: DnsZone, role: DnsKeyRole,
+) -> tuple[DnsKey, list[DnsKey]]:
+    """Generate a fresh key of the named role for `zone`, mark every
+    currently-active key of that role as retired, and bump the zone's
+    updated_at so SOA serial moves. Returns (new_key, retired_keys).
+
+    Shared between the operator-driven API endpoint and the scheduled
+    rotation worker. Caller commits the transaction + records the
+    audit event with whatever actor info applies (Principal for the
+    API, "scheduler" for the cron)."""
+    active_keys = list((
+        await db.execute(
+            select(DnsKey).where(
+                DnsKey.zone_id == zone.id,
+                DnsKey.role == role,
+                DnsKey.retired_at.is_(None),
+            )
+        )
+    ).scalars().all())
+    now = datetime.now(UTC)
+    # Inherit the algorithm of the most-recently-active key of this
+    # role; falls back to ECDSAP256 when nothing's active yet.
+    prior_alg = active_keys[0].algorithm if active_keys else None
+    material = generate_dnssec_keypair(
+        zone.name, role,
+        algorithm=prior_alg or DnsKeyAlgorithm.ecdsap256sha256,
+    )
+    new_key = DnsKey(
+        zone_id=zone.id,
+        role=material["role"],
+        algorithm=material["algorithm"],
+        private_pem=material["private_pem"],
+        public_key_b64=material["public_key_b64"],
+        key_tag=material["key_tag"],
+        active_from=now,
+    )
+    db.add(new_key)
+    for k in active_keys:
+        k.retired_at = now
+    # Bump zone.updated_at so the rendered SOA serial moves and the
+    # bundle etag flips for downstream resolvers.
+    await db.execute(
+        update(DnsZone).where(DnsZone.id == zone.id).values(updated_at=func.now()),
+    )
+    await db.flush()
+    return new_key, active_keys
+
+
+async def auto_rotate_due_zsks(db: AsyncSession) -> dict:
+    """Walk every signed zone with zsk_rotation_days > 0 and rotate
+    the ZSK if its current active key is older than the threshold.
+    Returns a summary {checked, rotated} for the worker log."""
+    rows = list((
+        await db.execute(
+            select(DnsZone).where(
+                DnsZone.signed.is_(True),
+                DnsZone.zsk_rotation_days > 0,
+            )
+        )
+    ).scalars().all())
+    rotated = 0
+    now = datetime.now(UTC)
+    for zone in rows:
+        active_zsk = (
+            await db.execute(
+                select(DnsKey).where(
+                    DnsKey.zone_id == zone.id,
+                    DnsKey.role == DnsKeyRole.zsk,
+                    DnsKey.retired_at.is_(None),
+                )
+                .order_by(DnsKey.active_from.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if active_zsk is None:
+            # Signed zone without an active ZSK — skip; an operator
+            # has manually retired everything and rotation here
+            # would mask a misconfiguration.
+            continue
+        age_days = (now - active_zsk.active_from).total_seconds() / 86400
+        if age_days < zone.zsk_rotation_days:
+            continue
+        await rotate_zone_key(db, zone, DnsKeyRole.zsk)
+        rotated += 1
+    if rotated:
+        await db.commit()
+    return {"checked": len(rows), "rotated": rotated}
 
 
 async def probe_health_check(

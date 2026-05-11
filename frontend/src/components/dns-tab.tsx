@@ -60,6 +60,9 @@ type DnsZone = {
   // True once an operator has clicked Enable DNSSEC — keys live in
   // dns_keys, surfaced via /dns/zones/{id}/keys + /ds-records.
   signed: boolean;
+  // 0 = manual rotation only. Otherwise the worker rotates the
+  // active ZSK every N days.
+  zsk_rotation_days: number;
 };
 
 type DnsRecordSource = 'manual' | 'ipam' | 'ddns';
@@ -1157,6 +1160,8 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
   const [busy, setBusy] = useState(false);
   const [unsignOpen, setUnsignOpen] = useState(false);
   const [unsignText, setUnsignText] = useState('');
+  const [policyOpen, setPolicyOpen] = useState(false);
+  const [policyDays, setPolicyDays] = useState(String(zone.zsk_rotation_days ?? 0));
 
   async function enable() {
     if (!window.confirm(`Generate KSK + ZSK for ${zone.name} and mark it signed?`)) return;
@@ -1205,6 +1210,25 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
   function openUnsign() {
     setUnsignText('');
     setUnsignOpen(true);
+  }
+
+  async function savePolicy() {
+    const n = Number(policyDays);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error('Enter 0 (off) or a positive integer number of days');
+      return;
+    }
+    setBusy(true);
+    try {
+      await http.patch(`/dns/zones/${zone.id}`, { zsk_rotation_days: n });
+      toast.success(n === 0 ? 'Automatic rotation disabled' : `Automatic ZSK rotation every ${n} days`);
+      setPolicyOpen(false);
+      await qc.invalidateQueries({ queryKey: ['dns-zone', zone.id] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function confirmUnsign() {
@@ -1280,6 +1304,15 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
             description="Key roster and parent-zone DS records."
             actions={canWrite && (
               <SpaceBetween size="xs" direction="horizontal">
+                <Button
+                  iconName="settings"
+                  onClick={() => {
+                    setPolicyDays(String(zone.zsk_rotation_days ?? 0));
+                    setPolicyOpen(true);
+                  }}
+                >
+                  Rotation policy
+                </Button>
                 <Button iconName="refresh" loading={busy} onClick={() => rotate('ksk')}>
                   Rotate KSK
                 </Button>
@@ -1297,11 +1330,17 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
         }
       >
         <KeyValuePairs
-          columns={3}
+          columns={4}
           items={[
             { label: 'Status', value: <Badge color="green">Signed</Badge> },
             { label: 'Algorithm', value: keys[0]?.algorithm ?? '—' },
             { label: 'Keys', value: `${keys.length} (${keys.filter((k) => k.role === 'ksk').length} KSK / ${keys.filter((k) => k.role === 'zsk').length} ZSK)` },
+            {
+              label: 'ZSK auto-rotation',
+              value: zone.zsk_rotation_days > 0
+                ? `Every ${zone.zsk_rotation_days} day${zone.zsk_rotation_days === 1 ? '' : 's'}`
+                : <Box color="text-status-inactive">Manual only</Box>,
+            },
           ]}
         />
       </Container>
@@ -1423,6 +1462,46 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
           </Box>
         }
       />
+
+      <Modal
+        visible={policyOpen}
+        onDismiss={() => setPolicyOpen(false)}
+        header="ZSK rotation policy"
+        size="medium"
+        footer={
+          <Box float="right">
+            <SpaceBetween size="xs" direction="horizontal">
+              <Button onClick={() => setPolicyOpen(false)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button variant="primary" loading={busy} onClick={savePolicy}>
+                Save
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box>
+            When set to a positive number, the worker rotates the
+            active ZSK on that cadence. The KSK is intentionally not
+            rotated automatically — that requires coordinating a new
+            DS upload with the parent zone's operator.
+          </Box>
+          <FormField
+            label="Rotation interval (days)"
+            description="0 disables automatic rotation. 30 / 60 / 90 are typical operator choices."
+          >
+            <Input
+              type="number"
+              value={policyDays}
+              onChange={({ detail }) => setPolicyDays(detail.value)}
+              placeholder="0"
+              autoFocus
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
 
       <Modal
         visible={unsignOpen}

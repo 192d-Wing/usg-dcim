@@ -87,6 +87,16 @@ async def dns_sync_from_ipam(_ctx) -> dict:
     return {"added": total_added, "removed": total_removed, "zones": len(zones)}
 
 
+async def dns_rotate_zsks(_ctx) -> dict:
+    """Rotate ZSKs for signed zones whose zsk_rotation_days policy has
+    elapsed. KSKs are intentionally skipped here — the parent-zone DS
+    upload still belongs to a human."""
+    async with async_session() as db:
+        result = await dns_svc.auto_rotate_due_zsks(db)
+    log.info("dns_rotate_zsks", **result)
+    return result
+
+
 async def dns_health_checks(_ctx) -> dict:
     """Probe every enabled DnsHealthCheck and update its status. The
     bundle renderer reads this status to exclude records bound to
@@ -126,6 +136,7 @@ class WorkerSettings:
     functions: ClassVar[list] = [
         evaluate_alerts, sweep_collectors, freshness_sweep,
         dhcp_sync, dhcp_age_out, dns_sync_from_ipam, dns_health_checks,
+        dns_rotate_zsks,
     ]
     cron_jobs: ClassVar[list] = [
         cron(evaluate_alerts, second={0, 30}),
@@ -142,4 +153,8 @@ class WorkerSettings:
         # interval_seconds field on individual checks (the function
         # internally skips checks whose interval hasn't elapsed).
         cron(dns_health_checks, second={0, 30}),
+        # ZSK rotation once a day at 03:17 UTC — the cron skips zones
+        # whose policy hasn't elapsed, so a daily wakeup is cheap and
+        # avoids tight loops near boundary seconds.
+        cron(dns_rotate_zsks, hour={3}, minute={17}),
     ]

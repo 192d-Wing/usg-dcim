@@ -77,6 +77,15 @@ class Settings(BaseSettings):
     # is a 4-byte private ASN (RFC 6996).
     dns_anycast_originate_asn: int = 4_200_000_000
 
+    # DNSSEC private-key encryption secret. When set, DnsKey.private_pem
+    # is encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA-256).
+    # Generate with `python -c "from cryptography.fernet import Fernet;
+    # print(Fernet.generate_key().decode())"`. Optional in dev; required
+    # in any environment that holds production zone keys — leave unset
+    # and DnsKey rows fall back to plaintext (with a warning at write
+    # time). Existing plaintext rows are lazily re-encrypted on next use.
+    dns_dnssec_secret: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

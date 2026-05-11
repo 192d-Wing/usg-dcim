@@ -51,6 +51,9 @@ class DnsZoneBase(BaseModel):
     soa_expire: int = 1800
     soa_minimum: int = 60
     default_ttl: int = 60
+    # 0 = manual rotation only (operator clicks Rotate ZSK). Otherwise
+    # the worker rotates the active ZSK every N days.
+    zsk_rotation_days: int = 0
 
 
 class DnsZoneCreate(DnsZoneBase):
@@ -59,6 +62,7 @@ class DnsZoneCreate(DnsZoneBase):
 
 class DnsZoneUpdate(BaseModel):
     description: str | None = None
+    zsk_rotation_days: int | None = None
     soa_mname: str | None = None
     soa_rname: str | None = None
     soa_refresh: int | None = None

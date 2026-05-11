@@ -138,6 +138,11 @@ class DnsZone(UUIDPrimaryKey, Timestamped, Base):
     # DNSSEC: when true, the renderer emits the dnssec plugin and
     # includes DNSKEY records. Keys live in dns_keys (KSK + ZSK).
     signed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Auto-rotation policy for the ZSK. 0 = off (operator rotates by
+    # hand via the UI button). When > 0, the worker rotates the active
+    # ZSK every N days. KSK rotation stays manual because it requires
+    # the operator to upload the new DS to the parent zone.
+    zsk_rotation_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class DnsRecord(UUIDPrimaryKey, Timestamped, Base):
