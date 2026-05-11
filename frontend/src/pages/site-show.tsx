@@ -1,13 +1,23 @@
+// Site detail — Cloudscape ContentLayout + KPI tiles + capacity +
+// hierarchy. The hierarchy tree (buildings → rooms → rows → racks)
+// keeps its existing Tailwind-styled inner blocks; only the outer
+// chrome migrates so the dense layout doesn't lose information.
+
 import { useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import {
-  ArrowLeft, Building2, Server, Bell, Cpu, Zap, Ruler, ChevronRight,
-} from 'lucide-react';
+import { Server, ChevronRight } from 'lucide-react';
+
+import Box from '@cloudscape-design/components/box';
+import ColumnLayout from '@cloudscape-design/components/column-layout';
+import Container from '@cloudscape-design/components/container';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import ExpandableSection from '@cloudscape-design/components/expandable-section';
+import Header from '@cloudscape-design/components/header';
+import SpaceBetween from '@cloudscape-design/components/space-between';
+import Spinner from '@cloudscape-design/components/spinner';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+
 import { http } from '@/lib/http';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
 import { CapacityBar } from '@/components/capacity-bar';
 
 type RackNode = {
@@ -58,18 +68,17 @@ export function SiteShowPage() {
 
   if (detail.isLoading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-72" />
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={`k-${i}`} className="h-24" />)}
-        </div>
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-60 w-full" />
-      </div>
+      <ContentLayout header={<Header variant="h1">Loading…</Header>}>
+        <Box textAlign="center" padding="xl"><Spinner size="large" /></Box>
+      </ContentLayout>
     );
   }
   if (detail.isError || !detail.data?.site) {
-    return <p className="text-sm text-muted-foreground">Failed to load site.</p>;
+    return (
+      <ContentLayout header={<Header variant="h1">Site</Header>}>
+        <Box color="text-status-error">Failed to load site.</Box>
+      </ContentLayout>
+    );
   }
 
   const { site, region, kpis, capacity, hierarchy, orphan_racks } = detail.data;
@@ -80,142 +89,156 @@ export function SiteShowPage() {
   const collectorSummary = formatCollectorSummary(collectors);
 
   return (
-    <div className="space-y-6">
-      <Button variant="ghost" size="sm" onClick={() => nav('/sites')} className="-ml-2">
-        <ArrowLeft className="h-4 w-4" /> All sites
-      </Button>
-
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{site.code} · {site.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {region ? <>{region.code} · </> : null}
-            {site.majcom && <>{site.majcom} · </>}
-            {site.organization && <>{site.organization} · </>}
-            {site.address ?? 'no address on file'}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {site.classification && (
-            <Badge variant="warning">{site.classification}</Badge>
-          )}
-          {site.enclave && <Badge variant="secondary">{site.enclave}</Badge>}
-          {site.mission_owner && <Badge variant="outline">{site.mission_owner}</Badge>}
-          <Badge variant={site.lifecycle_state === 'active' ? 'success' : 'warning'}>
-            {site.lifecycle_state}
-          </Badge>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          icon={Building2}
-          label="Footprint"
-          primary={`${kpis.racks} racks`}
-          secondary={`${kpis.buildings} bldg · ${kpis.rooms} rm · ${kpis.rows} rows · ${kpis.assets.total} assets`}
-        />
-        <KpiCard icon={Zap} label="Power" primary={power.primary} secondary={power.secondary} />
-        <KpiCard
-          icon={Bell}
-          label="Open alerts"
-          primary={alertSummary.primary}
-          secondary={alertSummary.secondary}
-          tone={alertSummary.tone}
-        />
-        <KpiCard
-          icon={Cpu}
-          label="Collectors"
-          primary={collectorSummary.primary}
-          secondary={collectorSummary.secondary}
-          tone={collectorSummary.tone}
-        />
-      </div>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Server className="h-4 w-4" /> Site capacity
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-5 md:grid-cols-2">
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <Ruler className="h-3.5 w-3.5" /> Rack space
-            </div>
-            <CapacityBar
-              used={capacity.u_used}
-              total={capacity.u_total}
-              leftLabel={`${capacity.u_used} / ${capacity.u_total} U used`}
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          description={[
+            region?.code,
+            site.majcom,
+            site.organization,
+            site.address ?? 'no address on file',
+          ].filter(Boolean).join(' · ')}
+          actions={
+            <SpaceBetween size="xs" direction="horizontal">
+              {site.classification && (
+                <StatusIndicator type="warning">{site.classification}</StatusIndicator>
+              )}
+              {site.enclave && (
+                <Box variant="span" color="text-status-info">
+                  <StatusIndicator type="info">{site.enclave}</StatusIndicator>
+                </Box>
+              )}
+              {site.mission_owner && (
+                <Box variant="span" color="text-status-inactive">{site.mission_owner}</Box>
+              )}
+              {site.lifecycle_state === 'active'
+                ? <StatusIndicator type="success">{site.lifecycle_state}</StatusIndicator>
+                : <StatusIndicator type="warning">{site.lifecycle_state}</StatusIndicator>}
+            </SpaceBetween>
+          }
+        >
+          {site.code} · {site.name}
+        </Header>
+      }
+    >
+      <SpaceBetween size="l">
+        <Container>
+          <ColumnLayout columns={4} variant="text-grid">
+            <KpiTile
+              label="Footprint"
+              primary={`${kpis.racks} racks`}
+              secondary={`${kpis.buildings} bldg · ${kpis.rooms} rm · ${kpis.rows} rows · ${kpis.assets.total} assets`}
             />
-            <p className="text-xs text-muted-foreground">{capacity.u_free} U free across {capacity.racks_total} racks</p>
-          </div>
-          <div className="space-y-2">
-            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <Zap className="h-3.5 w-3.5" /> Power
-            </div>
-            {capacity.kw_max_sum === null ? (
-              <p className="text-xs text-muted-foreground">No racks at this site have a kW rating configured.</p>
-            ) : (
-              <>
-                <CapacityBar
-                  used={capacity.kw_current ?? 0}
-                  total={capacity.kw_max_sum}
-                  unknown={capacity.kw_current === null}
-                  leftLabel={
-                    capacity.kw_current === null
-                      ? `— / ${capacity.kw_max_sum.toFixed(0)} kW`
-                      : `${capacity.kw_current.toFixed(2)} / ${capacity.kw_max_sum.toFixed(0)} kW`
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  {capacity.kw_current === null
-                    ? 'awaiting current PDU telemetry'
-                    : `${(capacity.kw_max_sum - capacity.kw_current).toFixed(2)} kW headroom`}
-                </p>
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+            <KpiTile label="Power" primary={power.primary} secondary={power.secondary} />
+            <KpiTile
+              label="Open alerts"
+              primary={alertSummary.primary}
+              secondary={alertSummary.secondary}
+              tone={alertSummary.tone}
+            />
+            <KpiTile
+              label="Collectors"
+              primary={collectorSummary.primary}
+              secondary={collectorSummary.secondary}
+              tone={collectorSummary.tone}
+            />
+          </ColumnLayout>
+        </Container>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Building2 className="h-4 w-4" /> Hierarchy
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
+        <Container header={<Header variant="h2">Site capacity</Header>}>
+          <ColumnLayout columns={2}>
+            <SpaceBetween size="xs">
+              <Box variant="awsui-key-label">Rack space</Box>
+              <CapacityBar
+                used={capacity.u_used}
+                total={capacity.u_total}
+                leftLabel={`${capacity.u_used} / ${capacity.u_total} U used`}
+              />
+              <Box color="text-status-inactive" fontSize="body-s">
+                {capacity.u_free} U free across {capacity.racks_total} racks
+              </Box>
+            </SpaceBetween>
+            <SpaceBetween size="xs">
+              <Box variant="awsui-key-label">Power</Box>
+              {capacity.kw_max_sum === null ? (
+                <Box color="text-status-inactive" fontSize="body-s">
+                  No racks at this site have a kW rating configured.
+                </Box>
+              ) : (
+                <>
+                  <CapacityBar
+                    used={capacity.kw_current ?? 0}
+                    total={capacity.kw_max_sum}
+                    unknown={capacity.kw_current === null}
+                    leftLabel={
+                      capacity.kw_current === null
+                        ? `— / ${capacity.kw_max_sum.toFixed(0)} kW`
+                        : `${capacity.kw_current.toFixed(2)} / ${capacity.kw_max_sum.toFixed(0)} kW`
+                    }
+                  />
+                  <Box color="text-status-inactive" fontSize="body-s">
+                    {capacity.kw_current === null
+                      ? 'awaiting current PDU telemetry'
+                      : `${(capacity.kw_max_sum - capacity.kw_current).toFixed(2)} kW headroom`}
+                  </Box>
+                </>
+              )}
+            </SpaceBetween>
+          </ColumnLayout>
+        </Container>
+
+        <Container header={<Header variant="h2">Hierarchy</Header>}>
           {hierarchy.length === 0 && orphan_racks.length === 0 && (
-            <p className="text-sm text-muted-foreground">No buildings yet. Create a building → room → row → rack to populate this site.</p>
+            <Box color="text-status-inactive">
+              No buildings yet. Create a building → room → row → rack to populate this site.
+            </Box>
           )}
-          {hierarchy.map((b) => (
-            <BuildingSection key={b.id} building={b} onRackClick={(rackId) => nav(`/racks/${rackId}`)} />
-          ))}
-          {orphan_racks.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wider text-warning">
-                Unassigned racks
-              </div>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {orphan_racks.map((rk) => (
-                  <RackTile key={rk.id} rack={rk} onClick={() => nav(`/racks/${rk.id}`)} />
-                ))}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
+          <SpaceBetween size="s">
+            {hierarchy.map((b) => (
+              <BuildingSection key={b.id} building={b} onRackClick={(rackId) => nav(`/racks/${rackId}`)} />
+            ))}
+            {orphan_racks.length > 0 && (
+              <Container
+                header={<Header variant="h3">Unassigned racks</Header>}
+              >
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {orphan_racks.map((rk) => (
+                    <RackTile key={rk.id} rack={rk} onClick={() => nav(`/racks/${rk.id}`)} />
+                  ))}
+                </div>
+              </Container>
+            )}
+          </SpaceBetween>
+        </Container>
+      </SpaceBetween>
+    </ContentLayout>
   );
 }
 
 type Tone = 'ok' | 'warn' | 'danger';
 
-const TONE_CLASS: Record<Tone, string> = {
-  ok: 'text-foreground',
-  warn: 'text-warning',
-  danger: 'text-destructive',
-};
+function KpiTile({
+  label, primary, secondary, tone = 'ok',
+}: Readonly<{
+  label: string;
+  primary: string;
+  secondary: string;
+  tone?: Tone;
+}>) {
+  const colorByTone = {
+    ok: 'inherit',
+    warn: 'text-status-warning',
+    danger: 'text-status-error',
+  } as const;
+  return (
+    <Box>
+      <Box variant="awsui-key-label">{label}</Box>
+      <Box variant="h3" color={colorByTone[tone] as any}>{primary}</Box>
+      <Box color="text-status-inactive" fontSize="body-s">{secondary || '—'}</Box>
+    </Box>
+  );
+}
 
 function formatPowerKpi(c: SiteDetail['capacity']): { primary: string; secondary: string } {
   if (c.kw_max_sum === null) {
@@ -261,60 +284,41 @@ function formatCollectorSummary(
   };
 }
 
-function KpiCard({
-  icon: Icon, label, primary, secondary, tone = 'ok',
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  primary: string;
-  secondary: string;
-  tone?: Tone;
-}) {
-  return (
-    <Card>
-      <CardContent className="space-y-1 p-4">
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <Icon className="h-3.5 w-3.5" /> {label}
-        </div>
-        <div className={`text-lg font-semibold tabular-nums ${TONE_CLASS[tone]}`}>{primary}</div>
-        <div className="text-xs text-muted-foreground">{secondary || '—'}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function BuildingSection({
   building, onRackClick,
-}: { building: BuildingNode; onRackClick: (rackId: string) => void }) {
+}: Readonly<{
+  building: BuildingNode;
+  onRackClick: (rackId: string) => void;
+}>) {
   const rackCount = building.rooms.reduce(
     (n, rm) => n + rm.rows.reduce((m, rw) => m + rw.racks.length, 0),
     0,
   );
   return (
-    <div className="space-y-3 rounded-md border bg-muted/20 p-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="flex items-baseline gap-2">
-          <Building2 className="h-4 w-4 self-center text-muted-foreground" />
-          <span className="font-medium">{building.code}</span>
-          <span className="text-sm text-muted-foreground">{building.name}</span>
-        </div>
-        <span className="text-xs text-muted-foreground">
-          {building.rooms.length} room{building.rooms.length === 1 ? '' : 's'} · {rackCount} rack{rackCount === 1 ? '' : 's'}
-        </span>
-      </div>
-      {building.rooms.length === 0 && (
-        <p className="text-xs text-muted-foreground">No rooms in this building.</p>
-      )}
-      {building.rooms.map((rm) => (
-        <RoomBlock key={rm.id} room={rm} onRackClick={onRackClick} />
-      ))}
-    </div>
+    <ExpandableSection
+      defaultExpanded
+      variant="container"
+      headerText={`${building.code} · ${building.name}`}
+      headerCounter={`(${building.rooms.length} room${building.rooms.length === 1 ? '' : 's'} · ${rackCount} rack${rackCount === 1 ? '' : 's'})`}
+    >
+      <SpaceBetween size="s">
+        {building.rooms.length === 0 && (
+          <Box color="text-status-inactive" fontSize="body-s">No rooms in this building.</Box>
+        )}
+        {building.rooms.map((rm) => (
+          <RoomBlock key={rm.id} room={rm} onRackClick={onRackClick} />
+        ))}
+      </SpaceBetween>
+    </ExpandableSection>
   );
 }
 
 function RoomBlock({
   room, onRackClick,
-}: { room: RoomNode; onRackClick: (rackId: string) => void }) {
+}: Readonly<{
+  room: RoomNode;
+  onRackClick: (rackId: string) => void;
+}>) {
   const rackCount = room.rows.reduce((n, rw) => n + rw.racks.length, 0);
   return (
     <div className="space-y-2 rounded-md border bg-card p-3">
@@ -349,7 +353,9 @@ function RoomBlock({
   );
 }
 
-function RackTile({ rack, onClick }: { rack: RackNode; onClick: () => void }) {
+function RackTile({
+  rack, onClick,
+}: Readonly<{ rack: RackNode; onClick: () => void }>) {
   return (
     <button
       type="button"
@@ -385,3 +391,4 @@ function RackTile({ rack, onClick }: { rack: RackNode; onClick: () => void }) {
     </button>
   );
 }
+

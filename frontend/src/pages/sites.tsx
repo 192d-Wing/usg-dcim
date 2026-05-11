@@ -1,10 +1,18 @@
+// Sites list — Cloudscape Table.
+// Read-only list; no create/edit UI yet (the backend supports POST but
+// the operator workflow uses CSV import for bulk site bring-up).
+
+import { useState } from 'react';
 import { useTable } from '@refinedev/core';
-import { Link } from 'react-router';
-import { Card, CardContent } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router';
+
+import Box from '@cloudscape-design/components/box';
+import ContentLayout from '@cloudscape-design/components/content-layout';
+import Header from '@cloudscape-design/components/header';
+import Link from '@cloudscape-design/components/link';
+import Pagination from '@cloudscape-design/components/pagination';
+import StatusIndicator from '@cloudscape-design/components/status-indicator';
+import Table from '@cloudscape-design/components/table';
 
 type Site = {
   id: string;
@@ -18,69 +26,85 @@ type Site = {
 };
 
 export function SitesListPage() {
+  const navigate = useNavigate();
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<Site>({
     resource: 'inventory/sites',
     pagination: { pageSize: 50 },
     sorters: { initial: [{ field: 'code', order: 'asc' }] },
   });
+  const [selected, setSelected] = useState<Site[]>([]);
   const data = result.data ?? [];
   const total = result.total ?? 0;
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Sites</h1>
-        <p className="text-sm text-muted-foreground">
-          {total} total · page {currentPage} of {pageCount}
-        </p>
-      </div>
-      <Card>
-        <CardContent className="p-0">
-          {tableQuery.isLoading ? (
-            <div className="space-y-2 p-4">
-              {Array.from({ length: 6 }).map((_, i) => <Skeleton key={`s-${i}`} className="h-9 w-full" />)}
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>MAJCOM</TableHead>
-                  <TableHead>Org</TableHead>
-                  <TableHead>Enclave</TableHead>
-                  <TableHead>State</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell><Link to={`/sites/${s.id}`} className="font-mono text-xs hover:underline">{s.code}</Link></TableCell>
-                    <TableCell>{s.name}</TableCell>
-                    <TableCell>{s.majcom ?? '—'}</TableCell>
-                    <TableCell>{s.organization ?? '—'}</TableCell>
-                    <TableCell>{s.enclave ?? '—'}</TableCell>
-                    <TableCell>
-                      <Badge variant={s.lifecycle_state === 'active' ? 'success' : 'warning'}>
-                        {s.lifecycle_state}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-      {pageCount > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>Showing {data.length} of {total}</span>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage <= 1}>Prev</Button>
-            <Button variant="outline" size="sm" onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage >= pageCount}>Next</Button>
-          </div>
-        </div>
-      )}
-    </div>
+    <ContentLayout
+      header={
+        <Header
+          variant="h1"
+          counter={`(${total})`}
+          description={`Page ${currentPage} of ${Math.max(pageCount, 1)}`}
+        >
+          Sites
+        </Header>
+      }
+    >
+      <Table<Site>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading sites…"
+        items={data}
+        trackBy="id"
+        selectionType="single"
+        selectedItems={selected}
+        onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
+        onRowClick={({ detail }) => navigate(`/sites/${detail.item.id}`)}
+        ariaLabels={{
+          selectionGroupLabel: 'Site selection',
+          itemSelectionLabel: (_d, item) => `Select ${item.code}`,
+          allItemsSelectionLabel: () => 'Select all sites',
+        }}
+        columnDefinitions={[
+          {
+            id: 'code',
+            header: 'Code',
+            cell: (s) => (
+              <Link
+                href={`/sites/${s.id}`}
+                onFollow={(e) => { e.preventDefault(); navigate(`/sites/${s.id}`); }}
+              >
+                <span style={{ fontFamily: 'ui-monospace, monospace' }}>{s.code}</span>
+              </Link>
+            ),
+            width: 140,
+          },
+          { id: 'name', header: 'Name', cell: (s) => s.name },
+          { id: 'majcom', header: 'MAJCOM', cell: (s) => s.majcom ?? '—' },
+          { id: 'organization', header: 'Org', cell: (s) => s.organization ?? '—' },
+          { id: 'enclave', header: 'Enclave', cell: (s) => s.enclave ?? '—' },
+          {
+            id: 'lifecycle_state',
+            header: 'State',
+            cell: (s) => s.lifecycle_state === 'active'
+              ? <StatusIndicator type="success">{s.lifecycle_state}</StatusIndicator>
+              : <StatusIndicator type="warning">{s.lifecycle_state}</StatusIndicator>,
+            width: 120,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No sites yet.
+          </Box>
+        }
+        pagination={
+          pageCount > 1 ? (
+            <Pagination
+              currentPageIndex={currentPage}
+              pagesCount={pageCount}
+              onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+            />
+          ) : undefined
+        }
+      />
+    </ContentLayout>
   );
 }
