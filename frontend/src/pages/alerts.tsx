@@ -47,6 +47,8 @@ function sevType(s: string): StatusIndicatorProps.Type {
 export function AlertsPage() {
   const navigate = useNavigate();
   const [stateOpt, setStateOpt] = useState<SelectProps.Option>(STATE_OPTIONS[0]);
+  const [selected, setSelected] = useState<Alert[]>([]);
+  const [acking, setAcking] = useState(false);
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<Alert>({
     resource: 'alerts',
     pagination: { pageSize: 50 },
@@ -57,15 +59,53 @@ export function AlertsPage() {
   const data = result.data ?? [];
   const total = result.total ?? 0;
 
-  async function ack(id: string) {
-    try {
-      await http.post(`/alerts/${id}/ack`, { note: null });
-      toast.success('Alert acknowledged');
-      tableQuery.refetch();
-    } catch (err: any) {
-      toast.error(err?.message ?? 'failed');
-    }
+  // Bulk-ack the selection. Backend has no batch endpoint so we fan out
+  // — fine for typical ops batch sizes (tens, not thousands). Toast
+  // summarizes how many succeeded so a partial failure is visible.
+  async function ackSelected() {
+    if (selected.length === 0) return;
+    setAcking(true);
+    const results = await Promise.allSettled(
+      selected.map((a) => http.post(`/alerts/${a.id}/ack`, { note: null })),
+    );
+    const ok = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.length - ok;
+    if (failed === 0) toast.success(`Acknowledged ${ok}`);
+    else toast.error(`Acknowledged ${ok}, ${failed} failed`);
+    setSelected([]);
+    setAcking(false);
+    tableQuery.refetch();
   }
+
+  // Header buttons follow the Cloudscape "table with action buttons"
+  // playground pattern: row-action buttons live in the table header
+  // rather than per-row, are disabled when the selection is empty (or
+  // the wrong state for the action), and a primary/right-most button
+  // navigates to the related management page.
+  const onlyFiring = selected.every((a) => a.state === 'firing');
+  const ackDisabled = !canAck || selected.length === 0 || !onlyFiring || acking;
+  const tableHeader = (
+    <Header
+      counter={selected.length ? `(${selected.length}/${data.length})` : `(${data.length})`}
+      actions={
+        <SpaceBetween size="xs" direction="horizontal">
+          <Button
+            disabled={ackDisabled}
+            loading={acking}
+            onClick={ackSelected}
+            iconName="status-positive"
+          >
+            Acknowledge
+          </Button>
+          <Button onClick={() => navigate('/alerts/rules')} variant="primary" iconName="settings">
+            Manage rules
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      Alerts
+    </Header>
+  );
 
   return (
     <ContentLayout
@@ -74,19 +114,18 @@ export function AlertsPage() {
           variant="h1"
           counter={`(${total})`}
           actions={
-            <SpaceBetween size="xs" direction="horizontal">
-              <Button onClick={() => navigate('/alerts/rules')} iconName="settings">
-                Manage rules
-              </Button>
-              <Select
-                selectedOption={stateOpt}
-                onChange={({ detail }) => { setStateOpt(detail.selectedOption); setCurrentPage(1); }}
-                options={STATE_OPTIONS}
-                expandToViewport
-              />
-            </SpaceBetween>
+            <Select
+              selectedOption={stateOpt}
+              onChange={({ detail }) => {
+                setStateOpt(detail.selectedOption);
+                setCurrentPage(1);
+                setSelected([]);
+              }}
+              options={STATE_OPTIONS}
+              expandToViewport
+            />
           }
-          description="Open and historical alerts. Rules + suppression managed under Manage rules."
+          description="Open and historical alerts. Select rows to acknowledge in bulk."
         >
           Alerts
         </Header>
@@ -94,10 +133,20 @@ export function AlertsPage() {
     >
       <Table<Alert>
         variant="container"
+        header={tableHeader}
         loading={tableQuery.isLoading}
         loadingText="Loading alerts…"
         items={data}
         trackBy="id"
+        selectionType="multi"
+        selectedItems={selected}
+        onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
+        ariaLabels={{
+          selectionGroupLabel: 'Alert selection',
+          allItemsSelectionLabel: ({ selectedItems }) =>
+            `${selectedItems.length} alerts selected`,
+          itemSelectionLabel: (_d, item) => `Select alert ${item.summary}`,
+        }}
         columnDefinitions={[
           {
             id: 'severity',
@@ -129,16 +178,6 @@ export function AlertsPage() {
               </Box>
             ),
             width: 200,
-          },
-          {
-            id: 'actions',
-            header: '',
-            cell: (a) => stateOpt.value === 'firing' && canAck ? (
-              <Button onClick={() => ack(a.id)} iconName="status-positive">
-                Ack
-              </Button>
-            ) : null,
-            width: 100,
           },
         ]}
         empty={
