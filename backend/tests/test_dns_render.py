@@ -102,21 +102,24 @@ def test_corefile_auth_contains_zone_blocks():
     assert "file /var/lib/dcim-dns/auth/zones/a.example..zone" in cf
 
 
-def test_corefile_recursive_includes_apex_stub_when_set():
+def test_corefile_recursive_includes_apex_stubs_when_set():
+    # Multiple apexes per fabric → one stub-forward block each, all
+    # targeting the same local auth pod.
     cf = render_corefile_recursive(
-        fabric_apex="prod.dcim.mil",
+        fabric_apexes=["prod.dcim.mil", "tenant.example"],
         auth_unicast_ip="10.42.0.53",
         upstream_resolvers=["1.1.1.1"],
     )
     assert "prod.dcim.mil:53 {" in cf
-    assert "forward . 10.42.0.53:53" in cf
+    assert "tenant.example:53 {" in cf
+    assert cf.count("forward . 10.42.0.53:53") == 2
     assert ".:53 {" in cf
     assert "forward . 1.1.1.1" in cf
 
 
 def test_corefile_recursive_falls_back_to_default_upstreams():
     cf = render_corefile_recursive(
-        fabric_apex=None, auth_unicast_ip=None, upstream_resolvers=[],
+        fabric_apexes=[], auth_unicast_ip=None, upstream_resolvers=[],
     )
     # When the operator hasn't configured upstreams, the renderer picks a
     # public resolver default rather than emitting an empty `forward .`.

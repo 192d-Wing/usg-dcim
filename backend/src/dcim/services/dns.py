@@ -150,24 +150,26 @@ def render_corefile_auth(zone_names: Iterable[str], *, zones_dir: str) -> str:
 
 def render_corefile_recursive(
     *,
-    fabric_apex: str | None,
+    fabric_apexes: Iterable[str],
     auth_unicast_ip: str | None,
     upstream_resolvers: Iterable[str],
 ) -> str:
-    """Recursive Corefile: forward `*.<fabric_apex>` to the local auth
-    pod, forward everything else to operator upstreams, plus
-    cache/log/errors/prometheus/health."""
+    """Recursive Corefile: forward `*.<apex>` for each fabric apex to
+    the local auth pod, forward everything else to operator upstreams,
+    plus cache/log/errors/prometheus/health."""
     upstream_list = " ".join(upstream_resolvers) or "1.1.1.1 8.8.8.8"
     blocks = []
-    if fabric_apex and auth_unicast_ip:
-        # Stub-zone forward — keeps internal lookups off the public root.
-        blocks.append(
-            f"{fabric_apex}:53 {{\n"
-            f"    forward . {auth_unicast_ip}:53\n"
-            f"    log\n"
-            f"    errors\n"
-            f"}}"
-        )
+    if auth_unicast_ip:
+        # One stub-zone forward per apex — keeps internal lookups off
+        # the public root. Sorted for deterministic render diffs.
+        for apex in sorted(set(fabric_apexes)):
+            blocks.append(
+                f"{apex}:53 {{\n"
+                f"    forward . {auth_unicast_ip}:53\n"
+                f"    log\n"
+                f"    errors\n"
+                f"}}"
+            )
     blocks.append(
         ".:53 {\n"
         f"    forward . {upstream_list}\n"
@@ -300,15 +302,17 @@ async def _local_auth_unicast_ip(db: AsyncSession, server: DnsServer) -> str | N
     return str(auth.unicast_ip).split("/", 1)[0] if auth else None
 
 
-async def _fabric_apex_name(db: AsyncSession, fabric_id: UUID) -> str | None:
-    apex = (
+async def _fabric_apex_names(db: AsyncSession, fabric_id: UUID) -> list[str]:
+    """Every apex zone bound to this fabric. Multiple are allowed — the
+    recursive Corefile emits a stub-forward per apex."""
+    rows = (
         await db.execute(
-            select(DnsZone).where(
+            select(DnsZone.name).where(
                 DnsZone.fabric_id == fabric_id, DnsZone.kind == DnsZoneKind.apex,
             )
         )
-    ).scalar_one_or_none()
-    return apex.name if apex else None
+    ).scalars().all()
+    return list(rows)
 
 
 async def _bgp_for_server(
@@ -373,15 +377,15 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         )
         gobgp: dict | None = None
     else:
-        # Recursive: assemble forwarders + stub for the fabric apex.
-        apex_name = await _fabric_apex_name(db, server.fabric_id)
+        # Recursive: assemble forwarders + a stub per fabric apex.
+        apex_names = await _fabric_apex_names(db, server.fabric_id)
         local_auth_ip = await _local_auth_unicast_ip(db, server)
         # Operator-configured upstreams aren't modeled per-fabric yet
         # (deferred to a Fabric.dns_upstreams field). Default to public
         # quad-eight / cloudflare for the v1 plumbing.
         upstreams = ["1.1.1.1", "8.8.8.8"]
         corefile = render_corefile_recursive(
-            fabric_apex=apex_name,
+            fabric_apexes=apex_names,
             auth_unicast_ip=local_auth_ip,
             upstream_resolvers=upstreams,
         )

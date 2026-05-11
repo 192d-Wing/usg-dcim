@@ -87,10 +87,10 @@ class DnsZone(UUIDPrimaryKey, Timestamped, Base):
     __tablename__ = "dns_zones"
     __table_args__ = (
         UniqueConstraint("name", name="uq_dns_zone_name"),
-        # One apex per fabric. Sites can host any number of site-kind
-        # zones; FQDN uniqueness is the only other rule and is covered
-        # by uq_dns_zone_name. Enforced by partial unique index
-        # uq_dns_zone_one_apex_per_fabric (migration 0015).
+        # Zone names must be globally unique (uq_dns_zone_name); no
+        # other restrictions on count or shape. A fabric may carry any
+        # mix of apex + site-kind zones, and a site may host multiple
+        # site-kind zones.
         Index("ix_dns_zones_fabric", "fabric_id"),
         Index("ix_dns_zones_site", "site_id"),
     )
