@@ -3687,6 +3687,7 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 500 } });
   const sites = sitesRes.result.data ?? [];
   const sitesById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
+  const [metricsServer, setMetricsServer] = useState<DnsServer | null>(null);
 
   const serversQ = useQuery({
     queryKey: ['dns-servers', fabricId],
@@ -3769,7 +3770,17 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
           </Header>
         }
         columnDefinitions={[
-          { id: 'name', header: 'Name', cell: (s) => s.name },
+          {
+            id: 'name', header: 'Name',
+            cell: (s) => (
+              <Link
+                href={`#metrics-${s.id}`}
+                onFollow={(e) => { e.preventDefault(); setMetricsServer(s); }}
+              >
+                {s.name}
+              </Link>
+            ),
+          },
           {
             id: 'site', header: 'Site',
             cell: (s) => (
@@ -3876,7 +3887,134 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
           </Modal>
         </>
       )}
+      <Modal
+        visible={metricsServer !== null}
+        onDismiss={() => setMetricsServer(null)}
+        header={metricsServer ? <span>Metrics — <span style={MONO}>{metricsServer.name}</span></span> : ''}
+        size="max"
+      >
+        {metricsServer && <ServerMetricsDetail server={metricsServer} />}
+      </Modal>
     </>
+  );
+}
+
+function ServerMetricsDetail({ server }: { server: DnsServer }) {
+  const [windowOpt, setWindowOpt] = useState<SelectProps.Option>({ value: '60', label: '1 hour' });
+  const minutes = Number(windowOpt.value);
+  const { data, isLoading } = useQuery({
+    queryKey: ['dns-server-metrics', server.id, minutes],
+    queryFn: async () => (
+      await http.get<MetricsSample[]>(`/dns/servers/${server.id}/metrics?minutes=${minutes}`)
+    ).data ?? [],
+    refetchInterval: 30_000,
+  });
+  const samples = data ?? [];
+
+  if (isLoading) {
+    return <Box color="text-status-inactive"><Spinner /> Loading metrics…</Box>;
+  }
+  if (samples.length === 0) {
+    return <Box color="text-status-inactive">No samples in this window yet.</Box>;
+  }
+
+  // QPS + rcode-breakdown lines computed client-side from the
+  // per-interval deltas the collector reports. The backend
+  // intentionally doesn't aggregate — keep the server math simple.
+  const chart = samples.map((s) => {
+    const dt = s.interval_seconds || 1;
+    return {
+      t: new Date(s.observed_at).getTime(),
+      qps: s.queries / dt,
+      noerror: s.noerror / dt,
+      nxdomain: s.nxdomain / dt,
+      servfail: s.servfail / dt,
+      p50: s.p50_ms ?? 0,
+      p95: s.p95_ms ?? 0,
+    };
+  });
+  // Sum totals across the window for the summary chips.
+  const totals = samples.reduce(
+    (acc, s) => ({
+      queries: acc.queries + s.queries,
+      noerror: acc.noerror + s.noerror,
+      nxdomain: acc.nxdomain + s.nxdomain,
+      servfail: acc.servfail + s.servfail,
+    }),
+    { queries: 0, noerror: 0, nxdomain: 0, servfail: 0 },
+  );
+  const last = samples[samples.length - 1];
+  const lastQps = chart[chart.length - 1].qps;
+  const fmtTime = (t: number) => new Date(Number(t)).toISOString().replace(/\.\d{3}Z$/, 'Z');
+
+  return (
+    <SpaceBetween size="m">
+      <SpaceBetween size="xs" direction="horizontal">
+        <Box variant="awsui-key-label">Window</Box>
+        <Select
+          selectedOption={windowOpt}
+          onChange={({ detail }) => {
+            if (detail.selectedOption.value) setWindowOpt(detail.selectedOption);
+          }}
+          options={[
+            { value: '15', label: '15 minutes' },
+            { value: '60', label: '1 hour' },
+            { value: '240', label: '4 hours' },
+            { value: '720', label: '12 hours' },
+            { value: '1440', label: '24 hours' },
+          ]}
+        />
+      </SpaceBetween>
+
+      <KeyValuePairs
+        columns={4}
+        items={[
+          { label: 'Current QPS', value: <span style={MONO}>{lastQps.toFixed(2)}</span> },
+          { label: 'Window total', value: <span style={MONO}>{totals.queries.toLocaleString()} queries</span> },
+          {
+            label: 'NXDOMAIN %',
+            value: <span style={MONO}>{totals.queries > 0 ? (100 * totals.nxdomain / totals.queries).toFixed(2) : '0.00'}%</span>,
+          },
+          {
+            label: 'SERVFAIL %',
+            value: <span style={MONO}>{totals.queries > 0 ? (100 * totals.servfail / totals.queries).toFixed(2) : '0.00'}%</span>,
+          },
+          { label: 'p50 latency', value: <span style={MONO}>{last.p50_ms != null ? last.p50_ms.toFixed(2) + ' ms' : '—'}</span> },
+          { label: 'p95 latency', value: <span style={MONO}>{last.p95_ms != null ? last.p95_ms.toFixed(2) + ' ms' : '—'}</span> },
+          { label: 'Last sample', value: <span style={MONO}>{fmtTime(chart[chart.length - 1].t)}</span> },
+          { label: 'Samples', value: samples.length },
+        ]}
+      />
+
+      <Container header={<Header variant="h3">Queries per second (by rcode)</Header>}>
+        <div style={{ width: '100%', height: 220 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chart}>
+              <XAxis dataKey="t" tickFormatter={(t) => fmtTime(t).slice(11, 19)} />
+              <YAxis allowDecimals />
+              <Tooltip labelFormatter={(t) => fmtTime(Number(t))} />
+              <Line type="monotone" dataKey="noerror" stroke="#1b8e1b" strokeWidth={1.5} dot={false} isAnimationActive={false} name="NOERROR" />
+              <Line type="monotone" dataKey="nxdomain" stroke="#c2640e" strokeWidth={1.5} dot={false} isAnimationActive={false} name="NXDOMAIN" />
+              <Line type="monotone" dataKey="servfail" stroke="#b8252f" strokeWidth={1.5} dot={false} isAnimationActive={false} name="SERVFAIL" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </Container>
+
+      <Container header={<Header variant="h3">Response latency (ms)</Header>}>
+        <div style={{ width: '100%', height: 200 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chart}>
+              <XAxis dataKey="t" tickFormatter={(t) => fmtTime(t).slice(11, 19)} />
+              <YAxis allowDecimals />
+              <Tooltip labelFormatter={(t) => fmtTime(Number(t))} />
+              <Line type="monotone" dataKey="p50" stroke="#0972d3" strokeWidth={1.5} dot={false} isAnimationActive={false} name="p50" />
+              <Line type="monotone" dataKey="p95" stroke="#7d4cbb" strokeWidth={1.5} dot={false} isAnimationActive={false} name="p95" />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </Container>
+    </SpaceBetween>
   );
 }
 
