@@ -897,13 +897,13 @@ function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
             </FormField>
             <FormField
               label="TTL (seconds)"
-              description={`Clear to inherit the zone default (${zone.default_ttl})`}
+              description="Defaults to 60 seconds"
             >
               <Input
                 type="number"
                 value={ttl}
                 onChange={({ detail }) => setTtl(detail.value)}
-                placeholder={String(zone.default_ttl)}
+                placeholder="60"
               />
             </FormField>
           </ColumnLayout>
@@ -1226,8 +1226,14 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
             width: 160,
           },
           {
-            id: 'render', header: 'Last render',
-            cell: (s) => <RenderStatusBadge server={s} />,
+            id: 'status', header: 'Status',
+            cell: (s) => <RenderStatusCell server={s} />,
+            width: 120,
+          },
+          {
+            id: 'last_render', header: 'Last render (UTC)',
+            cell: (s) => <LastRenderCell server={s} />,
+            width: 220,
           },
           {
             id: 'announced_peer', header: 'Announced to peer',
@@ -1302,27 +1308,31 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
 }
 
 
-function RenderStatusBadge({ server }: { server: DnsServer }) {
+function RenderStatusCell({ server }: { server: DnsServer }) {
   if (!server.last_render_at) {
-    return <Box color="text-status-inactive" fontSize="body-s">never</Box>;
+    return <Box color="text-status-inactive" fontSize="body-s">Never</Box>;
   }
   const ok = server.last_render_status === 'ok';
-  const when = new Date(server.last_render_at).toLocaleString();
+  // The title gives a hover-over for the error text — the operator's
+  // quickest path when last_render_status='error'.
   return (
-    <SpaceBetween size="xxs" direction="horizontal">
+    <span title={server.last_render_error ?? ''}>
       <StatusIndicator type={ok ? 'success' : 'error'}>
-        {server.last_render_status}
+        {ok ? 'OK' : 'Down'}
       </StatusIndicator>
-      <Box
-        color="text-status-inactive"
-        fontSize="body-s"
-        // The title gives a hover-over for the error text, which is the
-        // operator's quickest path when last_render_status='error'.
-      >
-        <span title={server.last_render_error ?? ''}>{when}</span>
-      </Box>
-    </SpaceBetween>
+    </span>
   );
+}
+
+// Render the last-render timestamp in Zulu (UTC ISO 8601, second
+// precision) — easier to correlate across sites than localized time.
+function LastRenderCell({ server }: { server: DnsServer }) {
+  if (!server.last_render_at) {
+    return <Box color="text-status-inactive" fontSize="body-s">—</Box>;
+  }
+  const d = new Date(server.last_render_at);
+  const zulu = d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  return <span style={MONO}>{zulu}</span>;
 }
 
 // The Servers table renders bindings across two columns ("Announced to
