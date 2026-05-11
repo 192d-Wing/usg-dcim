@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_sender: str = "dcim-alerts@example.org"
 
+    # AS number used as the originating AS for all DNS recursive
+    # anycast announcements. Renders into every recursive server's
+    # GoBGP `global.config.as` so the leaf/ToR sees the same origin AS
+    # regardless of which site the announcement comes from. 4200000000
+    # is a 4-byte private ASN (RFC 6996).
+    dns_anycast_originate_asn: int = 4_200_000_000
+
 
 @lru_cache
 def get_settings() -> Settings:

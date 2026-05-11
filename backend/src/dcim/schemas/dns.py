@@ -201,24 +201,29 @@ class AnycastGroupOut(AnycastGroupBase):
 class BgpPeerBase(BaseModel):
     name: str
     site_id: UUID
-    local_asn: int
-    peer_asn: int
+    # AS numbers reference the ASN catalog (bgp_asns). The API layer
+    # cross-checks both FKs at create/patch time.
+    local_asn_id: UUID
+    peer_asn_id: UUID
     peer_ip: InetStr
     peer_description: str | None = None
+    # Optional TCP AO key chain reference (RFC 5925). MD5 password is
+    # deprecated and no longer surfaced.
+    tcp_ao_key_chain_id: UUID | None = None
     enabled: bool = True
 
 
 class BgpPeerCreate(BgpPeerBase):
-    md5_password: str | None = None
+    pass
 
 
 class BgpPeerUpdate(BaseModel):
     name: str | None = None
-    local_asn: int | None = None
-    peer_asn: int | None = None
+    local_asn_id: UUID | None = None
+    peer_asn_id: UUID | None = None
     peer_ip: str | None = None
     peer_description: str | None = None
-    md5_password: str | None = None
+    tcp_ao_key_chain_id: UUID | None = None
     enabled: bool | None = None
 
 

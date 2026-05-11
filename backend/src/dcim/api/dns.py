@@ -43,6 +43,7 @@ from ..models.dns import (
     DnsZone,
     DnsZoneKind,
 )
+from ..models.bgp import Asn, TcpAoKeyChain
 from ..models.inventory import Site
 from ..models.ipam import Fabric
 from ..schemas.common import Page, PageParams
@@ -606,14 +607,25 @@ async def create_bgp_peer(
     site = await db.get(Site, payload.site_id)
     if site is None:
         raise ValidationError(f"site {payload.site_id} not found")
+    # Cross-check ASN catalog FKs at the call site so 404s land here
+    # instead of as an opaque IntegrityError at commit.
+    if await db.get(Asn, payload.local_asn_id) is None:
+        raise NotFoundError(f"local ASN {payload.local_asn_id} not found")
+    if await db.get(Asn, payload.peer_asn_id) is None:
+        raise NotFoundError(f"peer ASN {payload.peer_asn_id} not found")
+    if (
+        payload.tcp_ao_key_chain_id is not None
+        and await db.get(TcpAoKeyChain, payload.tcp_ao_key_chain_id) is None
+    ):
+        raise NotFoundError(f"tcp ao key chain {payload.tcp_ao_key_chain_id} not found")
     obj = BgpPeer(**payload.model_dump())
     db.add(obj)
     await db.flush()
-    redacted = {"name": payload.name, "peer_ip": payload.peer_ip, "peer_asn": payload.peer_asn}
+    metadata = {"name": payload.name, "peer_ip": payload.peer_ip}
     await audit.record(
         db, principal, action="bgp_peer.create",
         target_type="bgp_peer", target_id=str(obj.id),
-        site_id=obj.site_id, metadata=redacted,
+        site_id=obj.site_id, metadata=metadata,
     )
     await db.commit()
     await db.refresh(obj)
@@ -631,13 +643,30 @@ async def update_bgp_peer(
     if obj is None:
         raise NotFoundError(_BGP_NOT_FOUND)
     diff = payload.model_dump(exclude_unset=True)
-    redacted = {k: ("***" if k == "md5_password" else v) for k, v in diff.items()}
+    if (
+        "local_asn_id" in diff
+        and diff["local_asn_id"] is not None
+        and await db.get(Asn, diff["local_asn_id"]) is None
+    ):
+        raise NotFoundError(f"local ASN {diff['local_asn_id']} not found")
+    if (
+        "peer_asn_id" in diff
+        and diff["peer_asn_id"] is not None
+        and await db.get(Asn, diff["peer_asn_id"]) is None
+    ):
+        raise NotFoundError(f"peer ASN {diff['peer_asn_id']} not found")
+    if (
+        "tcp_ao_key_chain_id" in diff
+        and diff["tcp_ao_key_chain_id"] is not None
+        and await db.get(TcpAoKeyChain, diff["tcp_ao_key_chain_id"]) is None
+    ):
+        raise NotFoundError(f"tcp ao key chain {diff['tcp_ao_key_chain_id']} not found")
     for k, v in diff.items():
         setattr(obj, k, v)
     await audit.record(
         db, principal, action="bgp_peer.update",
         target_type="bgp_peer", target_id=str(peer_id),
-        site_id=obj.site_id, diff=redacted,
+        site_id=obj.site_id, diff=diff,
     )
     await db.commit()
     await db.refresh(obj)

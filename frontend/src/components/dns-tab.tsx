@@ -21,11 +21,13 @@ import FormField from '@cloudscape-design/components/form-field';
 import Header from '@cloudscape-design/components/header';
 import Input from '@cloudscape-design/components/input';
 import Modal from '@cloudscape-design/components/modal';
+import Multiselect, { MultiselectProps } from '@cloudscape-design/components/multiselect';
 import Select, { SelectProps } from '@cloudscape-design/components/select';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Spinner from '@cloudscape-design/components/spinner';
 import Table from '@cloudscape-design/components/table';
+import Tabs from '@cloudscape-design/components/tabs';
 import {
   colorBackgroundContainerContent, colorBorderDividerDefault,
 } from '@cloudscape-design/design-tokens';
@@ -83,10 +85,11 @@ type BgpPeer = {
   id: string;
   name: string;
   site_id: string;
-  local_asn: number;
-  peer_asn: number;
+  local_asn_id: string;
+  peer_asn_id: string;
   peer_ip: string;
 };
+type Asn = { id: string; asn: number; name: string };
 
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'NS', 'CAA', 'PTR'] as const;
 type RecordType = (typeof RECORD_TYPES)[number];
@@ -99,6 +102,7 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
   const fabrics = fabricsRes.result.data ?? [];
   const [fabricId, setFabricId] = useState<string>('');
   const [zoneId, setZoneId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('zones');
 
   useEffect(() => {
     if (!fabricId && fabrics.length > 0) setFabricId(fabrics[0].id);
@@ -108,10 +112,23 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
     fabrics.map((f) => ({ value: f.id, label: f.name }));
   const fabricOpt = fabricOptions.find((o) => o.value === fabricId) ?? null;
 
+  if (!fabricId) {
+    return (
+      <Container>
+        <Box padding="m" color="text-status-inactive">
+          {fabricsRes.query.isLoading ? 'Loading fabrics…' : 'No fabrics yet.'}
+        </Box>
+      </Container>
+    );
+  }
+
   return (
-    <SpaceBetween size="l">
-      <Container header={<Header variant="h2">Fabric</Header>}>
-        <FormField label="Fabric">
+    <SpaceBetween size="m">
+      {/* Compact fabric picker — sits above the tab strip so every
+        sub-tab's data is scoped to the same fabric. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Box variant="awsui-key-label">Fabric</Box>
+        <div style={{ minWidth: 260 }}>
           <Select
             placeholder="Pick a fabric"
             selectedOption={fabricOpt}
@@ -124,36 +141,48 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
             options={fabricOptions}
             expandToViewport
           />
-        </FormField>
-      </Container>
+        </div>
+      </div>
 
-      {fabricId && (
-        <ColumnLayout columns={2}>
-          <ZonesPanel
-            fabricId={fabricId}
-            selectedZoneId={zoneId}
-            onSelectZone={setZoneId}
-            canWrite={canWrite}
-          />
-          {zoneId
-            ? <RecordsPanel zoneId={zoneId} canWrite={canWrite} />
-            : (
-              <Container>
-                <Box padding="m" color="text-status-inactive">
-                  Pick a zone to see its records.
-                </Box>
-              </Container>
-            )}
-        </ColumnLayout>
-      )}
-
-      {fabricId && (
-        <AnycastGroupsPanel fabricId={fabricId} canWrite={canWrite} />
-      )}
-
-      {fabricId && (
-        <ServersPanel fabricId={fabricId} canWrite={canWrite} />
-      )}
+      <Tabs
+        activeTabId={activeTab}
+        onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+        tabs={[
+          {
+            id: 'zones',
+            label: 'Zones & records',
+            content: (
+              <ColumnLayout columns={2}>
+                <ZonesPanel
+                  fabricId={fabricId}
+                  selectedZoneId={zoneId}
+                  onSelectZone={setZoneId}
+                  canWrite={canWrite}
+                />
+                {zoneId
+                  ? <RecordsPanel zoneId={zoneId} canWrite={canWrite} />
+                  : (
+                    <Container>
+                      <Box padding="m" color="text-status-inactive">
+                        Pick a zone to see its records.
+                      </Box>
+                    </Container>
+                  )}
+              </ColumnLayout>
+            ),
+          },
+          {
+            id: 'servers',
+            label: 'Servers',
+            content: <ServersPanel fabricId={fabricId} canWrite={canWrite} />,
+          },
+          {
+            id: 'anycast',
+            label: 'Anycast groups',
+            content: <AnycastGroupsPanel fabricId={fabricId} canWrite={canWrite} />,
+          },
+        ]}
+      />
     </SpaceBetween>
   );
 }
@@ -894,13 +923,24 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
       await http.get<{ items: BgpPeer[] }>(`/dns/bgp-peers?page_size=500`)
     ).data.items ?? [],
   });
+  // ASN catalog feeds the "AS65000" label on the BindingsCell pickers
+  // and on the per-binding chips. BgpPeer rows reference ASN ids only.
+  const asnsQ = useQuery({
+    queryKey: ['bgp-asns'],
+    queryFn: async () => (
+      await http.get<{ items: Asn[] }>('/bgp/asns?page_size=500')
+    ).data.items ?? [],
+  });
   const servers = serversQ.data ?? [];
   const anycast = anycastQ.data ?? [];
   const peers = peersQ.data ?? [];
+  const asnsById = useMemo(
+    () => new Map((asnsQ.data ?? []).map((a) => [a.id, a])),
+    [asnsQ.data],
+  );
 
   const [serverOpen, setServerOpen] = useState(false);
   const [editServer, setEditServer] = useState<DnsServer | null>(null);
-  const [bgpOpen, setBgpOpen] = useState(false);
 
   async function refreshServers() {
     await qc.invalidateQueries({ queryKey: ['dns-servers', fabricId] });
@@ -914,6 +954,16 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
 
+  // Build a tooltip for the role chip so anycast IPs are still
+  // reachable without dedicating two columns to them.
+  function roleTooltip(s: DnsServer): string {
+    if (s.role !== 'recursive') return 'authoritative';
+    const ag = anycast.find((a) => a.id === s.anycast_group_id);
+    if (!ag) return 'recursive (no anycast group bound)';
+    const ips = [ag.anycast_ipv4, ag.anycast_ipv6].filter(Boolean).join(' · ');
+    return `recursive · anycast: ${ips || '—'}`;
+  }
+
   return (
     <>
       <Table<DnsServer>
@@ -925,14 +975,14 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
         header={
           <Header
             counter={`(${servers.length})`}
+            description="Authoritative servers serve site zones; recursive servers forward everything else and announce an anycast IP via BGP."
             actions={canWrite && (
-              <SpaceBetween size="xs" direction="horizontal">
-                <Button iconName="add-plus" onClick={() => setBgpOpen(true)}>BGP peer</Button>
-                <Button variant="primary" iconName="add-plus" onClick={() => setServerOpen(true)}>DNS server</Button>
-              </SpaceBetween>
+              <Button variant="primary" iconName="add-plus" onClick={() => setServerOpen(true)}>
+                New DNS server
+              </Button>
             )}
           >
-            DNS servers + anycast
+            DNS servers
           </Header>
         }
         columnDefinitions={[
@@ -948,36 +998,34 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
           },
           {
             id: 'role', header: 'Role',
-            cell: (s) => <Badge color={s.role === 'recursive' ? 'blue' : 'grey'}>{s.role}</Badge>,
+            cell: (s) => (
+              <span title={roleTooltip(s)}>
+                <Badge color={s.role === 'recursive' ? 'blue' : 'grey'}>{s.role}</Badge>
+              </span>
+            ),
             width: 110,
           },
           {
             id: 'unicast', header: 'Unicast IP',
             cell: (s) => <span style={MONO}>{s.unicast_ip}</span>,
-          },
-          {
-            id: 'v4', header: 'Anycast v4',
-            cell: (s) => {
-              const ag = anycast.find((a) => a.id === s.anycast_group_id);
-              return <span style={MONO}>{ag?.anycast_ipv4 ?? '—'}</span>;
-            },
-          },
-          {
-            id: 'v6', header: 'Anycast v6',
-            cell: (s) => {
-              const ag = anycast.find((a) => a.id === s.anycast_group_id);
-              return <span style={MONO}>{ag?.anycast_ipv6 ?? '—'}</span>;
-            },
+            width: 160,
           },
           {
             id: 'render', header: 'Last render',
             cell: (s) => <RenderStatusBadge server={s} />,
           },
           {
-            id: 'bgp', header: 'BGP peers',
+            id: 'announced_peer', header: 'Announced to peer',
             cell: (s) => s.role === 'recursive'
-              ? <BindingsCell server={s} peers={peers} canWrite={canWrite} />
+              ? <BindingsCell server={s} peers={peers} asnsById={asnsById} mode="peer" canWrite={canWrite} />
               : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+          },
+          {
+            id: 'announced_asn', header: 'Announced to ASN',
+            cell: (s) => s.role === 'recursive'
+              ? <BindingsCell server={s} peers={peers} asnsById={asnsById} mode="asn" canWrite={canWrite} />
+              : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+            width: 140,
           },
           ...(canWrite ? [{
             id: 'actions', header: '',
@@ -999,20 +1047,6 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
       {canWrite && (
         <>
           <Modal
-            visible={bgpOpen}
-            onDismiss={() => setBgpOpen(false)}
-            header="New BGP peer"
-            size="medium"
-          >
-            <BgpPeerForm
-              sites={sites}
-              onSaved={async () => {
-                setBgpOpen(false);
-                await qc.invalidateQueries({ queryKey: ['bgp-peers'] });
-              }}
-            />
-          </Modal>
-          <Modal
             visible={serverOpen}
             onDismiss={() => setServerOpen(false)}
             header="New DNS server"
@@ -1022,6 +1056,7 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
               fabricId={fabricId}
               sites={sites}
               anycast={anycast}
+              peers={peers}
               onSaved={async () => {
                 setServerOpen(false);
                 await qc.invalidateQueries({ queryKey: ['dns-servers', fabricId] });
@@ -1039,6 +1074,7 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
                 fabricId={fabricId}
                 sites={sites}
                 anycast={anycast}
+                peers={peers}
                 server={editServer}
                 onSaved={async () => { setEditServer(null); await refreshServers(); }}
               />
@@ -1049,6 +1085,7 @@ function ServersPanel({ fabricId, canWrite }: { fabricId: string; canWrite: bool
     </>
   );
 }
+
 
 function RenderStatusBadge({ server }: { server: DnsServer }) {
   if (!server.last_render_at) {
@@ -1073,9 +1110,24 @@ function RenderStatusBadge({ server }: { server: DnsServer }) {
   );
 }
 
+// The Servers table renders bindings across two columns ("Announced to
+// peer" + "Announced to ASN"). Both cells share the same react-query
+// cache (queryKey: ['anycast-bindings', server.id]) so the second cell
+// reuses the first's fetch — no duplicate network. The `mode` prop
+// picks what to render:
+//   peer — peer-name chip + IP, with the Add/Remove affordances
+//   asn  — read-only AS number, one row per binding, aligned with peer
+type BindingsCellMode = 'peer' | 'asn';
+
 function BindingsCell({
-  server, peers, canWrite,
-}: { server: DnsServer; peers: BgpPeer[]; canWrite: boolean }) {
+  server, peers, asnsById, canWrite, mode,
+}: Readonly<{
+  server: DnsServer;
+  peers: BgpPeer[];
+  asnsById: Map<string, Asn>;
+  canWrite: boolean;
+  mode: BindingsCellMode;
+}>) {
   const qc = useQueryClient();
   const bindingsQ = useQuery({
     queryKey: ['anycast-bindings', server.id],
@@ -1085,6 +1137,11 @@ function BindingsCell({
   });
   const bindings = bindingsQ.data ?? [];
   const sitePeers = peers.filter((p) => p.site_id === server.site_id);
+
+  function asLabel(p: BgpPeer): string {
+    const a = asnsById.get(p.peer_asn_id);
+    return a ? `AS${a.asn}` : '';
+  }
 
   async function add(peerId: string) {
     try {
@@ -1100,9 +1157,33 @@ function BindingsCell({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
 
+  if (bindings.length === 0 && (mode === 'asn' || !canWrite)) {
+    return <Box color="text-status-inactive" fontSize="body-s">—</Box>;
+  }
+
+  if (mode === 'asn') {
+    // Read-only column. One AS chip per binding; aligned row-for-row
+    // with the peer cell next to it (same iteration order).
+    return (
+      <SpaceBetween size="xxs">
+        {bindings.map((b) => {
+          const p = peers.find((x) => x.id === b.bgp_peer_id);
+          const as = p ? asLabel(p) : '';
+          return (
+            <Box key={b.id} fontSize="body-s">
+              {as || <span style={{ color: 'var(--color-text-status-inactive-gy7337, #757575)' }}>—</span>}
+            </Box>
+          );
+        })}
+      </SpaceBetween>
+    );
+  }
+
+  // mode === 'peer' — name + IP per binding, plus the add/remove
+  // affordances. This is the writable side of the split.
   const peerOptions: SelectProps.Option[] = sitePeers
     .filter((p) => !bindings.some((b) => b.bgp_peer_id === p.id))
-    .map((p) => ({ value: p.id, label: `${p.peer_ip} (AS${p.peer_asn})` }));
+    .map((p) => ({ value: p.id, label: p.name, description: p.peer_ip }));
 
   return (
     <SpaceBetween size="xxs">
@@ -1110,12 +1191,14 @@ function BindingsCell({
         const p = peers.find((x) => x.id === b.bgp_peer_id);
         return (
           <SpaceBetween key={b.id} size="xxs" direction="horizontal">
-            <span style={{ ...MONO, fontSize: '12px' }}>
-              {p?.peer_ip ?? b.bgp_peer_id.slice(0, 8) + '…'}
-            </span>
-            {p && (
-              <Box color="text-status-inactive" fontSize="body-s">AS{p.peer_asn}</Box>
-            )}
+            <Box fontSize="body-s">
+              {p?.name ?? b.bgp_peer_id.slice(0, 8) + '…'}
+              {p && (
+                <span style={{ marginLeft: 6, color: 'var(--color-text-status-inactive-gy7337, #757575)', fontFamily: 'ui-monospace, monospace' }}>
+                  {p.peer_ip}
+                </span>
+              )}
+            </Box>
             {canWrite && (
               <Button
                 iconName="remove"
@@ -1143,15 +1226,17 @@ function BindingsCell({
 }
 
 function ServerForm({
-  fabricId, sites, anycast, server, onSaved,
+  fabricId, sites, anycast, peers, server, onSaved,
 }: {
   fabricId: string;
   sites: Site[];
   anycast: AnycastGroup[];
+  peers: BgpPeer[];
   server?: DnsServer;
   onSaved: () => void;
 }) {
   const editing = !!server;
+  const qc = useQueryClient();
   const [name, setName] = useState(server?.name ?? '');
   const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(() => {
     if (!server) return null;
@@ -1171,6 +1256,31 @@ function ServerForm({
       ? { value: g.id, label: `${g.name} (${g.anycast_ipv4 ?? g.anycast_ipv6 ?? '—'})` }
       : null;
   });
+
+  // Existing peer-bindings for this server (recursive only). The form
+  // tracks the operator's intent as a set of peer IDs; on save we diff
+  // against the server-side state and emit per-peer POST/DELETE calls.
+  const bindingsQ = useQuery({
+    queryKey: ['anycast-bindings', server?.id],
+    queryFn: async () => server
+      ? (await http.get<{ items: { id: string; bgp_peer_id: string }[] }>(
+        `/dns/anycast-bindings?dns_server_id=${server.id}&page_size=50`,
+      )).data.items ?? []
+      : [],
+    enabled: !!server && server.role === 'recursive',
+  });
+  const existingBindings = bindingsQ.data ?? [];
+  const [selectedPeerIds, setSelectedPeerIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  // Seed the selection once bindings load (only if the operator hasn't
+  // already touched it — initial empty set means "untouched").
+  const [bindingsSeeded, setBindingsSeeded] = useState(false);
+  if (!bindingsSeeded && existingBindings.length > 0) {
+    setSelectedPeerIds(new Set(existingBindings.map((b) => b.bgp_peer_id)));
+    setBindingsSeeded(true);
+  }
+
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -1187,6 +1297,25 @@ function ServerForm({
 
   const role = roleOpt.value as 'auth' | 'recursive';
 
+  async function syncBindings(serverId: string) {
+    // Diff selection vs server-side state and apply the difference.
+    // Per-peer POST/DELETE because the backend doesn't expose a bulk-set
+    // endpoint — fine for the small fanout (typically 1-3 peers).
+    const have = new Map(existingBindings.map((b) => [b.bgp_peer_id, b.id]));
+    const want = selectedPeerIds;
+    const toAdd = [...want].filter((pid) => !have.has(pid));
+    const toRemove = [...have.entries()].filter(([pid]) => !want.has(pid));
+    for (const pid of toAdd) {
+      await http.post('/dns/anycast-bindings', {
+        dns_server_id: serverId, bgp_peer_id: pid,
+      });
+    }
+    for (const [, bindingId] of toRemove) {
+      await http.delete(`/dns/anycast-bindings/${bindingId}`);
+    }
+    await qc.invalidateQueries({ queryKey: ['anycast-bindings', serverId] });
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs: Record<string, string> = {};
@@ -1197,6 +1326,7 @@ function ServerForm({
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
     try {
+      let serverId: string;
       if (editing && server) {
         await http.patch(`/dns/servers/${server.id}`, {
           name,
@@ -1204,9 +1334,10 @@ function ServerForm({
           anycast_group_id: server.role === 'recursive' && anycastOpt?.value
             ? anycastOpt.value : null,
         });
+        serverId = server.id;
         toast.success('DNS server updated');
       } else {
-        await http.post('/dns/servers', {
+        const r = await http.post<{ id: string }>('/dns/servers', {
           name,
           site_id: siteOpt!.value,
           fabric_id: fabricId,
@@ -1214,7 +1345,13 @@ function ServerForm({
           unicast_ip: unicastIp,
           anycast_group_id: role === 'recursive' && anycastOpt?.value ? anycastOpt.value : null,
         });
+        serverId = r.data.id;
         toast.success('DNS server created');
+      }
+      // Sync peer bindings only for recursive servers — auth servers
+      // don't announce anything.
+      if (role === 'recursive') {
+        await syncBindings(serverId);
       }
       onSaved();
     } catch (err: any) {
@@ -1279,18 +1416,52 @@ function ServerForm({
             />
           </FormField>
           {role === 'recursive' && (
-            <FormField
-              label="Anycast group"
-              description="Recursive servers must bind an anycast group."
-            >
-              <Select
-                placeholder="Pick an anycast group"
-                selectedOption={anycastOpt}
-                onChange={({ detail }) => setAnycastOpt(detail.selectedOption)}
-                options={anycastOptions}
-                expandToViewport
-              />
-            </FormField>
+            <>
+              <FormField
+                label="Anycast group"
+                description="Recursive servers must bind an anycast group."
+              >
+                <Select
+                  placeholder="Pick an anycast group"
+                  selectedOption={anycastOpt}
+                  onChange={({ detail }) => setAnycastOpt(detail.selectedOption)}
+                  options={anycastOptions}
+                  expandToViewport
+                />
+              </FormField>
+              <FormField
+                label="Announced to"
+                description={
+                  siteOpt
+                    ? 'BGP peers that this recursive server advertises its anycast IP to. Scoped to peers at the same site.'
+                    : 'Pick a site first — peers scope to the server site.'
+                }
+              >
+                <Multiselect
+                  placeholder="Pick BGP peers"
+                  selectedOptions={
+                    peers
+                      .filter((p) => selectedPeerIds.has(p.id))
+                      .map((p) => ({ value: p.id, label: p.name, description: p.peer_ip }))
+                  }
+                  onChange={({ detail }) => {
+                    const next = new Set<string>();
+                    for (const o of detail.selectedOptions) {
+                      if (o.value) next.add(o.value);
+                    }
+                    setSelectedPeerIds(next);
+                  }}
+                  options={
+                    peers
+                      .filter((p) => !siteOpt || p.site_id === siteOpt.value)
+                      .map((p) => ({ value: p.id, label: p.name, description: p.peer_ip } satisfies MultiselectProps.Option))
+                  }
+                  filteringType="auto"
+                  expandToViewport
+                  empty="No BGP peers available for this site"
+                />
+              </FormField>
+            </>
           )}
         </SpaceBetween>
       </Form>
@@ -1409,93 +1580,3 @@ function AnycastForm({
   );
 }
 
-function BgpPeerForm({ sites, onSaved }: { sites: Site[]; onSaved: () => void }) {
-  const [name, setName] = useState('');
-  const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
-  const [localAsn, setLocalAsn] = useState('65000');
-  const [peerAsn, setPeerAsn] = useState('65001');
-  const [peerIp, setPeerIp] = useState('');
-  const [md5, setMd5] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const siteOptions: SelectProps.Option[] = sites.map((s) => ({
-    value: s.id, label: `${s.code} · ${s.name}`,
-  }));
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const errs: Record<string, string> = {};
-    if (!name.trim()) errs.name = 'Required';
-    if (!siteOpt) errs.site = 'Pick a site';
-    if (!peerIp.trim()) errs.peer_ip = 'Required';
-    setErrors(errs);
-    if (Object.keys(errs).length > 0) return;
-    setSubmitting(true);
-    try {
-      await http.post('/dns/bgp-peers', {
-        name,
-        site_id: siteOpt!.value,
-        local_asn: Number(localAsn),
-        peer_asn: Number(peerAsn),
-        peer_ip: peerIp,
-        md5_password: md5 || null,
-      });
-      toast.success('BGP peer created');
-      onSaved();
-    } catch (err: any) {
-      toast.error(err?.message ?? 'failed');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form onSubmit={onSubmit}>
-      <Form
-        actions={
-          <Button variant="primary" formAction="submit" loading={submitting}>
-            {submitting ? 'Saving…' : 'Create'}
-          </Button>
-        }
-      >
-        <SpaceBetween size="m">
-          <FormField label="Name" errorText={errors.name}>
-            <Input
-              value={name}
-              onChange={({ detail }) => setName(detail.value)}
-              placeholder="e.g. site42-leaf-01"
-            />
-          </FormField>
-          <FormField label="Site" errorText={errors.site}>
-            <Select
-              placeholder="Pick a site"
-              selectedOption={siteOpt}
-              onChange={({ detail }) => setSiteOpt(detail.selectedOption)}
-              options={siteOptions}
-              expandToViewport
-            />
-          </FormField>
-          <ColumnLayout columns={2}>
-            <FormField label="Local AS">
-              <Input type="number" value={localAsn} onChange={({ detail }) => setLocalAsn(detail.value)} />
-            </FormField>
-            <FormField label="Peer AS">
-              <Input type="number" value={peerAsn} onChange={({ detail }) => setPeerAsn(detail.value)} />
-            </FormField>
-          </ColumnLayout>
-          <FormField label="Peer IP" errorText={errors.peer_ip}>
-            <Input
-              value={peerIp}
-              onChange={({ detail }) => setPeerIp(detail.value)}
-              placeholder="10.42.255.1"
-            />
-          </FormField>
-          <FormField label="MD5 password (optional)">
-            <Input type="password" value={md5} onChange={({ detail }) => setMd5(detail.value)} />
-          </FormField>
-        </SpaceBetween>
-      </Form>
-    </form>
-  );
-}

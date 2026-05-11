@@ -35,8 +35,9 @@ type Vrf = {
 type Fabric = { id: string; name: string; slug: string };
 type BgpPeer = {
   id: string; name: string; site_id: string;
-  local_asn: number; peer_asn: number; peer_ip: string;
+  local_asn_id: string; peer_asn_id: string; peer_ip: string;
 };
+type Asn = { id: string; asn: number; name: string };
 type AddressFamily = 'vpnv4' | 'vpnv6' | 'evpn';
 type VrfBgpPeer = {
   id: string; vrf_id: string; bgp_peer_id: string;
@@ -256,10 +257,21 @@ function BgpPeerBindingsPanel({
       await http.get<{ items: BgpPeer[] }>(`/dns/bgp-peers?page_size=500`)
     ).data.items ?? [],
   });
+  // Resolve a peer's local/peer ASN ids → AS numbers via the catalog.
+  const asnsQ = useQuery({
+    queryKey: ['bgp-asns'],
+    queryFn: async () => (
+      await http.get<{ items: Asn[] }>('/bgp/asns?page_size=500')
+    ).data.items ?? [],
+  });
 
   const bindings = bindingsQ.data ?? [];
   const peers = peersQ.data ?? [];
   const peersById = useMemo(() => new Map(peers.map((p) => [p.id, p])), [peers]);
+  const asnsById = useMemo(
+    () => new Map((asnsQ.data ?? []).map((a) => [a.id, a])),
+    [asnsQ.data],
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editBinding, setEditBinding] = useState<VrfBgpPeer | null>(null);
@@ -305,12 +317,13 @@ function BgpPeerBindingsPanel({
             cell: (b) => {
               const p = peersById.get(b.bgp_peer_id);
               if (!p) return b.bgp_peer_id.slice(0, 8) + '…';
+              const peerAsn = asnsById.get(p.peer_asn_id)?.asn;
               return (
                 <SpaceBetween size="xxs">
                   <span>{p.name}</span>
                   <Box color="text-status-inactive" fontSize="body-s">
                     <span style={{ fontFamily: 'ui-monospace, monospace' }}>{p.peer_ip}</span>
-                    {' '}· AS{p.peer_asn}
+                    {peerAsn ? ` · AS${peerAsn}` : ''}
                   </Box>
                 </SpaceBetween>
               );
@@ -377,6 +390,7 @@ function BgpPeerBindingsPanel({
           <BindingForm
             vrf={vrf}
             peers={peers}
+            asnsById={asnsById}
             existing={bindings}
             onSaved={async () => {
               setCreateOpen(false);
@@ -395,6 +409,7 @@ function BgpPeerBindingsPanel({
           <BindingForm
             vrf={vrf}
             peers={peers}
+            asnsById={asnsById}
             existing={bindings}
             binding={editBinding}
             onSaved={async () => {
@@ -409,21 +424,26 @@ function BgpPeerBindingsPanel({
 }
 
 function BindingForm({
-  vrf, peers, existing, binding, onSaved,
+  vrf, peers, asnsById, existing, binding, onSaved,
 }: Readonly<{
   vrf: Vrf;
   peers: BgpPeer[];
+  asnsById: Map<string, Asn>;
   existing: VrfBgpPeer[];
   binding?: VrfBgpPeer;
   onSaved: () => void;
 }>) {
   const editing = !!binding;
 
-  const peerOptions: SelectProps.Option[] = peers.map((p) => ({
-    value: p.id,
-    label: p.name,
-    description: `${p.peer_ip} · AS${p.peer_asn}`,
-  }));
+  const peerOptions: SelectProps.Option[] = peers.map((p) => {
+    const peerAsn = asnsById.get(p.peer_asn_id)?.asn;
+    const asnSuffix = peerAsn ? ` · AS${peerAsn}` : '';
+    return {
+      value: p.id,
+      label: p.name,
+      description: `${p.peer_ip}${asnSuffix}`,
+    };
+  });
 
   const [peerOpt, setPeerOpt] = useState<SelectProps.Option | null>(() => {
     if (!binding) return null;

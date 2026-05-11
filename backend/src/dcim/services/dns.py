@@ -40,6 +40,7 @@ from ..models.dns import (
     DnsZoneKind,
 )
 from ..models.ipam import IPAddress, Subnet
+from ..settings import get_settings
 from .ipam import parse_address, parse_network
 
 
@@ -180,20 +181,30 @@ def render_gobgp_config(
     *,
     server: DnsServer,
     peers: Iterable[BgpPeer],
+    peer_asns: dict,
     anycast_group: AnycastGroup,
+    local_asn: int,
 ) -> dict:
     """GoBGP YAML config (returned as a dict; collector serializes to
-    YAML on disk). Local AS is taken from the first peer — all peers at
-    a site are expected to share the same local AS. Network statements
-    advertise the anycast IPv4 /32 and IPv6 /128 if set."""
+    YAML on disk).
+
+    `local_asn` is the originating AS for every DNS anycast
+    announcement — pulled from settings.dns_anycast_originate_asn so
+    every recursive site advertises from the same origin (default
+    4200000000). The BgpPeer.local_asn_id on individual peers is
+    informational here; we deliberately don't read it so a typo in a
+    catalog row can't desync sites.
+
+    `peer_asns` maps BgpPeer.peer_asn_id → ASN integer, resolved by the
+    caller against the ASN catalog. Missing entries (dangling FK) get
+    0 — GoBGP will reject the config, surfacing the bad reference at
+    render time instead of silently advertising into nowhere."""
     peer_list = list(peers)
-    local_asn = peer_list[0].local_asn if peer_list else 65000
     neighbors = [
         {
             "config": {
                 "neighbor-address": str(p.peer_ip).split("/", 1)[0],
-                "peer-as": p.peer_asn,
-                **({"auth-password": p.md5_password} if p.md5_password else {}),
+                "peer-as": peer_asns.get(p.peer_asn_id, 0),
             },
         }
         for p in peer_list
@@ -300,11 +311,12 @@ async def _fabric_apex_name(db: AsyncSession, fabric_id: UUID) -> str | None:
 
 async def _bgp_for_server(
     db: AsyncSession, server: DnsServer,
-) -> tuple[list[BgpPeer], AnycastGroup | None]:
-    """Resolve the BGP peers a recursive server advertises to + its
-    anycast group. Returns ([], None) for auth servers."""
+) -> tuple[list[BgpPeer], dict, AnycastGroup | None]:
+    """Resolve the BGP peers a recursive server advertises to + the
+    ASN-id → integer map for those peers + the server's anycast group.
+    Returns ([], {}, None) for auth servers."""
     if server.role != DnsServerRole.recursive or server.anycast_group_id is None:
-        return [], None
+        return [], {}, None
     peer_ids = (
         await db.execute(
             select(AnycastBgpBinding.bgp_peer_id).where(
@@ -313,12 +325,24 @@ async def _bgp_for_server(
         )
     ).scalars().all()
     peers: list[BgpPeer] = []
+    peer_asns: dict = {}
     if peer_ids:
         peers = list((
             await db.execute(select(BgpPeer).where(BgpPeer.id.in_(peer_ids)))
         ).scalars().all())
+        # One query to pull every ASN catalog row a peer points at.
+        # The render function only needs peer_asn_id (the downstream
+        # router AS); local_asn_id is intentionally ignored — the DNS
+        # anycast origin AS is a system constant from settings.
+        asn_ids = {p.peer_asn_id for p in peers}
+        if asn_ids:
+            from ..models.bgp import Asn  # avoid top-level cycle
+            rows = (
+                await db.execute(select(Asn).where(Asn.id.in_(asn_ids)))
+            ).scalars().all()
+            peer_asns = {row.id: row.asn for row in rows}
     anycast = await db.get(AnycastGroup, server.anycast_group_id)
-    return peers, anycast
+    return peers, peer_asns, anycast
 
 
 async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
@@ -353,9 +377,11 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             upstream_resolvers=upstreams,
         )
         zone_files = {}
-        peers, anycast = await _bgp_for_server(db, server)
+        peers, peer_asns, anycast = await _bgp_for_server(db, server)
         gobgp = render_gobgp_config(
-            server=server, peers=peers, anycast_group=anycast,
+            server=server, peers=peers, peer_asns=peer_asns,
+            anycast_group=anycast,
+            local_asn=get_settings().dns_anycast_originate_asn,
         ) if anycast else None
     etag = bundle_etag(corefile, zone_files, gobgp)
     return {"corefile": corefile, "zones": zone_files, "gobgp": gobgp, "etag": etag}

@@ -185,7 +185,13 @@ class BgpPeer(UUIDPrimaryKey, Timestamped, Base):
     """A BGP neighbor — typically the leaf or top-of-rack a service's
     anycast sidecar peers with. First-class so anycast services beyond
     DNS can reuse the same row without each one redefining its own
-    peer config."""
+    peer config.
+
+    Both AS numbers are FKs into the ASN catalog (models/bgp.py:Asn) so
+    operators can't typo a number that isn't in their inventory. MD5
+    authentication is deprecated — RFC 5925 TCP AO superseded it — so
+    the peer references a key chain rather than carrying a single
+    shared secret inline."""
 
     __tablename__ = "bgp_peers"
     __table_args__ = (
@@ -197,13 +203,23 @@ class BgpPeer(UUIDPrimaryKey, Timestamped, Base):
     site_id: Mapped[UUID] = mapped_column(
         PgUUID(as_uuid=True), ForeignKey("sites.id"), nullable=False,
     )
-    local_asn: Mapped[int] = mapped_column(Integer, nullable=False)
-    peer_asn: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Replaces the old `local_asn` / `peer_asn` integer columns. The
+    # ASN value is reached via Asn.asn through the FK; the API layer
+    # surfaces both the id and the resolved integer for convenience.
+    local_asn_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("bgp_asns.id"), nullable=False,
+    )
+    peer_asn_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("bgp_asns.id"), nullable=False,
+    )
     peer_ip: Mapped[str] = mapped_column(INET, nullable=False)
     peer_description: Mapped[str | None] = mapped_column(String(512))
-    # Stored plain in v1; encryption-at-rest will land alongside the
-    # equivalent DhcpServer.auth_password hardening pass.
-    md5_password: Mapped[str | None] = mapped_column(String(128))
+    # Optional TCP AO key chain (RFC 5925). Replaces the old
+    # md5_password column. Recursive announcements + VRF MP-BGP both
+    # default to no-auth when null.
+    tcp_ao_key_chain_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("tcp_ao_key_chains.id"),
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
