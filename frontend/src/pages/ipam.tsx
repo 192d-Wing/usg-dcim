@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router';
 import {
   DndContext, DragEndEvent, DragOverEvent, DragOverlay, DragStartEvent,
   KeyboardSensor, MouseSensor, TouchSensor,
@@ -9,6 +10,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import {
+  colorBackgroundCellShaded, colorBackgroundContainerContent,
+  colorBackgroundInputDisabled, colorBackgroundItemSelected,
+  colorBorderDividerDefault, colorTextBodySecondary,
+  colorTextStatusError, colorTextStatusInactive, colorTextStatusInfo,
+  colorTextStatusSuccess, colorTextStatusWarning,
+} from '@cloudscape-design/design-tokens';
+
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
 import { CapacityBar } from '@/components/capacity-bar';
@@ -19,7 +28,6 @@ import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import BreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
 import Button from '@cloudscape-design/components/button';
-import Cards from '@cloudscape-design/components/cards';
 import Checkbox from '@cloudscape-design/components/checkbox';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
@@ -41,7 +49,8 @@ type Fabric = {
   enclave: string | null; classification: string | null;
 };
 type Vrf = {
-  id: string; fabric_id: string; name: string; rd: string | null;
+  id: string; fabric_id: string; name: string;
+  route_target: string | null;
   description: string | null; is_default: boolean;
 };
 type Supernet = {
@@ -103,7 +112,9 @@ const SOURCES = ['static', 'dhcp', 'reservation'];
 
 // Inline styles for the supernet/subnet tree — Cloudscape Table doesn't
 // expose <tr> refs for DnD-Kit, so we keep a native HTML table and color
-// it with Cloudscape design tokens.
+// it with Cloudscape design tokens. Imported from @cloudscape-design/
+// design-tokens so the values flip with applyMode(Dark) instead of
+// falling back to the hard-coded light fallback baked into the var().
 const TREE_TABLE_STYLE: React.CSSProperties = {
   width: '100%',
   borderCollapse: 'collapse',
@@ -114,20 +125,20 @@ const TREE_TH_STYLE: React.CSSProperties = {
   padding: '8px 12px',
   fontSize: 12,
   fontWeight: 600,
-  color: 'var(--color-text-body-secondary, #5f6b7a)',
-  borderBottom: '1px solid var(--color-border-divider-default, #e9ebed)',
-  background: 'var(--color-background-cell-shaded, #fafafa)',
+  color: colorTextBodySecondary,
+  borderBottom: `1px solid ${colorBorderDividerDefault}`,
+  background: colorBackgroundCellShaded,
 };
 const TREE_TD_STYLE: React.CSSProperties = {
   padding: '8px 12px',
-  borderBottom: '1px solid var(--color-border-divider-default, #e9ebed)',
+  borderBottom: `1px solid ${colorBorderDividerDefault}`,
   verticalAlign: 'top',
 };
 const SKELETON_STYLE: React.CSSProperties = {
   height: 16,
   width: '100%',
   borderRadius: 4,
-  background: 'var(--color-background-input-disabled, #eaeded)',
+  background: colorBackgroundInputDisabled,
 };
 
 export function IpamPage() {
@@ -529,20 +540,12 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
 
   return (
     <>
-      {/* Cards — a 5-field-per-fabric Table looked stretched at full
-          container width. Cards renders each fabric as a tile with the
-          name as a clickable header and the rest as small key/value
-          sections. Scales 1/2/3 per row by viewport. */}
-      <Cards<Fabric>
+      <Table<Fabric>
+        variant="container"
         loading={tableQuery.isLoading}
         loadingText="Loading fabrics…"
         items={data}
         trackBy="id"
-        cardsPerRow={[
-          { cards: 1 },
-          { minWidth: 600, cards: 2 },
-          { minWidth: 1100, cards: 3 },
-        ]}
         header={
           <Header
             counter={`(${data.length})`}
@@ -557,39 +560,39 @@ function FabricsTab({ onSelect, canWrite }: { onSelect: (id: string) => void; ca
             Fabrics
           </Header>
         }
-        cardDefinition={{
-          header: (f) => (
-            <Button variant="inline-link" onClick={() => onSelect(f.id)}>
-              {f.name}
-            </Button>
-          ),
-          sections: [
-            {
-              id: 'slug',
-              header: 'Slug',
-              content: (f) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{f.slug}</span>,
-            },
-            {
-              id: 'enclave',
-              header: 'Enclave',
-              content: (f) => f.enclave ?? '—',
-            },
-            {
-              id: 'classification',
-              header: 'Classification',
-              content: (f) => f.classification ?? '—',
-            },
-            {
-              id: 'description',
-              header: 'Description',
-              content: (f) => (
-                <Box variant="span" color="text-status-inactive" fontSize="body-s">
-                  {f.description ?? '—'}
-                </Box>
-              ),
-            },
-          ],
-        }}
+        columnDefinitions={[
+          {
+            id: 'name', header: 'Name',
+            cell: (f) => (
+              <Button variant="inline-link" onClick={() => onSelect(f.id)}>
+                {f.name}
+              </Button>
+            ),
+          },
+          {
+            id: 'slug', header: 'Slug',
+            cell: (f) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{f.slug}</span>,
+            width: 160,
+          },
+          {
+            id: 'enclave', header: 'Enclave',
+            cell: (f) => f.enclave ?? '—',
+            width: 140,
+          },
+          {
+            id: 'classification', header: 'Classification',
+            cell: (f) => f.classification ?? '—',
+            width: 160,
+          },
+          {
+            id: 'description', header: 'Description',
+            cell: (f) => (
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                {f.description ?? '—'}
+              </Box>
+            ),
+          },
+        ]}
         empty={
           <Box textAlign="center" color="inherit" padding="l">
             <SpaceBetween size="xs">
@@ -680,7 +683,7 @@ function FabricForm({ onSaved }: { onSaved: () => void }) {
 
 const vrfSchema = z.object({
   name: z.string().min(1),
-  rd: z.string().optional(),
+  route_target: z.string().optional(),
   description: z.string().optional(),
 });
 
@@ -691,6 +694,7 @@ function VrfsTab({
   onSelect: (id: string) => void;
   canWrite: boolean;
 }) {
+  const nav = useNavigate();
   const { tableQuery, result } = useTable<Vrf>({
     resource: 'ipam/vrfs',
     pagination: { pageSize: 200 },
@@ -727,12 +731,18 @@ function VrfsTab({
           {
             id: 'name', header: 'Name',
             cell: (v) => (
-              <span style={{ fontWeight: 500 }}>{v.name}</span>
+              <Button variant="inline-link" onClick={() => onSelect(v.id)}>
+                {v.name}
+              </Button>
             ),
           },
           {
-            id: 'rd', header: 'RD',
-            cell: (v) => <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{v.rd ?? '—'}</span>,
+            id: 'route_target', header: 'Route target',
+            cell: (v) => (
+              <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+                {v.route_target ?? '—'}
+              </span>
+            ),
             width: 160,
           },
           {
@@ -748,6 +758,23 @@ function VrfsTab({
               </Box>
             ),
           },
+          ...(canWrite ? [{
+            id: 'actions', header: '',
+            // Stop the row click (which drills to supernets) from firing
+            // when the operator clicks the Edit icon — the icon opens
+            // the VRF detail page where metadata + BGP peers are edited.
+            cell: (v: Vrf) => (
+              <div onClick={(e) => e.stopPropagation()}>
+                <Button
+                  iconName="edit"
+                  variant="inline-icon"
+                  ariaLabel={`Edit ${v.name}`}
+                  onClick={() => nav(`/ipam/vrfs/${v.id}`)}
+                />
+              </div>
+            ),
+            width: 60,
+          }] : []),
         ]}
         empty={<Box textAlign="center" color="inherit" padding="m">No VRFs yet.</Box>}
       />
@@ -767,7 +794,7 @@ function VrfsTab({
 
 function VrfForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void }) {
   const [name, setName] = useState('');
-  const [rd, setRd] = useState('');
+  const [routeTarget, setRouteTarget] = useState('');
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -782,7 +809,7 @@ function VrfForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void 
     try {
       await http.post('/ipam/vrfs', {
         fabric_id: fabricId, name,
-        rd: rd || null,
+        route_target: routeTarget || null,
         description: description || null,
         is_default: false,
       });
@@ -803,8 +830,15 @@ function VrfForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void 
           <FormField label="Name" errorText={errors.name}>
             <Input value={name} onChange={({ detail }) => setName(detail.value)} placeholder="e.g. mgmt" />
           </FormField>
-          <FormField label="Route distinguisher (optional)">
-            <Input value={rd} onChange={({ detail }) => setRd(detail.value)} placeholder="e.g. 65000:100" />
+          <FormField
+            label="Route target (optional)"
+            description="Imported/exported by every BGP peer advertising this VRF (e.g. 65000:100)."
+          >
+            <Input
+              value={routeTarget}
+              onChange={({ detail }) => setRouteTarget(detail.value)}
+              placeholder="e.g. 65000:100"
+            />
           </FormField>
           <FormField label="Description">
             <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
@@ -998,7 +1032,7 @@ function SupernetTreeTab({
             <tbody>
               {data.length === 0 && (
                 <tr>
-                  <td style={{ ...TREE_TD_STYLE, color: 'var(--color-text-status-inactive, #757575)' }} colSpan={canWrite ? 6 : 5}>
+                  <td style={{ ...TREE_TD_STYLE, color: colorTextStatusInactive }} colSpan={canWrite ? 6 : 5}>
                     No supernets yet.
                   </td>
                 </tr>
@@ -1035,19 +1069,19 @@ function SupernetTreeTab({
               padding: '6px 12px',
               fontSize: 14,
               borderRadius: 8,
-              background: 'var(--color-background-container-content, #fff)',
-              border: '1px solid var(--color-border-divider-default, #e9ebed)',
+              background: colorBackgroundContainerContent,
+              border: `1px solid ${colorBorderDividerDefault}`,
               boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
             }}>
               <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 500 }}>
                 {draggingSubnet.prefix}
               </span>
               {draggingSubnet.name && (
-                <span style={{ marginLeft: 8, color: 'var(--color-text-status-inactive, #757575)' }}>
+                <span style={{ marginLeft: 8, color: colorTextStatusInactive }}>
                   {draggingSubnet.name}
                 </span>
               )}
-              <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+              <span style={{ marginLeft: 8, fontSize: 12, color: colorTextStatusInactive }}>
                 drop on a supernet to move
               </span>
             </div>
@@ -1205,9 +1239,9 @@ function SupernetNode({
 
   let rowStyle: React.CSSProperties = { cursor: 'pointer' };
   if (isOver && isValidTarget) {
-    rowStyle = { ...rowStyle, boxShadow: 'inset 0 0 0 2px var(--color-text-status-success, #037f0c)', background: 'rgba(3, 127, 12, 0.05)' };
+    rowStyle = { ...rowStyle, boxShadow: `inset 0 0 0 2px ${colorTextStatusSuccess}`, background: 'rgba(3, 127, 12, 0.05)' };
   } else if (isOver && isDragging) {
-    rowStyle = { ...rowStyle, boxShadow: 'inset 0 0 0 2px var(--color-text-status-error, #d91515)', background: 'rgba(217, 21, 21, 0.05)' };
+    rowStyle = { ...rowStyle, boxShadow: `inset 0 0 0 2px ${colorTextStatusError}`, background: 'rgba(217, 21, 21, 0.05)' };
   } else if (isValidTarget) {
     rowStyle = { ...rowStyle, boxShadow: 'inset 0 0 0 1px rgba(3, 127, 12, 0.4)' };
   }
@@ -1219,17 +1253,17 @@ function SupernetNode({
         style={rowStyle}
         onClick={() => onToggle(supernet.id)}
       >
-        <td style={{ ...TREE_TD_STYLE, color: 'var(--color-text-status-inactive, #757575)' }}>
+        <td style={{ ...TREE_TD_STYLE, color: colorTextStatusInactive }}>
           <Box>{isOpen ? '▾' : '▸'}</Box>
         </td>
         <td style={{ ...TREE_TD_STYLE, paddingLeft: 16 + indent, fontFamily: 'ui-monospace, monospace', fontWeight: 500 }}>
-          {depth > 0 && <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>└─ </span>}
+          {depth > 0 && <span style={{ color: colorTextStatusInactive }}>└─ </span>}
           {supernet.prefix}
         </td>
         <td style={TREE_TD_STYLE}>
           <div>{supernet.name ?? '—'}</div>
           {sitePill && (
-            <div style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>{sitePill}</div>
+            <div style={{ fontSize: 12, color: colorTextStatusInactive }}>{sitePill}</div>
           )}
         </td>
         <td style={TREE_TD_STYLE}>
@@ -1347,7 +1381,7 @@ function SubnetBranch({
         />
       ))}
       {canWrite && (
-        <tr style={{ background: 'var(--color-background-cell-shaded, #fafafa)' }}>
+        <tr style={{ background: colorBackgroundCellShaded }}>
           <td />
           <td colSpan={branchSpan} style={{ ...TREE_TD_STYLE, paddingLeft: 16 + indent }}>
             <Button iconName="add-plus" variant="link" onClick={onAddSubnet}>
@@ -1387,18 +1421,18 @@ function SubnetRow({
       {...listeners}
       style={{
         cursor: 'pointer',
-        background: 'var(--color-background-cell-shaded, #fafafa)',
+        background: colorBackgroundCellShaded,
         opacity,
       }}
       onClick={() => onSelectSubnet(s.id)}
     >
       <td style={TREE_TD_STYLE} />
       <td style={{ ...TREE_TD_STYLE, paddingLeft: 16 + indent, fontFamily: 'ui-monospace, monospace' }}>
-        <span style={{ color: 'var(--color-text-status-inactive, #757575)' }}>└─</span> {s.prefix}
+        <span style={{ color: colorTextStatusInactive }}>└─</span> {s.prefix}
       </td>
       <td style={TREE_TD_STYLE}>
         <div>{s.name ?? '—'}</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-status-inactive, #757575)' }}>
+        <div style={{ fontSize: 12, color: colorTextStatusInactive }}>
           {s.site_id
             ? `site: ${sitesById.get(s.site_id)?.code ?? s.site_id.slice(0, 8) + '…'}`
             : 'unassigned'}
@@ -2009,11 +2043,11 @@ function IpGrid({
     <Container>
       <SpaceBetween size="s">
         <SpaceBetween size="s" direction="horizontal">
-          <Legend color="var(--color-background-input-disabled, #eaeded)" label="free" />
-          <Legend color="var(--color-text-status-success, #037f0c)" label="static" />
-          <Legend color="var(--color-text-status-warning, #b25b00)" label="dhcp" />
-          <Legend color="var(--color-text-status-info, #0972d3)" label="reservation" />
-          <Legend color="var(--color-text-status-inactive, #757575)" label="deprecated" />
+          <Legend color={colorBackgroundInputDisabled} label="free" />
+          <Legend color={colorTextStatusSuccess} label="static" />
+          <Legend color={colorTextStatusWarning} label="dhcp" />
+          <Legend color={colorTextStatusInfo} label="reservation" />
+          <Legend color={colorTextStatusInactive} label="deprecated" />
         </SpaceBetween>
         <div
           style={{
@@ -2190,11 +2224,11 @@ function IpCell({
 }
 
 function cellColor(ip: IPAddr | null): string {
-  if (!ip) return 'var(--color-background-input-disabled, #eaeded)';
-  if (ip.status === 'deprecated') return 'var(--color-text-status-inactive, #757575)';
-  if (ip.source === 'dhcp') return 'var(--color-text-status-warning, #b25b00)';
-  if (ip.source === 'reservation') return 'var(--color-text-status-info, #0972d3)';
-  return 'var(--color-text-status-success, #037f0c)';
+  if (!ip) return colorBackgroundInputDisabled;
+  if (ip.status === 'deprecated') return colorTextStatusInactive;
+  if (ip.source === 'dhcp') return colorTextStatusWarning;
+  if (ip.source === 'reservation') return colorTextStatusInfo;
+  return colorTextStatusSuccess;
 }
 
 

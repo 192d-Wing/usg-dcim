@@ -35,6 +35,7 @@ from .inventory import (
     SiteGroupMembership,
 )
 from .ipam import (
+    BgpAddressFamily,
     DhcpServer,
     Fabric,
     IPAddress,
@@ -48,6 +49,7 @@ from .ipam import (
     Vni,
     VniKind,
     Vrf,
+    VrfBgpPeer,
     Vtep,
     VtepRole,
     VtepVniMembership,
@@ -67,6 +69,7 @@ __all__ = [
     "AssetFace",
     "AssetMount",
     "AuditLog",
+    "BgpAddressFamily",
     "BgpPeer",
     "Building",
     "Cable",
@@ -113,6 +116,7 @@ __all__ = [
     "Vni",
     "VniKind",
     "Vrf",
+    "VrfBgpPeer",
     "Vtep",
     "VtepRole",
     "VtepVniMembership",

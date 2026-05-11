@@ -30,7 +30,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import ConflictError, NotFoundError, ValidationError
+from ..models.dns import BgpPeer
 from ..models.ipam import (
+    BgpAddressFamily,
     DhcpServer,
     Fabric,
     IPAddress,
@@ -39,6 +41,7 @@ from ..models.ipam import (
     Supernet,
     Vni,
     Vrf,
+    VrfBgpPeer,
     Vtep,
     VtepVniMembership,
 )
@@ -66,6 +69,9 @@ from ..schemas.ipam import (
     VniCreate,
     VniOut,
     VniUpdate,
+    VrfBgpPeerCreate,
+    VrfBgpPeerOut,
+    VrfBgpPeerUpdate,
     VrfCreate,
     VrfOut,
     VrfUpdate,
@@ -210,6 +216,18 @@ async def list_vrfs(
     return await paginate(db, stmt, model=Vrf, params=params, out_model=VrfOut)
 
 
+@router.get("/vrfs/{vrf_id}", response_model=VrfOut)
+async def get_vrf(
+    vrf_id: UUID,
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(Vrf, vrf_id)
+    if obj is None:
+        raise NotFoundError(_VRF_NOT_FOUND)
+    return obj
+
+
 @router.post("/vrfs", response_model=VrfOut, status_code=201)
 async def create_vrf(
     payload: VrfCreate,
@@ -271,6 +289,115 @@ async def delete_vrf(
     await db.execute(delete(Vrf).where(Vrf.id == vrf_id))
     await audit.record(
         db, principal, action="vrf.delete", target_type="vrf", target_id=str(vrf_id),
+    )
+    await db.commit()
+
+
+# ----------------------- VRF ↔ BGP peer bindings -----------------------
+#
+# vrf_bgp_peers is a many-to-many: a single BGP peer (one TCP session)
+# can carry the same VRF across multiple address families (VPNv4 /
+# VPNv6 / EVPN), and each (VRF, peer, AF) tuple has its own Route
+# Distinguisher. The unique constraint enforces one row per tuple.
+
+_VRF_BGP_PEER_NOT_FOUND = "vrf bgp peer binding not found"
+
+
+@router.get("/vrf-bgp-peers", response_model=Page[VrfBgpPeerOut])
+async def list_vrf_bgp_peers(
+    params: PageParams = Depends(PageParams.from_query),
+    vrf_id: UUID | None = Query(None),
+    bgp_peer_id: UUID | None = Query(None),
+    address_family: BgpAddressFamily | None = Query(None),
+    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(VrfBgpPeer)
+    if vrf_id is not None:
+        stmt = stmt.where(VrfBgpPeer.vrf_id == vrf_id)
+    if bgp_peer_id is not None:
+        stmt = stmt.where(VrfBgpPeer.bgp_peer_id == bgp_peer_id)
+    if address_family is not None:
+        stmt = stmt.where(VrfBgpPeer.address_family == address_family)
+    return await paginate(
+        db, stmt, model=VrfBgpPeer, params=params, out_model=VrfBgpPeerOut,
+    )
+
+
+@router.post("/vrf-bgp-peers", response_model=VrfBgpPeerOut, status_code=201)
+async def create_vrf_bgp_peer(
+    payload: VrfBgpPeerCreate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    vrf = await db.get(Vrf, payload.vrf_id)
+    if vrf is None:
+        raise NotFoundError(_VRF_NOT_FOUND)
+    peer = await db.get(BgpPeer, payload.bgp_peer_id)
+    if peer is None:
+        raise NotFoundError("bgp peer not found")
+    # Surface the unique-tuple collision as a 409 instead of letting
+    # the DB raise an IntegrityError that the operator can't act on.
+    existing = (
+        await db.execute(
+            select(VrfBgpPeer.id).where(
+                VrfBgpPeer.vrf_id == payload.vrf_id,
+                VrfBgpPeer.bgp_peer_id == payload.bgp_peer_id,
+                VrfBgpPeer.address_family == payload.address_family,
+            ),
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ConflictError(
+            "binding already exists for this (vrf, peer, address_family)",
+        )
+    obj = VrfBgpPeer(**payload.model_dump())
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="vrf_bgp_peer.create",
+        target_type="vrf_bgp_peer", target_id=str(obj.id),
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch("/vrf-bgp-peers/{binding_id}", response_model=VrfBgpPeerOut)
+async def update_vrf_bgp_peer(
+    binding_id: UUID,
+    payload: VrfBgpPeerUpdate,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(VrfBgpPeer, binding_id)
+    if obj is None:
+        raise NotFoundError(_VRF_BGP_PEER_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="vrf_bgp_peer.update",
+        target_type="vrf_bgp_peer", target_id=str(binding_id), diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/vrf-bgp-peers/{binding_id}", status_code=204)
+async def delete_vrf_bgp_peer(
+    binding_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(VrfBgpPeer, binding_id)
+    if obj is None:
+        raise NotFoundError(_VRF_BGP_PEER_NOT_FOUND)
+    await db.execute(delete(VrfBgpPeer).where(VrfBgpPeer.id == binding_id))
+    await audit.record(
+        db, principal, action="vrf_bgp_peer.delete",
+        target_type="vrf_bgp_peer", target_id=str(binding_id),
     )
     await db.commit()
 

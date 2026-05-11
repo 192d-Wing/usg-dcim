@@ -79,6 +79,19 @@ class VtepRole(str, enum.Enum):
     other = "other"
 
 
+class BgpAddressFamily(str, enum.Enum):
+    """BGP address family for a VRF↔peer binding.
+
+    A single TCP/MP-BGP session typically carries multiple address
+    families to advertise the same VRF (VPNv4 for IPv4 unicast, VPNv6
+    for IPv6 unicast, EVPN for L2/L3 overlays). Each family can use a
+    distinct Route Distinguisher, so the binding is keyed per AF."""
+
+    vpnv4 = "vpnv4"
+    vpnv6 = "vpnv6"
+    evpn = "evpn"
+
+
 class Fabric(UUIDPrimaryKey, Timestamped, Base):
     """Top-level network namespace. Maps roughly to an enclave."""
 
@@ -100,12 +113,18 @@ class Fabric(UUIDPrimaryKey, Timestamped, Base):
 
 class Vrf(UUIDPrimaryKey, Timestamped, Base):
     """Isolated routing domain inside a fabric. Same address space can
-    appear in multiple VRFs; Subnet uniqueness is per-VRF."""
+    appear in multiple VRFs; Subnet uniqueness is per-VRF.
+
+    The Route Distinguisher is *not* on the VRF row — RDs are recorded
+    per (VRF, BGP peer, address family) in vrf_bgp_peers since a single
+    VRF can be advertised with different RDs on different peers / AFs
+    (VPNv4 vs VPNv6 vs EVPN). The VRF carries a Route Target instead
+    (the import/export extended community shared across all peers
+    advertising this VRF)."""
 
     __tablename__ = "vrfs"
     __table_args__ = (
         UniqueConstraint("fabric_id", "name", name="uq_vrf_fabric_name"),
-        UniqueConstraint("fabric_id", "rd", name="uq_vrf_fabric_rd"),
         Index("ix_vrfs_fabric", "fabric_id"),
     )
 
@@ -113,12 +132,54 @@ class Vrf(UUIDPrimaryKey, Timestamped, Base):
         PgUUID(as_uuid=True), ForeignKey("fabrics.id"), nullable=False,
     )
     name: Mapped[str] = mapped_column(String(64), nullable=False)
-    # Route Distinguisher e.g. "65000:100". Optional; `default` VRF has none.
-    rd: Mapped[str | None] = mapped_column(String(32))
+    # Route Target extended community e.g. "65000:100". Imported + exported
+    # by every peer that advertises this VRF.
+    route_target: Mapped[str | None] = mapped_column(String(32))
     description: Mapped[str | None] = mapped_column(String(512))
     is_default: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     fabric: Mapped[Fabric] = relationship(back_populates="vrfs")
+
+
+class VrfBgpPeer(UUIDPrimaryKey, Timestamped, Base):
+    """Many-to-many between a VRF and a BgpPeer, per BGP address family.
+
+    The same TCP session (one BgpPeer row) can carry multiple AFs for
+    the same VRF, each with its own Route Distinguisher. The unique
+    constraint enforces one row per (vrf, peer, AF) tuple."""
+
+    __tablename__ = "vrf_bgp_peers"
+    __table_args__ = (
+        UniqueConstraint(
+            "vrf_id", "bgp_peer_id", "address_family",
+            name="uq_vrf_bgp_peer_af",
+        ),
+        Index("ix_vrf_bgp_peers_vrf", "vrf_id"),
+        Index("ix_vrf_bgp_peers_peer", "bgp_peer_id"),
+    )
+
+    vrf_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("vrfs.id"), nullable=False,
+    )
+    # bgp_peers lives in models/dns.py — string FK target avoids a
+    # cross-module import cycle (dns.py imports nothing from ipam.py
+    # and we want to keep it that way).
+    bgp_peer_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("bgp_peers.id"), nullable=False,
+    )
+    address_family: Mapped[BgpAddressFamily] = mapped_column(
+        Enum(
+            BgpAddressFamily,
+            name="bgp_address_family",
+            values_callable=lambda x: [e.value for e in x],
+        ),
+        nullable=False,
+    )
+    # Route Distinguisher for this (VRF, peer, AF) tuple e.g. "65000:100".
+    # Per-binding so the same VRF can be advertised under different RDs
+    # on different peers (multi-PE deployments).
+    rd: Mapped[str | None] = mapped_column(String(32))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
 class Supernet(UUIDPrimaryKey, Timestamped, Base):

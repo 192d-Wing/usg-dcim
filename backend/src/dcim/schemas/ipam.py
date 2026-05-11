@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from ..models.ipam import (
+    BgpAddressFamily,
     IpAddressRole,
     IpAddressSource,
     IpAddressStatus,
@@ -64,7 +65,10 @@ class FabricOut(FabricBase):
 class VrfBase(BaseModel):
     fabric_id: UUID
     name: str
-    rd: str | None = None
+    # Route Target extended community (e.g. "65000:100"). Imported and
+    # exported by every peer advertising this VRF. The Route Distinguisher
+    # lives per-binding on VrfBgpPeer.
+    route_target: str | None = None
     description: str | None = None
     is_default: bool = False
 
@@ -75,12 +79,43 @@ class VrfCreate(VrfBase):
 
 class VrfUpdate(BaseModel):
     name: str | None = None
-    rd: str | None = None
+    route_target: str | None = None
     description: str | None = None
     is_default: bool | None = None
 
 
 class VrfOut(VrfBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- VrfBgpPeer (many-to-many between VRF and BgpPeer) ----------
+
+class VrfBgpPeerBase(BaseModel):
+    vrf_id: UUID
+    bgp_peer_id: UUID
+    address_family: BgpAddressFamily
+    # Route Distinguisher for this (vrf, peer, AF) binding. Optional —
+    # some operators carry the VRF without an explicit RD.
+    rd: str | None = None
+    enabled: bool = True
+
+
+class VrfBgpPeerCreate(VrfBgpPeerBase):
+    pass
+
+
+class VrfBgpPeerUpdate(BaseModel):
+    # vrf_id, bgp_peer_id, and address_family are immutable post-create
+    # (changing them would silently break the unique key). Operators
+    # delete + recreate the binding to repoint.
+    rd: str | None = None
+    enabled: bool | None = None
+
+
+class VrfBgpPeerOut(VrfBgpPeerBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     created_at: datetime
