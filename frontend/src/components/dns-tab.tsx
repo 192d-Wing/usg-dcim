@@ -14,7 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Plus, Pencil, Trash2, RefreshCw, Globe, FileText } from 'lucide-react';
+import { Plus, Pencil, Trash2, RefreshCw, FileText } from 'lucide-react';
 import { http } from '@/lib/http';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -33,6 +33,21 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { toast } from 'sonner';
+// Cloudscape primitives for the DNS tab outer chrome and the
+// ZonesPanel migration. The inner Records / Anycast / Servers panels
+// still render shadcn and migrate in follow-ups.
+import CsBox from '@cloudscape-design/components/box';
+import CsButton from '@cloudscape-design/components/button';
+import CsContainer from '@cloudscape-design/components/container';
+import CsColumnLayout from '@cloudscape-design/components/column-layout';
+import CsFormField from '@cloudscape-design/components/form-field';
+import CsHeader from '@cloudscape-design/components/header';
+import CsModal from '@cloudscape-design/components/modal';
+import CsSelect, { SelectProps as CsSelectProps } from '@cloudscape-design/components/select';
+import CsSpaceBetween from '@cloudscape-design/components/space-between';
+import CsStatusIndicator from '@cloudscape-design/components/status-indicator';
+import CsTable from '@cloudscape-design/components/table';
+import CsBadge from '@cloudscape-design/components/badge';
 
 type Fabric = { id: string; name: string };
 type Site = { id: string; code: string; name: string };
@@ -105,22 +120,31 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
     if (!fabricId && fabrics.length > 0) setFabricId(fabrics[0].id);
   }, [fabricId, fabrics]);
 
+  const fabricOptions: CsSelectProps.Option[] =
+    fabrics.map((f) => ({ value: f.id, label: f.name }));
+  const fabricOpt = fabricOptions.find((o) => o.value === fabricId) ?? null;
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fabric</p>
-          <Select value={fabricId} onValueChange={(v) => { setFabricId(v); setZoneId(null); }}>
-            <SelectTrigger className="w-[260px]"><SelectValue placeholder="Pick a fabric" /></SelectTrigger>
-            <SelectContent>
-              {fabrics.map((f) => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+    <CsSpaceBetween size="l">
+      <CsContainer header={<CsHeader variant="h2">Fabric</CsHeader>}>
+        <CsFormField label="Fabric">
+          <CsSelect
+            placeholder="Pick a fabric"
+            selectedOption={fabricOpt}
+            onChange={({ detail }) => {
+              if (detail.selectedOption.value) {
+                setFabricId(detail.selectedOption.value);
+                setZoneId(null);
+              }
+            }}
+            options={fabricOptions}
+            expandToViewport
+          />
+        </CsFormField>
+      </CsContainer>
 
       {fabricId && (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <CsColumnLayout columns={2}>
           <ZonesPanel
             fabricId={fabricId}
             selectedZoneId={zoneId}
@@ -130,11 +154,13 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
           {zoneId
             ? <RecordsPanel zoneId={zoneId} canWrite={canWrite} />
             : (
-              <Card><CardContent className="p-6 text-sm text-muted-foreground">
-                Pick a zone to see its records.
-              </CardContent></Card>
+              <CsContainer>
+                <CsBox padding="m" color="text-status-inactive">
+                  Pick a zone to see its records.
+                </CsBox>
+              </CsContainer>
             )}
-        </div>
+        </CsColumnLayout>
       )}
 
       {fabricId && (
@@ -144,7 +170,7 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
       {fabricId && (
         <ServersPanel fabricId={fabricId} canWrite={canWrite} />
       )}
-    </div>
+    </CsSpaceBetween>
   );
 }
 
@@ -200,81 +226,124 @@ function ZonesPanel({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
 
+  // Note: previously used <FileText> + <RefreshCw> + <Trash2> from
+  // lucide for the per-row action buttons. Cloudscape inline-icon
+  // buttons take a Cloudscape icon name instead, so the lucide icons
+  // get dropped from this panel — they remain imported because the
+  // Records / Anycast / Servers panels still use them.
+  void FileText; void RefreshCw;
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b p-3">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Globe className="h-4 w-4" /> Zones
-          </h3>
-          {canWrite && (
-            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-              <DialogTrigger asChild>
-                <Button size="sm" variant="outline"><Plus className="h-3.5 w-3.5" /> Add zone</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader><DialogTitle>New DNS zone</DialogTitle></DialogHeader>
-                <ZoneForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
-              </DialogContent>
-            </Dialog>
-          )}
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Kind</TableHead>
-              <TableHead>TTL</TableHead>
-              <TableHead className="w-32" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {zones.length === 0 && !zonesQ.isLoading && (
-              <TableRow><TableCell colSpan={4} className="text-muted-foreground">
-                No zones in this fabric yet.
-              </TableCell></TableRow>
+    <>
+      <CsTable<DnsZone>
+        variant="container"
+        loading={zonesQ.isLoading}
+        loadingText="Loading zones…"
+        items={zones}
+        trackBy="id"
+        selectionType="single"
+        selectedItems={selectedZoneId
+          ? zones.filter((z) => z.id === selectedZoneId)
+          : []}
+        onSelectionChange={({ detail }) => {
+          const next = detail.selectedItems[0];
+          onSelectZone(next ? next.id : null);
+        }}
+        ariaLabels={{
+          selectionGroupLabel: 'Zone selection',
+          itemSelectionLabel: (_d, item) => `Select zone ${item.name}`,
+          allItemsSelectionLabel: () => 'select all',
+        }}
+        header={
+          <CsHeader
+            counter={`(${zones.length})`}
+            actions={canWrite && (
+              <CsButton iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                Add zone
+              </CsButton>
             )}
-            {zones.map((z) => (
-              <TableRow
-                key={z.id}
-                className={'cursor-pointer hover:bg-accent/40 ' + (selectedZoneId === z.id ? 'bg-accent/30' : '')}
-                onClick={() => onSelectZone(z.id === selectedZoneId ? null : z.id)}
-              >
-                <TableCell className="font-mono">{z.name}</TableCell>
-                <TableCell><Badge variant={z.kind === 'apex' ? 'default' : 'secondary'}>{z.kind}</Badge></TableCell>
-                <TableCell className="font-mono">{z.default_ttl}</TableCell>
-                <TableCell onClick={(e) => e.stopPropagation()}>
-                  <Button size="sm" variant="ghost" onClick={() => setPreviewZone(z)} title="Preview rendered zone">
-                    <FileText className="h-3.5 w-3.5" />
-                  </Button>
-                  {canWrite && z.kind === 'site' && (
-                    <Button size="sm" variant="ghost" onClick={() => syncFromIpam(z)} title="Sync records from IPAM">
-                      <RefreshCw className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                  {canWrite && (
-                    <Button size="sm" variant="ghost" onClick={() => remove(z)} title="Delete zone">
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-      <Dialog
-        open={previewZone !== null}
-        onOpenChange={(o) => { if (!o) setPreviewZone(null); }}
+            description="Select a zone to see its records."
+          >
+            Zones
+          </CsHeader>
+        }
+        columnDefinitions={[
+          {
+            id: 'name', header: 'Name',
+            cell: (z) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{z.name}</span>,
+          },
+          {
+            id: 'kind', header: 'Kind',
+            cell: (z) => z.kind === 'apex'
+              ? <CsStatusIndicator type="info">apex</CsStatusIndicator>
+              : <CsBadge>site</CsBadge>,
+            width: 100,
+          },
+          {
+            id: 'ttl', header: 'TTL',
+            cell: (z) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{z.default_ttl}</span>,
+            width: 100,
+          },
+          {
+            id: 'actions', header: '',
+            cell: (z) => (
+              <CsSpaceBetween size="xxs" direction="horizontal">
+                <CsButton
+                  iconName="file"
+                  variant="inline-icon"
+                  onClick={() => setPreviewZone(z)}
+                  ariaLabel={`Preview ${z.name}`}
+                />
+                {canWrite && z.kind === 'site' && (
+                  <CsButton
+                    iconName="refresh"
+                    variant="inline-icon"
+                    onClick={() => syncFromIpam(z)}
+                    ariaLabel={`Sync ${z.name} from IPAM`}
+                  />
+                )}
+                {canWrite && (
+                  <CsButton
+                    iconName="remove"
+                    variant="inline-icon"
+                    onClick={() => remove(z)}
+                    ariaLabel={`Delete ${z.name}`}
+                  />
+                )}
+              </CsSpaceBetween>
+            ),
+            width: 140,
+          },
+        ]}
+        empty={
+          <CsBox textAlign="center" color="inherit" padding="m">
+            No zones in this fabric yet.
+          </CsBox>
+        }
+      />
+      {canWrite && (
+        <CsModal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header="New DNS zone"
+          size="medium"
+        >
+          <ZoneForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
+        </CsModal>
+      )}
+      <CsModal
+        visible={previewZone !== null}
+        onDismiss={() => setPreviewZone(null)}
+        header={
+          <span>
+            Zone preview:{' '}
+            <span style={{ fontFamily: 'ui-monospace, monospace' }}>{previewZone?.name}</span>
+          </span>
+        }
+        size="large"
       >
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>Zone preview: <span className="font-mono">{previewZone?.name}</span></DialogTitle>
-          </DialogHeader>
-          {previewZone && <ZonePreview zoneId={previewZone.id} />}
-        </DialogContent>
-      </Dialog>
-    </Card>
+        {previewZone && <ZonePreview zoneId={previewZone.id} />}
+      </CsModal>
+    </>
   );
 }
 
