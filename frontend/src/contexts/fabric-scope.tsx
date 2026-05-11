@@ -8,7 +8,7 @@
 // prefer the first available fabric in that case).
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useList } from '@refinedev/core';
+import { useGetIdentity, useList } from '@refinedev/core';
 
 type Fabric = { id: string; name: string };
 
@@ -23,11 +23,17 @@ const FabricScopeContext = createContext<FabricScopeValue | null>(null);
 const STORAGE_KEY = 'dcim.fabric-scope';
 
 export function FabricScopeProvider({ children }: { children: ReactNode }) {
+  // Hold the fabrics fetch until refine has resolved an identity —
+  // otherwise the request fires before auth hydrates and refine's
+  // authProvider bounces the user back to /login on a 401.
+  const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
+  const authed = !!identity;
   const fabricsRes = useList<Fabric>({
     resource: 'ipam/fabrics',
     pagination: { pageSize: 500 },
+    queryOptions: { enabled: authed },
   });
-  const fabrics = fabricsRes.result.data ?? [];
+  const fabrics = authed ? (fabricsRes.result.data ?? []) : [];
 
   const [fabricId, setFabricIdState] = useState<string | null>(() => {
     try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }

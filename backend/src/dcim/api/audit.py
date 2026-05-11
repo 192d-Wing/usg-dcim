@@ -45,6 +45,14 @@ async def list_audit_log(
     action: str | None = Query(None, description="Exact action match, e.g. asset.update."),
     target_type: str | None = Query(None),
     target_id: str | None = Query(None),
+    target_ids: str | None = Query(
+        None,
+        description=(
+            "Comma-separated set of target ids. Useful for scoping the log "
+            "to a group of related resources in a single round-trip, e.g. "
+            "all records belonging to a particular DNS zone."
+        ),
+    ),
     site_id: UUID | None = Query(None),
     since: datetime | None = Query(None, description="Only entries at or after this timestamp."),
     until: datetime | None = Query(None, description="Only entries at or before this timestamp."),
@@ -62,6 +70,14 @@ async def list_audit_log(
         stmt = stmt.where(AuditLog.target_type == target_type)
     if target_id is not None:
         stmt = stmt.where(AuditLog.target_id == target_id)
+    if target_ids:
+        # Trim + dedupe; empty list short-circuits to no rows so the
+        # caller doesn't see "no filter" semantics by accident.
+        ids = [s.strip() for s in target_ids.split(",") if s.strip()]
+        if not ids:
+            stmt = stmt.where(AuditLog.id.is_(None))
+        else:
+            stmt = stmt.where(AuditLog.target_id.in_(ids))
     if site_id is not None:
         stmt = stmt.where(AuditLog.site_id == site_id)
     if since is not None:

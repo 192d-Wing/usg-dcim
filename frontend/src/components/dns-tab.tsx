@@ -501,7 +501,14 @@ function ZoneDetailView({
         />
       </Container>
 
-      <Table<DnsRecord>
+      <Tabs
+        variant="container"
+        tabs={[
+          {
+            id: 'records',
+            label: 'Records',
+            content: (
+              <Table<DnsRecord>
         loading={recordsQ.isLoading}
         loadingText="Loading records…"
         items={filtered}
@@ -613,6 +620,20 @@ function ZoneDetailView({
           </Box>
         }
       />
+            ),
+          },
+          {
+            id: 'activity',
+            label: 'Activity',
+            content: (
+              <ZoneActivityTab
+                zoneId={zone.id}
+                recordIds={records.map((r) => r.id)}
+              />
+            ),
+          },
+        ]}
+      />
 
       {canWrite && (
         <Modal
@@ -641,6 +662,100 @@ function ZoneDetailView({
         <ZonePreviewBody zoneId={zone.id} />
       </Modal>
     </SpaceBetween>
+  );
+}
+
+// Surfaces audit-log entries scoped to this zone — zone-level events
+// (zone.create/update/delete, sync-from-ipam) plus every record event
+// for records that currently belong to the zone. Two parallel calls so
+// each one is cacheable on its own key.
+type AuditEntry = {
+  id: string;
+  occurred_at: string;
+  actor_label: string | null;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  success: boolean;
+};
+
+function ZoneActivityTab({ zoneId, recordIds }: { zoneId: string; recordIds: string[] }) {
+  const zoneEvents = useQuery({
+    queryKey: ['audit', 'dns_zone', zoneId],
+    queryFn: async () => (await http.get<{ items: AuditEntry[] }>(
+      `/audit/log?target_type=dns_zone&target_id=${zoneId}&page_size=200`,
+    )).data.items ?? [],
+  });
+  // Record-level events: ask audit/log for any dns_record entry whose
+  // target_id matches one of this zone's *current* records. Records
+  // that have been deleted (so they're not in recordIds) won't appear
+  // here — accepted tradeoff vs. storing zone_id on every audit row.
+  const recordEvents = useQuery({
+    queryKey: ['audit', 'dns_record', zoneId, recordIds.join(',')],
+    enabled: recordIds.length > 0,
+    queryFn: async () => (await http.get<{ items: AuditEntry[] }>(
+      `/audit/log?target_type=dns_record&target_ids=${recordIds.join(',')}&page_size=500`,
+    )).data.items ?? [],
+  });
+
+  const entries = useMemo(() => {
+    const merged = [
+      ...(zoneEvents.data ?? []),
+      ...(recordEvents.data ?? []),
+    ];
+    return merged.sort(
+      (a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime(),
+    );
+  }, [zoneEvents.data, recordEvents.data]);
+
+  const loading = zoneEvents.isLoading || recordEvents.isLoading;
+
+  return (
+    <Table<AuditEntry>
+      variant="embedded"
+      loading={loading}
+      loadingText="Loading activity…"
+      items={entries}
+      trackBy="id"
+      columnDefinitions={[
+        {
+          id: 'when', header: 'When (UTC)',
+          cell: (e) => {
+            const zulu = new Date(e.occurred_at).toISOString().replace(/\.\d{3}Z$/, 'Z');
+            return <span style={MONO}>{zulu}</span>;
+          },
+          width: 220,
+        },
+        {
+          id: 'actor', header: 'Actor',
+          cell: (e) => e.actor_label
+            ?? <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+        },
+        {
+          id: 'action', header: 'Action',
+          cell: (e) => <span style={MONO}>{e.action}</span>,
+        },
+        {
+          id: 'target', header: 'Target',
+          cell: (e) => e.target_type
+            ? <span style={MONO}>{e.target_type}:{(e.target_id ?? '').slice(0, 8)}…</span>
+            : <Box color="text-status-inactive" fontSize="body-s">—</Box>,
+          width: 220,
+        },
+        {
+          id: 'result', header: 'Result',
+          cell: (e) => e.success
+            ? <StatusIndicator type="success">ok</StatusIndicator>
+            : <StatusIndicator type="error">fail</StatusIndicator>,
+          width: 80,
+        },
+      ]}
+      empty={
+        <Box textAlign="center" padding="l" color="text-status-inactive">
+          No activity recorded yet for this zone.
+        </Box>
+      }
+    />
   );
 }
 
