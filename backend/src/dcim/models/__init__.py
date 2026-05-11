@@ -4,6 +4,19 @@ from .alerts import Alert, AlertRule, MaintenanceWindow
 from .audit import AuditLog
 from .auth import ApiToken, Permission, Role, RoleScope, User, UserRole
 from .collectors import Collector, CollectorHeartbeat
+from .dns import (
+    AnycastBgpBinding,
+    AnycastGroup,
+    AnycastService,
+    BgpPeer,
+    DnsRecord,
+    DnsRecordSource,
+    DnsRecordType,
+    DnsServer,
+    DnsServerRole,
+    DnsZone,
+    DnsZoneKind,
+)
 from .inventory import (
     Asset,
     AssetFace,
@@ -46,11 +59,15 @@ from .telemetry_meta import TelemetrySource
 __all__ = [
     "Alert",
     "AlertRule",
+    "AnycastBgpBinding",
+    "AnycastGroup",
+    "AnycastService",
     "ApiToken",
     "Asset",
     "AssetFace",
     "AssetMount",
     "AuditLog",
+    "BgpPeer",
     "Building",
     "Cable",
     "ChannelKind",
@@ -58,6 +75,13 @@ __all__ = [
     "Collector",
     "CollectorHeartbeat",
     "DhcpServer",
+    "DnsRecord",
+    "DnsRecordSource",
+    "DnsRecordType",
+    "DnsServer",
+    "DnsServerRole",
+    "DnsZone",
+    "DnsZoneKind",
     "Fabric",
     "IPAddress",
     "IpAddressRole",

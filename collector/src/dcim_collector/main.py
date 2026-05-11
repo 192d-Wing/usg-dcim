@@ -10,6 +10,7 @@ import structlog
 
 from .buffer import Buffer
 from .config import CollectorConfig
+from .dns_agent import run_dns_agent
 from .drivers import load_driver
 from .forwarder import Forwarder
 
@@ -66,6 +67,7 @@ async def run(config_path: str) -> None:
     tasks = [asyncio.create_task(_device_loop(d, buffer)) for d in cfg.devices]
     tasks.append(asyncio.create_task(_drain_loop(fwd)))
     tasks.append(asyncio.create_task(_heartbeat_loop(fwd, cfg.heartbeat_interval_seconds)))
+    tasks.append(asyncio.create_task(run_dns_agent(cfg)))
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

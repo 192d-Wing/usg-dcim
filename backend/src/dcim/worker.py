@@ -20,8 +20,10 @@ from sqlalchemy import select
 
 from .db import async_session
 from .logging_setup import configure_logging
+from .models.dns import DnsZone, DnsZoneKind
 from .models.telemetry_meta import FreshnessState, TelemetrySource
 from .services import alerts as alerts_svc
+from .services import dns as dns_svc
 from .services import kea as kea_svc
 from .settings import get_settings
 
@@ -67,6 +69,24 @@ async def dhcp_age_out(_ctx) -> dict:
     return {"aged_out": n}
 
 
+async def dns_sync_from_ipam(_ctx) -> dict:
+    """Re-project IPAddress.dns_name into source=ipam DNS records for
+    every site zone. Catches new allocations / DHCP leases that landed
+    since the last cycle. Apex zones are skipped (operator-curated)."""
+    async with async_session() as db:
+        zones = (
+            await db.execute(select(DnsZone).where(DnsZone.kind == DnsZoneKind.site))
+        ).scalars().all()
+        total_added = total_removed = 0
+        for z in zones:
+            added, removed = await dns_svc.sync_ipam_records_for_zone(db, z)
+            total_added += added
+            total_removed += removed
+        await db.commit()
+    log.info("dns_sync_from_ipam", added=total_added, removed=total_removed, zones=len(zones))
+    return {"added": total_added, "removed": total_removed, "zones": len(zones)}
+
+
 async def startup(ctx) -> None:
     configure_logging()
     log.info("worker_startup")
@@ -82,7 +102,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     functions: ClassVar[list] = [
         evaluate_alerts, sweep_collectors, freshness_sweep,
-        dhcp_sync, dhcp_age_out,
+        dhcp_sync, dhcp_age_out, dns_sync_from_ipam,
     ]
     cron_jobs: ClassVar[list] = [
         cron(evaluate_alerts, second={0, 30}),
@@ -92,4 +112,7 @@ class WorkerSettings:
         # already-stale rows don't pile up.
         cron(dhcp_sync, minute=set(range(2, 60, 5))),
         cron(dhcp_age_out, minute={7}),
+        # DNS IPAM-projection: 5 minutes offset from DHCP so a freshly-
+        # ingested lease has time to land before its DNS record renders.
+        cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))),
     ]

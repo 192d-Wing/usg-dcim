@@ -1,0 +1,80 @@
+# Site DNS bundle: collector + two CoreDNS pods (auth + recursive) + GoBGP sidecar.
+#
+# Operators bring this up at each site with:
+#   COLLECTOR_CONFIG=/path/to/collector.yaml docker compose -f docker-compose.yml up -d
+#
+# The collector polls the central DCIM for the current bundle and writes
+# Corefiles + zone files into the shared `dns-state` volume. CoreDNS pods
+# read from that volume and reload on SIGUSR1; GoBGP reads gobgp.yaml and
+# reloads on SIGHUP. All four containers share the host PID namespace so
+# the collector can signal sibling processes by PID.
+
+services:
+  collector:
+    image: ghcr.io/192d-wing/usg-dcim-collector:latest
+    pid: "host"
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ${COLLECTOR_CONFIG:-./collector.yaml}:/etc/dcim/collector.yaml:ro
+      - collector-buffer:/var/lib/dcim-collector
+      - dns-state:/var/lib/dcim-dns
+    restart: unless-stopped
+
+  coredns-auth:
+    image: coredns/coredns:1.11.3
+    pid: "host"
+    network_mode: "host"
+    command:
+      - "-conf"
+      - "/etc/coredns/Corefile"
+      - "-pidfile"
+      - "/var/lib/dcim-dns/auth/coredns.pid"
+    volumes:
+      # The collector writes Corefile + zones into this dir; CoreDNS
+      # consumes them. SIGUSR1 from the collector triggers hot-reload.
+      - dns-state:/var/lib/dcim-dns
+      - dns-state:/etc/coredns
+    restart: unless-stopped
+    depends_on: [collector]
+
+  coredns-recursive:
+    image: coredns/coredns:1.11.3
+    pid: "host"
+    network_mode: "host"
+    command:
+      - "-conf"
+      - "/etc/coredns/Corefile"
+      - "-pidfile"
+      - "/var/lib/dcim-dns/recursive/coredns.pid"
+    volumes:
+      # Separate sub-tree from auth; the collector writes a different
+      # Corefile here (forwarders + apex stub) and the recursive pod
+      # binds to the anycast IP via host networking.
+      - dns-state:/var/lib/dcim-dns
+      - dns-state:/etc/coredns
+    restart: unless-stopped
+    depends_on: [collector]
+
+  gobgp:
+    image: jauderho/gobgp:latest
+    pid: "host"
+    network_mode: "host"
+    command:
+      - "gobgpd"
+      - "-f"
+      - "/var/lib/dcim-dns/recursive/gobgp.yaml"
+      - "--pid-file"
+      - "/var/lib/dcim-dns/recursive/gobgp.pid"
+    volumes:
+      - dns-state:/var/lib/dcim-dns
+    cap_add:
+      # Anycast advertisement requires NET_ADMIN to bring up loopback
+      # routes for the announced /32 and /128.
+      - NET_ADMIN
+    restart: unless-stopped
+    depends_on: [collector]
+
+volumes:
+  collector-buffer:
+  dns-state:

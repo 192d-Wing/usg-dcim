@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from 'sonner';
+import { DnsTab } from '@/components/dns-tab';
 
 type Fabric = {
   id: string; name: string; slug: string; description: string | null;
@@ -139,6 +140,7 @@ export function IpamPage() {
           <TabsTrigger value="hierarchy">Hierarchy</TabsTrigger>
           <TabsTrigger value="free-space"><Search className="h-3.5 w-3.5" /> Free space</TabsTrigger>
           <TabsTrigger value="overlays">Overlays / VNI</TabsTrigger>
+          <TabsTrigger value="dns">DNS</TabsTrigger>
           <TabsTrigger value="dhcp">DHCP servers</TabsTrigger>
         </TabsList>
         <TabsContent value="hierarchy" className="pt-3">
@@ -173,6 +175,9 @@ export function IpamPage() {
         </TabsContent>
         <TabsContent value="overlays" className="pt-3">
           <OverlaysTab canWrite={!!canWrite} />
+        </TabsContent>
+        <TabsContent value="dns" className="pt-3">
+          <DnsTab canWrite={!!canWrite} />
         </TabsContent>
         <TabsContent value="dhcp" className="pt-3">
           <DhcpServersTab canWrite={!!canWrite} />

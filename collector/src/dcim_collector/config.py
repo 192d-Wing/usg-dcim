@@ -71,6 +71,28 @@ class DeviceConfig(BaseModel):
     ipmi: IpmiDriverConfig | None = None
 
 
+class DnsServerConfig(BaseModel):
+    """One CoreDNS deployment the collector renders configs for. The
+    collector polls /api/v1/dns/servers/{id}/bundle and writes the
+    Corefile + zone files (+ gobgp.yaml when role=recursive) into
+    `output_dir`, then signals the matching processes to reload."""
+
+    id: UUID
+    role: Literal["auth", "recursive"]
+    output_dir: str
+    coredns_pidfile: str
+    gobgp_pidfile: str | None = None  # only set when role=recursive
+
+
+class DnsAgentConfig(BaseModel):
+    enabled: bool = False
+    poll_interval_seconds: int = 30
+    # API base for DNS endpoints. Defaults to derive from ingest_url's
+    # origin so most operators don't have to set this twice.
+    api_base: str | None = None
+    servers: list[DnsServerConfig] = Field(default_factory=list)
+
+
 class CollectorConfig(BaseModel):
     collector_id: UUID
     site_id: UUID
@@ -81,6 +103,7 @@ class CollectorConfig(BaseModel):
     mtls: MtlsConfig = Field(default_factory=MtlsConfig)
     devices: list[DeviceConfig] = Field(default_factory=list)
     syslog_listen: int | None = None  # bind port for syslog ingest
+    dns: DnsAgentConfig = Field(default_factory=DnsAgentConfig)
 
     @classmethod
     def load(cls, path: str | Path) -> CollectorConfig:
