@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useList } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { http } from '@/lib/http';
+import { useFabricScope } from '@/contexts/fabric-scope';
 import { toast } from 'sonner';
 
 import Badge from '@cloudscape-design/components/badge';
@@ -20,6 +21,8 @@ import Form from '@cloudscape-design/components/form';
 import FormField from '@cloudscape-design/components/form-field';
 import Header from '@cloudscape-design/components/header';
 import Input from '@cloudscape-design/components/input';
+import KeyValuePairs from '@cloudscape-design/components/key-value-pairs';
+import Link from '@cloudscape-design/components/link';
 import Modal from '@cloudscape-design/components/modal';
 import Multiselect, { MultiselectProps } from '@cloudscape-design/components/multiselect';
 import Select, { SelectProps } from '@cloudscape-design/components/select';
@@ -28,11 +31,11 @@ import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Spinner from '@cloudscape-design/components/spinner';
 import Table from '@cloudscape-design/components/table';
 import Tabs from '@cloudscape-design/components/tabs';
+import TextFilter from '@cloudscape-design/components/text-filter';
 import {
   colorBackgroundContainerContent, colorBorderDividerDefault,
 } from '@cloudscape-design/design-tokens';
 
-type Fabric = { id: string; name: string };
 type Site = { id: string; code: string; name: string };
 
 type DnsZone = {
@@ -98,25 +101,20 @@ const RECORD_TYPE_OPTS: SelectProps.Option[] = RECORD_TYPES.map((t) => ({ value:
 const MONO = { fontFamily: 'ui-monospace, monospace' } as const;
 
 export function DnsTab({ canWrite }: { canWrite: boolean }) {
-  const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
-  const fabrics = fabricsRes.result.data ?? [];
-  const [fabricId, setFabricId] = useState<string>('');
+  // Fabric scope comes from the TopNavigation's region selector now —
+  // see FabricScopeProvider. Drilling into a zone clears when the
+  // operator switches fabrics so we don't surface a stale records page.
+  const { fabricId, isLoading: fabricsLoading } = useFabricScope();
   const [zoneId, setZoneId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('zones');
 
-  useEffect(() => {
-    if (!fabricId && fabrics.length > 0) setFabricId(fabrics[0].id);
-  }, [fabricId, fabrics]);
-
-  const fabricOptions: SelectProps.Option[] =
-    fabrics.map((f) => ({ value: f.id, label: f.name }));
-  const fabricOpt = fabricOptions.find((o) => o.value === fabricId) ?? null;
+  useEffect(() => { setZoneId(null); }, [fabricId]);
 
   if (!fabricId) {
     return (
       <Container>
         <Box padding="m" color="text-status-inactive">
-          {fabricsRes.query.isLoading ? 'Loading fabrics…' : 'No fabrics yet.'}
+          {fabricsLoading ? 'Loading fabrics…' : 'No fabrics yet — pick or create one in IPAM → Fabrics.'}
         </Box>
       </Container>
     );
@@ -124,52 +122,34 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
 
   return (
     <SpaceBetween size="m">
-      {/* Compact fabric picker — sits above the tab strip so every
-        sub-tab's data is scoped to the same fabric. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <Box variant="awsui-key-label">Fabric</Box>
-        <div style={{ minWidth: 260 }}>
-          <Select
-            placeholder="Pick a fabric"
-            selectedOption={fabricOpt}
-            onChange={({ detail }) => {
-              if (detail.selectedOption.value) {
-                setFabricId(detail.selectedOption.value);
-                setZoneId(null);
-              }
-            }}
-            options={fabricOptions}
-            expandToViewport
-          />
-        </div>
-      </div>
-
       <Tabs
         activeTabId={activeTab}
-        onChange={({ detail }) => setActiveTab(detail.activeTabId)}
+        onChange={({ detail }) => {
+          // Switching tabs always clears the zone drill-in so we don't
+          // surface a stale records page on return.
+          setActiveTab(detail.activeTabId);
+          if (detail.activeTabId !== 'zones') setZoneId(null);
+        }}
         tabs={[
           {
             id: 'zones',
-            label: 'Zones & records',
-            content: (
-              <ColumnLayout columns={2}>
-                <ZonesPanel
+            label: 'Hosted zones',
+            content: zoneId
+              ? (
+                <ZoneDetailView
                   fabricId={fabricId}
-                  selectedZoneId={zoneId}
-                  onSelectZone={setZoneId}
+                  zoneId={zoneId}
+                  onBack={() => setZoneId(null)}
                   canWrite={canWrite}
                 />
-                {zoneId
-                  ? <RecordsPanel zoneId={zoneId} canWrite={canWrite} />
-                  : (
-                    <Container>
-                      <Box padding="m" color="text-status-inactive">
-                        Pick a zone to see its records.
-                      </Box>
-                    </Container>
-                  )}
-              </ColumnLayout>
-            ),
+              )
+              : (
+                <ZonesListView
+                  fabricId={fabricId}
+                  onOpenZone={setZoneId}
+                  canWrite={canWrite}
+                />
+              ),
           },
           {
             id: 'servers',
@@ -187,14 +167,34 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
   );
 }
 
-// ----------------------- Zones -----------------------
+// ----------------------- Record type chip -----------------------
 
-function ZonesPanel({
-  fabricId, selectedZoneId, onSelectZone, canWrite,
+const RECORD_TYPE_COLOR: Record<RecordType, 'blue' | 'green' | 'grey' | 'red' | 'severity-medium' | 'severity-low' | 'severity-neutral'> = {
+  A: 'blue', AAAA: 'blue',
+  CNAME: 'green',
+  MX: 'severity-medium', SRV: 'severity-medium',
+  NS: 'severity-low', CAA: 'severity-low',
+  TXT: 'grey', PTR: 'grey',
+};
+
+function RecordTypeChip({ type }: { type: RecordType }) {
+  return <Badge color={RECORD_TYPE_COLOR[type]}>{type}</Badge>;
+}
+
+// Build the displayed FQDN for a record like Route 53 does: the
+// left-hand `name` joined to the zone FQDN. `@` collapses to bare zone.
+function fqdn(name: string, zoneName: string): string {
+  if (!name || name === '@') return zoneName;
+  return `${name}.${zoneName}`;
+}
+
+// ----------------------- Zones list view -----------------------
+
+function ZonesListView({
+  fabricId, onOpenZone, canWrite,
 }: {
   fabricId: string;
-  selectedZoneId: string | null;
-  onSelectZone: (id: string | null) => void;
+  onOpenZone: (id: string) => void;
   canWrite: boolean;
 }) {
   const qc = useQueryClient();
@@ -204,119 +204,147 @@ function ZonesPanel({
       await http.get<{ items: DnsZone[] }>(`/dns/zones?fabric_id=${fabricId}&page_size=200`)
     ).data.items ?? [],
   });
+  const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 500 } });
+  const sitesById = useMemo(
+    () => new Map((sitesRes.result.data ?? []).map((s) => [s.id, s])),
+    [sitesRes.result.data],
+  );
   const zones = zonesQ.data ?? [];
   const [createOpen, setCreateOpen] = useState(false);
-  const [previewZone, setPreviewZone] = useState<DnsZone | null>(null);
+  const [selected, setSelected] = useState<DnsZone[]>([]);
+  const [filterText, setFilterText] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    if (!q) return zones;
+    return zones.filter((z) => (
+      z.name.toLowerCase().includes(q)
+      || (z.description ?? '').toLowerCase().includes(q)
+      || z.kind.toLowerCase().includes(q)
+    ));
+  }, [zones, filterText]);
 
   async function refresh() {
     await qc.invalidateQueries({ queryKey: ['dns-zones', fabricId] });
+    setSelected([]);
   }
 
-  async function syncFromIpam(z: DnsZone) {
+  async function removeSelected() {
+    if (selected.length === 0) return;
+    if (!window.confirm(`Delete ${selected.length} zone(s)?`)) return;
     try {
-      const r = await http.post<{ added: number; removed: number }>(
-        `/dns/zones/${z.id}/sync-from-ipam`, {},
-      );
-      toast.success(`Synced ${z.name}: +${r.data.added}, -${r.data.removed}`);
-      await qc.invalidateQueries({ queryKey: ['dns-records', z.id] });
-    } catch (err: any) { toast.error(err?.message ?? 'sync failed'); }
-  }
-
-  async function remove(z: DnsZone) {
-    if (!window.confirm(`Delete zone ${z.name}?`)) return;
-    try {
-      await http.delete(`/dns/zones/${z.id}`);
-      if (selectedZoneId === z.id) onSelectZone(null);
+      await Promise.all(selected.map((z) => http.delete(`/dns/zones/${z.id}`)));
+      toast.success('Zones removed');
       await refresh();
-      toast.success('Zone removed');
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
 
   return (
     <>
       <Table<DnsZone>
-        variant="container"
         loading={zonesQ.isLoading}
-        loadingText="Loading zones…"
-        items={zones}
+        loadingText="Loading hosted zones…"
+        items={filtered}
         trackBy="id"
-        selectionType="single"
-        selectedItems={selectedZoneId
-          ? zones.filter((z) => z.id === selectedZoneId)
-          : []}
-        onSelectionChange={({ detail }) => {
-          const next = detail.selectedItems[0];
-          onSelectZone(next ? next.id : null);
-        }}
+        selectionType={canWrite ? 'multi' : undefined}
+        selectedItems={selected}
+        onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
         ariaLabels={{
-          selectionGroupLabel: 'Zone selection',
-          itemSelectionLabel: (_d, item) => `Select zone ${item.name}`,
-          allItemsSelectionLabel: () => 'select all',
+          selectionGroupLabel: 'Hosted zone selection',
+          itemSelectionLabel: (_d, item) => `Select ${item.name}`,
+          allItemsSelectionLabel: () => 'Select all hosted zones',
         }}
+        filter={
+          <TextFilter
+            filteringText={filterText}
+            filteringPlaceholder="Filter hosted zones"
+            filteringAriaLabel="Filter hosted zones"
+            onChange={({ detail }) => setFilterText(detail.filteringText)}
+            countText={`${filtered.length} match${filtered.length === 1 ? '' : 'es'}`}
+          />
+        }
         header={
           <Header
-            counter={`(${zones.length})`}
-            actions={canWrite && (
-              <Button iconName="add-plus" onClick={() => setCreateOpen(true)}>
-                Add zone
-              </Button>
-            )}
-            description="Select a zone to see its records."
+            counter={selected.length > 0 ? `(${selected.length}/${zones.length})` : `(${zones.length})`}
+            actions={
+              <SpaceBetween size="xs" direction="horizontal">
+                {canWrite && (
+                  <Button
+                    disabled={selected.length === 0}
+                    onClick={removeSelected}
+                  >
+                    Delete
+                  </Button>
+                )}
+                {canWrite && (
+                  <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                    Create hosted zone
+                  </Button>
+                )}
+              </SpaceBetween>
+            }
+            description="DCIM-managed DNS zones. Click a domain name to view records."
           >
-            Zones
+            Hosted zones
           </Header>
         }
         columnDefinitions={[
           {
-            id: 'name', header: 'Name',
-            cell: (z) => <span style={MONO}>{z.name}</span>,
-          },
-          {
-            id: 'kind', header: 'Kind',
-            cell: (z) => z.kind === 'apex'
-              ? <StatusIndicator type="info">apex</StatusIndicator>
-              : <Badge>site</Badge>,
-            width: 100,
-          },
-          {
-            id: 'ttl', header: 'TTL',
-            cell: (z) => <span style={MONO}>{z.default_ttl}</span>,
-            width: 100,
-          },
-          {
-            id: 'actions', header: '',
+            id: 'name', header: 'Domain name',
             cell: (z) => (
-              <SpaceBetween size="xxs" direction="horizontal">
-                <Button
-                  iconName="file"
-                  variant="inline-icon"
-                  onClick={() => setPreviewZone(z)}
-                  ariaLabel={`Preview ${z.name}`}
-                />
-                {canWrite && z.kind === 'site' && (
-                  <Button
-                    iconName="refresh"
-                    variant="inline-icon"
-                    onClick={() => syncFromIpam(z)}
-                    ariaLabel={`Sync ${z.name} from IPAM`}
-                  />
-                )}
-                {canWrite && (
-                  <Button
-                    iconName="remove"
-                    variant="inline-icon"
-                    onClick={() => remove(z)}
-                    ariaLabel={`Delete ${z.name}`}
-                  />
-                )}
-              </SpaceBetween>
+              <Link
+                onFollow={(e) => { e.preventDefault(); onOpenZone(z.id); }}
+                href={`#${z.id}`}
+              >
+                <span style={MONO}>{z.name}</span>
+              </Link>
             ),
+            sortingField: 'name',
+            minWidth: 240,
+          },
+          {
+            id: 'kind', header: 'Type',
+            cell: (z) => z.kind === 'apex'
+              ? <Badge color="blue">Apex</Badge>
+              : <Badge>Site</Badge>,
+            width: 100,
+          },
+          {
+            id: 'site', header: 'Site',
+            cell: (z) => {
+              if (!z.site_id) return <Box color="text-status-inactive">—</Box>;
+              const s = sitesById.get(z.site_id);
+              return s ? `${s.code} · ${s.name}` : z.site_id.slice(0, 8);
+            },
+          },
+          {
+            id: 'ttl', header: 'Default TTL',
+            cell: (z) => <span style={MONO}>{z.default_ttl}</span>,
+            width: 120,
+          },
+          {
+            id: 'description', header: 'Description',
+            cell: (z) => z.description || <Box color="text-status-inactive">—</Box>,
+          },
+          {
+            id: 'id', header: 'Hosted zone ID',
+            cell: (z) => <span style={MONO}>{z.id.slice(0, 8)}…</span>,
             width: 140,
           },
         ]}
         empty={
-          <Box textAlign="center" color="inherit" padding="m">
-            No zones in this fabric yet.
+          <Box textAlign="center" padding="l">
+            <SpaceBetween size="xs">
+              <b>No hosted zones</b>
+              <Box color="text-status-inactive" fontSize="body-s">
+                Create an apex zone first, then per-site subdomains.
+              </Box>
+              {canWrite && (
+                <Button onClick={() => setCreateOpen(true)} variant="primary">
+                  Create hosted zone
+                </Button>
+              )}
+            </SpaceBetween>
           </Box>
         }
       />
@@ -324,30 +352,299 @@ function ZonesPanel({
         <Modal
           visible={createOpen}
           onDismiss={() => setCreateOpen(false)}
-          header="New DNS zone"
+          header="Create hosted zone"
           size="medium"
         >
           <ZoneForm fabricId={fabricId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
         </Modal>
       )}
-      <Modal
-        visible={previewZone !== null}
-        onDismiss={() => setPreviewZone(null)}
-        header={
-          <span>
-            Zone preview:{' '}
-            <span style={MONO}>{previewZone?.name}</span>
-          </span>
-        }
-        size="large"
-      >
-        {previewZone && <ZonePreview zoneId={previewZone.id} />}
-      </Modal>
     </>
   );
 }
 
-function ZonePreview({ zoneId }: { zoneId: string }) {
+// ----------------------- Zone detail view (drill-in) -----------------------
+
+function ZoneDetailView({
+  fabricId, zoneId, onBack, canWrite,
+}: {
+  fabricId: string;
+  zoneId: string;
+  onBack: () => void;
+  canWrite: boolean;
+}) {
+  const qc = useQueryClient();
+  const zoneQ = useQuery({
+    queryKey: ['dns-zone', zoneId],
+    queryFn: async () => (await http.get<DnsZone>(`/dns/zones/${zoneId}`)).data,
+  });
+  const recordsQ = useQuery({
+    queryKey: ['dns-records', zoneId],
+    queryFn: async () => (
+      await http.get<{ items: DnsRecord[] }>(`/dns/records?zone_id=${zoneId}&page_size=500`)
+    ).data.items ?? [],
+  });
+
+  const zone = zoneQ.data;
+  const records = recordsQ.data ?? [];
+  const [createOpen, setCreateOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [selected, setSelected] = useState<DnsRecord[]>([]);
+  const [filterText, setFilterText] = useState('');
+
+  const filtered = useMemo(() => {
+    const q = filterText.trim().toLowerCase();
+    if (!q) return records;
+    return records.filter((r) => {
+      const name = (r.name || '@').toLowerCase();
+      const data = formatRdata(r).toLowerCase();
+      return name.includes(q) || data.includes(q) || r.type.toLowerCase().includes(q);
+    });
+  }, [records, filterText]);
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-records', zoneId] });
+    await qc.invalidateQueries({ queryKey: ['dns-zone-preview', zoneId] });
+    setSelected([]);
+  }
+
+  async function syncFromIpam() {
+    if (!zone) return;
+    try {
+      const r = await http.post<{ added: number; removed: number }>(
+        `/dns/zones/${zone.id}/sync-from-ipam`, {},
+      );
+      toast.success(`Synced ${zone.name}: +${r.data.added}, -${r.data.removed}`);
+      await refresh();
+    } catch (err: any) { toast.error(err?.message ?? 'sync failed'); }
+  }
+
+  async function removeSelected() {
+    const deletable = selected.filter((r) => r.source !== 'ipam');
+    const skipped = selected.length - deletable.length;
+    if (deletable.length === 0) {
+      toast.error('IPAM-projected records are managed by clearing dns_name on the IPAddress');
+      return;
+    }
+    if (!window.confirm(`Delete ${deletable.length} record(s)?`)) return;
+    try {
+      await Promise.all(deletable.map((r) => http.delete(`/dns/records/${r.id}`)));
+      toast.success(skipped > 0
+        ? `Removed ${deletable.length}; skipped ${skipped} IPAM row(s)`
+        : 'Records removed');
+      await refresh();
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  async function exportZoneFile() {
+    if (!zone) return;
+    try {
+      const r = await http.get<{ text: string; record_count: number }>(
+        `/dns/zones/${zone.id}/preview`,
+      );
+      const blob = new Blob([r.data.text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${zone.name}.zone`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err: any) { toast.error(err?.message ?? 'export failed'); }
+  }
+
+  if (zoneQ.isLoading || !zone) {
+    return <Box padding="m" color="text-status-inactive"><Spinner /> Loading zone…</Box>;
+  }
+
+  return (
+    <SpaceBetween size="m">
+      <div>
+        <Link
+          href="#zones"
+          onFollow={(e) => { e.preventDefault(); onBack(); }}
+        >
+          ← Hosted zones
+        </Link>
+      </div>
+
+      <Container
+        header={
+          <Header
+            variant="h2"
+            actions={
+              canWrite && zone.kind === 'site' && (
+                <Button iconName="refresh" onClick={syncFromIpam}>
+                  Sync from IPAM
+                </Button>
+              )
+            }
+          >
+            <span style={MONO}>{zone.name}</span>
+          </Header>
+        }
+      >
+        <KeyValuePairs
+          columns={4}
+          items={[
+            {
+              label: 'Type',
+              value: zone.kind === 'apex'
+                ? <Badge color="blue">Apex</Badge>
+                : <Badge>Site</Badge>,
+            },
+            { label: 'Default TTL', value: <span style={MONO}>{zone.default_ttl}</span> },
+            { label: 'Records', value: records.length },
+            { label: 'Hosted zone ID', value: <span style={MONO}>{zone.id.slice(0, 8)}…</span> },
+            { label: 'Description', value: zone.description || <Box color="text-status-inactive">—</Box> },
+          ]}
+        />
+      </Container>
+
+      <Table<DnsRecord>
+        loading={recordsQ.isLoading}
+        loadingText="Loading records…"
+        items={filtered}
+        trackBy="id"
+        selectionType={canWrite ? 'multi' : undefined}
+        selectedItems={selected}
+        onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
+        ariaLabels={{
+          selectionGroupLabel: 'Record selection',
+          itemSelectionLabel: (_d, item) => `Select ${item.name || '@'} ${item.type}`,
+          allItemsSelectionLabel: () => 'Select all records',
+        }}
+        filter={
+          <TextFilter
+            filteringText={filterText}
+            filteringPlaceholder="Filter records by name, type, or value"
+            filteringAriaLabel="Filter records"
+            onChange={({ detail }) => setFilterText(detail.filteringText)}
+            countText={`${filtered.length} match${filtered.length === 1 ? '' : 'es'}`}
+          />
+        }
+        header={
+          <Header
+            counter={selected.length > 0 ? `(${selected.length}/${records.length})` : `(${records.length})`}
+            actions={
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button onClick={() => setPreviewOpen(true)} iconName="file">
+                  Preview zone file
+                </Button>
+                <Button onClick={exportZoneFile} iconName="download">
+                  Export
+                </Button>
+                {canWrite && (
+                  <Button
+                    disabled={selected.length === 0}
+                    onClick={removeSelected}
+                  >
+                    Delete
+                  </Button>
+                )}
+                {canWrite && (
+                  <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                    Create record
+                  </Button>
+                )}
+              </SpaceBetween>
+            }
+          >
+            Records
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'name', header: 'Record name',
+            cell: (r) => <span style={MONO}>{fqdn(r.name, zone.name)}</span>,
+            sortingField: 'name',
+            minWidth: 240,
+          },
+          {
+            id: 'type', header: 'Type',
+            cell: (r) => <RecordTypeChip type={r.type} />,
+            width: 90,
+          },
+          {
+            id: 'data', header: 'Value/Route traffic to',
+            cell: (r) => <span style={MONO}>{formatRdata(r)}</span>,
+            minWidth: 240,
+          },
+          {
+            id: 'ttl', header: 'TTL (seconds)',
+            cell: (r) => (
+              <span style={MONO}>
+                {r.ttl ?? <Box color="text-status-inactive" display="inline">{zone.default_ttl} (zone)</Box>}
+              </span>
+            ),
+            width: 160,
+          },
+          {
+            id: 'source', header: 'Source',
+            cell: (r) => r.source === 'ipam'
+              ? <Badge color="blue">From IPAM</Badge>
+              : <Box color="text-status-inactive" fontSize="body-s">Manual</Box>,
+            width: 110,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" padding="l">
+            <SpaceBetween size="xs">
+              <b>No records yet</b>
+              {zone.kind === 'site' && (
+                <Box color="text-status-inactive" fontSize="body-s">
+                  Site zones auto-populate when you sync from IPAM, or you can
+                  add records manually.
+                </Box>
+              )}
+              {canWrite && (
+                <SpaceBetween size="xs" direction="horizontal">
+                  <Button onClick={() => setCreateOpen(true)} variant="primary">
+                    Create record
+                  </Button>
+                  {zone.kind === 'site' && (
+                    <Button iconName="refresh" onClick={syncFromIpam}>
+                      Sync from IPAM
+                    </Button>
+                  )}
+                </SpaceBetween>
+              )}
+            </SpaceBetween>
+          </Box>
+        }
+      />
+
+      {canWrite && (
+        <Modal
+          visible={createOpen}
+          onDismiss={() => setCreateOpen(false)}
+          header={<span>Create record in <span style={MONO}>{zone.name}</span></span>}
+          size="medium"
+        >
+          <RecordForm
+            zone={zone}
+            onSaved={async () => { setCreateOpen(false); await refresh(); }}
+          />
+        </Modal>
+      )}
+      <Modal
+        visible={previewOpen}
+        onDismiss={() => setPreviewOpen(false)}
+        header={<span>Zone file preview: <span style={MONO}>{zone.name}</span></span>}
+        size="large"
+        footer={
+          <Box float="right">
+            <Button onClick={exportZoneFile} iconName="download">Download .zone</Button>
+          </Box>
+        }
+      >
+        <ZonePreviewBody zoneId={zone.id} />
+      </Modal>
+    </SpaceBetween>
+  );
+}
+
+function ZonePreviewBody({ zoneId }: { zoneId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ['dns-zone-preview', zoneId],
     queryFn: async () => (await http.get<{ text: string; record_count: number }>(`/dns/zones/${zoneId}/preview`)).data,
@@ -463,111 +760,7 @@ function ZoneForm({ fabricId, onSaved }: { fabricId: string; onSaved: () => void
   );
 }
 
-// ----------------------- Records -----------------------
-
-function RecordsPanel({ zoneId, canWrite }: { zoneId: string; canWrite: boolean }) {
-  const qc = useQueryClient();
-  const recordsQ = useQuery({
-    queryKey: ['dns-records', zoneId],
-    queryFn: async () => (
-      await http.get<{ items: DnsRecord[] }>(`/dns/records?zone_id=${zoneId}&page_size=500`)
-    ).data.items ?? [],
-  });
-  const records = recordsQ.data ?? [];
-  const [createOpen, setCreateOpen] = useState(false);
-
-  async function refresh() {
-    await qc.invalidateQueries({ queryKey: ['dns-records', zoneId] });
-    await qc.invalidateQueries({ queryKey: ['dns-zone-preview', zoneId] });
-  }
-
-  async function remove(r: DnsRecord) {
-    if (r.source === 'ipam') {
-      toast.error('Clear the dns_name on the IPAddress and re-sync to remove this row');
-      return;
-    }
-    if (!window.confirm(`Delete ${r.name} ${r.type}?`)) return;
-    try {
-      await http.delete(`/dns/records/${r.id}`);
-      await refresh();
-      toast.success('Record removed');
-    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
-  }
-
-  return (
-    <>
-      <Table<DnsRecord>
-        variant="container"
-        loading={recordsQ.isLoading}
-        loadingText="Loading records…"
-        items={records}
-        trackBy="id"
-        header={
-          <Header
-            counter={`(${records.length})`}
-            actions={canWrite && (
-              <Button iconName="add-plus" onClick={() => setCreateOpen(true)}>
-                Add record
-              </Button>
-            )}
-          >
-            Records
-          </Header>
-        }
-        columnDefinitions={[
-          {
-            id: 'name', header: 'Name',
-            cell: (r) => <span style={MONO}>{r.name || '@'}</span>,
-          },
-          {
-            id: 'type', header: 'Type',
-            cell: (r) => <Badge>{r.type}</Badge>,
-            width: 90,
-          },
-          {
-            id: 'data', header: 'Data',
-            cell: (r) => <span style={MONO}>{formatRdata(r)}</span>,
-          },
-          {
-            id: 'source', header: 'Source',
-            cell: (r) => r.source === 'ipam'
-              ? <Badge color="blue">from IPAM</Badge>
-              : <Box color="text-status-inactive" fontSize="body-s">manual</Box>,
-            width: 110,
-          },
-          ...(canWrite ? [{
-            id: 'actions', header: '',
-            cell: (r: DnsRecord) => (
-              <Button
-                iconName="remove"
-                variant="inline-icon"
-                disabled={r.source === 'ipam'}
-                onClick={() => remove(r)}
-                ariaLabel={`Delete ${r.name || '@'} ${r.type}`}
-              />
-            ),
-            width: 60,
-          }] : []),
-        ]}
-        empty={
-          <Box textAlign="center" color="inherit" padding="m">
-            No records yet.
-          </Box>
-        }
-      />
-      {canWrite && (
-        <Modal
-          visible={createOpen}
-          onDismiss={() => setCreateOpen(false)}
-          header="New DNS record"
-          size="medium"
-        >
-          <RecordForm zoneId={zoneId} onSaved={async () => { setCreateOpen(false); await refresh(); }} />
-        </Modal>
-      )}
-    </>
-  );
-}
+// ----------------------- Record helpers -----------------------
 
 function formatRdata(r: DnsRecord): string {
   const d = r.data ?? {};
@@ -586,8 +779,8 @@ function formatRdata(r: DnsRecord): string {
   }
 }
 
-function RecordForm({ zoneId, onSaved }: { zoneId: string; onSaved: () => void }) {
-  const [name, setName] = useState('@');
+function RecordForm({ zone, onSaved }: { zone: DnsZone; onSaved: () => void }) {
+  const [name, setName] = useState('');
   const [typeOpt, setTypeOpt] = useState<SelectProps.Option>({ value: 'A', label: 'A' });
   const [ttl, setTtl] = useState('');
   const [target, setTarget] = useState('');
@@ -634,7 +827,9 @@ function RecordForm({ zoneId, onSaved }: { zoneId: string; onSaved: () => void }
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    if (!name.trim()) errs.name = 'Required';
+    // Empty subdomain means the apex itself; we send `@` over the wire
+    // to match how the backend treats the zone origin.
+    const lhs = name.trim() === '' ? '@' : name.trim();
     if ((['A', 'AAAA', 'CNAME', 'NS', 'PTR', 'MX', 'SRV'] as RecordType[]).includes(type) && !target.trim()) {
       errs.target = 'Required';
     }
@@ -645,8 +840,8 @@ function RecordForm({ zoneId, onSaved }: { zoneId: string; onSaved: () => void }
     setSubmitting(true);
     try {
       await http.post('/dns/records', {
-        zone_id: zoneId,
-        name,
+        zone_id: zone.id,
+        name: lhs,
         type,
         ttl: ttl ? Number(ttl) : null,
         data: buildData(),
@@ -670,15 +865,27 @@ function RecordForm({ zoneId, onSaved }: { zoneId: string; onSaved: () => void }
         }
       >
         <SpaceBetween size="m">
-          <ColumnLayout columns={3}>
-            <FormField label="Name" errorText={errors.name}>
-              <Input
-                value={name}
-                onChange={({ detail }) => setName(detail.value)}
-                placeholder="@ or leaf-01"
-              />
-            </FormField>
-            <FormField label="Type">
+          <FormField
+            label="Record name"
+            description={`Leave blank to create a record at the zone apex (${zone.name})`}
+            errorText={errors.name}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ flex: 1 }}>
+                <Input
+                  value={name}
+                  onChange={({ detail }) => setName(detail.value)}
+                  placeholder="leaf-01"
+                />
+              </div>
+              <Box color="text-status-inactive" fontSize="body-m">
+                <span style={MONO}>.{zone.name}</span>
+              </Box>
+            </div>
+          </FormField>
+
+          <ColumnLayout columns={2}>
+            <FormField label="Record type">
               <Select
                 selectedOption={typeOpt}
                 onChange={({ detail }) => {
@@ -688,8 +895,16 @@ function RecordForm({ zoneId, onSaved }: { zoneId: string; onSaved: () => void }
                 expandToViewport
               />
             </FormField>
-            <FormField label="TTL (s, optional)">
-              <Input type="number" value={ttl} onChange={({ detail }) => setTtl(detail.value)} />
+            <FormField
+              label="TTL (seconds)"
+              description={`Defaults to zone default of ${zone.default_ttl}`}
+            >
+              <Input
+                type="number"
+                value={ttl}
+                onChange={({ detail }) => setTtl(detail.value)}
+                placeholder={String(zone.default_ttl)}
+              />
             </FormField>
           </ColumnLayout>
 
