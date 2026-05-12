@@ -91,6 +91,13 @@ class DnsServerConfig(BaseModel):
     # endpoint doesn't exist — set this to False on Hickory recursives
     # until the dnstap reader lands as the unified QPS source.
     metrics_enabled: bool = True
+    # UNIX socket the resolver writes dnstap frames to. When set, the
+    # collector spawns a dnstap listener and folds per-query (name,
+    # type) tuples into a top-K reservoir shipped on the metrics POST.
+    # Only CoreDNS auth pods support this today; Hickory has no
+    # dnstap output. Set on the same shared volume as zones/keys so
+    # both the resolver container and the collector see the same path.
+    dnstap_socket: str | None = None
 
 
 class DnsAgentConfig(BaseModel):

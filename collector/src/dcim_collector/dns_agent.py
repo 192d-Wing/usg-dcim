@@ -24,6 +24,7 @@ import structlog
 import yaml
 
 from .config import CollectorConfig, DnsServerConfig
+from .dnstap import serve_dnstap
 
 log = structlog.get_logger("collector.dns_agent")
 
@@ -420,6 +421,83 @@ def _percentile_from_buckets(buckets: dict, total: int, percentile: float) -> fl
     return None
 
 
+# Per-server top-K reservoirs populated by the dnstap loop and
+# snapshotted by the metrics loop. Keyed by `str(server.id)` so the
+# two loops can be in different asyncio tasks without sharing a
+# DnsServerConfig reference. Access is protected by `_TOP_NAMES_LOCK`
+# because both loops touch it from independent coroutines.
+_TOP_NAMES: dict[str, dict[tuple[str, str], int]] = {}
+_TOP_NAMES_LOCK = asyncio.Lock()
+
+# Cap the per-server reservoir to bound memory under load. 5000
+# distinct (name, type) tuples covers normal traffic with headroom;
+# above that we drop new entries (a low-frequency name doesn't
+# matter for top-K anyway). The metrics POST trims further to
+# `_TOP_NAMES_SHIP_K` so the wire payload stays small.
+_TOP_NAMES_CAP = 5000
+_TOP_NAMES_SHIP_K = 100
+
+
+async def _record_query(server_id: str, name: str, qtype: str) -> None:
+    """Increment the per-(name, type) counter for `server_id`. Called
+    by the dnstap loop on every decoded query. Drops new entries
+    when the reservoir is full so a query storm of unique names
+    can't blow memory."""
+    async with _TOP_NAMES_LOCK:
+        bucket = _TOP_NAMES.setdefault(server_id, {})
+        key = (name, qtype)
+        if key in bucket:
+            bucket[key] += 1
+            return
+        if len(bucket) >= _TOP_NAMES_CAP:
+            return
+        bucket[key] = 1
+
+
+async def _snapshot_top_names(server_id: str) -> list[dict]:
+    """Atomically take and reset the per-server reservoir, returning
+    the top-K entries by count for the metrics POST. Reset-on-read
+    matches the per-interval-delta shape of the rcode counters."""
+    async with _TOP_NAMES_LOCK:
+        bucket = _TOP_NAMES.pop(server_id, {})
+    ranked = sorted(bucket.items(), key=lambda kv: kv[1], reverse=True)
+    return [
+        {"name": n, "type": t, "count": c}
+        for (n, t), c in ranked[:_TOP_NAMES_SHIP_K]
+    ]
+
+
+async def _dnstap_loop(server: DnsServerConfig) -> None:
+    """Listen on the resolver's dnstap socket and feed each decoded
+    query into the per-server top-K reservoir. CoreDNS retries with
+    backoff if our listener isn't up yet, so it's fine for this loop
+    to start in parallel with bundle apply."""
+    socket_path = server.dnstap_socket
+    if not socket_path:
+        return
+    server_id = str(server.id)
+
+    async def on_query(name: str, qtype: str) -> None:
+        await _record_query(server_id, name, qtype)
+
+    log.info(
+        "dnstap_loop_start", server_id=server_id, socket=socket_path,
+    )
+    # Restart on unexpected exceptions — the listener should run
+    # forever for the life of the collector. asyncio.CancelledError
+    # bubbles up so shutdown works.
+    while True:
+        try:
+            await serve_dnstap(socket_path, on_query)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "dnstap_loop_restart", server_id=server_id, err=str(e),
+            )
+            await asyncio.sleep(2)
+
+
 async def _metrics_loop(
     cfg: CollectorConfig, server: DnsServerConfig, token: str | None,
 ) -> None:
@@ -462,11 +540,22 @@ async def _metrics_loop(
                 p95 = _percentile_from_buckets(
                     snap["duration_buckets"], snap["duration_count"], 0.95,
                 )
+                # Snapshot+reset the dnstap reservoir for this
+                # interval. Returns an empty list when dnstap isn't
+                # wired on this server — central treats null and []
+                # differently (null = "not wired anywhere", [] =
+                # "wired but zero queries in window") so we ship null
+                # when there's no dnstap socket and a list otherwise.
+                top_names = (
+                    await _snapshot_top_names(str(server.id))
+                    if server.dnstap_socket else None
+                )
                 payload = {
                     "interval_seconds": interval,
                     **delta,
                     "p50_ms": p50,
                     "p95_ms": p95,
+                    "top_names": top_names,
                 }
                 async with _client(cfg, token) as push:
                     url = f"{api_base}/api/v1/dns/servers/{server.id}/metrics"
@@ -517,6 +606,14 @@ async def run_dns_agent(cfg: CollectorConfig) -> None:
             asyncio.create_task(_metrics_loop(cfg, s, token))
             for s in cfg.dns.servers if s.metrics_enabled
         )
+    # One dnstap listener per server that has the socket configured.
+    # CoreDNS auth pods are the only consumers today; Hickory has no
+    # dnstap output. The reservoir + the metrics loop coordinate via
+    # the module-level `_TOP_NAMES` dict.
+    tasks.extend(
+        asyncio.create_task(_dnstap_loop(s))
+        for s in cfg.dns.servers if s.dnstap_socket
+    )
     try:
         await asyncio.gather(*tasks)
     except asyncio.CancelledError:
