@@ -9,15 +9,18 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import ConflictError, NotFoundError, ValidationError
-from ..models.auth import Role, RoleScope, ScopeType, User, UserRole
+from ..models.auth import OidcRoleMapping, Role, RoleScope, ScopeType, User, UserRole
 from ..schemas.auth import (
     AssignmentCreate,
     AssignmentOut,
+    OidcRoleMappingCreate,
+    OidcRoleMappingOut,
+    OidcRoleMappingUpdate,
     RoleCreate,
     RoleOut,
     RoleUpdate,
@@ -37,6 +40,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 _USER_NOT_FOUND = "user not found"
 _ROLE_NOT_FOUND = "role not found"
 _ASSIGNMENT_NOT_FOUND = "role assignment not found"
+_OIDC_MAPPING_NOT_FOUND = "oidc role mapping not found"
 
 
 # ----------------------- Users -----------------------
@@ -296,5 +300,146 @@ async def delete_assignment(
         db, principal, action="role_assignment.delete", target_type="user_role",
         target_id=str(assignment_id),
         metadata={"user_id": str(user_id), "role_id": str(role_id)},
+    )
+    await db.commit()
+
+
+# ----------------------- OIDC role mappings -----------------------
+
+
+async def _hydrate_mapping(db: AsyncSession, m: OidcRoleMapping) -> OidcRoleMappingOut:
+    role = await db.get(Role, m.dcim_role_id)
+    return OidcRoleMappingOut(
+        id=m.id,
+        idp_role=m.idp_role,
+        claim_source=m.claim_source,
+        dcim_role_id=m.dcim_role_id,
+        dcim_role_name=role.name if role else "(deleted role)",
+        description=m.description,
+        created_at=m.created_at,
+    )
+
+
+@router.get("/oidc-role-mappings", response_model=Page[OidcRoleMappingOut])
+async def list_oidc_mappings(
+    params: PageParams = Depends(PageParams.from_query),
+    _: Principal = Depends(require_capability(ROLES_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+):
+    # Join Role so we can return the human-readable role name in one
+    # roundtrip; the standard paginate() helper assumes a single
+    # model + sync model_validate, which doesn't fit this join shape.
+    base = (
+        select(OidcRoleMapping, Role)
+        .join(Role, Role.id == OidcRoleMapping.dcim_role_id)
+        .order_by(OidcRoleMapping.idp_role)
+    )
+    total = (
+        await db.execute(
+            select(func.count()).select_from(
+                select(OidcRoleMapping.id).subquery()
+            )
+        )
+    ).scalar_one()
+    rows = (
+        await db.execute(
+            base.offset((params.page - 1) * params.page_size).limit(params.page_size)
+        )
+    ).all()
+    items = [
+        OidcRoleMappingOut(
+            id=m.id,
+            idp_role=m.idp_role,
+            claim_source=m.claim_source,
+            dcim_role_id=m.dcim_role_id,
+            dcim_role_name=r.name,
+            description=m.description,
+            created_at=m.created_at,
+        )
+        for (m, r) in rows
+    ]
+    return Page[OidcRoleMappingOut](
+        items=items,
+        page=params.page,
+        page_size=params.page_size,
+        total=int(total or 0),
+        has_more=(params.page * params.page_size) < int(total or 0),
+    )
+
+
+@router.post("/oidc-role-mappings", response_model=OidcRoleMappingOut, status_code=201)
+async def create_oidc_mapping(
+    payload: OidcRoleMappingCreate,
+    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+):
+    if (await db.get(Role, payload.dcim_role_id)) is None:
+        raise NotFoundError(_ROLE_NOT_FOUND)
+    existing = (
+        await db.execute(
+            select(OidcRoleMapping).where(OidcRoleMapping.idp_role == payload.idp_role)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        raise ConflictError("a mapping for that IdP role already exists")
+    obj = OidcRoleMapping(
+        idp_role=payload.idp_role,
+        claim_source=payload.claim_source,
+        dcim_role_id=payload.dcim_role_id,
+        description=payload.description,
+    )
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="oidc_role_mapping.create",
+        target_type="oidc_role_mapping", target_id=str(obj.id),
+        metadata={"idp_role": payload.idp_role, "dcim_role_id": str(payload.dcim_role_id)},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return await _hydrate_mapping(db, obj)
+
+
+@router.patch("/oidc-role-mappings/{mapping_id}", response_model=OidcRoleMappingOut)
+async def update_oidc_mapping(
+    mapping_id: UUID,
+    payload: OidcRoleMappingUpdate,
+    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(OidcRoleMapping, mapping_id)
+    if obj is None:
+        raise NotFoundError(_OIDC_MAPPING_NOT_FOUND)
+    if payload.dcim_role_id is not None:
+        if (await db.get(Role, payload.dcim_role_id)) is None:
+            raise NotFoundError(_ROLE_NOT_FOUND)
+        obj.dcim_role_id = payload.dcim_role_id
+    if payload.claim_source is not None:
+        obj.claim_source = payload.claim_source
+    if payload.description is not None:
+        obj.description = payload.description
+    await audit.record(
+        db, principal, action="oidc_role_mapping.update",
+        target_type="oidc_role_mapping", target_id=str(obj.id),
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return await _hydrate_mapping(db, obj)
+
+
+@router.delete("/oidc-role-mappings/{mapping_id}", status_code=204)
+async def delete_oidc_mapping(
+    mapping_id: UUID,
+    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(OidcRoleMapping, mapping_id)
+    if obj is None:
+        raise NotFoundError(_OIDC_MAPPING_NOT_FOUND)
+    await db.execute(delete(OidcRoleMapping).where(OidcRoleMapping.id == mapping_id))
+    await audit.record(
+        db, principal, action="oidc_role_mapping.delete",
+        target_type="oidc_role_mapping", target_id=str(mapping_id),
+        metadata={"idp_role": obj.idp_role},
     )
     await db.commit()

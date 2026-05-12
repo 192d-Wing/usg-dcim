@@ -85,6 +85,28 @@ class RoleScope(UUIDPrimaryKey, Timestamped, Base):
     assignment: Mapped[UserRole] = relationship(back_populates="scopes")
 
 
+class OidcRoleMapping(UUIDPrimaryKey, Timestamped, Base):
+    """Map a role name asserted by the IdP (Keycloak realm role,
+    Okta/ADFS group, etc.) to a DCIM Role.
+
+    On each OIDC sign-in we look at the id_token claims, extract role
+    strings via the configured claim paths, and look up rows here to
+    decide which DCIM roles the user should hold. claim_source is a
+    free-form label ("keycloak", "okta", "adfs", ...) — it lets admins
+    document where the value comes from but doesn't affect matching.
+    """
+
+    __tablename__ = "oidc_role_mappings"
+    __table_args__ = (UniqueConstraint("idp_role", name="uq_oidc_role_mapping_idp_role"),)
+
+    idp_role: Mapped[str] = mapped_column(String(255), nullable=False)
+    claim_source: Mapped[str] = mapped_column(String(64), default="keycloak", nullable=False)
+    dcim_role_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("roles.id"), nullable=False
+    )
+    description: Mapped[str | None] = mapped_column(String(255))
+
+
 class ApiToken(UUIDPrimaryKey, Timestamped, Base):
     """Service-account or integration token. Scope is a copy of (a subset of) the owner's scope."""
 

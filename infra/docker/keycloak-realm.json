@@ -30,6 +30,13 @@
     }
   ],
 
+  "roles": {
+    "realm": [
+      { "name": "dcim-admin",  "description": "Maps to DCIM EnterpriseAdmin via OIDC role mappings" },
+      { "name": "dcim-viewer", "description": "Maps to DCIM Viewer via OIDC role mappings" }
+    ]
+  },
+
   "users": [
     {
       "username": "demo",
@@ -40,7 +47,8 @@
       "emailVerified": true,
       "credentials": [
         {"type": "password", "value": "demo", "temporary": false}
-      ]
+      ],
+      "realmRoles": ["dcim-admin"]
     }
   ]
 }

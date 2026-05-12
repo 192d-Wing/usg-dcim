@@ -108,3 +108,27 @@ class AssignmentOut(BaseModel):
     role_id: UUID
     role_name: str
     scopes: list[ScopeRowOut]
+
+
+class OidcRoleMappingCreate(BaseModel):
+    idp_role: str
+    claim_source: str = "keycloak"
+    dcim_role_id: UUID
+    description: str | None = None
+
+
+class OidcRoleMappingUpdate(BaseModel):
+    claim_source: str | None = None
+    dcim_role_id: UUID | None = None
+    description: str | None = None
+
+
+class OidcRoleMappingOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    idp_role: str
+    claim_source: str
+    dcim_role_id: UUID
+    dcim_role_name: str
+    description: str | None
+    created_at: datetime

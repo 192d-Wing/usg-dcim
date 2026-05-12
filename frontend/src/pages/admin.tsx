@@ -42,6 +42,15 @@ type Assignment = {
   role_name: string; scopes: ScopeRow[];
 };
 type Site = { id: string; code: string; name: string };
+type OidcMapping = {
+  id: string;
+  idp_role: string;
+  claim_source: string;
+  dcim_role_id: string;
+  dcim_role_name: string;
+  description: string | null;
+  created_at: string;
+};
 
 const SCOPE_TYPES: SelectProps.Option[] = [
   { value: 'global', label: 'global' },
@@ -72,6 +81,7 @@ export function AdminPage() {
   const tabs: { id: string; label: string; content: React.ReactNode }[] = [];
   if (canUsers) tabs.push({ id: 'users', label: 'Users', content: <UsersTab /> });
   if (canRoles) tabs.push({ id: 'roles', label: 'Roles', content: <RolesTab myCapabilities={myCaps} /> });
+  if (canRoles) tabs.push({ id: 'oidc', label: 'OIDC mappings', content: <OidcMappingsTab /> });
 
   return (
     <ContentLayout
@@ -581,6 +591,228 @@ function RoleForm({
                 </Checkbox>
               ))}
             </div>
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
+  );
+}
+
+// ----------------------- OIDC role mappings -----------------------
+
+function OidcMappingsTab() {
+  const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<OidcMapping>({
+    resource: 'admin/oidc-role-mappings',
+    pagination: { pageSize: 50 },
+  });
+  const rolesRes = useList<Role>({ resource: 'admin/roles', pagination: { pageSize: 200 } });
+  const data = result.data ?? [];
+  const roles = rolesRes.result.data ?? [];
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<OidcMapping | null>(null);
+
+  async function refresh() { await tableQuery.refetch(); }
+
+  async function remove(m: OidcMapping) {
+    if (!globalThis.confirm(`Delete mapping for IdP role "${m.idp_role}"?`)) return;
+    try {
+      await http.delete(`/admin/oidc-role-mappings/${m.id}`);
+      toast.success('Mapping deleted');
+      await refresh();
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  return (
+    <SpaceBetween size="l">
+      <Table<OidcMapping>
+        variant="container"
+        loading={tableQuery.isLoading}
+        loadingText="Loading mappings…"
+        items={data}
+        trackBy="id"
+        header={
+          <Header
+            counter={`(${data.length})`}
+            description="Map an IdP-asserted role (Keycloak realm role, Okta/ADFS group) to a DCIM role. Applied on every OIDC sign-in."
+            actions={
+              <Button variant="primary" iconName="add-plus" onClick={() => setCreateOpen(true)}>
+                New mapping
+              </Button>
+            }
+          >
+            OIDC role mappings
+          </Header>
+        }
+        columnDefinitions={[
+          {
+            id: 'idp_role', header: 'IdP role',
+            cell: (m) => <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 500 }}>{m.idp_role}</span>,
+          },
+          {
+            id: 'claim_source', header: 'Source',
+            cell: (m) => <Badge color="grey">{m.claim_source}</Badge>,
+            width: 130,
+          },
+          {
+            id: 'dcim_role', header: 'DCIM role',
+            cell: (m) => <Badge color="blue">{m.dcim_role_name}</Badge>,
+          },
+          {
+            id: 'description', header: 'Description',
+            cell: (m) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{m.description ?? '—'}</Box>,
+          },
+          {
+            id: 'actions', header: '',
+            cell: (m) => (
+              <SpaceBetween size="xxs" direction="horizontal">
+                <Button iconName="edit" variant="inline-icon" onClick={() => setEditing(m)} ariaLabel={`Edit ${m.idp_role}`} />
+                <Button iconName="remove" variant="inline-icon" onClick={() => remove(m)} ariaLabel={`Delete ${m.idp_role}`} />
+              </SpaceBetween>
+            ),
+            width: 110,
+          },
+        ]}
+        empty={
+          <Box textAlign="center" color="inherit" padding="m">
+            No mappings yet. OIDC users sign in without any DCIM role attached until you add at least one mapping.
+          </Box>
+        }
+        pagination={
+          pageCount > 1 ? (
+            <Pagination
+              currentPageIndex={currentPage}
+              pagesCount={pageCount}
+              onChange={({ detail }) => setCurrentPage(detail.currentPageIndex)}
+            />
+          ) : undefined
+        }
+      />
+
+      <Modal visible={createOpen} onDismiss={() => setCreateOpen(false)} header="New OIDC mapping" size="medium">
+        <MappingForm
+          roles={roles}
+          onSaved={async () => { setCreateOpen(false); await refresh(); }}
+        />
+      </Modal>
+      <Modal visible={editing !== null} onDismiss={() => setEditing(null)} header="Edit OIDC mapping" size="medium">
+        {editing && (
+          <MappingForm
+            roles={roles}
+            mapping={editing}
+            onSaved={async () => { setEditing(null); await refresh(); }}
+          />
+        )}
+      </Modal>
+    </SpaceBetween>
+  );
+}
+
+const CLAIM_SOURCE_OPTIONS: SelectProps.Option[] = [
+  { value: 'keycloak', label: 'Keycloak (realm_access.roles)' },
+  { value: 'keycloak-client', label: 'Keycloak (resource_access.<client>.roles)' },
+  { value: 'okta', label: 'Okta (groups)' },
+  { value: 'adfs', label: 'ADFS (groups / roles)' },
+  { value: 'other', label: 'Other' },
+];
+
+function MappingForm({
+  roles, mapping, onSaved,
+}: Readonly<{
+  roles: Role[];
+  mapping?: OidcMapping;
+  onSaved: () => void;
+}>) {
+  const editing = !!mapping;
+  const [idpRole, setIdpRole] = useState(mapping?.idp_role ?? '');
+  const [claimSource, setClaimSource] = useState<SelectProps.Option>(
+    CLAIM_SOURCE_OPTIONS.find((o) => o.value === mapping?.claim_source) ?? CLAIM_SOURCE_OPTIONS[0],
+  );
+  const [dcimRoleOpt, setDcimRoleOpt] = useState<SelectProps.Option | null>(
+    mapping ? { value: mapping.dcim_role_id, label: mapping.dcim_role_name } : null,
+  );
+  const [description, setDescription] = useState(mapping?.description ?? '');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const roleOptions: SelectProps.Option[] = roles.map((r) => ({
+    value: r.id,
+    label: r.is_system ? `${r.name} (system)` : r.name,
+  }));
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!idpRole.trim()) errs.idp_role = 'IdP role name required';
+    if (!dcimRoleOpt?.value) errs.dcim_role = 'Pick a DCIM role';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
+    try {
+      if (editing && mapping) {
+        await http.patch(`/admin/oidc-role-mappings/${mapping.id}`, {
+          claim_source: claimSource.value,
+          dcim_role_id: dcimRoleOpt!.value,
+          description: description || null,
+        });
+        toast.success('Mapping updated');
+      } else {
+        await http.post('/admin/oidc-role-mappings', {
+          idp_role: idpRole.trim(),
+          claim_source: claimSource.value,
+          dcim_role_id: dcimRoleOpt!.value,
+          description: description || null,
+        });
+        toast.success('Mapping created');
+      }
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'save failed');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Saving…' : editing ? 'Save' : 'Create'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField
+            label="IdP role"
+            description="Exact string as it appears in the ID token (case-sensitive). Cannot be changed after creation."
+            errorText={errors.idp_role}
+          >
+            <Input
+              value={idpRole}
+              disabled={editing}
+              placeholder="e.g. dcim-admin"
+              onChange={({ detail }) => setIdpRole(detail.value)}
+            />
+          </FormField>
+          <FormField label="Claim source" description="Where to expect this role string. Documentation only — matching is across all known claim paths.">
+            <Select
+              selectedOption={claimSource}
+              onChange={({ detail }) => setClaimSource(detail.selectedOption)}
+              options={CLAIM_SOURCE_OPTIONS}
+              expandToViewport
+            />
+          </FormField>
+          <FormField label="DCIM role" errorText={errors.dcim_role}>
+            <Select
+              placeholder="Pick a DCIM role"
+              selectedOption={dcimRoleOpt}
+              onChange={({ detail }) => setDcimRoleOpt(detail.selectedOption)}
+              options={roleOptions}
+              expandToViewport
+            />
+          </FormField>
+          <FormField label="Description (optional)">
+            <Input value={description ?? ''} onChange={({ detail }) => setDescription(detail.value)} />
           </FormField>
         </SpaceBetween>
       </Form>
