@@ -386,6 +386,113 @@ Most common causes, in order:
 Routing issue, not DNS. The leaf is announcing the route to only
 a subset of clients. Talk to whoever owns the underlay network.
 
+## DNS overview dashboard
+
+The top-level **DNS** entry in the side-nav (`/dns`) is the single
+page operators land on for an at-a-glance view of the whole fabric.
+Everything on the page refetches every 30 seconds.
+
+### Reading it
+
+| Panel | What it shows | Where the number comes from |
+| --- | --- | --- |
+| **Global** strip (5 KPIs) | Current QPS, NXDOMAIN%, p95 latency, zones, servers | Last sample per server (QPS), window aggregates (rates), live row counts (zones/servers) |
+| **QPS timeline** | Two-axis line chart: QPS (left) + p95 ms (right) over the selected window | Bucketed deltas from `dns_server_metrics_samples` |
+| **By site** table | Per-site rollup, sorted by current QPS | Same window samples, grouped by `DnsServer.site_id` |
+| **Top queried names** | Top-N name + type with counts; copy-to-clipboard icon per row | `top_names` JSONB column from dnstap-shipping CoreDNS auth pods |
+| **Server health** | Each `DnsServer` with role, engine, last-render status chip | `DnsServer.last_render_*` columns updated by the collector |
+
+The header strip has two controls:
+
+- **Window** — segmented 1h/6h/24h. Changes the `minutes` query
+  param the page polls, re-buckets every aggregate.
+- **Fabric scope** — the existing top-nav fabric picker. When set,
+  every aggregate on the page narrows to that fabric (servers,
+  zones, samples, anycast groups). Header description reads
+  `fabric: <name>` so the scope is always visible.
+
+A storage footer in the header description (`top_names: N rows ·
+XB avg · YMB total`) lets you eyeball the JSONB column's disk
+footprint against `dns_metrics_retention_days` (default 14).
+
+### Wiring per-query name capture (dnstap)
+
+The Top queried names card stays in its "Coming soon" placeholder
+state until **both** legs of the dnstap path are connected:
+
+1. **Central** emits the directive into CoreDNS auth Corefiles —
+   on by default via `DCIM_DNS_DNSTAP_ENABLED=true` (set in the
+   central docker-compose api env). Renders a
+   `dnstap <socket-path> full` line in every zone block.
+2. **Collector** listens on that socket — set `dnstap_socket` on
+   the auth entry in `collector.yaml`:
+
+   ```yaml
+   dns:
+     servers:
+       - id: <auth dns_server_id>
+         role: auth
+         output_dir: /var/lib/dcim-dns/auth
+         dnstap_socket: /var/lib/dcim-dns/auth/dnstap.sock
+   ```
+
+   Restart the collector. Successful start logs
+   `dnstap_loop_start` and `dnstap_server_start`.
+
+Hickory recursive pods can't supply top-names — Hickory has no
+dnstap support upstream. The dashboard says so explicitly when
+`top_names` is `null` (vs an empty list, which means "dnstap is
+wired but the window saw zero queries").
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Dashboard shows 0 QPS on a server with traffic | Collector's prom scrape failing | `docker compose -p siteN logs collector \| grep dns_metrics_cycle_failed` — typical causes: `metrics_url` wrong, Hickory binary built without `prometheus-metrics` |
+| Hickory recursive: `qps_now: null` | Scrape disabled or Hickory upstream image lacking metrics | Confirm `metrics_enabled: true` on the recursive in `collector.yaml`. If using the upstream `hickorydns/hickory-dns` image, swap to `ghcr.io/192d-wing/hickory-prom:v0.26.0-1` (see `infra/hickory-prom/`) |
+| Top queried names says "No per-name data yet" | dnstap not wired on any server | Confirm `DCIM_DNS_DNSTAP_ENABLED=true` on the api container AND `dnstap_socket` set on at least one auth entry in `collector.yaml` |
+| Top queried names is empty list | dnstap wired, no traffic in window | Generate test traffic: `dig @<auth-ip> -p 53 <zone> SOA` |
+| `resolver_reloaded=false` on Hickory bundle apply | Hickory's pidfile missing | Already fixed in collector via `/proc/<pid>/comm` fallback; if still failing, confirm site stack runs `pid: host` on both collector + recursive containers |
+| Latency p95 is null but QPS > 0 | Histogram has too few samples or Hickory's `cache_miss_*` histogram is empty | Drive real load through the recursive (cache-hit latency is sub-ms and is intentionally excluded); for CoreDNS auth, the duration histogram needs at least 5 samples in the window |
+| Dashboard scoped to fabric shows zero everything | Fabric has no DnsServers | Add at least one `DnsServer` row bound to the fabric, or switch the fabric picker back to "all fabrics" |
+
+### Cutover playbooks
+
+**Enable Hickory recursive on a fabric:**
+
+```bash
+curl -X PATCH /api/v1/ipam/fabrics/$FABRIC_ID \
+  -H "content-type: application/json" \
+  -d '{"recursive_engine":"hickory"}'
+
+# Then layer the Hickory overlay on the site stack:
+docker compose -p siteN \
+  -f infra/docker/site-dns/docker-compose.yml \
+  -f infra/docker/site-dns/docker-compose.hickory.yml \
+  up -d --force-recreate coredns-recursive
+```
+
+**Enable NSEC3 on a signed zone:**
+
+```bash
+# Zone must be signed first (POST .../enable-dnssec).
+curl -X POST /api/v1/dns/zones/$ZONE_ID/nsec3 \
+  -H "content-type: application/json" \
+  -d '{"salt":"ABCD","iterations":0,"opt_out":false}'
+```
+
+Auth pod must be running the custom `coredns-nsec3sign` image —
+the upstream CoreDNS rejects the `nsec3sign` directive and falls
+back to its previous config.
+
+**Roll back:**
+
+- Hickory → CoreDNS recursive: PATCH the fabric back to
+  `recursive_engine:"coredns"` and re-run with the base compose
+  file (no `-f docker-compose.hickory.yml`).
+- NSEC3 → NSEC: `DELETE /api/v1/dns/zones/$ZONE_ID/nsec3`. The
+  renderer switches back to the upstream `dnssec` plugin block.
+
 ## Pointers
 
 - Admin / deployment: [admin-guide.md](admin-guide.md)

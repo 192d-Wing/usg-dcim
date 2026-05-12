@@ -27,7 +27,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, ValidationError as PydanticValidationError
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -1073,6 +1073,19 @@ class _DashTopName(BaseModel):
     count: int
 
 
+class _DashStorageStats(BaseModel):
+    """Operator-facing instrumentation for the metrics-samples table —
+    specifically the `top_names` JSONB column, which can balloon if a
+    busy server's reservoir runs near its 100-row ship cap every
+    interval. The dashboard surfaces these so operators can correlate
+    `dns_metrics_retention_days` with actual disk usage and decide
+    whether to tighten the window before the cron sweeps."""
+    sample_count: int
+    samples_with_top_names: int
+    top_names_bytes_avg: int | None
+    top_names_bytes_total: int
+
+
 class DnsDashboardOut(BaseModel):
     generated_at: datetime
     window_minutes: int
@@ -1087,6 +1100,7 @@ class DnsDashboardOut(BaseModel):
     # aggregating `DnsServerMetricsSample.top_names` per the dnstap
     # plumbing tracked in .claude/plans/dns-top-names.md.
     top_names: list[_DashTopName] | None = None
+    storage: _DashStorageStats
 
 
 def _pct(numerator: int, total: int) -> float:
@@ -1258,6 +1272,35 @@ def _build_by_site(
     return out
 
 
+async def _storage_stats(db: AsyncSession) -> _DashStorageStats:
+    """One round-trip through Postgres for the metrics-samples size
+    metrics. `pg_column_size` measures the TOAST-compressed footprint
+    of the JSONB column on disk, which is what `dns_metrics_retention_days`
+    actually trims when the cron sweeps. Null when the column is null
+    for every row (dnstap not wired anywhere yet), in which case the
+    avg is meaningless and the UI suppresses the bytes line."""
+    row = (
+        await db.execute(
+            text(
+                "SELECT count(*) AS total, "
+                "count(*) FILTER (WHERE top_names IS NOT NULL) AS with_tn, "
+                "COALESCE(avg(pg_column_size(top_names))::bigint, 0) AS avg_b, "
+                "COALESCE(sum(pg_column_size(top_names))::bigint, 0) AS sum_b "
+                "FROM dns_server_metrics_samples"
+            )
+        )
+    ).first()
+    total, with_tn, avg_b, sum_b = (
+        (row[0], row[1], row[2], row[3]) if row else (0, 0, 0, 0)
+    )
+    return _DashStorageStats(
+        sample_count=int(total),
+        samples_with_top_names=int(with_tn),
+        top_names_bytes_avg=int(avg_b) if with_tn else None,
+        top_names_bytes_total=int(sum_b),
+    )
+
+
 def _aggregate_top_names(
     samples: list[DnsServerMetricsSample], limit: int = 10,
 ) -> list[_DashTopName] | None:
@@ -1412,6 +1455,7 @@ async def dns_dashboard(
             qps_now_per_server=qps_now_per_server,
         ),
         top_names=_aggregate_top_names(samples),
+        storage=await _storage_stats(db),
     )
 
 

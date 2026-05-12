@@ -23,6 +23,7 @@ import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator, {
   StatusIndicatorProps,
 } from '@cloudscape-design/components/status-indicator';
+import CopyToClipboard from '@cloudscape-design/components/copy-to-clipboard';
 import Table, { TableProps } from '@cloudscape-design/components/table';
 
 import { http } from '@/lib/http';
@@ -95,6 +96,13 @@ type DashServerHealth = {
   qps_now: number | null;
 };
 
+type DashStorage = {
+  sample_count: number;
+  samples_with_top_names: number;
+  top_names_bytes_avg: number | null;
+  top_names_bytes_total: number;
+};
+
 type Dashboard = {
   generated_at: string;
   window_minutes: number;
@@ -106,6 +114,7 @@ type Dashboard = {
   // collector is the only thing that ships this). Empty list means
   // dnstap is wired but the window saw zero queries.
   top_names: DashTopName[] | null;
+  storage: DashStorage;
 };
 
 // Render-status → Cloudscape status chip. Matches the chip pattern on
@@ -143,8 +152,25 @@ function Kpi({
 // as a positional argument — Cloudscape's column API hands the cell
 // function the whole row.
 function TopNameCell(item: Readonly<DashTopName>) {
+  // The CopyToClipboard control gives operators a one-click way to
+  // pivot from the dashboard into their existing DNS tooling (`dig`,
+  // record search, log greps) without retyping the name. Keeping the
+  // monospaced label inline alongside so the row still reads as a
+  // single thing visually.
   return (
-    <span style={{ fontFamily: 'ui-monospace, monospace' }}>{item.name}</span>
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      fontFamily: 'ui-monospace, monospace',
+    }}>
+      {item.name}
+      <CopyToClipboard
+        variant="icon"
+        copyButtonAriaLabel={`Copy ${item.name}`}
+        copyErrorText="Copy failed"
+        copySuccessText="Copied"
+        textToCopy={item.name.replace(/\.$/, '')}
+      />
+    </span>
   );
 }
 
@@ -359,17 +385,30 @@ export function DnsDashboardPage() {
     ? `fabric: ${activeFabric.name}`
     : 'all fabrics';
   const timelineLabel = WINDOW_OPTIONS.find((o) => o.id === windowId)?.text ?? `${minutes}m`;
+  // Storage footer note. Shows the rough disk envelope of the
+  // metrics-samples table so operators can decide whether to tighten
+  // `dns_metrics_retention_days` before the cron sweeps. Suppressed
+  // until at least one row has a top_names payload — until then the
+  // avg is null and the total is 0, which isn't a useful signal.
+  const storageNote = (() => {
+    const s = data?.storage;
+    if (!s?.samples_with_top_names) return null;
+    const mb = (s.top_names_bytes_total / 1_048_576).toFixed(1);
+    return `top_names: ${s.samples_with_top_names.toLocaleString()} rows · ` +
+      `${s.top_names_bytes_avg ?? 0}B avg · ${mb}MB total`;
+  })();
+  let headerDescription = 'Loading…';
+  if (data) {
+    const base = `Window: last ${data.window_minutes} min · ${scopeLabel} · updated ${relativeTime(data.generated_at)}`;
+    headerDescription = storageNote ? `${base} · ${storageNote}` : base;
+  }
 
   return (
     <ContentLayout
       header={
         <Header
           variant="h1"
-          description={
-            data
-              ? `Window: last ${data.window_minutes} min · ${scopeLabel} · updated ${relativeTime(data.generated_at)}`
-              : 'Loading…'
-          }
+          description={headerDescription}
           actions={
             <SegmentedControl
               selectedId={windowId}
