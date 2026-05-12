@@ -18,6 +18,7 @@ import Spinner from '@cloudscape-design/components/spinner';
 // Eagerly imported: small + on the critical path. Login is the unauth
 // fallback; the dashboard is the index landing.
 import { LoginPage } from '@/pages/login';
+import { LoginCallbackPage } from '@/pages/login-callback';
 import { DashboardPage } from '@/pages/dashboard';
 
 // Everything else is route-level split — vite emits a chunk per page so
@@ -109,6 +110,11 @@ export function App() {
             </Authenticated>
           }>
             <Route path="/login" element={<LoginPage />} />
+            {/* OIDC return URL — exchanges the ?code for our own token,
+                caches identity, then routes into the app. Lives under
+                the unauth wrapper so the user lands here before the
+                Authenticated check decides where to go. */}
+            <Route path="/login/callback" element={<LoginCallbackPage />} />
           </Route>
         </Routes>
         <Toaster theme="dark" />
