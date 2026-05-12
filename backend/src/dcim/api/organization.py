@@ -19,7 +19,7 @@ from ..schemas.organization import (
     OrganizationUpdate,
 )
 from ..security import audit
-from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
+
 from ..security.deps import Principal, require_capability
 from ._pagination import paginate
 
@@ -27,22 +27,20 @@ router = APIRouter(prefix="/organizations", tags=["organizations"])
 
 _NOT_FOUND = "organization not found"
 
-
 @router.get("", response_model=Page[OrganizationOut])
 async def list_orgs(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:organizations:read")),
     db: AsyncSession = Depends(get_db),
 ):
     return await paginate(
         db, select(Organization), model=Organization, params=params, out_model=OrganizationOut,
     )
 
-
 @router.get("/{org_id}", response_model=OrganizationOut)
 async def get_org(
     org_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:organizations:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Organization, org_id)
@@ -50,11 +48,10 @@ async def get_org(
         raise NotFoundError(_NOT_FOUND)
     return obj
 
-
 @router.post("", response_model=OrganizationOut, status_code=201)
 async def create_org(
     payload: OrganizationCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:organizations:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = Organization(**payload.model_dump())
@@ -68,12 +65,11 @@ async def create_org(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/{org_id}", response_model=OrganizationOut)
 async def update_org(
     org_id: UUID,
     payload: OrganizationUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:organizations:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Organization, org_id)
@@ -90,11 +86,10 @@ async def update_org(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/{org_id}", status_code=204)
 async def delete_org(
     org_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:organizations:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Organization, org_id)

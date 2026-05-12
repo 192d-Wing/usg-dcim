@@ -7,12 +7,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from ..security.capabilities import TELEMETRY_READ
 from ..security.deps import Principal, require_capability
 from ..services.elastic import client, telemetry_index
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
-
 
 @router.get("/series")
 async def get_series(
@@ -21,7 +19,7 @@ async def get_series(
     metric: str,
     start: datetime | None = Query(None),
     end: datetime | None = Query(None),
-    _: Principal = Depends(require_capability(TELEMETRY_READ)),
+    _: Principal = Depends(require_capability("telemetry:metrics:read")),
 ) -> dict:
     end = end or datetime.now(UTC)
     start = start or (end - timedelta(hours=1))

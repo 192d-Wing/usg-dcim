@@ -16,27 +16,25 @@ from ..models.collectors import Collector, CollectorHeartbeat, CollectorStatus
 from ..schemas.collectors import CollectorEnroll, CollectorHeartbeatIn, CollectorOut
 from ..schemas.common import Page, PageParams
 from ..security import audit
-from ..security.capabilities import COLLECTOR_ENROLL, COLLECTOR_INGEST, COLLECTOR_READ
+
 from ..security.deps import Principal, require_capability
 from ..security.tokens import hash_api_token
 from ._pagination import paginate
 
 router = APIRouter(prefix="/collectors", tags=["collectors"])
 
-
 @router.get("", response_model=Page[CollectorOut])
 async def list_collectors(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(COLLECTOR_READ)),
+    _: Principal = Depends(require_capability("collectors:collectors:read")),
     db: AsyncSession = Depends(get_db),
 ):
     return await paginate(db, select(Collector), model=Collector, params=params, out_model=CollectorOut)
 
-
 @router.post("/enroll")
 async def enroll_collector(
     payload: CollectorEnroll,
-    principal: Principal = Depends(require_capability(COLLECTOR_ENROLL)),
+    principal: Principal = Depends(require_capability("collectors:collectors:enroll")),
     db: AsyncSession = Depends(get_db),
 ):
     """Issue a one-time enrollment token. The collector exchanges it for an mTLS cert + API token."""
@@ -58,12 +56,11 @@ async def enroll_collector(
     await db.refresh(obj)
     return {"collector_id": str(obj.id), "enrollment_token": raw, "expires_in_seconds": 3600}
 
-
 @router.post("/{collector_id}/heartbeat")
 async def heartbeat(
     collector_id: UUID,
     payload: CollectorHeartbeatIn,
-    _: Principal = Depends(require_capability(COLLECTOR_INGEST)),
+    _: Principal = Depends(require_capability("collectors:ingest:write")),
     db: AsyncSession = Depends(get_db),
 ):
     coll = await db.get(Collector, collector_id)

@@ -69,7 +69,22 @@ CAPABILITY_CATALOG: dict[str, dict[str, list[str]]] = {
         "assets": ["create", "read", "update", "delete"],
         "cables": ["create", "read", "update", "delete"],
         "stencils": ["create", "read", "update", "delete"],
+        "organizations": ["create", "read", "update", "delete"],
         "bulk": ["execute"],
+    },
+    "routing": {
+        "asns": ["create", "read", "update", "delete"],
+        "tcp-ao-key-chains": ["create", "read", "update", "delete", "rotate"],
+        "tcp-ao-keys": ["create", "read", "update", "delete"],
+        "prefix-lists": ["create", "read", "update", "delete"],
+        "prefix-list-entries": ["create", "read", "update", "delete"],
+        "community-lists": ["create", "read", "update", "delete"],
+        "community-list-entries": ["create", "read", "update", "delete"],
+        "route-maps": ["create", "read", "update", "delete"],
+        "route-map-entries": ["create", "read", "update", "delete"],
+    },
+    "search": {
+        "search": ["read"],
     },
     "ipam": {
         "fabrics": ["create", "read", "update", "delete"],
@@ -115,6 +130,9 @@ CAPABILITY_CATALOG: dict[str, dict[str, list[str]]] = {
     },
     "maintenance": {
         "windows": ["create", "read", "update", "delete"],
+    },
+    "power": {
+        "outlets": ["create", "read", "delete"],
     },
     "audit": {
         "events": ["read", "export"],

@@ -11,11 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..models.inventory import Asset, Rack, Site
 from ..models.ipam import Fabric, IPAddress, Subnet, Vrf
-from ..security.capabilities import INVENTORY_READ
+
 from ..security.deps import Principal, require_capability
 
 router = APIRouter(prefix="/search", tags=["search"])
-
 
 def _looks_like_ip(q: str) -> str | None:
     """Return the canonical text of `q` if it parses as an IPv4 or IPv6
@@ -27,7 +26,6 @@ def _looks_like_ip(q: str) -> str | None:
     except ValueError:
         return None
 
-
 async def _bulk_by_id(db: AsyncSession, model, ids: set) -> dict:
     """Fetch every row whose id is in `ids`, return {id: row}. Empty
     input → empty result without hitting the DB."""
@@ -38,10 +36,8 @@ async def _bulk_by_id(db: AsyncSession, model, ids: set) -> dict:
     ).scalars().all()
     return {r.id: r for r in rows}
 
-
 def _enum_v(v):
     return v.value if hasattr(v, "value") else v
-
 
 def _ip_search_row(
     ip: IPAddress,
@@ -68,7 +64,6 @@ def _ip_search_row(
         "asset_name": a.name if a else None,
     }
 
-
 async def _ip_search(db: AsyncSession, addr: str, limit: int) -> list[dict]:
     """Resolve an IP query into enriched IPAddress rows.
 
@@ -92,12 +87,11 @@ async def _ip_search(db: AsyncSession, addr: str, limit: int) -> list[dict]:
     )
     return [_ip_search_row(ip, subnets, vrfs, fabrics, assets) for ip in ip_rows]
 
-
 @router.get("")
 async def global_search(
     q: str = Query(min_length=2, max_length=128),
     limit: int = Query(25, ge=1, le=200),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("search:search:read")),
     db: AsyncSession = Depends(get_db),
 ):
     pat = f"%{q}%"

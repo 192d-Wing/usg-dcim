@@ -85,23 +85,21 @@ from ..schemas.bgp import (
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
-from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
+
 from ..security.deps import Principal, require_capability
 from ._pagination import paginate
 
 router = APIRouter(prefix="/bgp", tags=["bgp"])
 
-
 # ----------------------- ASNs -----------------------
 
 _ASN_NOT_FOUND = "asn not found"
-
 
 @router.get("/asns", response_model=Page[AsnOut])
 async def list_asns(
     params: PageParams = Depends(PageParams.from_query),
     kind: AsnKind | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:asns:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Asn)
@@ -109,11 +107,10 @@ async def list_asns(
         stmt = stmt.where(Asn.kind == kind)
     return await paginate(db, stmt, model=Asn, params=params, out_model=AsnOut)
 
-
 @router.post("/asns", response_model=AsnOut, status_code=201)
 async def create_asn(
     payload: AsnCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:asns:create")),
     db: AsyncSession = Depends(get_db),
 ):
     if payload.organization_id is not None:
@@ -129,12 +126,11 @@ async def create_asn(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/asns/{asn_id}", response_model=AsnOut)
 async def update_asn(
     asn_id: UUID,
     payload: AsnUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:asns:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Asn, asn_id)
@@ -157,11 +153,10 @@ async def update_asn(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/asns/{asn_id}", status_code=204)
 async def delete_asn(
     asn_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:asns:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Asn, asn_id)
@@ -173,28 +168,25 @@ async def delete_asn(
     )
     await db.commit()
 
-
 # ----------------------- TCP AO key chains -----------------------
 
 _TCP_AO_CHAIN_NOT_FOUND = "tcp ao key chain not found"
 _TCP_AO_KEY_NOT_FOUND = "tcp ao key not found"
 
-
 @router.get("/tcp-ao-key-chains", response_model=Page[TcpAoKeyChainOut])
 async def list_tcp_ao_chains(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:tcp-ao-key-chains:read")),
     db: AsyncSession = Depends(get_db),
 ):
     return await paginate(
         db, select(TcpAoKeyChain), model=TcpAoKeyChain, params=params, out_model=TcpAoKeyChainOut,
     )
 
-
 @router.post("/tcp-ao-key-chains", response_model=TcpAoKeyChainOut, status_code=201)
 async def create_tcp_ao_chain(
     payload: TcpAoKeyChainCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = TcpAoKeyChain(**payload.model_dump())
@@ -208,12 +200,11 @@ async def create_tcp_ao_chain(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/tcp-ao-key-chains/{chain_id}", response_model=TcpAoKeyChainOut)
 async def update_tcp_ao_chain(
     chain_id: UUID,
     payload: TcpAoKeyChainUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(TcpAoKeyChain, chain_id)
@@ -230,11 +221,10 @@ async def update_tcp_ao_chain(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/tcp-ao-key-chains/{chain_id}", status_code=204)
 async def delete_tcp_ao_chain(
     chain_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(TcpAoKeyChain, chain_id)
@@ -256,12 +246,11 @@ async def delete_tcp_ao_chain(
     )
     await db.commit()
 
-
 @router.get("/tcp-ao-keys", response_model=Page[TcpAoKeyOut])
 async def list_tcp_ao_keys(
     params: PageParams = Depends(PageParams.from_query),
     key_chain_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:tcp-ao-keys:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(TcpAoKey)
@@ -269,11 +258,10 @@ async def list_tcp_ao_keys(
         stmt = stmt.where(TcpAoKey.key_chain_id == key_chain_id)
     return await paginate(db, stmt, model=TcpAoKey, params=params, out_model=TcpAoKeyOut)
 
-
 @router.post("/tcp-ao-keys", response_model=TcpAoKeyOut, status_code=201)
 async def create_tcp_ao_key(
     payload: TcpAoKeyCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:tcp-ao-keys:create")),
     db: AsyncSession = Depends(get_db),
 ):
     chain = await db.get(TcpAoKeyChain, payload.key_chain_id)
@@ -290,12 +278,11 @@ async def create_tcp_ao_key(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/tcp-ao-keys/{key_id_pk}", response_model=TcpAoKeyOut)
 async def update_tcp_ao_key(
     key_id_pk: UUID,
     payload: TcpAoKeyUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:tcp-ao-keys:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(TcpAoKey, key_id_pk)
@@ -312,11 +299,10 @@ async def update_tcp_ao_key(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/tcp-ao-keys/{key_id_pk}", status_code=204)
 async def delete_tcp_ao_key(
     key_id_pk: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:tcp-ao-keys:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(TcpAoKey, key_id_pk)
@@ -328,7 +314,6 @@ async def delete_tcp_ao_key(
         target_type="tcp_ao_key", target_id=str(key_id_pk),
     )
     await db.commit()
-
 
 # ---- TCP AO key chain rotation: generate a year's worth at once ----
 
@@ -343,7 +328,6 @@ class TcpAoRotationRequest(BaseModel):
     days_per_key: int = 30
     algorithm: TcpAoAlgorithm = TcpAoAlgorithm.hmac_sha1_96
 
-
 @router.post(
     "/tcp-ao-key-chains/{chain_id}/rotate-batch",
     response_model=list[TcpAoKeyOut],
@@ -352,7 +336,7 @@ class TcpAoRotationRequest(BaseModel):
 async def rotate_tcp_ao_chain(
     chain_id: UUID,
     payload: TcpAoRotationRequest,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:rotate")),
     db: AsyncSession = Depends(get_db),
 ):
     chain = await db.get(TcpAoKeyChain, chain_id)
@@ -409,18 +393,16 @@ async def rotate_tcp_ao_chain(
         await db.refresh(obj)
     return created
 
-
 # ----------------------- Prefix lists -----------------------
 
 _PREFIX_LIST_NOT_FOUND = "prefix list not found"
 _PREFIX_LIST_ENTRY_NOT_FOUND = "prefix list entry not found"
 
-
 @router.get("/prefix-lists", response_model=Page[PrefixListOut])
 async def list_prefix_lists(
     params: PageParams = Depends(PageParams.from_query),
     family: AddressFamilyV4V6 | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:prefix-lists:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(PrefixList)
@@ -428,11 +410,10 @@ async def list_prefix_lists(
         stmt = stmt.where(PrefixList.family == family)
     return await paginate(db, stmt, model=PrefixList, params=params, out_model=PrefixListOut)
 
-
 @router.post("/prefix-lists", response_model=PrefixListOut, status_code=201)
 async def create_prefix_list(
     payload: PrefixListCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:prefix-lists:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = PrefixList(**payload.model_dump())
@@ -446,12 +427,11 @@ async def create_prefix_list(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/prefix-lists/{list_id}", response_model=PrefixListOut)
 async def update_prefix_list(
     list_id: UUID,
     payload: PrefixListUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:prefix-lists:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(PrefixList, list_id)
@@ -468,11 +448,10 @@ async def update_prefix_list(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/prefix-lists/{list_id}", status_code=204)
 async def delete_prefix_list(
     list_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:prefix-lists:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(PrefixList, list_id)
@@ -492,12 +471,11 @@ async def delete_prefix_list(
     )
     await db.commit()
 
-
 @router.get("/prefix-list-entries", response_model=Page[PrefixListEntryOut])
 async def list_prefix_list_entries(
     params: PageParams = Depends(PageParams.from_query),
     prefix_list_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:prefix-list-entries:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(PrefixListEntry)
@@ -507,11 +485,10 @@ async def list_prefix_list_entries(
         db, stmt, model=PrefixListEntry, params=params, out_model=PrefixListEntryOut,
     )
 
-
 @router.post("/prefix-list-entries", response_model=PrefixListEntryOut, status_code=201)
 async def create_prefix_list_entry(
     payload: PrefixListEntryCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:prefix-list-entries:create")),
     db: AsyncSession = Depends(get_db),
 ):
     parent = await db.get(PrefixList, payload.prefix_list_id)
@@ -528,12 +505,11 @@ async def create_prefix_list_entry(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/prefix-list-entries/{entry_id}", response_model=PrefixListEntryOut)
 async def update_prefix_list_entry(
     entry_id: UUID,
     payload: PrefixListEntryUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:prefix-list-entries:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(PrefixListEntry, entry_id)
@@ -550,11 +526,10 @@ async def update_prefix_list_entry(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/prefix-list-entries/{entry_id}", status_code=204)
 async def delete_prefix_list_entry(
     entry_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:prefix-list-entries:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(PrefixListEntry, entry_id)
@@ -567,18 +542,16 @@ async def delete_prefix_list_entry(
     )
     await db.commit()
 
-
 # ----------------------- Community lists -----------------------
 
 _COMMUNITY_LIST_NOT_FOUND = "community list not found"
 _COMMUNITY_LIST_ENTRY_NOT_FOUND = "community list entry not found"
 
-
 @router.get("/community-lists", response_model=Page[CommunityListOut])
 async def list_community_lists(
     params: PageParams = Depends(PageParams.from_query),
     kind: CommunityKind | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:community-lists:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(CommunityList)
@@ -588,11 +561,10 @@ async def list_community_lists(
         db, stmt, model=CommunityList, params=params, out_model=CommunityListOut,
     )
 
-
 @router.post("/community-lists", response_model=CommunityListOut, status_code=201)
 async def create_community_list(
     payload: CommunityListCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:community-lists:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = CommunityList(**payload.model_dump())
@@ -606,12 +578,11 @@ async def create_community_list(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/community-lists/{list_id}", response_model=CommunityListOut)
 async def update_community_list(
     list_id: UUID,
     payload: CommunityListUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:community-lists:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(CommunityList, list_id)
@@ -628,11 +599,10 @@ async def update_community_list(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/community-lists/{list_id}", status_code=204)
 async def delete_community_list(
     list_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:community-lists:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(CommunityList, list_id)
@@ -654,12 +624,11 @@ async def delete_community_list(
     )
     await db.commit()
 
-
 @router.get("/community-list-entries", response_model=Page[CommunityListEntryOut])
 async def list_community_list_entries(
     params: PageParams = Depends(PageParams.from_query),
     community_list_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:community-list-entries:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(CommunityListEntry)
@@ -669,11 +638,10 @@ async def list_community_list_entries(
         db, stmt, model=CommunityListEntry, params=params, out_model=CommunityListEntryOut,
     )
 
-
 @router.post("/community-list-entries", response_model=CommunityListEntryOut, status_code=201)
 async def create_community_list_entry(
     payload: CommunityListEntryCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:community-list-entries:create")),
     db: AsyncSession = Depends(get_db),
 ):
     parent = await db.get(CommunityList, payload.community_list_id)
@@ -690,12 +658,11 @@ async def create_community_list_entry(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/community-list-entries/{entry_id}", response_model=CommunityListEntryOut)
 async def update_community_list_entry(
     entry_id: UUID,
     payload: CommunityListEntryUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:community-list-entries:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(CommunityListEntry, entry_id)
@@ -712,11 +679,10 @@ async def update_community_list_entry(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/community-list-entries/{entry_id}", status_code=204)
 async def delete_community_list_entry(
     entry_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:community-list-entries:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(CommunityListEntry, entry_id)
@@ -729,28 +695,25 @@ async def delete_community_list_entry(
     )
     await db.commit()
 
-
 # ----------------------- Route maps -----------------------
 
 _ROUTE_MAP_NOT_FOUND = "route map not found"
 _ROUTE_MAP_ENTRY_NOT_FOUND = "route map entry not found"
 
-
 @router.get("/route-maps", response_model=Page[RouteMapOut])
 async def list_route_maps(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:route-maps:read")),
     db: AsyncSession = Depends(get_db),
 ):
     return await paginate(
         db, select(RouteMap), model=RouteMap, params=params, out_model=RouteMapOut,
     )
 
-
 @router.post("/route-maps", response_model=RouteMapOut, status_code=201)
 async def create_route_map(
     payload: RouteMapCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:route-maps:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = RouteMap(**payload.model_dump())
@@ -764,12 +727,11 @@ async def create_route_map(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/route-maps/{map_id}", response_model=RouteMapOut)
 async def update_route_map(
     map_id: UUID,
     payload: RouteMapUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:route-maps:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(RouteMap, map_id)
@@ -786,11 +748,10 @@ async def update_route_map(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/route-maps/{map_id}", status_code=204)
 async def delete_route_map(
     map_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:route-maps:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(RouteMap, map_id)
@@ -810,12 +771,11 @@ async def delete_route_map(
     )
     await db.commit()
 
-
 @router.get("/route-map-entries", response_model=Page[RouteMapEntryOut])
 async def list_route_map_entries(
     params: PageParams = Depends(PageParams.from_query),
     route_map_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("routing:route-map-entries:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(RouteMapEntry)
@@ -825,11 +785,10 @@ async def list_route_map_entries(
         db, stmt, model=RouteMapEntry, params=params, out_model=RouteMapEntryOut,
     )
 
-
 @router.post("/route-map-entries", response_model=RouteMapEntryOut, status_code=201)
 async def create_route_map_entry(
     payload: RouteMapEntryCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:route-map-entries:create")),
     db: AsyncSession = Depends(get_db),
 ):
     parent = await db.get(RouteMap, payload.route_map_id)
@@ -854,12 +813,11 @@ async def create_route_map_entry(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/route-map-entries/{entry_id}", response_model=RouteMapEntryOut)
 async def update_route_map_entry(
     entry_id: UUID,
     payload: RouteMapEntryUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:route-map-entries:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(RouteMapEntry, entry_id)
@@ -876,11 +834,10 @@ async def update_route_map_entry(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/route-map-entries/{entry_id}", status_code=204)
 async def delete_route_map_entry(
     entry_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("routing:route-map-entries:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(RouteMapEntry, entry_id)

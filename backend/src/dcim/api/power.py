@@ -19,16 +19,15 @@ from ..models.inventory import Asset, AssetKind
 from ..models.power import Outlet, PowerConnection
 from ..schemas.power import OutletOut, PowerConnectionCreate, PowerConnectionOut
 from ..security import audit
-from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
+
 from ..security.deps import Principal, require_capability
 
 router = APIRouter(prefix="/power", tags=["power"])
 
-
 @router.get("/pdus/{pdu_id}/outlets", response_model=list[OutletOut])
 async def list_outlets(
     pdu_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("power:outlets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     pdu = await db.get(Asset, pdu_id)
@@ -71,12 +70,11 @@ async def list_outlets(
         for o in outlets
     ]
 
-
 @router.post("/outlets/{outlet_id}/connect", response_model=PowerConnectionOut, status_code=201)
 async def connect_outlet(
     outlet_id: UUID,
     payload: PowerConnectionCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("power:outlets:create")),
     db: AsyncSession = Depends(get_db),
 ):
     outlet = await db.get(Outlet, outlet_id)
@@ -113,11 +111,10 @@ async def connect_outlet(
     await db.refresh(conn)
     return conn
 
-
 @router.delete("/outlets/{outlet_id}/connect", status_code=204)
 async def disconnect_outlet(
     outlet_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("power:outlets:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     conn = (

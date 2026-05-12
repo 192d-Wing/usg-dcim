@@ -19,16 +19,15 @@ from ..models.alerts import Alert, AlertState, Severity
 from ..models.collectors import Collector, CollectorStatus
 from ..models.inventory import Asset, Building, LifecycleState, Rack, Region, Room, Row, Site
 from ..models.telemetry_meta import FreshnessState, TelemetrySource
-from ..security.capabilities import DASHBOARD_READ
+
 from ..security.deps import Principal, require_capability
 from ..settings import get_settings
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
-
 @router.get("/enterprise")
 async def enterprise_overview(
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Top-level KPIs: site count, alerting sites, stale collectors, capacity at risk."""
@@ -79,11 +78,10 @@ async def enterprise_overview(
         "generated_at": datetime.now(UTC).isoformat(),
     }
 
-
 @router.get("/sites/at-risk")
 async def sites_at_risk(
     severity: Severity = Query(Severity.major),
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     rows = (
@@ -97,11 +95,10 @@ async def sites_at_risk(
     ).all()
     return {"sites": [{"site_id": str(r.site_id), "alert_count": r.n} for r in rows]}
 
-
 @router.get("/racks/{rack_id}")
 async def rack_detail(
     rack_id: UUID,
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Rack + ordered assets + per-asset freshness summary, used by the rack visualization."""
@@ -189,7 +186,6 @@ async def rack_detail(
         ],
     }
 
-
 @router.get("/free-space")
 async def free_space(
     u: int = Query(
@@ -200,7 +196,7 @@ async def free_space(
     region_id: UUID | None = Query(None),
     min_kw_headroom: float | None = Query(None, description="Minimum unused kW the rack must still have"),
     limit: int = Query(50, ge=1, le=500),
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Find racks with at least `u` contiguous free U slots, ranked by biggest run."""
@@ -214,11 +210,10 @@ async def free_space(
                       "min_kw_headroom": min_kw_headroom},
             "racks": racks, "count": len(racks)}
 
-
 @router.get("/assets/{asset_id}")
 async def asset_detail(
     asset_id: UUID,
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Asset health: identity, telemetry sources, bound IPs, recent alerts."""
@@ -316,12 +311,11 @@ async def asset_detail(
         ],
     }
 
-
 @router.get("/forecast/racks")
 async def racks_forecast_batch(
     site_id: UUID | None = Query(None),
     limit: int = Query(200, ge=1, le=1000),
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Batch forecast for many racks. Used by the racks-list runway column.
@@ -351,13 +345,12 @@ async def racks_forecast_batch(
         out.append(f)
     return {"racks": out}
 
-
 @router.get("/forecast/racks/{rack_id}")
 async def rack_forecast(
     rack_id: UUID,
     add_units: int = Query(0, ge=0, le=60, description="What-if: project runway after adding this many U."),
     kw_days: int = Query(90, ge=7, le=365, description="Window for kW-trend regression."),
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Per-rack U-fill forecast + kW-trend forecast + optional what-if delta."""
@@ -380,11 +373,10 @@ async def rack_forecast(
     payload["kw_forecast"] = await compute_rack_kw_forecast(rack, asset_list, days=kw_days)
     return payload
 
-
 @router.get("/forecast/sites/{site_id}")
 async def site_forecast(
     site_id: UUID,
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Site-wide forecast rollup: U usage, worst-case rack runway, band counts."""
@@ -395,10 +387,8 @@ async def site_forecast(
         return {"error": "not_found"}
     return await compute_site_forecast(db, site_id)
 
-
 def _enum_val(v):
     return v.value if hasattr(v, "value") else v
-
 
 async def _load_site_topology(
     db: AsyncSession, site_id: UUID,
@@ -439,7 +429,6 @@ async def _load_site_topology(
         (await db.execute(select(Asset).where(Asset.site_id == site_id))).scalars().all()
     )
     return list(buildings), rooms, rows, racks, site_assets
-
 
 async def _site_capacity_rollup(
     db: AsyncSession, racks: list[Rack], assets_by_rack: dict[UUID, list[Asset]],
@@ -483,7 +472,6 @@ async def _site_capacity_rollup(
     }
     return rack_caps, rollup
 
-
 async def _site_alerts_kpi(db: AsyncSession, site_id: UUID) -> dict[str, int]:
     rows = (
         await db.execute(
@@ -497,7 +485,6 @@ async def _site_alerts_kpi(db: AsyncSession, site_id: UUID) -> dict[str, int]:
         out[_enum_val(sev)] = int(n)
     out["total"] = sum(out.values())
     return out
-
 
 async def _site_collectors_kpi(db: AsyncSession, site_id: UUID) -> dict[str, int]:
     collectors = (
@@ -515,14 +502,12 @@ async def _site_collectors_kpi(db: AsyncSession, site_id: UUID) -> dict[str, int
             out["stale"] += 1
     return out
 
-
 def _assets_by_lifecycle(site_assets: list[Asset]) -> dict[str, int]:
     out: dict[str, int] = {ls.value: 0 for ls in LifecycleState}
     out["total"] = len(site_assets)
     for a in site_assets:
         out[_enum_val(a.lifecycle_state)] += 1
     return out
-
 
 def _build_hierarchy(
     buildings: list[Building], rooms: list[Room], rows: list[Row], racks: list[Rack],
@@ -574,11 +559,10 @@ def _build_hierarchy(
     orphans = [rack_node(rk) for rk in racks if rk.id not in placed]
     return hierarchy, orphans
 
-
 @router.get("/sites/{site_id}")
 async def site_detail(
     site_id: UUID,
-    _: Principal = Depends(require_capability(DASHBOARD_READ)),
+    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Site identity + KPIs + capacity rollup + buildings/rooms/rows/racks hierarchy.
