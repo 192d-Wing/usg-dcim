@@ -57,62 +57,64 @@ when `Keys` is empty. The pass-through behaviour stays (test wiring
 still works) but the WARNING means a misconfiguration is
 journalctl-visible.
 
-### Documented as known gaps (correctness, not vulnerability)
+### Fixed in follow-up commits
 
-**S-03 — Wildcard expansion proofs not synthesized.** RFC 5155 §7.2.5
-requires that a positive response derived from a wildcard expansion
-ship with an NSEC3 record proving QNAME itself doesn't exist (only
-the wildcard does). We don't emit this — wildcard-expanded responses
-go out without the supporting NSEC3, and strict validators (BIND
-`validate-except`, Unbound `harden-below-nxdomain`) treat them as
-bogus.
+**S-03 — Wildcard expansion proofs.** Fixed in commit `d40f587`.
 
-Impact: limited. DCIM site zones are typically flat — host-name to
-A/AAAA mappings, no wildcards. Apex zones rarely use wildcards
-either. The gap matters only if an operator explicitly defines a
-`*.something.zone.` record.
+RFC 5155 §7.2.4 requires that a positive response derived from a
+wildcard expansion ship with the *covering NSEC3 for the
+next-closer name* — proof that QNAME itself doesn't exist (only
+the wildcard does). RFC 4034 §3.1.3 also requires RRSIG.Labels to
+reflect the wildcard owner's label count (minus the `*`), not the
+qname's, so validators can reconstruct the canonical wildcard
+owner when verifying.
 
-Mitigation when needed: classify response via `state.IsExpansion()`
-(miekg/dns can detect this from the wildcard-source label) and
-attach the NSEC3 proof for `QNAME` in the answer section's
-authority companion.
+The fix has three pieces in [chain.go](nsec3sign/chain.go),
+[signer.go](nsec3sign/signer.go), and [denial.go](nsec3sign/denial.go):
+`chain.wildcardSource(owner)` detects expansion by checking
+whether owner is missing from the chain but `*.<closest-encloser>`
+exists; signRRset clones the RRset with the wildcard owner before
+calling `miekg/dns.RRSIG.Sign` so the library computes Labels and
+the canonical signing form correctly, then patches `Hdr.Name`
+back to qname; `attachWildcardProof` scans answer RRsets and
+appends the covering NSEC3 to the authority section.
 
-**S-04 — Delegation referrals don't get DS-attestation NSEC3s.** A
-query for a name below an in-bailiwick delegation point should
-return a referral (NOERROR + NS in authority, no SOA). The matching
-NSEC3 for the delegation owner should be attached to prove either
-"DS present" (for secure delegations) or "DS absent" (for opt-out
-insecure delegations).
+§7.2.3 wildcard-NODATA (queries that fall on a wildcard but ask
+for a type the wildcard doesn't carry) is still deferred —
+detecting it requires correlating rcode + chain state in concert,
+and the §7.2.4 positive-wildcard case is the dominant pattern.
 
-Our `attachDenialProof` classifies only `NameError` and `NoData`
-through `response.Typify`. Referrals (`response.Delegation`) fall
-through unsigned. Validators chasing into a child zone can't
-establish a chain of trust if the parent's referral lacks the
-DS-attestation NSEC3.
+**S-04 — Delegation referrals carry DS-attestation NSEC3.** Fixed
+in commit `caebe81`.
 
-Impact: matters mostly for apex zones that delegate to site zones.
-A site zone is unlikely to delegate further. Mitigation: extend the
-switch in `attachDenialProof` to handle `response.Delegation` by
-emitting the matching NSEC3 of the delegation owner.
+A `response.Delegation` classification in [denial.go](nsec3sign/denial.go)
+now routes through `proofForDelegation`, which emits the matching
+NSEC3 for the delegation owner (showing NS + DS for secure
+delegations, NS-without-DS for insecure non-opt-out) or the
+covering NSEC3 with the opt-out flag for elided opt-out
+delegations.
 
-**S-05 — Empty non-terminals not synthesized in the chain.** When a
-zone has `a.b.example.test.` but no records at `b.example.test.`,
-the parent `b.example.test.` is an "empty non-terminal" (ENT) per
-RFC 4592. RFC 5155 §7.2.2 requires ENTs to be in the NSEC3 chain
-because queries for them must return NODATA (the name "exists" by
-virtue of having descendants) — and the matching NSEC3 must list
-no types at all.
+This was the highest-priority correctness gap — DCIM's documented
+architecture has the per-fabric apex zone delegating to per-site
+zones, and without DS attestation every cross-site DNSSEC
+validation through the apex would have failed.
 
-Our `parseZoneFile` enumerates only owners with at least one record
-in the file. ENTs are absent from the chain. Queries for them
-return our generic NXDOMAIN proof, which validates against
-`!matchingNSEC3(qname)` and thus claims the name doesn't exist.
-For a deep zone this is technically incorrect — but flat DCIM zones
-have no ENTs.
+**S-05 — Empty non-terminals synthesized.** Fixed in commit
+`be1e47a`.
 
-Mitigation: in `ownersToNameInfo`, walk every label-shortening of
-every owner name and add the prefixes as ENTs (empty Types slice).
-Easy enough but unnecessary for current zone shapes.
+`zone.go`'s new `synthesizeENTs` helper walks each explicit
+owner's ancestor labels and emits a `nameInfo` with an empty
+Types slice for any intermediate name not already an explicit
+owner. Direct queries for ENT names now return a matching NSEC3
+with empty bitmap — verifiable NODATA — instead of falling back
+to NXDOMAIN.
+
+Important enabling change: the wildcard-source detection in S-03
+relies on ENTs being in the chain for deep wildcards like
+`*.dev.example.test.` where `dev.example.test.` has no records of
+its own. Without S-05, `findClosestEncloser` would climb past the
+intermediate and look for `*.example.test.` (the wrong, less-
+specific wildcard). S-05 had to land before S-03 worked end-to-end.
 
 ### Defense-in-depth observations (no change recommended)
 
@@ -183,23 +185,23 @@ match. Misconfiguration only; no forgery vector.
 
 ## Severity summary
 
-| ID    | Severity                   | Disposition          |
-| ----- | -------------------------- | -------------------- |
-| S-01  | low (defense-in-depth)     | fixed                |
-| S-02  | low (operability)          | fixed (warning)      |
-| S-03  | medium (DNSSEC compliance) | documented gap       |
-| S-04  | medium (DNSSEC compliance) | documented gap       |
-| S-05  | low (DNSSEC compliance)    | documented gap       |
-| S-06  | low (DoS, requires insider)| matches upstream     |
-| S-07  | low (footgun)              | documented           |
-| S-08  | info                       | matches upstream     |
-| S-09  | info (year-2038)           | noted                |
-| S-10  | info (Go limitation)       | noted                |
-| S-11  | low (misconfig only)       | noted                |
+| ID    | Severity                    | Disposition           |
+| ----- | --------------------------- | --------------------- |
+| S-01  | low (defense-in-depth)      | fixed                 |
+| S-02  | low (operability)           | fixed (warning)       |
+| S-03  | medium (DNSSEC compliance)  | fixed (§7.2.4)        |
+| S-04  | medium (DNSSEC compliance)  | fixed                 |
+| S-05  | low (DNSSEC compliance)     | fixed                 |
+| S-06  | low (DoS, requires insider) | matches upstream      |
+| S-07  | low (footgun)               | documented            |
+| S-08  | info                        | matches upstream      |
+| S-09  | info (year-2038)            | noted                 |
+| S-10  | info (Go limitation)        | noted                 |
+| S-11  | low (misconfig only)        | noted                 |
 
-No HIGH or CRITICAL findings. The two MEDIUM items (S-03, S-04) are
-DNSSEC-protocol completeness gaps that affect zones with wildcards
-or delegations respectively. Neither applies to the design target
-(flat DCIM site zones); operators who venture beyond that profile
-should plan for the implementation work, not assume the plugin
-already covers it.
+No HIGH or CRITICAL findings. All three MEDIUM-LOW DNSSEC-
+correctness gaps (S-03 wildcard expansion, S-04 delegation
+attestation, S-05 empty non-terminals) are now fixed. One sub-case
+of S-03 remains deferred — wildcard-NODATA per RFC 5155 §7.2.3,
+which requires correlating rcode + chain state and is rare enough
+in DCIM-shaped zones to defer until an operator hits it.
