@@ -1,40 +1,33 @@
 // Plugin entry point — declares the `Nsec3Sign` handler type and
-// implements `plugin.Handler.ServeDNS`. For step 1 of the build-out
-// `ServeDNS` is a deliberate no-op pass-through so the custom CoreDNS
-// image build and chain wiring can be validated independently of the
-// (still-to-be-written) cryptographic + denial logic.
+// implements `plugin.Handler.ServeDNS`. As of step 4, ServeDNS does
+// positive-response signing: it intercepts the downstream plugin's
+// response via a `nonwriter` and attaches RRSIGs over every RRset in
+// the answer and authority sections when the client signals DO=1.
 //
-// When the rest of the plugin lands, ServeDNS will:
-//
-//  1. Forward to the data-source plugin via a `nonwriter`-style
-//     response interceptor so we can inspect the answer before it
-//     reaches the client.
-//  2. Decide whether the response is a positive answer, NODATA,
-//     NXDOMAIN, or a wildcard expansion.
-//  3. Sign each non-DNSSEC RRset that the client signaled DO=1 for,
-//     drawing fresh RRSIGs from the cache where possible.
-//  4. For NODATA / NXDOMAIN, attach the closest-encloser proof
-//     (matching NSEC3 + covering NSEC3 + wildcard NSEC3) drawn from
-//     the pre-computed sorted hash chain in chain.go.
-//  5. Write the rewritten response to the real ResponseWriter.
+// Still to land in later steps: NSEC3 denial proofs (closest-
+// encloser, covering, wildcard) on NODATA / NXDOMAIN responses, and
+// the LRU signature cache that will collapse duplicate-RRset signing
+// work across queries.
 
 package nsec3sign
 
 import (
 	"context"
+	"time"
 
 	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/plugin/pkg/nonwriter"
 	"github.com/coredns/coredns/request"
 
 	"github.com/miekg/dns"
 )
 
 // Nsec3Sign is one parsed `nsec3sign { ... }` block from the
-// Corefile. The fields are all populated by parse() in setup.go and
-// then consumed by ServeDNS at query time. Subsequent build-out
-// steps will add a `keys`, `chain`, and `cache` field — kept out of
-// this struct for now so the noop build doesn't pull in unused
-// types.
+// Corefile. The fields are populated in two phases: parse() in
+// setup.go reads the Corefile values, then loadKeys() (also in
+// setup) opens the key files. ServeDNS consumes the result at query
+// time. A future cache field will slot in alongside Chain when step
+// 6 lands.
 type Nsec3Sign struct {
 	// Next is the next plugin in the CoreDNS chain; Caddy injects it
 	// in setup() via dnsserver.GetConfig(c).AddPlugin.
@@ -80,20 +73,45 @@ type Nsec3Sign struct {
 // CoreDNS for logging, metrics labels, and `coredns -plugins` output.
 func (n *Nsec3Sign) Name() string { return "nsec3sign" }
 
-// ServeDNS handles one query. Step 1 unconditionally forwards to the
-// next plugin without modifying the response. The `request.Request`
-// is constructed so the handler shape matches what the eventual
-// implementation needs — keeping the surface stable across the
-// build-out lets the test scaffolding land alongside the noop.
+// ServeDNS handles one query. The signing path runs only when all
+// of (a) the QNAME is inside one of our configured zones, (b) the
+// client set the EDNS0 DO bit, and (c) at least one key is loaded.
+// Failing any of those, the query passes through to the next plugin
+// unchanged, which lets unsigned-but-DNSSEC-capable resolvers still
+// reach the data plane.
 func (n *Nsec3Sign) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
 
-	// Step 1: no zone-scoping check, no DO-bit check, no signing.
-	// Just pass through. The two lines below exist only so the
-	// imports compile without _-renames; they vanish when ServeDNS
-	// gains real logic.
-	_ = state.Name()
-	_ = state.QType()
+	zone := plugin.Zones(n.Zones).Matches(state.Name())
+	if zone == "" {
+		return plugin.NextOrFailure(n.Name(), n.Next, ctx, w, r)
+	}
+	if !state.Do() {
+		// RFC 6840 §5.9 — don't ship DNSSEC RRs to clients that
+		// didn't ask for them.
+		return plugin.NextOrFailure(n.Name(), n.Next, ctx, w, r)
+	}
+	if len(n.Keys) == 0 {
+		// Permitted in the build-out phase; step 7 will gate this
+		// at setup() so production deploys can't slip through.
+		return plugin.NextOrFailure(n.Name(), n.Next, ctx, w, r)
+	}
 
-	return plugin.NextOrFailure(n.Name(), n.Next, ctx, w, r)
+	// Intercept the downstream response so we can sign it before it
+	// reaches the wire. nonwriter is the standard CoreDNS plugin
+	// pattern for this — it embeds the real writer and captures the
+	// final WriteMsg into .Msg without forwarding.
+	nw := nonwriter.New(w)
+	code, err := plugin.NextOrFailure(n.Name(), n.Next, ctx, nw, r)
+	if err != nil {
+		return code, err
+	}
+	if nw.Msg == nil {
+		// Some plugins return an rcode without writing a message
+		// (e.g. when chaining further). Nothing to sign in that case.
+		return code, nil
+	}
+
+	signed := n.signMessage(nw.Msg, zone, time.Now().UTC())
+	return code, w.WriteMsg(signed)
 }

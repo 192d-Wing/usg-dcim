@@ -1,0 +1,189 @@
+// RRSIG generation.
+//
+// `signMessage` is the top-level entry point: given a response from
+// the data-source plugin, it groups records into RRsets and attaches
+// one RRSIG per applicable signing key. Canonical RRset ordering and
+// wire encoding (RFC 4034 §6) are delegated to miekg/dns's
+// `RRSIG.Sign`; we just fill the template and pick the right keys.
+//
+// A signature cache lands in step 6 — for now every query produces
+// fresh RRSIGs. That's correct (just expensive) and lets us settle
+// the algorithm-correctness story before adding the LRU.
+
+package nsec3sign
+
+import (
+	"crypto"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/miekg/dns"
+)
+
+const (
+	// sigInceptionOffset is the lookback for the RRSIG inception
+	// time. Validators with a slightly fast clock would reject a
+	// "signed-in-the-future" RRSIG, so we backdate by an hour.
+	sigInceptionOffset = 1 * time.Hour
+
+	// sigValidity is how long an RRSIG is valid from inception.
+	// Eight days matches CoreDNS's upstream `dnssec` plugin and
+	// gives validators plenty of slack if the auth pod is offline
+	// for a few days running.
+	sigValidity = 8 * 24 * time.Hour
+)
+
+// rrsetKey is the (name, type, class) triple that identifies one
+// RRset. Name is lowercased for grouping; the signature itself uses
+// whatever casing the data-source plugin emitted.
+type rrsetKey struct {
+	name   string
+	rrtype uint16
+	class  uint16
+}
+
+// signMessage attaches RRSIGs to every RRset in the answer and
+// authority sections of m. The Additional section is intentionally
+// not signed — RFC 4035 §3.1.4 makes that optional, and the records
+// typically found there (glue, OPT) don't gain much from a signature
+// that doubles the response size.
+//
+// Returns m for call-chain convenience. With no keys loaded, m is
+// returned unchanged — the no-op path is the responsibility of
+// ServeDNS, which short-circuits before calling here, but the guard
+// is cheap and prevents an empty-loop reallocation.
+func (n *Nsec3Sign) signMessage(m *dns.Msg, signerName string, now time.Time) *dns.Msg {
+	if len(n.Keys) == 0 {
+		return m
+	}
+	incep := uint32(now.Add(-sigInceptionOffset).Unix())
+	expir := uint32(now.Add(sigValidity).Unix())
+
+	m.Answer = n.appendRRSIGs(m.Answer, signerName, incep, expir)
+	m.Ns = n.appendRRSIGs(m.Ns, signerName, incep, expir)
+	return m
+}
+
+// appendRRSIGs groups section by RRset and appends one RRSIG per
+// applicable signing key. The map iteration happens against a
+// snapshot built from the input slice, so the in-place append
+// doesn't invalidate the iteration.
+func (n *Nsec3Sign) appendRRSIGs(section []dns.RR, signerName string, incep, expir uint32) []dns.RR {
+	for _, rrset := range groupByRRset(section) {
+		section = append(section, n.signRRset(rrset, signerName, incep, expir)...)
+	}
+	return section
+}
+
+// signRRset returns RRSIGs over rrs, one per key applicable to the
+// RRset's type. Returns nil when no keys apply. Individual key
+// errors are logged at warning level and the offending key skipped
+// — the remaining signatures still ship, which is preferable to
+// dropping a positive response entirely on one key's failure.
+func (n *Nsec3Sign) signRRset(rrs []dns.RR, signerName string, incep, expir uint32) []dns.RR {
+	if len(rrs) == 0 {
+		return nil
+	}
+	keys := n.signingKeysFor(rrs[0].Header().Rrtype)
+	if len(keys) == 0 {
+		return nil
+	}
+	sigs := make([]dns.RR, 0, len(keys))
+	for _, k := range keys {
+		sig, err := signOne(rrs, k, signerName, incep, expir)
+		if err != nil {
+			log.Warningf("sign %s/%s with keytag %d: %v",
+				rrs[0].Header().Name,
+				dns.TypeToString[rrs[0].Header().Rrtype],
+				k.KeyTag, err)
+			continue
+		}
+		sigs = append(sigs, sig)
+	}
+	return sigs
+}
+
+// signingKeysFor returns the keys that should sign an RRset of the
+// given type. DNSKEY gets signed by KSKs (the chain validators
+// follow to the parent DS); everything else by ZSKs. When only one
+// role exists we fall back to whatever's available so an operator
+// running a single combined-signing key still gets coverage.
+func (n *Nsec3Sign) signingKeysFor(rrtype uint16) []*signingKey {
+	if rrtype == dns.TypeDNSKEY {
+		if ks := n.KSKs(); len(ks) > 0 {
+			return ks
+		}
+		return n.ZSKs()
+	}
+	if zs := n.ZSKs(); len(zs) > 0 {
+		return zs
+	}
+	return n.KSKs()
+}
+
+// signOne fills an RRSIG template from rrs[0]'s header + key
+// metadata and runs the actual signature via miekg/dns. The library
+// handles canonical RRset ordering and wire encoding per RFC 4034
+// §6, so we never have to think about byte-level details here.
+func signOne(rrs []dns.RR, k *signingKey, signerName string, incep, expir uint32) (*dns.RRSIG, error) {
+	rh := rrs[0].Header()
+	sig := &dns.RRSIG{
+		Hdr: dns.RR_Header{
+			Name:   rh.Name,
+			Rrtype: dns.TypeRRSIG,
+			Class:  rh.Class,
+			Ttl:    rh.Ttl,
+		},
+		TypeCovered: rh.Rrtype,
+		Algorithm:   k.Public.Algorithm,
+		Labels:      rrsigLabels(rh.Name),
+		OrigTtl:     rh.Ttl,
+		Expiration:  expir,
+		Inception:   incep,
+		KeyTag:      k.KeyTag,
+		SignerName:  signerName,
+	}
+	signer, ok := k.Private.(crypto.Signer)
+	if !ok {
+		return nil, fmt.Errorf("private key for keytag %d does not implement crypto.Signer", k.KeyTag)
+	}
+	if err := sig.Sign(signer, rrs); err != nil {
+		return nil, fmt.Errorf("RRSIG.Sign: %w", err)
+	}
+	return sig, nil
+}
+
+// rrsigLabels computes the RRSIG Labels field per RFC 4034 §3.1.3:
+// "the number of labels in the RRSIG owner name, minus one if the
+// owner name contains a wildcard label." For typical concrete owner
+// names this is just CountLabel; for wildcard expansions the data-
+// source plugin rewrites the owner to the queried name, so the
+// wildcard branch is rare in positive responses but cheap to keep.
+func rrsigLabels(name string) uint8 {
+	n := dns.CountLabel(name)
+	if strings.HasPrefix(name, "*.") {
+		n--
+	}
+	return uint8(n)
+}
+
+// groupByRRset bins records by (name, type, class). RRSIGs and OPT
+// records are skipped: we never sign an existing signature, and OPT
+// is EDNS metadata that lives outside the data plane.
+func groupByRRset(rrs []dns.RR) map[rrsetKey][]dns.RR {
+	out := make(map[rrsetKey][]dns.RR)
+	for _, rr := range rrs {
+		h := rr.Header()
+		if h.Rrtype == dns.TypeRRSIG || h.Rrtype == dns.TypeOPT {
+			continue
+		}
+		k := rrsetKey{
+			name:   strings.ToLower(h.Name),
+			rrtype: h.Rrtype,
+			class:  h.Class,
+		}
+		out[k] = append(out[k], rr)
+	}
+	return out
+}

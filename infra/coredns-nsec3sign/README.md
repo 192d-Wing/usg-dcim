@@ -83,15 +83,15 @@ need the custom image — only authoritative zones sign.
 
 ## Status
 
-Build-out plan, with the current cursor on step 4:
+Build-out plan, with the current cursor on step 5:
 
 | Step | What                                                         | Status   |
 | ---- | ------------------------------------------------------------ | -------- |
 | 1    | Module scaffolding + custom CoreDNS image + noop plugin      | done     |
 | 2    | BIND key loader (`Kname+alg+tag.{key,private}` reader)       | done     |
 | 3    | NSEC3 chain builder (one-shot, sorted by hash)               | done     |
-| 4    | Positive-response RRSIG signing                              | **next** |
-| 5    | Denial proofs (NODATA, NXDOMAIN, wildcard)                   | todo     |
+| 4    | Positive-response RRSIG signing                              | done     |
+| 5    | Denial proofs (NODATA, NXDOMAIN, wildcard)                   | **next** |
 | 6    | Signature cache + zone-reload (SIGUSR1) + Prometheus metrics | todo     |
 | 7    | DCIM renderer change — emit `nsec3sign` for NSEC3 zones      | todo     |
 | 8    | End-to-end smoke against `site-dns/docker-compose.yml`       | todo     |
