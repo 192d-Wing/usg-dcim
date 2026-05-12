@@ -7,51 +7,18 @@ Wildcard matching in `require_capability`:
   *                   matches anything
   <domain>:*          matches any capability under that domain
   <domain>:<r>:*      matches any action on that resource
-
-The old 2-segment codes (e.g. `inventory:read`) are preserved as
-constants for endpoint-gate backward compatibility. Phases 1–4 of the
-RBAC refactor tighten each gate to the specific granular code; until
-then, the 2-segment names continue to work because the migration
-keeps them alongside the expanded granular set on every role.
 """
 
 from __future__ import annotations
 
-# --- Legacy 2-segment codes (still referenced by un-tightened gates) -----
-# Kept verbatim so phases 1–4 can replace them route-by-route.
+# --- Canonical specialty constants ---------------------------------------
+# 2-segment codes that don't fit the domain:resource:action shape. Kept
+# as module-level constants because SPECIALTY_CAPABILITIES and several
+# BUILT_IN_ROLES bundles reference them; using a constant avoids the
+# duplicate-string-literal lint.
 
-# inventory plane
-INVENTORY_READ = "inventory:read"
-INVENTORY_WRITE = "inventory:write"
-INVENTORY_BULK = "inventory:bulk"
-
-# collector plane
-COLLECTOR_READ = "collector:read"
-COLLECTOR_WRITE = "collector:write"
-COLLECTOR_ENROLL = "collector:enroll"
-COLLECTOR_INGEST = "collector:ingest"
-
-# telemetry / dashboards
-TELEMETRY_READ = "telemetry:read"
-DASHBOARD_READ = "dashboard:read"
-
-# alerting
-ALERTS_READ = "alerts:read"
-ALERTS_ACK = "alerts:ack"
-ALERTS_CONFIGURE = "alerts:configure"
-
-# power control (separately permissioned + audited)
 POWER_CONTROL = "power:control"
 POWER_APPROVE = "power:approve"
-
-# audit / governance
-AUDIT_READ = "audit:read"
-
-# admin
-USERS_MANAGE = "users:manage"
-ROLES_MANAGE = "roles:manage"
-TOKENS_MANAGE = "tokens:manage"
-SITES_MANAGE = "sites:manage"
 
 
 # --- Granular catalog ----------------------------------------------------
@@ -170,62 +137,6 @@ def all_granular_codes() -> set[str]:
         for resource, actions in resources.items():
             for action in actions:
                 out.add(f"{domain}:{resource}:{action}")
-    return out
-
-
-# --- Old-code -> granular expansion --------------------------------------
-# Applied by the 20260512_0030 migration so existing roles preserve their
-# effective access while gaining the new granular names. Each entry is
-# the set of granular codes that an old code logically implied.
-
-def _crud_codes(domain: str, *resources: str, actions: tuple[str, ...] = ("create", "read", "update", "delete")) -> list[str]:
-    return [f"{domain}:{r}:{a}" for r in resources for a in actions]
-
-
-# All inventory CRUD resources (everything in CAPABILITY_CATALOG["inventory"] except `bulk`).
-_INV_RESOURCES = ("sites", "regions", "buildings", "rooms", "rows", "racks", "assets", "stencils")
-
-LEGACY_CODE_EXPANSION: dict[str, list[str]] = {
-    INVENTORY_READ: _crud_codes("inventory", *_INV_RESOURCES, actions=("read",)),
-    INVENTORY_WRITE: _crud_codes("inventory", *_INV_RESOURCES, actions=("create", "update", "delete")),
-    INVENTORY_BULK: ["inventory:bulk:execute"],
-    COLLECTOR_READ: ["collectors:collectors:read"],
-    COLLECTOR_WRITE: ["collectors:collectors:create", "collectors:collectors:update", "collectors:collectors:delete"],
-    COLLECTOR_ENROLL: ["collectors:collectors:enroll"],
-    COLLECTOR_INGEST: ["collectors:ingest:write"],
-    TELEMETRY_READ: ["telemetry:metrics:read", "telemetry:events:read"],
-    DASHBOARD_READ: ["dashboards:dashboards:read"],
-    ALERTS_READ: ["alerts:alerts:read", "alerts:rules:read", "alerts:silences:read"],
-    ALERTS_ACK: ["alerts:alerts:ack"],
-    ALERTS_CONFIGURE: _crud_codes("alerts", "rules", "silences", actions=("create", "update", "delete")),
-    POWER_CONTROL: ["power:control"],
-    POWER_APPROVE: ["power:approve"],
-    AUDIT_READ: ["audit:events:read"],
-    USERS_MANAGE: _crud_codes("admin", "users", actions=("create", "read", "update", "delete")),
-    ROLES_MANAGE: _crud_codes("admin", "roles", "oidc-mappings", actions=("create", "read", "update", "delete")),
-    TOKENS_MANAGE: _crud_codes("admin", "api-tokens", actions=("create", "read", "update", "delete")),
-    SITES_MANAGE: _crud_codes("inventory", "sites", actions=("create", "update", "delete")),
-}
-
-
-def expand_legacy(codes: list[str]) -> list[str]:
-    """Return `codes` plus every granular code each legacy code implies.
-
-    Deterministic ordering: original codes first (in input order, deduped),
-    then expansions in registry order. Idempotent — calling twice yields
-    the same set.
-    """
-    seen: set[str] = set()
-    out: list[str] = []
-    for c in codes:
-        if c not in seen:
-            seen.add(c)
-            out.append(c)
-    for c in codes:
-        for granular in LEGACY_CODE_EXPANSION.get(c, []):
-            if granular not in seen:
-                seen.add(granular)
-                out.append(granular)
     return out
 
 
