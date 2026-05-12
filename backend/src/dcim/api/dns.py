@@ -102,7 +102,12 @@ from ..schemas.dns import (
 from ..security import audit
 
 from ..security.deps import Principal, require_capability
-from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
+from ..security.scope import (
+    enforce_fabric_scope,
+    enforce_site_scope,
+    scope_filtered_fabric_ids,
+    scope_filtered_site_ids,
+)
 from ..services import dns as dns_svc
 from ..settings import get_settings
 from ._pagination import paginate
@@ -113,6 +118,10 @@ router = APIRouter(prefix="/dns", tags=["dns"])
 # rename only happens in one place (and the Sonar duplicate-literal
 # check stops complaining about the popular ones).
 _CAP_SERVERS_READ = "dns:servers:read"
+_CAP_ZONES_READ = "dns:zones:read"
+_CAP_ZONES_UPDATE = "dns:zones:update"
+_CAP_KEYS_READ = "dns:keys:read"
+_CAP_KEYS_ROTATE = "dns:keys:rotate"
 
 _ZONE_NOT_FOUND = "dns zone not found"
 _RECORD_NOT_FOUND = "dns record not found"
@@ -272,6 +281,9 @@ async def sync_zone_from_ipam(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
+    )
     added, removed = await dns_svc.sync_ipam_records_for_zone(db, zone)
     await audit.record(
         db, principal, action="dns_zone.sync_ipam",
@@ -286,7 +298,7 @@ async def sync_zone_from_ipam(
 @router.get("/zones/{zone_id}/preview")
 async def preview_zone(
     zone_id: UUID,
-    _: Principal = Depends(require_capability("dns:zones:read")),
+    principal: Principal = Depends(require_capability("dns:zones:read")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Render the zone as a BIND-format text blob, useful for the UI's
@@ -295,6 +307,9 @@ async def preview_zone(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_ZONES_READ,
+    )
     records = (
         await db.execute(select(DnsRecord).where(DnsRecord.zone_id == zone_id))
     ).scalars().all()
@@ -334,6 +349,9 @@ async def import_zone_records(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
+    )
     try:
         parsed = dns_svc.parse_bind_zone(payload.text, default_zone=zone.name + ".")
     except dns_svc.BindImportError as e:
@@ -421,6 +439,9 @@ async def enable_dnssec(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_KEYS_ROTATE,
+    )
     existing = list((
         await db.execute(select(DnsKey).where(DnsKey.zone_id == zone_id))
     ).scalars().all())
@@ -468,11 +489,15 @@ async def enable_dnssec(
 @router.get("/zones/{zone_id}/keys", response_model=list[DnsKeyOut])
 async def list_zone_keys(
     zone_id: UUID,
-    _: Principal = Depends(require_capability("dns:keys:read")),
+    principal: Principal = Depends(require_capability(_CAP_KEYS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
-    if (await db.get(DnsZone, zone_id)) is None:
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_KEYS_READ,
+    )
     rows = (
         await db.execute(
             select(DnsKey).where(DnsKey.zone_id == zone_id)
@@ -485,7 +510,7 @@ async def list_zone_keys(
 @router.get("/zones/{zone_id}/ds-records", response_model=list[DnsDsRecordOut])
 async def list_ds_records(
     zone_id: UUID,
-    _: Principal = Depends(require_capability("dns:keys:read")),
+    principal: Principal = Depends(require_capability(_CAP_KEYS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """DS records for active KSKs — the operator uploads these to the
@@ -493,6 +518,9 @@ async def list_ds_records(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_KEYS_READ,
+    )
     keys = (
         await db.execute(select(DnsKey).where(DnsKey.zone_id == zone_id))
     ).scalars().all()
@@ -523,6 +551,9 @@ async def set_zone_nsec3(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
+    )
     if not zone.signed:
         raise ValidationError("zone is not signed — enable DNSSEC first")
     zone.nsec3_salt = params.salt
@@ -557,6 +588,9 @@ async def clear_zone_nsec3(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
+    )
     if zone.nsec3_salt is None and zone.nsec3_iterations == 0 and not zone.nsec3_opt_out:
         return zone
     zone.nsec3_salt = None
@@ -585,6 +619,9 @@ async def disable_dnssec(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_KEYS_ROTATE,
+    )
     if not zone.signed:
         return
     keys = list((
@@ -626,6 +663,9 @@ async def rotate_zone_key(
     zone = await db.get(DnsZone, zone_id)
     if zone is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_KEYS_ROTATE,
+    )
     if not zone.signed:
         raise ValidationError("zone is not signed — enable DNSSEC first")
     new_key, retired = await dns_svc.rotate_zone_key(db, zone, role)
@@ -658,6 +698,11 @@ async def delete_dns_key(
     obj = await db.get(DnsKey, key_id)
     if obj is None:
         raise NotFoundError("dns key not found")
+    zone = await db.get(DnsZone, obj.zone_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        zone.fabric_id if zone else None, "dns:keys:delete",
+    )
     if obj.retired_at is None:
         raise ValidationError(
             "active key can't be deleted; rotate it first so the new "
@@ -2138,12 +2183,22 @@ async def post_health_check_result(
 async def list_bgp_peers(
     params: PageParams = Depends(PageParams.from_query),
     site_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("dns:bgp-peers:read")),
+    principal: Principal = Depends(require_capability("dns:bgp-peers:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(BgpPeer)
     if site_id is not None:
         stmt = stmt.where(BgpPeer.site_id == site_id)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "dns:bgp-peers:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[BgpPeerOut](
+                items=[], total=0, page=params.page,
+                page_size=params.page_size, has_more=False,
+            )
+        stmt = stmt.where(BgpPeer.site_id.in_(in_scope))
     return await paginate(db, stmt, model=BgpPeer, params=params, out_model=BgpPeerOut)
 
 
@@ -2156,6 +2211,9 @@ async def create_bgp_peer(
     site = await db.get(Site, payload.site_id)
     if site is None:
         raise ValidationError(f"site {payload.site_id} not found")
+    await enforce_site_scope(
+        db, principal.capabilities, payload.site_id, "dns:bgp-peers:create",
+    )
     # Cross-check ASN catalog FKs at the call site so 404s land here
     # instead of as an opaque IntegrityError at commit.
     if await db.get(Asn, payload.local_asn_id) is None:
@@ -2191,6 +2249,9 @@ async def update_bgp_peer(
     obj = await db.get(BgpPeer, peer_id)
     if obj is None:
         raise NotFoundError(_BGP_NOT_FOUND)
+    await enforce_site_scope(
+        db, principal.capabilities, obj.site_id, "dns:bgp-peers:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     if (
         "local_asn_id" in diff
@@ -2231,6 +2292,9 @@ async def delete_bgp_peer(
     obj = await db.get(BgpPeer, peer_id)
     if obj is None:
         raise NotFoundError(_BGP_NOT_FOUND)
+    await enforce_site_scope(
+        db, principal.capabilities, obj.site_id, "dns:bgp-peers:delete",
+    )
     in_use = (
         await db.execute(
             select(AnycastBgpBinding.id).where(AnycastBgpBinding.bgp_peer_id == peer_id).limit(1)
@@ -2252,7 +2316,7 @@ async def list_bindings(
     params: PageParams = Depends(PageParams.from_query),
     dns_server_id: UUID | None = Query(None),
     bgp_peer_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("dns:anycast-bindings:read")),
+    principal: Principal = Depends(require_capability("dns:anycast-bindings:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(AnycastBgpBinding)
@@ -2260,6 +2324,18 @@ async def list_bindings(
         stmt = stmt.where(AnycastBgpBinding.dns_server_id == dns_server_id)
     if bgp_peer_id is not None:
         stmt = stmt.where(AnycastBgpBinding.bgp_peer_id == bgp_peer_id)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "dns:anycast-bindings:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[AnycastBgpBindingOut](
+                items=[], total=0, page=params.page,
+                page_size=params.page_size, has_more=False,
+            )
+        stmt = stmt.where(AnycastBgpBinding.bgp_peer_id.in_(
+            select(BgpPeer.id).where(BgpPeer.site_id.in_(in_scope))
+        ))
     return await paginate(
         db, stmt, model=AnycastBgpBinding, params=params, out_model=AnycastBgpBindingOut,
     )
@@ -2281,6 +2357,10 @@ async def create_binding(
         raise ValidationError("only recursive DNS servers advertise anycast IPs")
     if server.site_id != peer.site_id:
         raise ValidationError("dns server and bgp peer must live at the same site")
+    await enforce_site_scope(
+        db, principal.capabilities, peer.site_id,
+        "dns:anycast-bindings:create",
+    )
     existing = (
         await db.execute(
             select(AnycastBgpBinding).where(
@@ -2313,6 +2393,12 @@ async def delete_binding(
     obj = await db.get(AnycastBgpBinding, binding_id)
     if obj is None:
         raise NotFoundError(_BIND_NOT_FOUND)
+    peer = await db.get(BgpPeer, obj.bgp_peer_id)
+    await enforce_site_scope(
+        db, principal.capabilities,
+        peer.site_id if peer else None,
+        "dns:anycast-bindings:delete",
+    )
     await db.execute(delete(AnycastBgpBinding).where(AnycastBgpBinding.id == binding_id))
     await audit.record(
         db, principal, action="anycast_bgp_binding.delete",
