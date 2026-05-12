@@ -1,0 +1,15 @@
+# Comprehensive-test Corefile. Mirrors the production-rendered
+# shape: file plugin for zone data + nsec3sign for online signing.
+# Bind on a high port so the distroless:nonroot user can bind
+# without elevated caps.
+example.test:1053 {
+    errors
+    log
+    file /data/example.test.zone
+    nsec3sign {
+        key file /data/Kexample.test.+013+12165
+        zone file /data/example.test.zone
+        salt aabbccdd
+        iterations 0
+    }
+}

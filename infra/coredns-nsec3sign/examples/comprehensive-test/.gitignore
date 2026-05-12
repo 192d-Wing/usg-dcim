@@ -1,0 +1,4 @@
+# Repo-root .gitignore blocks *.key globally; allow the test-only
+# material in this directory (same pattern as quick-smoke).
+!K*.key
+!K*.private

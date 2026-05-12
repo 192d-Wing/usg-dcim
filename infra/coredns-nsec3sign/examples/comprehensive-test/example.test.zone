@@ -1,0 +1,27 @@
+$ORIGIN example.test.
+$TTL 3600
+@         IN SOA  ns1.example.test. hostmaster.example.test. 1 3600 600 86400 300
+@         IN NS   ns1.example.test.
+ns1       IN A    10.0.0.1
+
+; Flat hosts — covers positive-answer + NODATA paths.
+host1     IN A    10.0.0.10
+host2     IN A    10.0.0.11
+
+; Wildcard at *.dev — covers S-03 (RFC 5155 §7.2.4 wildcard
+; expansion proof + RRSIG.Labels correctness).
+*.dev     IN A    10.0.0.99
+
+; Deep hierarchy with no records at intermediate `floor3` /
+; `building-a` labels — covers S-05 (empty non-terminal
+; synthesis, RFC 5155 §7.2.2).
+printer-1.floor3.building-a  IN A  10.0.0.41
+printer-2.floor3.building-a  IN A  10.0.0.42
+
+; Secure delegation — covers S-04 (matching NSEC3 with NS+DS
+; bitmap on referral, RFC 5155 §7.2.7).
+secure    IN NS   ns.secure.example.test.
+secure    IN DS   12345 13 2 ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789
+
+; Insecure delegation (NS but no DS) — covers S-04 insecure case.
+insecure  IN NS   ns.insecure.example.test.
