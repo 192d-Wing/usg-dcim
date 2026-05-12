@@ -703,6 +703,7 @@ def render_corefile_auth(
     dnssec_keys_by_zone: dict[str, list[str]] | None = None,
     nsec3_params_by_zone: dict[str, dict] | None = None,
     views_by_zone: dict[str, list[dict]] | None = None,
+    dnstap_socket: str | None = None,
 ) -> str:
     """Authoritative Corefile: one `file` block per zone, plus health,
     prometheus, errors, log.
@@ -770,10 +771,21 @@ def render_corefile_auth(
         # the view-scoped blocks above win when their expr matches.
         # Only this block carries prometheus + health to avoid
         # double-registering them per view.
+        # `dnstap` taps every query handled by this server-block onto
+        # a UNIX socket the collector reads. `full` ships the full
+        # query + response so the collector can correlate; we drop
+        # the response side and only count the question name, but
+        # operators sometimes want the full stream for ad-hoc
+        # debugging via dnstap-read on the host.
+        dnstap_line = (
+            f"    dnstap {dnstap_socket} full\n"
+            if dnstap_socket else ""
+        )
         blocks.append(
             f"{name}:53 {{\n"
             f"    file {base}/{name}.zone\n"
             f"{dnssec_block}"
+            f"{dnstap_line}"
             f"    log\n"
             f"    errors\n"
             f"    prometheus :9153\n"
@@ -1610,6 +1622,33 @@ def _build_rpz_artifacts(
     return zones, refs
 
 
+def _dnstap_socket_for(server: DnsServer) -> str | None:
+    """Path the resolver writes dnstap frames to (and the collector
+    tails) for this server, or None when dnstap is globally disabled.
+
+    Lives alongside zones/keys on the shared dns-state volume so both
+    the resolver container and the collector see it at the same path.
+    Only meaningful for CoreDNS auth pods today — Hickory doesn't
+    support dnstap at all, so callers gate on `server.role`."""
+    settings = get_settings()
+    if not settings.dns_dnstap_enabled:
+        return None
+    return (
+        f"/var/lib/dcim-dns/{server.role.value}/"
+        f"{settings.dns_dnstap_socket_filename}"
+    )
+
+
+def _bundle_dnstap_path(server: DnsServer, engine: str) -> str | None:
+    """Path of the dnstap socket reported in the bundle response.
+    Hickory doesn't support dnstap, and only auth pods emit it today,
+    so we limit the return path to CoreDNS auth and let the collector
+    skip its reader loop on null."""
+    if server.role != DnsServerRole.auth or engine != "coredns":
+        return None
+    return _dnstap_socket_for(server)
+
+
 async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
     """One call returns the complete bundle a single server needs:
     Corefile, zone files, optional GoBGP config, etag.
@@ -1665,6 +1704,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         # /var/lib/dcim-dns/<role>/zones/.
         zones_dir_path = f"/var/lib/dcim-dns/{server.role.value}/zones"
         keys_dir_path = f"/var/lib/dcim-dns/{server.role.value}/keys"
+        dnstap_socket_path = _dnstap_socket_for(server)
         corefile = render_corefile_auth(
             (z.name for z in zones),
             zones_dir=zones_dir_path,
@@ -1672,6 +1712,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             dnssec_keys_by_zone=dnssec_keys_by_zone or None,
             nsec3_params_by_zone=nsec3_params_by_zone or None,
             views_by_zone=views_by_zone or None,
+            dnstap_socket=dnstap_socket_path,
         )
         gobgp: dict | None = None
     else:
@@ -1700,6 +1741,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         "gobgp": gobgp,
         "key_files": key_files,
         "etag": etag,
+        "dnstap_socket": _bundle_dnstap_path(server, engine),
     }
 
 

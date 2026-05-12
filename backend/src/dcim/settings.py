@@ -91,6 +91,16 @@ class Settings(BaseSettings):
     dns_hickory_prom_metrics: bool = True
     dns_hickory_prom_port: int = 9090
 
+    # Emit a `dnstap` directive in the CoreDNS auth Corefile so every
+    # query lands on a UNIX socket the collector tails. Powers the
+    # per-name top-K reservoir behind the dashboard's "Top queried
+    # names" widget. Hickory doesn't support dnstap at all, so this
+    # only affects CoreDNS auth pods. Off by default — turning it on
+    # requires the collector to be running a version that reads
+    # the socket (otherwise the file fills up on the shared volume).
+    dns_dnstap_enabled: bool = True
+    dns_dnstap_socket_filename: str = "dnstap.sock"
+
     # DNSSEC private-key encryption secret. When set, DnsKey.private_pem
     # is encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA-256).
     # Generate with `python -c "from cryptography.fernet import Fernet;

@@ -603,6 +603,13 @@ class DnsBundle(BaseModel):
     # plugin can sign responses. Empty dict for unsigned zones or
     # recursive servers.
     key_files: dict[str, str] = Field(default_factory=dict)
+    # UNIX socket path the resolver writes dnstap frames to (and the
+    # collector reads them from). Null when dnstap isn't enabled on
+    # this server — Hickory doesn't support dnstap at all, and
+    # CoreDNS-auth only emits the directive when central is set up
+    # to drive per-name top-K tracking. The collector treats null as
+    # "skip the dnstap loop entirely".
+    dnstap_socket: str | None = None
 
 
 class DnsRenderStatus(BaseModel):
