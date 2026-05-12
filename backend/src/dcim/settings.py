@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # admin@dcim.local remains in the DB for break-glass via the API token
     # path if the seed creates one. Flip on in any deployment with SSO.
     local_login_disabled: bool = False
+    # Sliding-window rate limit on /auth/login, keyed by (client_ip, email).
+    # 5 attempts per 60s by default — generous for fat-fingered passwords,
+    # tight enough to slow credential stuffing. Set max to 0 to disable.
+    login_rate_limit_max: int = 5
+    login_rate_limit_window_seconds: int = 60
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None

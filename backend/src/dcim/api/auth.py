@@ -17,6 +17,7 @@ from ..db import get_db
 from ..errors import AuthError, ForbiddenError
 from ..models.auth import ApiToken, User
 from ..security import audit
+from ..security.rate_limit import SlidingWindowLimiter
 from ..schemas.auth import ApiTokenOut, LoginRequest, TokenIssue, TokenOut
 
 from ..security.deps import AuthenticatedUser, Principal, find_matching_capability, require_capability
@@ -31,6 +32,26 @@ def _anon_principal(label: str, ip: str | None) -> Principal:
     """A Principal for unauthenticated audit events. Has no caps,
     no user, no token — just an actor label + ip for the trail."""
     return Principal(user=None, token=None, capabilities={}, label=label, ip=ip)
+
+
+# Module-level singleton so the bucket dict survives across requests.
+# Configured lazily from settings at first use; the dict survives
+# config reload via lru_cache invalidation if the operator wants
+# the new limits to apply mid-run (uncommon).
+_login_limiter: SlidingWindowLimiter | None = None
+
+
+def _get_login_limiter() -> SlidingWindowLimiter | None:
+    global _login_limiter
+    settings = get_settings()
+    if settings.login_rate_limit_max <= 0:
+        return None
+    if _login_limiter is None:
+        _login_limiter = SlidingWindowLimiter(
+            max_attempts=settings.login_rate_limit_max,
+            window_seconds=settings.login_rate_limit_window_seconds,
+        )
+    return _login_limiter
 
 
 async def _audit_login_failure(
@@ -70,6 +91,23 @@ async def login_local(
                               "message": "local password login is disabled; use SSO"}},
         )
 
+    # Rate limit: throttle credential-stuffing per (ip, email). Counted
+    # before any DB work so the bucket doesn't drift on slow lookups.
+    limiter = _get_login_limiter()
+    rl_key = f"{ip or '?'}:{(payload.email or '').lower()}"
+    if limiter is not None:
+        allowed, count = limiter.consume(rl_key)
+        if not allowed:
+            await _audit_login_failure(db, ip=ip, email=payload.email, reason="rate_limited")
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"error": {
+                    "code": "rate_limited",
+                    "message": f"too many login attempts ({count}); retry in a minute",
+                }},
+                headers={"Retry-After": str(settings.login_rate_limit_window_seconds)},
+            )
+
     res = await db.execute(select(User).where(User.email == payload.email))
     user = res.scalar_one_or_none()
     if user is None or not user.is_active or not user.password_hash:
@@ -79,6 +117,10 @@ async def login_local(
         await _audit_login_failure(db, ip=ip, email=payload.email, reason="bad_password")
         raise AuthError("invalid credentials")
 
+    # Reset the limiter on success so a flurry of bad guesses doesn't
+    # block the now-authenticated user from hitting login again later.
+    if limiter is not None:
+        limiter.reset(rl_key)
     user.last_login_at = datetime.now(UTC)  # type: ignore[assignment]
     await db.commit()
     return TokenOut(access_token=issue_user_jwt(str(user.id)), expires_in=settings.jwt_ttl_seconds)
