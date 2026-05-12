@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import AuthError, ScopeError
-from ..models.auth import ApiToken, User
+from ..models.auth import ApiToken, RevokedJti, User
 from .scope import Scope, caps_from_idp_roles, scope_for_user, site_matches_scope
 from .tokens import decode_user_jwt, hash_api_token
 
@@ -55,6 +55,15 @@ async def _principal_from_jwt(
     except Exception as e:
         raise AuthError("invalid token") from e
     user_id = UUID(claims["sub"])
+    # JTI revocation: a leaked token can be revoked server-side by
+    # inserting its jti into revoked_jtis (cf. /auth/logout). Tokens
+    # minted before this commit have no jti — those skip the check
+    # and continue to work until their natural expiry.
+    jti = claims.get("jti")
+    if jti:
+        revoked = await db.get(RevokedJti, jti)
+        if revoked is not None:
+            raise AuthError("token revoked")
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise AuthError("user not found or inactive")

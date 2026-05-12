@@ -120,6 +120,22 @@ class OidcRoleMapping(UUIDPrimaryKey, Timestamped, Base):
     scope_target: Mapped[str | None] = mapped_column(String(255))
 
 
+class RevokedJti(Base):
+    """Session-JWT deny list. Checked on every authenticated request;
+    populated by /auth/logout, admin force-logout, and admin revoke.
+    Rows are pruned past their `expires_at` by a periodic cleanup job."""
+
+    __tablename__ = "revoked_jtis"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"),
+    )
+    revoked_at: Mapped[str] = mapped_column(DateTime(timezone=True), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(64))
+    expires_at: Mapped[str] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ApiToken(UUIDPrimaryKey, Timestamped, Base):
     """Service-account or integration token. Scope is a copy of (a subset of) the owner's scope."""
 

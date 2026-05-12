@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from jose import jwt
@@ -22,6 +23,11 @@ def issue_user_jwt(
 ) -> str:
     """Mint a session JWT for `user_id`.
 
+    Every minted JWT carries a `jti` claim (UUID4); the deps layer
+    rejects requests whose jti is in the `revoked_jtis` table. Pair
+    that with /auth/logout to actually invalidate a session before
+    its natural expiry.
+
     Pass `idp_roles` to embed the role strings the IdP asserted for
     this user. The Principal builder reads them and resolves caps
     via `oidc_role_mappings` per request — that's the zero-trust
@@ -33,6 +39,7 @@ def issue_user_jwt(
         "sub": user_id,
         "iat": int(now.timestamp()),
         "exp": int(exp.timestamp()),
+        "jti": uuid.uuid4().hex,
         "kind": "user",
     }
     if idp_roles:

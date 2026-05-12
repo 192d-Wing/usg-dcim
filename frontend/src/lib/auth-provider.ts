@@ -34,6 +34,16 @@ export const authProvider: AuthProvider = {
     // session — without this, the IdP cookie stays alive and the
     // next "Login using DOD E-ICAM" click silently re-signs the user in.
     const idToken = localStorage.getItem(ID_TOKEN_KEY);
+    // Best-effort: revoke our session JWT server-side so a leaked
+    // copy can't be replayed during its remaining TTL. The interceptor
+    // attaches the bearer header from localStorage; do this BEFORE
+    // we wipe.
+    try {
+      await http.post('/auth/logout');
+    } catch {
+      // Ignore — server-side revocation is defense in depth; we still
+      // clear local state below so the SPA itself forgets the token.
+    }
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(IDENTITY_KEY);
     localStorage.removeItem(ID_TOKEN_KEY);

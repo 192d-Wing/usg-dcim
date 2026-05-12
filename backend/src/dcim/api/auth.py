@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from uuid import UUID
 from urllib.parse import urlencode
 
 import bcrypt
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from jose import jwt as jose_jwt
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -375,6 +376,61 @@ async def whoami(principal: AuthenticatedUser) -> dict:
         "via_token": principal.token is not None,
         "capabilities": sorted(principal.capabilities.keys()),
     }
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Revoke the caller's current session JWT server-side.
+
+    Reads the bearer token from the Authorization header, decodes it
+    without rejecting on expired (so a near-expiry logout still
+    revokes), and inserts the jti into revoked_jtis. Subsequent
+    requests using this token return 401 from `_principal_from_jwt`.
+
+    No body, no caps required — anyone with a JWT can revoke it.
+    Returns 204 unconditionally (idempotent): a malformed token, a
+    missing jti, or an already-revoked jti is still a "the caller
+    can't use this token any more" success from the caller's view.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return Response(status_code=204)
+    raw = auth_header[7:]
+    try:
+        claims = jose_jwt.decode(
+            raw,
+            get_settings().jwt_secret,
+            algorithms=[get_settings().jwt_algorithm],
+            options={"verify_exp": False},
+        )
+    except Exception:
+        return Response(status_code=204)
+    jti = claims.get("jti")
+    if not jti:
+        return Response(status_code=204)
+    exp = claims.get("exp")
+    expires_at = datetime.fromtimestamp(int(exp), tz=UTC) if exp else datetime.now(UTC)
+    user_id_str = claims.get("sub")
+    user_uuid: UUID | None = None
+    try:
+        if user_id_str:
+            user_uuid = UUID(user_id_str)
+    except ValueError:
+        user_uuid = None
+    # Upsert pattern: ignore conflict if already revoked.
+    await db.execute(
+        text(
+            "INSERT INTO revoked_jtis (jti, user_id, revoked_at, reason, expires_at) "
+            "VALUES (:jti, :user_id, NOW(), :reason, :expires_at) "
+            "ON CONFLICT (jti) DO NOTHING"
+        ),
+        {"jti": jti, "user_id": user_uuid, "reason": "user_logout", "expires_at": expires_at},
+    )
+    await db.commit()
+    return Response(status_code=204)
 
 @router.get("/tokens", response_model=list[ApiTokenOut])
 async def list_tokens(
