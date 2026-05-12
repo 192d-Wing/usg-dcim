@@ -123,6 +123,17 @@ class Fabric(UUIDPrimaryKey, Timestamped, Base):
     # Lets multi-tenant installs point each fabric at its own
     # internal resolver estate without a setting-per-fabric.
     dns_recursive_upstreams: Mapped[list[str] | None] = mapped_column(JSON)
+    # Per-fabric CIDR allow/deny lists for the recursive listener.
+    # Hickory's `allow_networks` (when set) is an allowlist — any
+    # client IP not in it gets rejected; `deny_networks` is a
+    # blocklist applied even when allow is empty. Operators use these
+    # to keep known abuser ranges off the resolver and to scope the
+    # recursive to internal client ranges. NOT per-second
+    # rate-limiting — Hickory 0.26 has no native QPS limiter; the
+    # answer for real DoS protection is still host-side nftables
+    # hashlimit or a dnsdist sidecar.
+    dns_deny_networks: Mapped[list[str] | None] = mapped_column(JSON)
+    dns_allow_networks: Mapped[list[str] | None] = mapped_column(JSON)
     # Recursive DNS engine for this fabric — CoreDNS (default) or
     # Hickory. Authoritative pods always use CoreDNS; only the
     # recursive side moves. Switch is reversible per-fabric.

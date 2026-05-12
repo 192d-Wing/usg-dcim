@@ -987,6 +987,8 @@ def render_hickory_recursive_config(
     upstream_resolvers: Iterable[str],
     conditional_forwarders: Iterable[tuple[str, list[str]]] = (),
     rpz_zone_files: Iterable[tuple[str, str]] = (),
+    deny_networks: Iterable[str] | None = None,
+    allow_networks: Iterable[str] | None = None,
 ) -> str:
     """Hickory DNS recursive config (TOML). Counterpart to
     render_corefile_recursive — same inputs, different output format.
@@ -1038,6 +1040,12 @@ def render_hickory_recursive_config(
         port = get_settings().dns_hickory_prom_port
         lines.append(f'prometheus_listen_addr = "0.0.0.0:{port}"')
         lines.append("")
+    # Order matters here: TOML tables consume every field that
+    # follows them until the next table header, so the ACL lines
+    # (which are top-level) MUST land before `[tls_cert]`. Otherwise
+    # Hickory parses `allow_networks` as a field of `tls_cert` and
+    # rejects the config on load.
+    lines.extend(_hickory_acl_lines(deny_networks, allow_networks))
     lines.extend(_hickory_tls_lines(get_settings()))
     # Forward queries back to the local auth pod for each apex —
     # internal lookups never leave the site.
@@ -1143,6 +1151,38 @@ def _hickory_tls_lines(settings) -> list[str]:
     lines.append("[tls_cert]")
     lines.append(f'path = "{cert}"')
     lines.append(f'private_key = "{key}"')
+    lines.append("")
+    return lines
+
+
+def _hickory_acl_lines(
+    deny_networks: Iterable[str] | None,
+    allow_networks: Iterable[str] | None,
+) -> list[str]:
+    """Render Hickory's top-level `deny_networks` + `allow_networks`
+    CIDR lists. Both are sorted for deterministic bundle etags. Empty
+    lists deliberately skip emission so a fat-fingered fabric edit
+    can't lock everyone out by writing `allow_networks = []` into
+    the rendered TOML — null vs empty needs an explicit operator
+    intent, which today's UI surfaces as "leave the field blank for
+    no restriction"."""
+    deny_list = sorted(set(deny_networks or []))
+    allow_list = sorted(set(allow_networks or []))
+    if not deny_list and not allow_list:
+        return []
+    lines: list[str] = []
+    if deny_list:
+        lines.append(
+            "deny_networks = ["
+            + ", ".join(f'"{c}"' for c in deny_list)
+            + "]"
+        )
+    if allow_list:
+        lines.append(
+            "allow_networks = ["
+            + ", ".join(f'"{c}"' for c in allow_list)
+            + "]"
+        )
     lines.append("")
     return lines
 
@@ -1637,6 +1677,8 @@ async def _render_recursive_config(
             upstream_resolvers=upstreams,
             conditional_forwarders=forwarders,
             rpz_zone_files=rpz_refs,
+            deny_networks=fabric.dns_deny_networks if fabric else None,
+            allow_networks=fabric.dns_allow_networks if fabric else None,
         )
         return config_text, rpz_zones
     config_text = render_corefile_recursive(

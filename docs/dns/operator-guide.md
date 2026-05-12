@@ -543,16 +543,32 @@ If the cert's SAN doesn't include the address clients hit, they'll
 trip on hostname verification — use a real DNS name in the cert and
 have clients resolve it (typically via the same recursive 😅).
 
-## Recursive rate-limiting
+## Recursive client access control
 
-**Status: not natively supported.** Hickory 0.26 exposes
-`allow_networks` / `deny_networks` (CIDR allow/deny lists) but no
-QPS-based rate-limiter. The roadmap item is parked pending either
-an upstream PR to Hickory or one of the out-of-band approaches
-below.
+Hickory 0.26 exposes `allow_networks` / `deny_networks` config
+fields and DCIM wires them through as **per-fabric** CIDR ACLs on
+the `Fabric` row (`dns_deny_networks` + `dns_allow_networks`). The
+recursive's rendered TOML carries the merged list:
 
-**Today's options** for sites that need protection from
-amplification / DoS:
+```toml
+deny_networks  = ["10.99.0.0/24"]
+allow_networks = ["10.0.0.0/8", "192.168.0.0/16"]
+```
+
+**Caveat (upstream Hickory):** during pilot smoke testing on
+v0.26.0 the renderer-side wiring was confirmed end-to-end, but the
+binary did NOT actually reject queries from IPs outside the
+allowlist — the access-control check appears to not be hooked up
+for UDP in this release. Track upstream
+[PR-2126](https://github.com/hickory-dns/hickory-dns/pull/2126);
+the DCIM data path is ready for when Hickory ships a working
+enforcement (or we patch our `hickory-prom` build to do so). Until
+then, treat the ACL config as documenting intent — actual
+enforcement needs one of the options below.
+
+**Real QPS-based rate-limiting** is still not natively supported
+on either engine. The roadmap item is parked pending either an
+upstream PR to Hickory or one of the out-of-band approaches:
 
 - **Host-side nftables/iptables `hashlimit`** on UDP/TCP 53. This
   is the standard production answer; not driven from DCIM but
@@ -562,11 +578,6 @@ amplification / DoS:
   nft add rule inet filter input udp dport 53 \
     meter ratelimit { ip saddr limit rate 100/second } accept
   ```
-
-- **`deny_networks` for known abusers** via a per-fabric setting —
-  DCIM can render this into the Hickory config today, but it's
-  binary allow/deny rather than per-second budget. Use for blocking
-  scanner IPs after the fact, not as DoS prevention.
 
 - **A dnsdist sidecar** in front of Hickory if you need real
   per-client QPS limits + selective blocking. Heaviest option but

@@ -43,6 +43,14 @@ class FabricBase(BaseModel):
     # Per-fabric override for the recursive Corefile's catch-all
     # forward. NULL falls back to settings.dns_recursive_upstreams.
     dns_recursive_upstreams: list[str] | None = None
+    # CIDR allow/deny lists rendered into the Hickory recursive's
+    # top-level `allow_networks` / `deny_networks` settings. Null
+    # means "no restriction" — the recursive answers any client
+    # that reaches it. Empty list also means no restriction (an
+    # explicit `allow_networks = []` would lock everyone out, which
+    # is rarely what an operator wants when they fat-finger the form).
+    dns_deny_networks: list[str] | None = None
+    dns_allow_networks: list[str] | None = None
     # Which engine renders this fabric's recursive pod. Authoritative
     # always uses CoreDNS — see hickory-migration plan.
     recursive_engine: RecursiveDnsEngine = RecursiveDnsEngine.coredns
@@ -59,6 +67,8 @@ class FabricUpdate(BaseModel):
     enclave: str | None = None
     classification: str | None = None
     dns_recursive_upstreams: list[str] | None = None
+    dns_deny_networks: list[str] | None = None
+    dns_allow_networks: list[str] | None = None
     recursive_engine: RecursiveDnsEngine | None = None
 
 
