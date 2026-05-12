@@ -594,11 +594,17 @@ def render_zone_file(
     records: Iterable[DnsRecord],
     *,
     unhealthy_check_ids: set | None = None,
+    extra_lines: Iterable[str] | None = None,
 ) -> str:
     """Emit a BIND-format zone file. Records are sorted by (name, type)
     for diffability. Records bound to an unhealthy health check are
     skipped — the caller hands the (set of unhealthy check ids) so we
-    don't query inside this pure function."""
+    don't query inside this pure function.
+
+    `extra_lines` is appended verbatim after the regular records — the
+    bundle-assembly path uses this to inject DS records for any
+    DCIM-owned child zones, completing the DNSSEC chain of trust from
+    parent → child without an operator manually copying RRs."""
     skip = unhealthy_check_ids or set()
     rec_list = sorted(
         (r for r in records if getattr(r, "health_check_id", None) not in skip),
@@ -621,6 +627,10 @@ def render_zone_file(
     ]
     for r in rec_list:
         lines.append(_format_record_line(r, zone))
+    if extra_lines:
+        lines.append("")
+        lines.append("; --- DS records for DCIM-owned child zones ---")
+        lines.extend(extra_lines)
     lines.append("")
     return "\n".join(lines)
 
@@ -1673,6 +1683,43 @@ def _anycast_prefixes(anycast: AnycastGroup | None) -> list[str]:
     return out
 
 
+async def _child_ds_lines_by_parent(
+    db: AsyncSession, zones: Iterable[DnsZone],
+) -> dict[UUID, list[str]]:
+    """For every parent zone in `zones`, return the DS-record lines
+    that should be embedded in its rendered zone file — one set of DS
+    RRs per DCIM-owned child zone that is a direct subdomain.
+
+    "Direct subdomain" means the child's name strips to the parent's
+    name after removing exactly one leading label. Multi-label nested
+    delegation (`a.b.example.com` → `example.com`) is intentionally
+    not supported: it would require the operator to also create the
+    intermediate `b.example.com` zone for the chain to be reachable.
+
+    Only signed children contribute records — an unsigned child has
+    nothing to delegate. Retired KSKs are skipped so the parent stays
+    in sync with the child's current key material across rotations."""
+    zone_list = list(zones)
+    by_name = {z.name.rstrip(".").lower(): z for z in zone_list}
+    out: dict[UUID, list[str]] = {z.id: [] for z in zone_list}
+    for child in zone_list:
+        if not getattr(child, "signed", False):
+            continue
+        child_name = child.name.rstrip(".").lower()
+        parent_name = child_name.split(".", 1)[1] if "." in child_name else ""
+        parent = by_name.get(parent_name) if parent_name else None
+        if parent is None or parent.id == child.id:
+            continue
+        keys = (
+            await db.execute(
+                select(DnsKey).where(DnsKey.zone_id == child.id)
+            )
+        ).scalars().all()
+        for ds in render_ds_records(child, keys):
+            out[parent.id].append(ds["rr"])
+    return out
+
+
 async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
     """One call returns the complete bundle a single server needs:
     Corefile, zone files, optional GoBGP config, etag.
@@ -1708,15 +1755,20 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         split_files, views_by_zone = await _views_and_zone_files_for_split_horizon(
             db, zones, records_by_zone, unhealthy,
         )
+        child_ds_lines = await _child_ds_lines_by_parent(db, zones)
         zone_files: dict[str, str] = {}
         for z in zones:
             if z.name in views_by_zone:
                 # split_files already contains both the default and
                 # per-view files keyed by their proper filenames.
+                # Split-horizon + delegation is unusual; the DS
+                # records would need to land in every view's file.
+                # Punt on that combo until an operator asks for it.
                 continue
             zone_files[_filename_for_zone(z.name)] = render_zone_file(
                 z, records_by_zone.get(z.id, []),
                 unhealthy_check_ids=unhealthy,
+                extra_lines=child_ds_lines.get(z.id) or None,
             )
         zone_files.update(split_files)
         key_files, dnssec_keys_by_zone, nsec3_params_by_zone = (
