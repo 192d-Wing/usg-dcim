@@ -12,27 +12,52 @@ import (
 	"github.com/coredns/caddy"
 )
 
+// parseWant captures every Nsec3Sign field a TestParseValid case
+// might assert on. Flattening case-specific checks into a single
+// struct + one assertion loop keeps the test's cognitive complexity
+// bounded as cases accrete — every new case adds one row, not a
+// new closure.
+type parseWant struct {
+	keyFiles      int    // expected len(n.KeyFiles)
+	zoneFile      string // expected n.ZoneFile
+	salt          string
+	iterations    uint16
+	optOut        bool
+	cacheCapacity int
+}
+
+func (w parseWant) check(t *testing.T, n *Nsec3Sign) {
+	t.Helper()
+	if len(n.KeyFiles) != w.keyFiles {
+		t.Errorf("KeyFiles len = %d, want %d", len(n.KeyFiles), w.keyFiles)
+	}
+	if n.ZoneFile != w.zoneFile {
+		t.Errorf("ZoneFile = %q, want %q", n.ZoneFile, w.zoneFile)
+	}
+	if n.Salt != w.salt {
+		t.Errorf("Salt = %q, want %q", n.Salt, w.salt)
+	}
+	if n.Iterations != w.iterations {
+		t.Errorf("Iterations = %d, want %d", n.Iterations, w.iterations)
+	}
+	if n.OptOut != w.optOut {
+		t.Errorf("OptOut = %v, want %v", n.OptOut, w.optOut)
+	}
+	if n.CacheCapacity != w.cacheCapacity {
+		t.Errorf("CacheCapacity = %d, want %d", n.CacheCapacity, w.cacheCapacity)
+	}
+}
+
 func TestParseValid(t *testing.T) {
 	cases := []struct {
 		name  string
 		input string
-		check func(t *testing.T, n *Nsec3Sign)
+		want  parseWant
 	}{
 		{
 			name:  "minimal",
 			input: `nsec3sign`,
-			check: func(t *testing.T, n *Nsec3Sign) {
-				if len(n.KeyFiles) != 0 {
-					t.Fatalf("expected no key files, got %v", n.KeyFiles)
-				}
-				if n.Salt != "" || n.Iterations != 0 || n.OptOut {
-					t.Fatalf("expected RFC 9276 defaults, got salt=%q iter=%d optOut=%v",
-						n.Salt, n.Iterations, n.OptOut)
-				}
-				if n.CacheCapacity != 10000 {
-					t.Fatalf("expected default cache_capacity=10000, got %d", n.CacheCapacity)
-				}
-			},
+			want:  parseWant{cacheCapacity: 10000},
 		},
 		{
 			name: "full block",
@@ -44,41 +69,33 @@ func TestParseValid(t *testing.T) {
 				opt_out
 				cache_capacity 5000
 			}`,
-			check: func(t *testing.T, n *Nsec3Sign) {
-				if len(n.KeyFiles) != 2 {
-					t.Fatalf("expected 2 key files, got %d", len(n.KeyFiles))
-				}
-				if n.Salt != "deadbeef" {
-					t.Fatalf("expected salt=deadbeef, got %q", n.Salt)
-				}
-				if !n.OptOut {
-					t.Fatal("expected opt_out=true")
-				}
-				if n.CacheCapacity != 5000 {
-					t.Fatalf("expected cache_capacity=5000, got %d", n.CacheCapacity)
-				}
+			want: parseWant{
+				keyFiles: 2, salt: "deadbeef", optOut: true,
+				cacheCapacity: 5000,
 			},
 		},
 		{
-			name: "empty salt spellings",
+			name: "empty salt spelling",
 			input: `nsec3sign {
 				salt ""
 			}`,
-			check: func(t *testing.T, n *Nsec3Sign) {
-				if n.Salt != "" {
-					t.Fatalf("expected empty salt, got %q", n.Salt)
-				}
-			},
+			want: parseWant{cacheCapacity: 10000},
 		},
 		{
 			name: "dash salt spelling",
 			input: `nsec3sign {
 				salt -
 			}`,
-			check: func(t *testing.T, n *Nsec3Sign) {
-				if n.Salt != "" {
-					t.Fatalf("expected empty salt, got %q", n.Salt)
-				}
+			want: parseWant{cacheCapacity: 10000},
+		},
+		{
+			name: "zone file directive",
+			input: `nsec3sign {
+				zone file /var/lib/dcim-dns/auth/zones/example.test.zone
+			}`,
+			want: parseWant{
+				zoneFile:      "/var/lib/dcim-dns/auth/zones/example.test.zone",
+				cacheCapacity: 10000,
 			},
 		},
 	}
@@ -90,7 +107,7 @@ func TestParseValid(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse error: %v", err)
 			}
-			tc.check(t, n)
+			tc.want.check(t, n)
 		})
 	}
 }
@@ -142,6 +159,43 @@ func TestParseInvalid(t *testing.T) {
 				opt_out yes
 			}`,
 			wantErr: "Wrong argument count",
+		},
+		{
+			name: "salt not hex",
+			input: `nsec3sign {
+				salt deadbeefg
+			}`,
+			wantErr: "salt must be hex",
+		},
+		{
+			name: "salt odd-length hex",
+			input: `nsec3sign {
+				salt abc
+			}`,
+			wantErr: "salt must be hex",
+		},
+		{
+			name: "salt too long",
+			// 33 bytes hex (66 chars) — one past the configured 32-byte cap.
+			input: `nsec3sign {
+				salt 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00
+			}`,
+			wantErr: "exceeds the configured maximum",
+		},
+		{
+			name: "zone without file",
+			input: `nsec3sign {
+				zone /var/lib/dcim-dns/auth/zones/example.test.zone
+			}`,
+			wantErr: "Wrong argument count",
+		},
+		{
+			name: "zone file duplicated",
+			input: `nsec3sign {
+				zone file /a.zone
+				zone file /b.zone
+			}`,
+			wantErr: "one zone file per nsec3sign block",
 		},
 	}
 

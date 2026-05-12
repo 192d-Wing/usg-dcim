@@ -6,9 +6,11 @@
 // wire encoding (RFC 4034 §6) are delegated to miekg/dns's
 // `RRSIG.Sign`; we just fill the template and pick the right keys.
 //
-// A signature cache lands in step 6 — for now every query produces
-// fresh RRSIGs. That's correct (just expensive) and lets us settle
-// the algorithm-correctness story before adding the LRU.
+// signRRset routes through the LRU signature cache in sigcache.go
+// before doing the math — on hit the same []dns.RR slice is reused,
+// so callers MUST treat the returned RRSIGs as immutable. The current
+// call path (appendRRSIGs → serialized WriteMsg) doesn't mutate, but
+// future maintainers should keep that invariant.
 
 package nsec3sign
 

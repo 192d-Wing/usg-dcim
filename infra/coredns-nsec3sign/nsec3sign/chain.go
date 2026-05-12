@@ -15,9 +15,8 @@
 //
 // This file owns the chain construction + lookup primitives. The
 // machinery that turns a covering / matching node into actual
-// `*dns.NSEC3` resource records lives in denial.go (step 5); zone-
-// data ingestion that produces the `nameInfo` slice lives in the
-// future file-plugin integration.
+// `*dns.NSEC3` resource records lives in denial.go; zone-data
+// ingestion that produces the `nameInfo` slice lives in zone.go.
 
 package nsec3sign
 

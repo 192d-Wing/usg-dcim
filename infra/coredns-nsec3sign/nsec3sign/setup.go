@@ -14,6 +14,7 @@
 package nsec3sign
 
 import (
+	"encoding/hex"
 	"strconv"
 
 	"github.com/coredns/caddy"
@@ -22,6 +23,14 @@ import (
 	"github.com/coredns/coredns/plugin/pkg/cache"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 )
+
+// nsec3MaxSaltBytes caps the salt length per RFC 5155 §3.1.5 (1-byte
+// SaltLength field on the wire allows up to 255 bytes, but anything
+// above a handful is operationally pointless and inflates every
+// NSEC3 record). The Pydantic schema on the DCIM side already enforces
+// the same bound; this is a defence-in-depth check at the Go boundary
+// in case an operator hand-edits the Corefile directly.
+const nsec3MaxSaltBytes = 32
 
 var log = clog.NewWithPlugin("nsec3sign")
 
@@ -74,16 +83,26 @@ func setup(c *caddy.Controller) error {
 		return n
 	})
 
-	log.Infof("nsec3sign registered for %v with %d key(s), cache capacity %d", n.Zones, len(n.Keys), n.CacheCapacity)
+	// An empty key roster is a deployment footgun — ServeDNS will
+	// silently pass through unsigned responses. Logging at WARNING
+	// keeps the boot loud enough that an operator who forgot the
+	// `key file` directive sees it in journalctl. We don't promote
+	// to a hard error because the test wiring sometimes constructs
+	// keyless plugin instances on purpose.
+	if len(n.Keys) == 0 {
+		log.Warningf("nsec3sign registered for %v with NO keys — responses will pass through unsigned", n.Zones)
+	} else {
+		log.Infof("nsec3sign registered for %v with %d key(s), cache capacity %d", n.Zones, len(n.Keys), n.CacheCapacity)
+	}
 	return nil
 }
 
 // parse reads one `nsec3sign { ... }` block and returns the
-// configured plugin instance. The directive keywords are recognized
-// here in step 1 but most of them only store raw values — the
-// crypto/chain code that consumes them isn't online yet. We still
-// validate the *shape* (arity, integer parses) so an operator who
-// drafts the eventual Corefile today gets useful errors at startup.
+// configured plugin instance. Each directive's handler validates
+// shape (arity), type (integer parses, hex check on salt), and
+// bounds (iterations ≤ 150, salt ≤ 32 bytes) so a misconfigured
+// Corefile fails CoreDNS startup rather than producing garbage at
+// query time.
 func parse(c *caddy.Controller) (*Nsec3Sign, error) {
 	n := &Nsec3Sign{
 		// RFC 9276 recommended defaults — empty salt, zero iterations.
@@ -163,7 +182,11 @@ func parseZone(c *caddy.Controller, n *Nsec3Sign) error {
 
 // parseSalt accepts a hex-encoded NSEC3 salt, or "" / "-" for empty.
 // RFC 9276 recommends empty; we accept both spellings so a renderer
-// can use whichever reads better in its template.
+// can use whichever reads better in its template. Validates that the
+// value is actually hex (so miekg/dns.HashName doesn't receive a
+// garbage salt at chain-build time) and that it fits within
+// `nsec3MaxSaltBytes`. Failing here aborts CoreDNS startup, which is
+// what we want — a misconfigured signing plugin should not run.
 func parseSalt(c *caddy.Controller, n *Nsec3Sign) error {
 	args := c.RemainingArgs()
 	if len(args) != 1 {
@@ -172,6 +195,16 @@ func parseSalt(c *caddy.Controller, n *Nsec3Sign) error {
 	salt := args[0]
 	if salt == `""` || salt == "-" {
 		salt = ""
+	}
+	// hex.DecodeString rejects odd-length strings AND non-hex
+	// characters in one shot — exactly the two failure modes we
+	// want to catch before the salt ever reaches HashName.
+	decoded, err := hex.DecodeString(salt)
+	if err != nil {
+		return c.Errf("salt must be hex (empty or pairs of 0-9a-fA-F), got %q: %v", salt, err)
+	}
+	if len(decoded) > nsec3MaxSaltBytes {
+		return c.Errf("salt of %d bytes exceeds the configured maximum of %d", len(decoded), nsec3MaxSaltBytes)
 	}
 	n.Salt = salt
 	return nil

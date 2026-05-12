@@ -1,18 +1,16 @@
 // Plugin entry point — declares the `Nsec3Sign` handler type and
-// implements `plugin.Handler.ServeDNS`. As of step 5, ServeDNS does
-// the full online-signing pass: intercept the downstream response,
-// attach NSEC3 denial proofs to NODATA / NXDOMAIN authority sections
-// (via `denial.go`), then sign every RRset in answer + authority
-// (via `signer.go`) when the client signals DO=1.
+// implements `plugin.Handler.ServeDNS`. ServeDNS runs the full
+// online-signing pass: intercept the downstream response, attach
+// NSEC3 denial proofs to NODATA / NXDOMAIN authority sections (via
+// `denial.go`), then sign every RRset in answer + authority (via
+// `signer.go`) when the client signals DO=1. The chain that powers
+// denial proofs is populated at startup from the configured zone
+// file (`zone.go`).
 //
-// The chain that powers denial proofs is still populated by hand in
-// tests — the file-plugin integration that walks a live zone tree
-// lands in step 5b. Until then `Nsec3Sign.Chain` defaults to nil and
-// attachDenialProof short-circuits, so positive responses keep
-// working without the chain.
-//
-// Still to land: LRU signature cache (step 6) that will collapse
-// duplicate-RRset signing work across queries; per-query metrics.
+// Known gaps documented in SECURITY-REVIEW.md: wildcard-expansion
+// proofs (RFC 5155 §7.2.5) and delegation referral DS-attestation
+// proofs aren't synthesized. Both are corner cases for the DCIM zone
+// shapes this plugin was built for.
 
 package nsec3sign
 
@@ -30,11 +28,10 @@ import (
 )
 
 // Nsec3Sign is one parsed `nsec3sign { ... }` block from the
-// Corefile. The fields are populated in two phases: parse() in
-// setup.go reads the Corefile values, then loadKeys() (also in
-// setup) opens the key files. ServeDNS consumes the result at query
-// time. A future cache field will slot in alongside Chain when step
-// 6 lands.
+// Corefile. setup() populates the fields in three phases: parse()
+// reads the Corefile values, loadKeys() opens the key files, and
+// loadChain() parses the zone file into the NSEC3 chain. ServeDNS
+// consumes all of that at query time.
 type Nsec3Sign struct {
 	// Next is the next plugin in the CoreDNS chain; Caddy injects it
 	// in setup() via dnsserver.GetConfig(c).AddPlugin.
@@ -48,9 +45,7 @@ type Nsec3Sign struct {
 
 	// KeyFiles are BIND-style basenames (no `.key`/`.private` suffix)
 	// for the KSK + ZSK material this zone is signed with. The loader
-	// in keys.go reads both halves and groups them by tag. Stored
-	// here even after loadKeys() runs so a future SIGUSR1 reload can
-	// re-open them without revisiting the Corefile.
+	// in keys.go reads both halves and groups them by tag.
 	KeyFiles []string
 
 	// ZoneFile is the BIND-format zone file the chain builder parses
@@ -61,14 +56,14 @@ type Nsec3Sign struct {
 	ZoneFile string
 
 	// Keys are the parsed key pairs ready for signing. Populated by
-	// loadKeys() in setup() after parse(); empty in step-1 plugins
-	// that have no `key file` directives.
+	// loadKeys() in setup() after parse(); empty when the Corefile
+	// has no `key file` directives (responses pass through unsigned
+	// — see the WARNING log line in setup).
 	Keys []*signingKey
 
-	// Chain is the pre-computed NSEC3 chain for this zone. nil until
-	// the file-plugin integration (later step) walks the zone tree
-	// and calls buildChain. ServeDNS only uses the chain for denial
-	// proofs, so positive responses work even before it's populated.
+	// Chain is the pre-computed NSEC3 chain for this zone. nil when
+	// no `zone file` directive is set; ServeDNS only uses the chain
+	// for denial proofs, so positive responses work even without it.
 	Chain *chain
 
 	// Salt + Iterations + OptOut control NSEC3 chain generation per

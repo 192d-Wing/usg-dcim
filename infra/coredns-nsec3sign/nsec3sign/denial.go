@@ -19,10 +19,11 @@
 // section, including the new NSEC3s, so the denial ships fully
 // signed.
 //
-// Wildcard-expansion proofs (RFC 5155 §7.2.5) and delegation /
-// referral proofs are deferred to step 5b alongside the file-plugin
-// integration that actually populates Nsec3Sign.Chain in production.
-// In the meantime tests inject a chain directly.
+// Known gaps documented in SECURITY-REVIEW.md (correctness, not
+// security): wildcard-expansion proofs (RFC 5155 §7.2.5) aren't
+// synthesized; delegation referrals don't get NSEC3 DS-attestation
+// proofs. Both affect zones that use those features — flat DCIM
+// host zones (the design target) don't trigger them.
 
 package nsec3sign
 
@@ -50,10 +51,11 @@ const defaultDenialTTL uint32 = 3600
 //
 // `server` is the request's server-block label, used as the metric
 // dimension for the denials counter. No-op when the chain hasn't
-// been populated yet — the cache + signing path keeps working in
-// that mode, just without proofs (zones not in OptOut mode would
-// then have validators rejecting denials, but a configured zone
-// always has a chain after setup()).
+// been populated (no `zone file` directive) — the cache + signing
+// path keeps working, just without denial proofs. Validators will
+// reject denial responses in that mode; the empty-keys WARNING at
+// startup mirrors the same intent: silent unsigned shipping is not
+// a default we sleep-walk into.
 func (n *Nsec3Sign) attachDenialProof(m *dns.Msg, qname, server string, now time.Time) *dns.Msg {
 	if n.Chain == nil || len(n.Chain.nodes) == 0 {
 		return m

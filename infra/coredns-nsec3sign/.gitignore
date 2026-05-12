@@ -4,4 +4,10 @@
 /out/
 *.test
 *.out
+# Coverage profile produced by `go test -cover -coverprofile=…` and
+# the bare `coverage` file `go test -cover` drops when a downstream
+# tool errors before consuming it. Neither is useful in version
+# control.
+coverage
+coverage.out
 vendor/

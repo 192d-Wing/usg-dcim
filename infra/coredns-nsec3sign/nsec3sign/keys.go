@@ -24,7 +24,7 @@ import (
 )
 
 // signingKey pairs a DNSKEY public RR with its private half. The
-// signer (step 4) consumes these to produce RRSIG records.
+// signer in signer.go consumes these to produce RRSIG records.
 type signingKey struct {
 	// KeyTag is the DNSSEC keytag — RFC 4034 §App.B — computed once
 	// at load and cached. miekg/dns recomputes from rdata on every
@@ -54,9 +54,10 @@ type signingKey struct {
 // Nsec3Sign.Keys. Called from setup() after parse() so file I/O
 // errors surface at startup instead of first query.
 //
-// An empty KeyFiles slice is permitted while the plugin is still in
-// noop mode (steps 1–3). Once ServeDNS actually signs, a zero-key
-// configuration will be promoted to a hard error in setup().
+// An empty KeyFiles slice is permitted — useful for test wiring
+// that constructs Nsec3Sign with synthetic keys. Production setups
+// without any key files trigger a WARNING in setup() because
+// ServeDNS will pass through unsigned in that configuration.
 func (n *Nsec3Sign) loadKeys() error {
 	if len(n.KeyFiles) == 0 {
 		return nil
