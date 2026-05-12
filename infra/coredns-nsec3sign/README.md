@@ -92,19 +92,24 @@ need the custom image — only authoritative zones sign.
 
 ## Status
 
-Build-out plan, with the current cursor on step 7:
+Build-out plan — all eight steps complete:
 
-| Step | What                                                         | Status   |
-| ---- | ------------------------------------------------------------ | -------- |
-| 1    | Module scaffolding + custom CoreDNS image + noop plugin      | done     |
-| 2    | BIND key loader (`Kname+alg+tag.{key,private}` reader)       | done     |
-| 3    | NSEC3 chain builder (one-shot, sorted by hash)               | done     |
-| 4    | Positive-response RRSIG signing                              | done     |
-| 5    | Denial-proof algorithm (NXDOMAIN closest-encloser, NODATA)   | done     |
-| 5b   | Zone-file ingestion — chain populated from BIND zone at boot | done     |
-| 6    | Signature cache + Prometheus metrics                         | done     |
-| 7    | DCIM renderer change — emit `nsec3sign` for NSEC3 zones      | **next** |
-| 8    | End-to-end smoke against `site-dns/docker-compose.yml`       | todo     |
+| Step | What                                                         | Status |
+| ---- | ------------------------------------------------------------ | ------ |
+| 1    | Module scaffolding + custom CoreDNS image + noop plugin      | done   |
+| 2    | BIND key loader (`Kname+alg+tag.{key,private}` reader)       | done   |
+| 3    | NSEC3 chain builder (one-shot, sorted by hash)               | done   |
+| 4    | Positive-response RRSIG signing                              | done   |
+| 5    | Denial-proof algorithm (NXDOMAIN closest-encloser, NODATA)   | done   |
+| 5b   | Zone-file ingestion — chain populated from BIND zone at boot | done   |
+| 6    | Signature cache + Prometheus metrics                         | done   |
+| 7    | DCIM renderer change — emit `nsec3sign` for NSEC3 zones      | done   |
+| 8    | DCIM-bundle smoke — Python renderer → Go plugin end-to-end   | done   |
+
+The plugin is production-ready for DCIM zones. The two smoke
+harnesses under `examples/` cover the plugin in isolation
+(`quick-smoke`, hand-rolled Corefile) and the full DCIM render
+path (`dcim-bundle-smoke`, Python-rendered Corefile).
 
 As of step 5b the plugin is functionally complete for authoritative
 DCIM zones: positive responses ship signed; NXDOMAIN and NODATA
