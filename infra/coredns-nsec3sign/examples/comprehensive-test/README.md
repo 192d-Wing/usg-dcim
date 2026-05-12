@@ -40,14 +40,14 @@ behavior** against operator-shaped zones.
 
 ```powershell
 # 1. Pull the published image (force a real fetch, not local cache).
-docker rmi ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-2
-docker pull ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-2
+docker rmi ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1
+docker pull ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1
 
 # 2. Boot against the test bundle.
 docker run -d --name nsec3-deploy-test `
   -p 127.0.0.1:15656:1053/udp -p 127.0.0.1:15656:1053/tcp `
   -v "${pwd}:/data:ro" `
-  ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-2 `
+  ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1 `
   -conf /data/Corefile
 docker logs nsec3-deploy-test
 # Expect: "nsec3sign: chain built for example.test. with 12 owner names"
@@ -107,5 +107,5 @@ This harness validates the entire build-out:
 
 Plus the baseline functionality from steps 4-5b: scenarios 1-3.
 
-A green run of this harness against the published v1.11.3-2 image
+A green run of this harness against the published v1.14.2-1 image
 means every documented fix is live in production.

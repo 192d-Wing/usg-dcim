@@ -101,7 +101,7 @@ func (n *Nsec3Sign) signRRset(rrs []dns.RR, signerName, server string, incep, ex
 		cacheKey = rrsetCacheKey(rrs)
 		if v, ok := n.SigCache.Get(cacheKey); ok {
 			cacheHits.WithLabelValues(server).Inc()
-			return v.([]dns.RR)
+			return v
 		}
 		cacheMisses.WithLabelValues(server).Inc()
 	}

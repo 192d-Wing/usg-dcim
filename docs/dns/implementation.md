@@ -291,7 +291,7 @@ the plugin chain immediately after `dnssec` (the existing NSEC
 plugin's slot), points the module graph at our local source via
 a `replace` directive, and runs the upstream's `go generate && go
 build` sequence. The resulting binary is a drop-in for
-`coredns/coredns:1.11.3` — same entrypoint, same `-conf` flag,
+`coredns/coredns:1.14.2` — same entrypoint, same `-conf` flag,
 same listening ports.
 
 ## Frontend

@@ -50,7 +50,7 @@ chmod 0600 token
 ### 3. Authenticate to ghcr (one-time per host)
 
 The `coredns-auth` service pulls
-`ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1` — a private package
+`ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1` — a private package
 under the 192d-Wing org. Each Docker host that runs the site stack
 needs a one-time login with a PAT carrying `read:packages` scope and
 membership in the team granted access to the package:

@@ -81,7 +81,12 @@ type Nsec3Sign struct {
 	// content. Populated by setup() once parse() has decided the
 	// capacity. A nil cache is permitted (test wiring) — signRRset
 	// short-circuits the cache path when it's absent.
-	SigCache *cache.Cache
+	//
+	// `[]dns.RR` is the value type — each entry holds one RRSIG per
+	// signing key. CoreDNS v1.14+ made `cache.Cache` generic; on
+	// older versions this was `*cache.Cache` with `interface{}`
+	// values and a type assertion on Get.
+	SigCache *cache.Cache[[]dns.RR]
 
 	// stopJanitor is closed by OnShutdown to terminate the cache's
 	// background cleanup goroutine. nil when no cache was created.

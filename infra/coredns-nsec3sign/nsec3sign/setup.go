@@ -22,6 +22,8 @@ import (
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/pkg/cache"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
+
+	"github.com/miekg/dns"
 )
 
 // nsec3MaxSaltBytes caps the salt length per RFC 5155 §3.1.5 (1-byte
@@ -70,7 +72,7 @@ func setup(c *caddy.Controller) error {
 	// RRset re-signs with a fresh inception. Both shut down on
 	// OnShutdown — leaking the goroutine would survive Corefile
 	// reloads and pile up across restarts.
-	n.SigCache = cache.New(n.CacheCapacity)
+	n.SigCache = cache.New[[]dns.RR](n.CacheCapacity)
 	n.stopJanitor = make(chan struct{})
 	go runSigCacheJanitor(n.SigCache, n.stopJanitor)
 	c.OnShutdown(func() error {

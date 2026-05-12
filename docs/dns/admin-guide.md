@@ -112,10 +112,10 @@ For air-gapped sites without ghcr reachability, mirror the image
 to your internal registry:
 
 ```bash
-docker pull ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1
-docker tag ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1 \
-  internal.registry.example/dns/coredns-nsec3sign:v1.11.3-1
-docker push internal.registry.example/dns/coredns-nsec3sign:v1.11.3-1
+docker pull ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1
+docker tag ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1 \
+  internal.registry.example/dns/coredns-nsec3sign:v1.14.2-1
+docker push internal.registry.example/dns/coredns-nsec3sign:v1.14.2-1
 ```
 
 Then edit [infra/docker/site-dns/docker-compose.yml](../../infra/docker/site-dns/docker-compose.yml)

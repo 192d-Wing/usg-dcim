@@ -58,12 +58,12 @@ Switching a zone from NSEC to NSEC3 is a one-line Corefile change
 
 ## Build
 
-The stock `coredns/coredns:1.11.3` image can't load external plugins
+The stock `coredns/coredns:1.14.2` image can't load external plugins
 — CoreDNS plugins are compiled in, not loaded at runtime. The
 `Dockerfile` here produces a drop-in replacement image:
 
 ```bash
-make build               # local image: ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1
+make build               # local image: ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1
 make push                # push to ghcr (requires docker login)
 ```
 
@@ -84,9 +84,9 @@ The resulting binary is distroless-packaged and ships in under 50 MB.
 ## Site stack wiring
 
 [`infra/docker/site-dns/docker-compose.yml`](../docker/site-dns/docker-compose.yml)
-points the `coredns-auth` service at `coredns/coredns:1.11.3` today.
+points the `coredns-auth` service at `coredns/coredns:1.14.2` today.
 Once an image is published, that line flips to
-`ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1` and the plugin is
+`ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1` and the plugin is
 available wherever auth pods run. The `coredns-recursive` pod doesn't
 need the custom image — only authoritative zones sign.
 

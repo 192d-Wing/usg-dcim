@@ -46,14 +46,14 @@ services:
     restart: unless-stopped
 
   coredns-auth:
-    # Custom build of CoreDNS 1.11.3 with the `nsec3sign` plugin
+    # Custom build of CoreDNS 1.14.2 with the `nsec3sign` plugin
     # compiled in (infra/coredns-nsec3sign). Drop-in for
-    # `coredns/coredns:1.11.3` — same entrypoint, same `-conf` flag,
+    # `coredns/coredns:1.14.2` — same entrypoint, same `-conf` flag,
     # same ports. The plugin only kicks in for zones with NSEC3
     # params set in the rendered Corefile; pre-NSEC3 zones stay on
     # the upstream `dnssec` plugin path, so this image works for both
     # legacy and migrated operators.
-    image: ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1
+    image: ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1
     pid: "host"
     # CoreDNS image runs as a non-root user by default; the shared
     # dns-state volume is owned by root (the collector writes as root),
@@ -86,7 +86,11 @@ services:
     depends_on: [collector]
 
   coredns-recursive:
-    image: coredns/coredns:1.11.3
+    # The recursive pod only forwards (no online signing), so the
+    # stock CoreDNS image is fine here — we don't need the custom
+    # nsec3sign plugin. Keep this in lockstep with the auth pod's
+    # CoreDNS version so a single CoreDNS release covers both pods.
+    image: coredns/coredns:1.14.2
     pid: "host"
     user: "0:0"
     # Share the dns-net bridge with the auth pod so the stub-zone

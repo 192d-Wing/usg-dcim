@@ -12,8 +12,12 @@
 # `coredns-auth` service in infra/docker/site-dns/docker-compose.yml
 # can swap to this image without other config changes.
 
-ARG COREDNS_VERSION=v1.11.3
-ARG GO_VERSION=1.22
+ARG COREDNS_VERSION=v1.14.2
+# `go mod tidy` against CoreDNS v1.14.2's dependency graph pulls in
+# transitive deps that require Go 1.25 minimum. Track that as the
+# image's build toolchain so the resolved go.mod stays buildable
+# without forcing the operator to override on the command line.
+ARG GO_VERSION=1.25
 
 # ---------- builder stage -----------------------------------------------------
 

@@ -3,7 +3,7 @@
 # so the same commands work in CI and on a developer laptop.
 
 IMAGE           ?= ghcr.io/192d-wing/coredns-nsec3sign
-COREDNS_VERSION ?= v1.11.3
+COREDNS_VERSION ?= v1.14.2
 REVISION        ?= 1
 TAG             ?= $(COREDNS_VERSION)-$(REVISION)
 

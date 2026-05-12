@@ -24,7 +24,7 @@ func TestSigCacheHitOnRepeatRRset(t *testing.T) {
 		A:   []byte{10, 0, 0, 1},
 	}
 	n, _ := newPluginWithKey(t, zone, 256, []dns.RR{a}, nil)
-	n.SigCache = cache.New(64)
+	n.SigCache = cache.New[[]dns.RR](64)
 
 	// First call: cache miss, computes a signature.
 	w1 := &captureWriter{}
@@ -72,7 +72,7 @@ func TestSigCacheMissOnDifferentRRset(t *testing.T) {
 	// query; the cache key includes owner+content so each gets its
 	// own slot.
 	n, _ := newPluginWithKey(t, zone, 256, []dns.RR{host, other}, nil)
-	n.SigCache = cache.New(64)
+	n.SigCache = cache.New[[]dns.RR](64)
 
 	for _, qname := range []string{"host." + zone, "other." + zone} {
 		w := &captureWriter{}
@@ -90,7 +90,7 @@ func TestSigCacheMissOnDifferentRRset(t *testing.T) {
 }
 
 func TestSigCacheCleanEvictsExpiringEntries(t *testing.T) {
-	c := cache.New(16)
+	c := cache.New[[]dns.RR](16)
 
 	// Plant two entries: one with a healthy validity window, one
 	// already inside the refresh threshold. cleanSigCache should
@@ -121,7 +121,7 @@ func TestSigCacheJanitorRespectsStop(t *testing.T) {
 	// Janitor must terminate promptly when the stop channel closes
 	// — otherwise plugin reloads would leak goroutines across
 	// restarts.
-	c := cache.New(8)
+	c := cache.New[[]dns.RR](8)
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {

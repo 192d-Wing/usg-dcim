@@ -26,7 +26,7 @@ func TestCacheHitMetricsIncrement(t *testing.T) {
 		A:   []byte{10, 0, 0, 1},
 	}
 	n, _ := newPluginWithKey(t, zone, 256, []dns.RR{a}, nil)
-	n.SigCache = cache.New(8)
+	n.SigCache = cache.New[[]dns.RR](8)
 
 	missBefore := testutil.ToFloat64(cacheMisses.WithLabelValues(server))
 	hitBefore := testutil.ToFloat64(cacheHits.WithLabelValues(server))

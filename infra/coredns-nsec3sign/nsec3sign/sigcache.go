@@ -55,7 +55,7 @@ func rrsetCacheKey(rrs []dns.RR) uint64 {
 //
 // Returns immediately if `c` or `stop` is nil — defensive against
 // the test path that constructs Nsec3Sign without a real cache.
-func runSigCacheJanitor(c *cache.Cache, stop <-chan struct{}) {
+func runSigCacheJanitor(c *cache.Cache[[]dns.RR], stop <-chan struct{}) {
 	if c == nil || stop == nil {
 		return
 	}
@@ -75,15 +75,10 @@ func runSigCacheJanitor(c *cache.Cache, stop <-chan struct{}) {
 // threshold of expiring. Exported (lowercase, same package) so the
 // test suite can drive eviction deterministically without waiting
 // for the janitor tick.
-func cleanSigCache(c *cache.Cache, now time.Time) {
+func cleanSigCache(c *cache.Cache[[]dns.RR], now time.Time) {
 	threshold := now.Add(sigCacheRefreshThreshold)
-	c.Walk(func(items map[uint64]interface{}, key uint64) bool {
-		entry, ok := items[key].([]dns.RR)
-		if !ok {
-			delete(items, key)
-			return true
-		}
-		for _, rr := range entry {
+	c.Walk(func(items map[uint64][]dns.RR, key uint64) bool {
+		for _, rr := range items[key] {
 			sig, ok := rr.(*dns.RRSIG)
 			if !ok {
 				continue
