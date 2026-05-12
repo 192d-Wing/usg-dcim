@@ -51,11 +51,33 @@ def issue_user_jwt(
     }
     if idp_roles:
         payload["idp_roles"] = sorted(set(idp_roles))
-    return jwt.encode(payload, _settings.jwt_secret, algorithm=_settings.jwt_algorithm)
+    return jwt.encode(
+        payload,
+        _settings.jwt_secret,
+        algorithm=_settings.jwt_algorithm,
+        headers={"kid": _settings.jwt_kid},
+    )
 
 
 def decode_user_jwt(token: str) -> dict:
-    return jwt.decode(token, _settings.jwt_secret, algorithms=[_settings.jwt_algorithm])
+    """Verify + decode. Walks active key first, then any retired key
+    matching the token's `kid` header — that's what lets a rotation
+    coexist with active sessions issued under the previous secret."""
+    headers = jwt.get_unverified_header(token)
+    candidates: list[tuple[str, str]] = [(_settings.jwt_kid, _settings.jwt_secret)]
+    kid = headers.get("kid")
+    if kid and kid != _settings.jwt_kid:
+        retired = _settings.jwt_old_secrets.get(kid)
+        if retired:
+            candidates.append((kid, retired))
+    last_err: Exception | None = None
+    for _kid, secret in candidates:
+        try:
+            return jwt.decode(token, secret, algorithms=[_settings.jwt_algorithm])
+        except Exception as exc:  # noqa: BLE001 - try next key
+            last_err = exc
+    assert last_err is not None
+    raise last_err
 
 
 def generate_api_token() -> tuple[str, str]:

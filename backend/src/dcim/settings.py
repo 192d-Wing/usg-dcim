@@ -29,7 +29,15 @@ class Settings(BaseSettings):
     elastic_password: str | None = None
 
     # Auth
+    # `jwt_secret` is the active signing key. New tokens are minted with
+    # it and stamped with `kid = jwt_kid`. To rotate without invalidating
+    # active sessions, add the OLD secret to `jwt_old_secrets` keyed by
+    # its kid before swapping the primary — decode walks both the active
+    # key and any retired key matching the token's kid. Drop retired
+    # keys from `jwt_old_secrets` after the JWT TTL has passed.
     jwt_secret: str = "change-me-in-prod"
+    jwt_kid: str = "v1"
+    jwt_old_secrets: dict[str, str] = Field(default_factory=dict)
     jwt_algorithm: str = "HS256"
     # Zero-trust posture: short JWT TTL so an IdP role revocation
     # propagates within this window. 15 minutes is the tradeoff between
