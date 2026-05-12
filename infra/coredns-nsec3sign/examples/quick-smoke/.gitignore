@@ -1,0 +1,9 @@
+# Repo-root `.gitignore` rejects `*.key` to keep real DNSSEC / TLS /
+# SSH keys out of version control. These BIND key files are the
+# generated throwaway material for the wire-level smoke harness —
+# they sign a private `example.test.` zone and are never trusted by
+# any real validator. Whitelisting them by basename keeps the
+# regeneration flow (`go run keygen.go example.test.`) friction-free
+# while leaving the global rule strict for everything else.
+!K*.key
+!K*.private

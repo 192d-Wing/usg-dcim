@@ -1,0 +1,13 @@
+# Bind on a high port — the distroless:nonroot runtime can't bind
+# 53. Host-side port mapping in `docker run` decides the public face.
+example.test:1053 {
+    errors
+    log
+    file /data/example.test.zone
+    nsec3sign {
+        key file /data/Kexample.test.+013+19870
+        zone file /data/example.test.zone
+        salt aabbccdd
+        iterations 0
+    }
+}
