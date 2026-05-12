@@ -46,7 +46,14 @@ services:
     restart: unless-stopped
 
   coredns-auth:
-    image: coredns/coredns:1.11.3
+    # Custom build of CoreDNS 1.11.3 with the `nsec3sign` plugin
+    # compiled in (infra/coredns-nsec3sign). Drop-in for
+    # `coredns/coredns:1.11.3` — same entrypoint, same `-conf` flag,
+    # same ports. The plugin only kicks in for zones with NSEC3
+    # params set in the rendered Corefile; pre-NSEC3 zones stay on
+    # the upstream `dnssec` plugin path, so this image works for both
+    # legacy and migrated operators.
+    image: ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1
     pid: "host"
     # CoreDNS image runs as a non-root user by default; the shared
     # dns-state volume is owned by root (the collector writes as root),

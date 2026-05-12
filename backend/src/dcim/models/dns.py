@@ -143,6 +143,15 @@ class DnsZone(UUIDPrimaryKey, Timestamped, Base):
     # ZSK every N days. KSK rotation stays manual because it requires
     # the operator to upload the new DS to the parent zone.
     zsk_rotation_days: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # NSEC3: when nsec3_salt is non-NULL the renderer emits the
+    # `nsec3sign` plugin (custom CoreDNS image required) instead of
+    # the upstream `dnssec` plugin. NULL keeps the NSEC path so this
+    # migration is a no-op for existing signed zones. RFC 9276 §3.1
+    # recommends empty salt + zero iterations; the column enforces
+    # the choice but doesn't constrain it.
+    nsec3_salt: Mapped[str | None] = mapped_column(String(64))
+    nsec3_iterations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    nsec3_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class DnsRecord(UUIDPrimaryKey, Timestamped, Base):

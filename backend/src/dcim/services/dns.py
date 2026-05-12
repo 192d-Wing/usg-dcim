@@ -645,12 +645,63 @@ def _zone_view_filename(zone_name: str, view_name: str | None) -> str:
     return f"{zone_name}.view-{view_name}.zone"
 
 
+def _render_signing_block(
+    zone_name: str,
+    base: str,
+    keys_base: str | None,
+    key_basenames: list[str],
+    nsec3_params: dict | None,
+) -> str:
+    """Render the per-zone signing directive — either the upstream
+    `dnssec` plugin (NSEC chains) or our `nsec3sign` plugin (NSEC3
+    chains with on-the-fly online signing).
+
+    Returns `""` when the zone isn't signed. When `nsec3_params` is
+    set the zone is in NSEC3 mode (custom CoreDNS image required) —
+    the block carries the salt + iterations + opt-out + zone-file
+    path the plugin needs to build its chain at boot. Without
+    `nsec3_params` we fall back to the upstream `dnssec` block so
+    existing operators on the stock CoreDNS image keep working
+    unchanged.
+    """
+    if not keys_base or not key_basenames:
+        return ""
+    key_lines = "\n".join(
+        f"        key file {keys_base}/{kb}" for kb in sorted(key_basenames)
+    )
+    if nsec3_params is None:
+        return f"    dnssec {{\n{key_lines}\n    }}\n"
+
+    # NSEC3 path. The duplicate zone-file path (also in the parent
+    # `file` directive) is deliberate — see the
+    # coredns-nsec3sign README for the coupling-tradeoff write-up.
+    salt = nsec3_params.get("salt") or ""
+    iterations = int(nsec3_params.get("iterations") or 0)
+    opt_out = bool(nsec3_params.get("opt_out"))
+    lines = [
+        "    nsec3sign {",
+        key_lines,
+        f"        zone file {base}/{zone_name}.zone",
+        # Empty salt is the RFC 9276 recommended default; we render
+        # it as the literal "" so an operator scanning the Corefile
+        # can see it explicitly rather than guessing at an absent
+        # directive.
+        f'        salt "{salt}"',
+        f"        iterations {iterations}",
+    ]
+    if opt_out:
+        lines.append("        opt_out")
+    lines.append("    }")
+    return "\n".join(lines) + "\n"
+
+
 def render_corefile_auth(
     zone_names: Iterable[str],
     *,
     zones_dir: str,
     keys_dir: str | None = None,
     dnssec_keys_by_zone: dict[str, list[str]] | None = None,
+    nsec3_params_by_zone: dict[str, dict] | None = None,
     views_by_zone: dict[str, list[dict]] | None = None,
 ) -> str:
     """Authoritative Corefile: one `file` block per zone, plus health,
@@ -663,9 +714,16 @@ def render_corefile_auth(
 
     `dnssec_keys_by_zone` maps each signed zone's name to the list of
     BIND key-file basenames CoreDNS should load. When set + `keys_dir`
-    is provided, the renderer emits a `dnssec { key file ... }`
-    directive in that zone's block so CoreDNS signs responses on the
-    fly using the operator's KSK + ZSK material.
+    is provided, the renderer emits a signing directive in that
+    zone's block so CoreDNS signs responses on the fly using the
+    operator's KSK + ZSK material.
+
+    `nsec3_params_by_zone` selects per-zone NSEC3 mode. When a zone
+    is in this map (value is `{salt, iterations, opt_out}`) AND has
+    keys loaded, the renderer emits `nsec3sign { ... }` instead of
+    `dnssec { ... }` — the custom coredns-nsec3sign image is required
+    to load the plugin. Zones absent from this map fall back to the
+    upstream `dnssec` plugin (NSEC chains).
 
     `views_by_zone` maps each zone with split-horizon configured to a
     priority-sorted list of view dicts (`{name, cidrs}`). When set,
@@ -678,16 +736,17 @@ def render_corefile_auth(
     base = zones_dir.rstrip("/")
     keys_base = keys_dir.rstrip("/") if keys_dir else None
     dnssec_map = dnssec_keys_by_zone or {}
+    nsec3_map = nsec3_params_by_zone or {}
     views_map = views_by_zone or {}
     blocks: list[str] = []
     for name in sorted(zone_names):
-        dnssec_block = ""
-        if keys_base and dnssec_map.get(name):
-            key_lines = "\n".join(
-                f"        key file {keys_base}/{kb}"
-                for kb in sorted(dnssec_map[name])
-            )
-            dnssec_block = f"    dnssec {{\n{key_lines}\n    }}\n"
+        dnssec_block = _render_signing_block(
+            zone_name=name,
+            base=base,
+            keys_base=keys_base,
+            key_basenames=dnssec_map.get(name) or [],
+            nsec3_params=nsec3_map.get(name),
+        )
         zone_views = views_map.get(name) or []
         # One block per view, then a default block as the fallthrough.
         # Operators put narrower CIDRs in the higher-priority view; we
@@ -1270,15 +1329,25 @@ async def _views_and_zone_files_for_split_horizon(
 
 async def _dnssec_artifacts_for_zones(
     db: AsyncSession, zones: Iterable[DnsZone],
-) -> tuple[dict[str, str], dict[str, list[str]]]:
-    """Return (key_files, dnssec_keys_by_zone) for every signed zone
-    in the iterable. `key_files` maps filename → text (both .key and
-    .private members per key); `dnssec_keys_by_zone` maps zone name to
-    the basenames CoreDNS's dnssec plugin should load. Empty dicts
-    when no zone is signed."""
+) -> tuple[dict[str, str], dict[str, list[str]], dict[str, dict]]:
+    """Return (key_files, dnssec_keys_by_zone, nsec3_params_by_zone)
+    for every signed zone in the iterable.
+
+    - `key_files` maps filename → text (both .key and .private
+      members per key).
+    - `dnssec_keys_by_zone` maps zone name to the basenames CoreDNS's
+      signing directive should load.
+    - `nsec3_params_by_zone` maps the subset of zones with
+      `nsec3_salt IS NOT NULL` to `{salt, iterations, opt_out}` —
+      these get rendered with `nsec3sign` instead of `dnssec`.
+      Zones absent from this dict (NULL salt) stay on the upstream
+      `dnssec` plugin (NSEC chains).
+
+    All three dicts are empty when no zone is signed.
+    """
     signed = [z for z in zones if z.signed]
     if not signed:
-        return {}, {}
+        return {}, {}, {}
     keys = list((
         await db.execute(
             select(DnsKey).where(DnsKey.zone_id.in_([z.id for z in signed]))
@@ -1289,6 +1358,7 @@ async def _dnssec_artifacts_for_zones(
         keys_by_zone.setdefault(k.zone_id, []).append(k)
     files: dict[str, str] = {}
     basenames_by_zone: dict[str, list[str]] = {}
+    nsec3_params_by_zone: dict[str, dict] = {}
     for z in signed:
         zone_keys = keys_by_zone.get(z.id, [])
         if not zone_keys:
@@ -1300,7 +1370,13 @@ async def _dnssec_artifacts_for_zones(
         basenames_by_zone[z.name] = sorted(
             fn[:-4] for fn in zone_files if fn.endswith(".key")
         )
-    return files, basenames_by_zone
+        if z.nsec3_salt is not None:
+            nsec3_params_by_zone[z.name] = {
+                "salt": z.nsec3_salt,
+                "iterations": z.nsec3_iterations,
+                "opt_out": z.nsec3_opt_out,
+            }
+    return files, basenames_by_zone, nsec3_params_by_zone
 
 
 async def _local_auth_unicast_ip(db: AsyncSession, server: DnsServer) -> str | None:
@@ -1567,7 +1643,9 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
                 unhealthy_check_ids=unhealthy,
             )
         zone_files.update(split_files)
-        key_files, dnssec_keys_by_zone = await _dnssec_artifacts_for_zones(db, zones)
+        key_files, dnssec_keys_by_zone, nsec3_params_by_zone = (
+            await _dnssec_artifacts_for_zones(db, zones)
+        )
         # Path matches the site-dns compose layout: the dns-state
         # volume is mounted at /var/lib/dcim-dns in both the collector
         # and CoreDNS containers, and the collector writes zones to
@@ -1579,6 +1657,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             zones_dir=zones_dir_path,
             keys_dir=keys_dir_path if dnssec_keys_by_zone else None,
             dnssec_keys_by_zone=dnssec_keys_by_zone or None,
+            nsec3_params_by_zone=nsec3_params_by_zone or None,
             views_by_zone=views_by_zone or None,
         )
         gobgp: dict | None = None

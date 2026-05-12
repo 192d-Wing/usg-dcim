@@ -102,6 +102,91 @@ def test_corefile_auth_contains_zone_blocks():
     assert "file /var/lib/dcim-dns/auth/zones/a.example..zone" in cf
 
 
+def test_corefile_auth_emits_dnssec_block_when_nsec3_unset():
+    """Zone signed but no nsec3 params → upstream `dnssec` plugin
+    (NSEC chains), which works against the stock coredns/coredns
+    image. Keep this path pinned so a refactor of the signing-block
+    helper can't silently break operators who haven't migrated to
+    the custom image yet."""
+    cf = render_corefile_auth(
+        ["a.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+        keys_dir="/var/lib/dcim-dns/auth/keys",
+        dnssec_keys_by_zone={"a.example.": ["Ka.example.+013+12345"]},
+    )
+    assert "dnssec {" in cf
+    assert "key file /var/lib/dcim-dns/auth/keys/Ka.example.+013+12345" in cf
+    # No nsec3sign artifacts should leak into the NSEC path.
+    assert "nsec3sign" not in cf
+    assert "salt" not in cf
+
+
+def test_corefile_auth_emits_nsec3sign_block_when_params_set():
+    """Zone signed AND in nsec3_params_by_zone → our `nsec3sign`
+    plugin (NSEC3 chains), which requires the custom coredns image.
+    The plugin block carries salt + iterations + the zone-file path
+    so the chain builder can walk the same zone at boot."""
+    cf = render_corefile_auth(
+        ["a.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+        keys_dir="/var/lib/dcim-dns/auth/keys",
+        dnssec_keys_by_zone={"a.example.": ["Ka.example.+013+12345"]},
+        nsec3_params_by_zone={
+            "a.example.": {"salt": "aabbccdd", "iterations": 0, "opt_out": False},
+        },
+    )
+    assert "nsec3sign {" in cf
+    assert "key file /var/lib/dcim-dns/auth/keys/Ka.example.+013+12345" in cf
+    assert "zone file /var/lib/dcim-dns/auth/zones/a.example..zone" in cf
+    assert 'salt "aabbccdd"' in cf
+    assert "iterations 0" in cf
+    # NSEC and NSEC3 are mutually exclusive per zone — the upstream
+    # `dnssec` directive must NOT appear when nsec3sign does.
+    assert "    dnssec {" not in cf
+    # opt_out is False → the directive should NOT be emitted.
+    assert "opt_out" not in cf
+
+
+def test_corefile_auth_nsec3_opt_out_emits_directive():
+    """opt_out=True surfaces the `opt_out` directive — operators
+    on delegation-heavy zones expect this to elide insecure
+    delegations from the NSEC3 chain."""
+    cf = render_corefile_auth(
+        ["a.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+        keys_dir="/var/lib/dcim-dns/auth/keys",
+        dnssec_keys_by_zone={"a.example.": ["Ka.example.+013+12345"]},
+        nsec3_params_by_zone={
+            "a.example.": {"salt": "", "iterations": 10, "opt_out": True},
+        },
+    )
+    assert "opt_out" in cf
+    assert 'salt ""' in cf
+    assert "iterations 10" in cf
+
+
+def test_corefile_auth_mixed_nsec_and_nsec3_zones():
+    """A bundle with one NSEC3 zone and one NSEC zone must emit the
+    right block per zone — operators migrating zone-by-zone need
+    both paths to coexist in one Corefile."""
+    cf = render_corefile_auth(
+        ["nsec.example.", "nsec3.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+        keys_dir="/var/lib/dcim-dns/auth/keys",
+        dnssec_keys_by_zone={
+            "nsec.example.":  ["Knsec.example.+013+11111"],
+            "nsec3.example.": ["Knsec3.example.+013+22222"],
+        },
+        nsec3_params_by_zone={
+            "nsec3.example.": {"salt": "", "iterations": 0, "opt_out": False},
+        },
+    )
+    # NSEC zone gets the upstream `dnssec` block; NSEC3 zone gets
+    # `nsec3sign`. Both appear exactly once.
+    assert cf.count("    dnssec {") == 1
+    assert cf.count("    nsec3sign {") == 1
+
+
 def test_corefile_recursive_includes_apex_stubs_when_set():
     # Multiple apexes per fabric → one stub-forward block each, all
     # targeting the same local auth pod.
