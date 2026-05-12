@@ -100,7 +100,7 @@ from ..schemas.dns import (
     validate_record_data,
 )
 from ..security import audit
-from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
+
 from ..security.deps import Principal, require_capability
 from ..services import dns as dns_svc
 from ..settings import get_settings
@@ -138,7 +138,7 @@ async def list_zones(
     fabric_id: UUID | None = Query(None),
     site_id: UUID | None = Query(None),
     kind: str | None = Query(None, regex="^(apex|site|reverse)$"),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:zones:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsZone)
@@ -154,7 +154,7 @@ async def list_zones(
 @router.post("/zones", response_model=DnsZoneOut, status_code=201)
 async def create_zone(
     payload: DnsZoneCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:zones:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -190,7 +190,7 @@ async def create_zone(
 @router.get("/zones/{zone_id}", response_model=DnsZoneOut)
 async def get_zone(
     zone_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:zones:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsZone, zone_id)
@@ -203,7 +203,7 @@ async def get_zone(
 async def update_zone(
     zone_id: UUID,
     payload: DnsZoneUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:zones:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsZone, zone_id)
@@ -225,7 +225,7 @@ async def update_zone(
 @router.delete("/zones/{zone_id}", status_code=204)
 async def delete_zone(
     zone_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:zones:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsZone, zone_id)
@@ -247,7 +247,7 @@ async def delete_zone(
 @router.post("/zones/{zone_id}/sync-from-ipam")
 async def sync_zone_from_ipam(
     zone_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:zones:update")),
     db: AsyncSession = Depends(get_db),
 ):
     zone = await db.get(DnsZone, zone_id)
@@ -267,7 +267,7 @@ async def sync_zone_from_ipam(
 @router.get("/zones/{zone_id}/preview")
 async def preview_zone(
     zone_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:zones:read")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Render the zone as a BIND-format text blob, useful for the UI's
@@ -302,7 +302,7 @@ class _ImportPayload(BaseModel):
 async def import_zone_records(
     zone_id: UUID,
     payload: _ImportPayload,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:zones:update")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Parse a BIND-format zone file and bulk-insert its records into
@@ -392,7 +392,7 @@ async def import_zone_records(
 @router.post("/zones/{zone_id}/enable-dnssec", response_model=list[DnsKeyOut])
 async def enable_dnssec(
     zone_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:keys:rotate")),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a KSK + ZSK for the zone, flip `signed=true`, and
@@ -449,7 +449,7 @@ async def enable_dnssec(
 @router.get("/zones/{zone_id}/keys", response_model=list[DnsKeyOut])
 async def list_zone_keys(
     zone_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:keys:read")),
     db: AsyncSession = Depends(get_db),
 ):
     if (await db.get(DnsZone, zone_id)) is None:
@@ -466,7 +466,7 @@ async def list_zone_keys(
 @router.get("/zones/{zone_id}/ds-records", response_model=list[DnsDsRecordOut])
 async def list_ds_records(
     zone_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:keys:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """DS records for active KSKs — the operator uploads these to the
@@ -484,7 +484,7 @@ async def list_ds_records(
 async def set_zone_nsec3(
     zone_id: UUID,
     params: DnsZoneNsec3Params,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:zones:update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Set NSEC3 parameters on a signed zone. Flipping a zone into
@@ -527,7 +527,7 @@ async def set_zone_nsec3(
 @router.delete("/zones/{zone_id}/nsec3", response_model=DnsZoneOut)
 async def clear_zone_nsec3(
     zone_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:zones:update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Clear NSEC3 parameters on a zone, reverting it to NSEC mode
@@ -556,7 +556,7 @@ async def clear_zone_nsec3(
 @router.post("/zones/{zone_id}/disable-dnssec", status_code=204)
 async def disable_dnssec(
     zone_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:keys:rotate")),
     db: AsyncSession = Depends(get_db),
 ):
     """Unsign a zone: delete every DnsKey for it and clear the signed
@@ -590,7 +590,7 @@ async def disable_dnssec(
 async def rotate_zone_key(
     zone_id: UUID,
     role: DnsKeyRole,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:keys:rotate")),
     db: AsyncSession = Depends(get_db),
 ):
     """Generate a fresh KSK or ZSK and mark the existing active key of
@@ -631,7 +631,7 @@ async def rotate_zone_key(
 @router.delete("/keys/{key_id}", status_code=204)
 async def delete_dns_key(
     key_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:keys:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     """Purge a retired key. Refuses to delete an active key — operators
@@ -665,7 +665,7 @@ async def list_records(
     zone_id: UUID | None = Query(None),
     type_: str | None = Query(None, alias="type"),
     source: str | None = Query(None, regex="^(ipam|manual)$"),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:records:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsRecord)
@@ -681,7 +681,7 @@ async def list_records(
 @router.post("/records", response_model=DnsRecordOut, status_code=201)
 async def create_record(
     payload: DnsRecordCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:records:create")),
     db: AsyncSession = Depends(get_db),
 ):
     zone = await db.get(DnsZone, payload.zone_id)
@@ -730,7 +730,7 @@ async def create_record(
 async def update_record(
     record_id: UUID,
     payload: DnsRecordUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:records:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsRecord, record_id)
@@ -765,7 +765,7 @@ async def update_record(
 @router.delete("/records/{record_id}", status_code=204)
 async def delete_record(
     record_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:records:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsRecord, record_id)
@@ -803,7 +803,7 @@ async def list_servers(
     site_id: UUID | None = Query(None),
     fabric_id: UUID | None = Query(None),
     role: str | None = Query(None, regex="^(auth|recursive)$"),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:servers:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsServer)
@@ -819,7 +819,7 @@ async def list_servers(
 @router.post("/servers", response_model=DnsServerOut, status_code=201)
 async def create_server(
     payload: DnsServerCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:servers:create")),
     db: AsyncSession = Depends(get_db),
 ):
     site = await db.get(Site, payload.site_id)
@@ -850,7 +850,7 @@ async def create_server(
 @router.get("/servers/{server_id}", response_model=DnsServerOut)
 async def get_server(
     server_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:servers:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsServer, server_id)
@@ -863,7 +863,7 @@ async def get_server(
 async def update_server(
     server_id: UUID,
     payload: DnsServerUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:servers:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsServer, server_id)
@@ -885,7 +885,7 @@ async def update_server(
 @router.delete("/servers/{server_id}", status_code=204)
 async def delete_server(
     server_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:servers:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsServer, server_id)
@@ -905,7 +905,7 @@ async def delete_server(
 async def server_bundle(
     server_id: UUID,
     etag: str | None = Query(None, description="If unchanged, response is identical."),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:servers:bundle")),
     db: AsyncSession = Depends(get_db),
 ):
     """The collector polls this every 30s. If `etag` matches the
@@ -925,7 +925,7 @@ async def server_bundle(
 async def post_render_status(
     server_id: UUID,
     payload: DnsRenderStatus,
-    _: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    _: Principal = Depends(require_capability("dns:servers:update")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Collector callback after every render attempt. We mirror the
@@ -950,7 +950,7 @@ async def post_render_status(
 async def post_server_metrics(
     server_id: UUID,
     payload: DnsMetricsSampleIn,
-    _: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    _: Principal = Depends(require_capability("dns:servers:update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Collector posts one sample (interval delta) per scrape. Skip
@@ -983,7 +983,7 @@ async def post_server_metrics(
 async def list_server_metrics(
     server_id: UUID,
     minutes: int = Query(60, ge=1, le=24 * 60),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:servers:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Recent metrics samples for one server, oldest-first so the UI
@@ -1009,7 +1009,7 @@ async def list_server_metrics(
 async def list_anycast_groups(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:anycast-groups:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(AnycastGroup)
@@ -1021,7 +1021,7 @@ async def list_anycast_groups(
 @router.post("/anycast-groups", response_model=AnycastGroupOut, status_code=201)
 async def create_anycast_group(
     payload: AnycastGroupCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:anycast-groups:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -1046,7 +1046,7 @@ async def create_anycast_group(
 async def update_anycast_group(
     group_id: UUID,
     payload: AnycastGroupUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:anycast-groups:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(AnycastGroup, group_id)
@@ -1067,7 +1067,7 @@ async def update_anycast_group(
 @router.delete("/anycast-groups/{group_id}", status_code=204)
 async def delete_anycast_group(
     group_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:anycast-groups:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(AnycastGroup, group_id)
@@ -1093,7 +1093,7 @@ async def delete_anycast_group(
 async def list_forwarders(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:forwarders:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsForwarder)
@@ -1107,7 +1107,7 @@ async def list_forwarders(
 @router.post("/forwarders", response_model=DnsForwarderOut, status_code=201)
 async def create_forwarder(
     payload: DnsForwarderCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:forwarders:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -1136,7 +1136,7 @@ async def create_forwarder(
 async def update_forwarder(
     forwarder_id: UUID,
     payload: DnsForwarderUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:forwarders:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsForwarder, forwarder_id)
@@ -1159,7 +1159,7 @@ async def update_forwarder(
 @router.delete("/forwarders/{forwarder_id}", status_code=204)
 async def delete_forwarder(
     forwarder_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:forwarders:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsForwarder, forwarder_id)
@@ -1185,7 +1185,7 @@ async def delete_forwarder(
 async def list_blocklists(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:blocklists:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsBlocklist)
@@ -1199,7 +1199,7 @@ async def list_blocklists(
 @router.post("/blocklists", response_model=DnsBlocklistOut, status_code=201)
 async def create_blocklist(
     payload: DnsBlocklistCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:blocklists:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -1224,7 +1224,7 @@ async def create_blocklist(
 async def update_blocklist(
     blocklist_id: UUID,
     payload: DnsBlocklistUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:blocklists:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsBlocklist, blocklist_id)
@@ -1245,7 +1245,7 @@ async def update_blocklist(
 @router.delete("/blocklists/{blocklist_id}", status_code=204)
 async def delete_blocklist(
     blocklist_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:blocklists:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsBlocklist, blocklist_id)
@@ -1266,7 +1266,7 @@ async def delete_blocklist(
 async def list_blocklist_entries(
     blocklist_id: UUID,
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:blocklists:read")),
     db: AsyncSession = Depends(get_db),
 ):
     if (await db.get(DnsBlocklist, blocklist_id)) is None:
@@ -1285,7 +1285,7 @@ async def list_blocklist_entries(
 async def create_blocklist_entry(
     blocklist_id: UUID,
     payload: DnsBlocklistEntryCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:blocklists:update")),
     db: AsyncSession = Depends(get_db),
 ):
     if (await db.get(DnsBlocklist, blocklist_id)) is None:
@@ -1307,7 +1307,7 @@ async def create_blocklist_entry(
 async def bulk_add_blocklist_entries(
     blocklist_id: UUID,
     payload: DnsBlocklistEntryBulk,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:blocklists:update")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Idempotent bulk insert for threat-feed style imports. Existing
@@ -1343,7 +1343,7 @@ async def bulk_add_blocklist_entries(
 async def delete_blocklist_entry(
     blocklist_id: UUID,
     entry_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:blocklists:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsBlocklistEntry, entry_id)
@@ -1364,7 +1364,7 @@ async def delete_blocklist_entry(
 async def list_views(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:views:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsView)
@@ -1378,7 +1378,7 @@ async def list_views(
 @router.post("/views", response_model=DnsViewOut, status_code=201)
 async def create_view(
     payload: DnsViewCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:views:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -1401,7 +1401,7 @@ async def create_view(
 async def update_view(
     view_id: UUID,
     payload: DnsViewUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:views:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsView, view_id)
@@ -1422,7 +1422,7 @@ async def update_view(
 @router.delete("/views/{view_id}", status_code=204)
 async def delete_view(
     view_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:views:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsView, view_id)
@@ -1445,7 +1445,7 @@ async def delete_view(
 async def list_health_checks(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:health-checks:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsHealthCheck)
@@ -1459,7 +1459,7 @@ async def list_health_checks(
 @router.post("/health-checks", response_model=DnsHealthCheckOut, status_code=201)
 async def create_health_check(
     payload: DnsHealthCheckCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:health-checks:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -1486,7 +1486,7 @@ async def create_health_check(
 async def update_health_check(
     check_id: UUID,
     payload: DnsHealthCheckUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:health-checks:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsHealthCheck, check_id)
@@ -1507,7 +1507,7 @@ async def update_health_check(
 @router.delete("/health-checks/{check_id}", status_code=204)
 async def delete_health_check(
     check_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:health-checks:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsHealthCheck, check_id)
@@ -1528,7 +1528,7 @@ async def delete_health_check(
 async def post_health_check_result(
     check_id: UUID,
     payload: DnsHealthCheckResult,
-    _: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    _: Principal = Depends(require_capability("dns:health-checks:update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Collector callback after running one probe. Skip audit on this
@@ -1552,7 +1552,7 @@ async def post_health_check_result(
 async def list_bgp_peers(
     params: PageParams = Depends(PageParams.from_query),
     site_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:bgp-peers:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(BgpPeer)
@@ -1564,7 +1564,7 @@ async def list_bgp_peers(
 @router.post("/bgp-peers", response_model=BgpPeerOut, status_code=201)
 async def create_bgp_peer(
     payload: BgpPeerCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:bgp-peers:create")),
     db: AsyncSession = Depends(get_db),
 ):
     site = await db.get(Site, payload.site_id)
@@ -1599,7 +1599,7 @@ async def create_bgp_peer(
 async def update_bgp_peer(
     peer_id: UUID,
     payload: BgpPeerUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:bgp-peers:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(BgpPeer, peer_id)
@@ -1639,7 +1639,7 @@ async def update_bgp_peer(
 @router.delete("/bgp-peers/{peer_id}", status_code=204)
 async def delete_bgp_peer(
     peer_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:bgp-peers:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(BgpPeer, peer_id)
@@ -1666,7 +1666,7 @@ async def list_bindings(
     params: PageParams = Depends(PageParams.from_query),
     dns_server_id: UUID | None = Query(None),
     bgp_peer_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("dns:anycast-bindings:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(AnycastBgpBinding)
@@ -1682,7 +1682,7 @@ async def list_bindings(
 @router.post("/anycast-bindings", response_model=AnycastBgpBindingOut, status_code=201)
 async def create_binding(
     payload: AnycastBgpBindingCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:anycast-bindings:create")),
     db: AsyncSession = Depends(get_db),
 ):
     server = await db.get(DnsServer, payload.dns_server_id)
@@ -1721,7 +1721,7 @@ async def create_binding(
 @router.delete("/anycast-bindings/{binding_id}", status_code=204)
 async def delete_binding(
     binding_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("dns:anycast-bindings:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(AnycastBgpBinding, binding_id)
