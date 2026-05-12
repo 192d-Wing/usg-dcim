@@ -36,7 +36,13 @@ services:
 
   # Keycloak — local OIDC issuer for end-to-end SSO testing.
   # Preseeded realm `dcim` with client `dcim-spa` is imported on first start.
-  # Login at http://localhost:8080 (admin / admin) to manage users.
+  # Admin UI at http://localhost:8080 (admin / admin).
+  #
+  # KC_HOSTNAME advertises a URL reachable from both the browser AND the
+  # api container. `host.docker.internal` is provided by Docker Desktop
+  # on both sides; on Linux Docker it requires the extra_hosts entry on
+  # the api service below. STRICT=false lets the admin UI still work
+  # over http://localhost:8080 for convenience.
   keycloak:
     image: quay.io/keycloak/keycloak:25.0
     profiles: ["sso"]   # opt-in: `docker compose --profile sso up`
@@ -47,6 +53,9 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://host.docker.internal:8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
     ports: ["8080:8080"]
     volumes:
       - ./keycloak-realm.json:/opt/keycloak/data/import/dcim-realm.json:ro
@@ -81,10 +90,13 @@ services:
       DCIM_ELASTIC_URL: http://elastic:9200
       DCIM_CORS_ORIGINS: '["http://localhost:5173"]'
       DCIM_COLLECTOR_MTLS_REQUIRED: "false"
-      # Pre-pointed at the keycloak service. Inactive unless the `sso`
-      # profile is up — without keycloak the API just doesn't reach the
-      # discovery doc and /auth/oidc/login returns 400, which is fine.
-      DCIM_OIDC_ISSUER: http://keycloak:8080/realms/dcim
+      # Issuer URL must match what Keycloak puts in the `iss` claim
+      # (controlled by KC_HOSTNAME on the keycloak service). Using
+      # host.docker.internal here means the browser hits the same URL
+      # it sees in the discovery doc, and the api container also reaches
+      # Keycloak via the host gateway — no localhost vs container-name
+      # mismatch. Inactive unless the `sso` profile is up.
+      DCIM_OIDC_ISSUER: http://host.docker.internal:8080/realms/dcim
       DCIM_OIDC_CLIENT_ID: dcim-spa
       DCIM_OIDC_CLIENT_SECRET: dev-secret-change-me
       DCIM_OIDC_REDIRECT_URI: http://localhost:5173/login/callback
@@ -96,6 +108,11 @@ services:
       # ). Optional in dev; required for any real production zone.
       DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
     ports: ["8000:8000"]
+    extra_hosts:
+      # On Docker Desktop this is automatic; declared explicitly for
+      # Linux Docker so the api container can reach Keycloak at the
+      # same host.docker.internal:8080 URL the browser uses.
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres: { condition: service_healthy }
       elastic:  { condition: service_healthy }
