@@ -846,32 +846,89 @@ def render_corefile_recursive(
     return "\n\n".join(blocks) + "\n"
 
 
+def _rpz_pattern_to_owner(pattern: str) -> str:
+    """Translate a blocklist pattern to its RPZ-zone owner label.
+    DCIM operators write `evil.example` or `*.evil.example`; RPZ
+    expects the same shape inside the RPZ zone (the zone's $ORIGIN
+    appends automatically). Trailing dots are stripped because
+    they're zone-origin-relative, not absolute."""
+    return pattern.strip().rstrip(".")
+
+
+def render_rpz_zone(
+    *,
+    rpz_zone_name: str,
+    action: str,
+    patterns: Iterable[str],
+    sink_ipv4: str | None,
+    sink_ipv6: str | None,
+    default_ttl: int = 60,
+) -> str:
+    """Render one RPZ-format zone file. Block actions emit
+    `<pattern> CNAME .` (the standard NXDOMAIN-equivalent); sinkhole
+    actions emit `<pattern> A <sink_ipv4>` / `AAAA <sink_ipv6>`.
+
+    The zone is self-contained: SOA + NS at apex, one record per
+    pattern. RPZ-aware resolvers (BIND, Unbound, recent Hickory
+    builds) consume it as a response policy; non-RPZ resolvers just
+    see a normal zone and ignore the unexpected owners."""
+    pattern_list = sorted({p for p in patterns if p.strip()})
+    rpz_apex = rpz_zone_name.rstrip(".")
+    lines = [
+        f"$ORIGIN {rpz_apex}.",
+        f"$TTL {default_ttl}",
+        f"@\tIN\tSOA\tns1.{rpz_apex}. hostmaster.{rpz_apex}. (",
+        f"\t\t\t{int(datetime.now(UTC).timestamp())}\t; serial",
+        "\t\t\t900\t; refresh",
+        "\t\t\t900\t; retry",
+        "\t\t\t1800\t; expire",
+        f"\t\t\t{default_ttl})\t; minimum",
+        f"@\t300\tIN\tNS\tns1.{rpz_apex}.",
+        "",
+    ]
+    for pat in pattern_list:
+        owner = _rpz_pattern_to_owner(pat)
+        if action == "block":
+            lines.append(f"{owner}\tIN\tCNAME\t.")
+        elif action == "sinkhole":
+            if sink_ipv4:
+                lines.append(f"{owner}\tIN\tA\t{sink_ipv4}")
+            if sink_ipv6:
+                lines.append(f"{owner}\tIN\tAAAA\t{sink_ipv6}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def render_hickory_recursive_config(
     *,
     fabric_apexes: Iterable[str],
     auth_unicast_ip: str | None,
     upstream_resolvers: Iterable[str],
     conditional_forwarders: Iterable[tuple[str, list[str]]] = (),
+    rpz_zone_files: Iterable[tuple[str, str]] = (),
 ) -> str:
     """Hickory DNS recursive config (TOML). Counterpart to
     render_corefile_recursive — same inputs, different output format.
 
-    Coverage in this skeleton (Phase 1 of the Hickory migration):
+    Coverage:
       - One Forward-type zone per fabric apex pointing at the local
         auth pod.
       - One Forward-type zone per operator-configured conditional
         forwarder.
       - A recursive-store root zone that points at the catch-all
         upstreams when nothing else matches.
+      - One Primary-type zone per RPZ blocklist; the response_policy
+        block at the end lists them in priority order so Hickory
+        (when its response-policy plugin is enabled) applies them
+        before forwarding.
 
     Deferred (later phases):
-      - RPZ blocklists (need RPZ zone-file rendering — Phase 3).
       - DoH / DoT listeners (separate ROADMAP item).
       - Per-zone TTL overrides (not used today).
 
     Hickory expects newline-terminated TOML; the renderer produces
-    deterministic output (sorted apex names + conditional forwarders)
-    so the bundle etag is stable across runs.
+    deterministic output (sorted apex names, conditional forwarders,
+    and RPZ zones) so the bundle etag is stable across runs.
     """
     upstreams = list(upstream_resolvers) or ["1.1.1.1", "8.8.8.8"]
     lines: list[str] = [
@@ -903,6 +960,20 @@ def render_hickory_recursive_config(
             pattern,
             [_split_host_port(u, 53) for u in fwd_upstreams],
         )
+    # RPZ blocklists rendered as Primary zones. Hickory's response-
+    # policy support uses these as a deny-/redirect-set; we list the
+    # zone names in a [[response_policy]] array so the response-
+    # policy plugin applies them on every recursive query.
+    rpz_list = sorted(rpz_zone_files, key=lambda t: t[0])
+    for rpz_zone_name, rpz_filename in rpz_list:
+        lines += _hickory_primary_zone(rpz_zone_name, rpz_filename)
+    if rpz_list:
+        lines.append("[[response_policy]]")
+        rpz_zone_array = ", ".join(
+            f'"{name.rstrip(".") + "."}"' for name, _ in rpz_list
+        )
+        lines.append(f"zones = [{rpz_zone_array}]")
+        lines.append("")
     # Catch-all when nothing else matches — routes to the configured
     # upstreams (system-wide setting or per-fabric override).
     lines += _hickory_forward_zone(
@@ -916,6 +987,23 @@ _HICKORY_FORWARD_ZONE_HEADER = "[[zones]]"
 _HICKORY_FORWARD_ZONE_TYPE = 'zone_type = "Forward"'
 _HICKORY_FORWARD_ZONE_STORES = "[zones.stores]"
 _HICKORY_FORWARD_STORE_TYPE = 'type = "forward"'
+
+
+def _hickory_primary_zone(zone_name: str, file_path: str) -> list[str]:
+    """Emit one Hickory Primary-zone block — used for RPZ zones loaded
+    from disk. The `file = "..."` path is resolved relative to the
+    Hickory process's `--zone-dir` flag (which the collector sets to
+    `<output_dir>/zones`)."""
+    zone_label = zone_name.rstrip(".") + "."
+    return [
+        _HICKORY_FORWARD_ZONE_HEADER,
+        f'zone = "{zone_label}"',
+        'zone_type = "Primary"',
+        "[zones.stores]",
+        'type = "file"',
+        f'file = "{file_path}"',
+        "",
+    ]
 
 
 def _hickory_forward_zone(
@@ -1340,39 +1428,76 @@ async def _engine_for_server(db: AsyncSession, server: DnsServer) -> str:
     return "coredns"
 
 
-async def _render_recursive_config(db: AsyncSession, server: DnsServer) -> str:
+async def _render_recursive_config(
+    db: AsyncSession, server: DnsServer,
+) -> tuple[str, dict[str, str]]:
     """Assemble the recursive-side config text (Corefile or Hickory
-    TOML) for one server. Pulled out of render_bundle_for_server so
-    the engine branch + fabric lookup don't run the parent function's
-    cognitive complexity past the linter cap."""
+    TOML) for one server, plus any auxiliary zone files the resolver
+    needs (RPZ on Hickory). Returns (config_text, rpz_zones_dict).
+    Empty dict for CoreDNS — its blocklists live inline in the
+    Corefile, not as separate zone files."""
     from ..models.ipam import Fabric, RecursiveDnsEngine  # noqa: PLC0415
 
     apex_names = await _fabric_apex_names(db, server.fabric_id)
     local_auth_ip = await _local_auth_unicast_ip(db, server)
     forwarders = await _fabric_forwarders(db, server.fabric_id)
     upstreams = await _recursive_upstreams_for_fabric(db, server.fabric_id)
+    blocklists = await _fabric_blocklists(db, server.fabric_id)
     fabric = await db.get(Fabric, server.fabric_id)
     engine = (
         fabric.recursive_engine if fabric else RecursiveDnsEngine.coredns
     )
     if engine == RecursiveDnsEngine.hickory:
-        # Phase 1 of the Hickory migration: apex stubs + conditional
-        # forwarders + catch-all upstream. Blocklist RPZ rendering
-        # lands in Phase 3.
-        return render_hickory_recursive_config(
+        rpz_zones, rpz_refs = _build_rpz_artifacts(blocklists)
+        config_text = render_hickory_recursive_config(
             fabric_apexes=apex_names,
             auth_unicast_ip=local_auth_ip,
             upstream_resolvers=upstreams,
             conditional_forwarders=forwarders,
+            rpz_zone_files=rpz_refs,
         )
-    blocklists = await _fabric_blocklists(db, server.fabric_id)
-    return render_corefile_recursive(
+        return config_text, rpz_zones
+    config_text = render_corefile_recursive(
         fabric_apexes=apex_names,
         auth_unicast_ip=local_auth_ip,
         upstream_resolvers=upstreams,
         conditional_forwarders=forwarders,
         blocklists=blocklists,
     )
+    return config_text, {}
+
+
+def _build_rpz_artifacts(
+    blocklists: Iterable[dict],
+) -> tuple[dict[str, str], list[tuple[str, str]]]:
+    """Render one RPZ zone file per blocklist + return the (zone-name,
+    filename) pairs the Hickory config needs to reference them.
+    Sinkhole blocklists with neither v4 nor v6 sink IPs are skipped —
+    they wouldn't produce any usable records."""
+    zones: dict[str, str] = {}
+    refs: list[tuple[str, str]] = []
+    for i, bl in enumerate(blocklists):
+        patterns = list(bl.get("patterns") or [])
+        if not patterns:
+            continue
+        action = bl.get("action", "block")
+        sink_v4 = bl.get("sink_ipv4")
+        sink_v6 = bl.get("sink_ipv6")
+        if action == "sinkhole" and not sink_v4 and not sink_v6:
+            continue
+        # Predictable name + filename so etag stability holds across
+        # renders even when blocklist ordering changes upstream.
+        rpz_name = f"bl-{i:03d}.rpz.dcim.local"
+        rpz_filename = f"{rpz_name}.zone"
+        zones[rpz_filename] = render_rpz_zone(
+            rpz_zone_name=rpz_name,
+            action=action,
+            patterns=patterns,
+            sink_ipv4=sink_v4,
+            sink_ipv6=sink_v6,
+        )
+        refs.append((rpz_name, rpz_filename))
+    return zones, refs
 
 
 async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
@@ -1437,8 +1562,13 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         )
         gobgp: dict | None = None
     else:
-        corefile = await _render_recursive_config(db, server)
-        zone_files = {}
+        corefile, rpz_zones_recursive = await _render_recursive_config(db, server)
+        # Hickory loads RPZ zones from the same `zones/` directory the
+        # collector materializes; folding them into zone_files keeps
+        # the bundle shape uniform across engines (CoreDNS just won't
+        # have RPZ entries because its renderer returns an empty
+        # dict).
+        zone_files = dict(rpz_zones_recursive)
         # `anycast` gates whether we emit a gobgpd config at all — the
         # group's IPs don't flow into the yaml (route advertisement is
         # a runtime gRPC operation), but a server without a bound
