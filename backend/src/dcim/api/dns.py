@@ -54,7 +54,7 @@ from ..models.dns import (
 )
 from ..models.bgp import Asn, TcpAoKeyChain
 from ..models.inventory import Site
-from ..models.ipam import Fabric
+from ..models.ipam import Fabric, RecursiveDnsEngine
 from ..schemas.common import Page, PageParams
 from ..schemas.dns import (
     AnycastBgpBindingCreate,
@@ -107,6 +107,11 @@ from ..settings import get_settings
 from ._pagination import paginate
 
 router = APIRouter(prefix="/dns", tags=["dns"])
+
+# Capability codes referenced from multiple endpoints. Centralized so a
+# rename only happens in one place (and the Sonar duplicate-literal
+# check stops complaining about the popular ones).
+_CAP_SERVERS_READ = "dns:servers:read"
 
 _ZONE_NOT_FOUND = "dns zone not found"
 _RECORD_NOT_FOUND = "dns record not found"
@@ -803,7 +808,7 @@ async def list_servers(
     site_id: UUID | None = Query(None),
     fabric_id: UUID | None = Query(None),
     role: str | None = Query(None, regex="^(auth|recursive)$"),
-    _: Principal = Depends(require_capability("dns:servers:read")),
+    _: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsServer)
@@ -850,7 +855,7 @@ async def create_server(
 @router.get("/servers/{server_id}", response_model=DnsServerOut)
 async def get_server(
     server_id: UUID,
-    _: Principal = Depends(require_capability("dns:servers:read")),
+    _: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsServer, server_id)
@@ -983,7 +988,7 @@ async def post_server_metrics(
 async def list_server_metrics(
     server_id: UUID,
     minutes: int = Query(60, ge=1, le=24 * 60),
-    _: Principal = Depends(require_capability("dns:servers:read")),
+    _: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     """Recent metrics samples for one server, oldest-first so the UI
@@ -1002,6 +1007,343 @@ async def list_server_metrics(
         )
     ).scalars().all()
     return rows
+
+
+# ----------------------- Dashboard -----------------------
+
+class _DashGlobal(BaseModel):
+    qps_now: float
+    qps_avg: float
+    queries_total: int
+    nxdomain_pct: float
+    servfail_pct: float
+    p50_ms: float | None
+    p95_ms: float | None
+    sites_active: int
+    servers_total: int
+    zones_total: int
+    zones_signed: int
+    zones_nsec3: int
+    anycast_groups: int
+    engines: dict[str, int]
+
+
+class _DashSeriesPoint(BaseModel):
+    observed_at: datetime
+    qps: float
+    nxdomain_pct: float
+    servfail_pct: float
+    p50_ms: float | None
+    p95_ms: float | None
+
+
+class _DashSitePanel(BaseModel):
+    site_id: UUID
+    site_name: str
+    qps_now: float
+    queries_total: int
+    nxdomain_pct: float
+    servfail_pct: float
+    p95_ms: float | None
+    server_count: int
+
+
+class _DashServerHealth(BaseModel):
+    server_id: UUID
+    name: str
+    role: str
+    engine: str
+    site_id: UUID | None
+    site_name: str | None
+    last_render_status: str | None
+    last_render_at: datetime | None
+    last_render_etag: str | None
+    qps_now: float | None
+
+
+class DnsDashboardOut(BaseModel):
+    generated_at: datetime
+    window_minutes: int
+    overall: _DashGlobal
+    series: list[_DashSeriesPoint]
+    by_site: list[_DashSitePanel]
+    server_health: list[_DashServerHealth]
+    # Populated once the collector instrumentation for per-name
+    # counters lands. Null in MVP so the UI renders a "coming soon"
+    # tile without special-casing missing fields.
+    top_names: list | None = None
+
+
+def _pct(numerator: int, total: int) -> float:
+    return round((numerator / total) * 100.0, 2) if total else 0.0
+
+
+def _weighted_latency(
+    samples: list[DnsServerMetricsSample], attr: str,
+) -> float | None:
+    """Query-weighted average of a latency field across samples.
+    Samples with no queries contribute nothing — a server that scraped
+    0 qps in the slice shouldn't drag the percentile to whatever it
+    last reported."""
+    pairs = [
+        (getattr(s, attr), s.queries) for s in samples
+        if getattr(s, attr) is not None and s.queries > 0
+    ]
+    if not pairs:
+        return None
+    num = sum(v * w for v, w in pairs)
+    den = sum(w for _, w in pairs)
+    return round(num / den, 2)
+
+
+def _qps_from_last_sample(sample: DnsServerMetricsSample | None) -> float | None:
+    if sample is None or sample.interval_seconds <= 0:
+        return None
+    return round(sample.queries / sample.interval_seconds, 2)
+
+
+def _engine_for(server: DnsServer, fabric: Fabric | None) -> str:
+    """Resolve the recursive engine for one server. Auth pods are
+    always CoreDNS in the hybrid model; only recursive pods honor the
+    fabric-level `recursive_engine` knob."""
+    if server.role != DnsServerRole.recursive:
+        return "coredns"
+    if fabric and fabric.recursive_engine:
+        return fabric.recursive_engine.value
+    return "coredns"
+
+
+def _bucket_series(
+    samples: list[DnsServerMetricsSample], minutes: int, buckets: int = 24,
+) -> list[_DashSeriesPoint]:
+    """Roll per-server samples into `buckets` equal time slices over
+    the window. Each slice sums queries/error counts across servers and
+    averages p50/p95 weighted by query volume — matches what an
+    operator would compute by eye on a single-line chart."""
+    if not samples:
+        return []
+    window = timedelta(minutes=minutes)
+    end = datetime.now(UTC)
+    start = end - window
+    slice_s = max(int(window.total_seconds() / buckets), 1)
+    out: list[_DashSeriesPoint] = []
+    for i in range(buckets):
+        b_start = start + timedelta(seconds=slice_s * i)
+        b_end = b_start + timedelta(seconds=slice_s)
+        in_slice = [
+            s for s in samples
+            if b_start <= s.observed_at < b_end
+        ]
+        if not in_slice:
+            out.append(_DashSeriesPoint(
+                observed_at=b_end, qps=0.0,
+                nxdomain_pct=0.0, servfail_pct=0.0,
+                p50_ms=None, p95_ms=None,
+            ))
+            continue
+        q = sum(s.queries for s in in_slice)
+        nx = sum(s.nxdomain for s in in_slice)
+        sf = sum(s.servfail for s in in_slice)
+        out.append(_DashSeriesPoint(
+            observed_at=b_end,
+            qps=round(q / slice_s, 2),
+            nxdomain_pct=_pct(nx, q),
+            servfail_pct=_pct(sf, q),
+            p50_ms=_weighted_latency(in_slice, "p50_ms"),
+            p95_ms=_weighted_latency(in_slice, "p95_ms"),
+        ))
+    return out
+
+
+def _build_global_kpis(
+    *,
+    samples: list[DnsServerMetricsSample],
+    servers: list[DnsServer],
+    fabrics: dict[UUID, Fabric],
+    zones: list[DnsZone],
+    qps_now_per_server: dict[UUID, float | None],
+    ag_count: int,
+    minutes: int,
+) -> _DashGlobal:
+    """Roll up the top-strip KPI numbers from the same sample window
+    used by the series. Extracted so the route handler stays under the
+    cognitive-complexity cap."""
+    total_q = sum(s.queries for s in samples)
+    total_nx = sum(s.nxdomain for s in samples)
+    total_sf = sum(s.servfail for s in samples)
+    qps_now = sum(
+        (qps_now_per_server.get(srv.id) or 0.0) for srv in servers
+    )
+    engines: dict[str, int] = {"coredns": 0, "hickory": 0}
+    for srv in servers:
+        if srv.role != DnsServerRole.recursive:
+            continue
+        engine = _engine_for(srv, fabrics.get(srv.fabric_id))
+        engines[engine] = engines.get(engine, 0) + 1
+    return _DashGlobal(
+        qps_now=round(qps_now, 2),
+        qps_avg=round(total_q / (minutes * 60), 2) if minutes > 0 else 0.0,
+        queries_total=total_q,
+        nxdomain_pct=_pct(total_nx, total_q),
+        servfail_pct=_pct(total_sf, total_q),
+        p50_ms=_weighted_latency(samples, "p50_ms"),
+        p95_ms=_weighted_latency(samples, "p95_ms"),
+        sites_active=len({srv.site_id for srv in servers if srv.site_id}),
+        servers_total=len(servers),
+        zones_total=len(zones),
+        zones_signed=sum(1 for z in zones if getattr(z, "signed", False)),
+        zones_nsec3=sum(
+            1 for z in zones if getattr(z, "nsec3_salt", None) is not None
+        ),
+        anycast_groups=ag_count,
+        engines=engines,
+    )
+
+
+def _build_by_site(
+    *,
+    samples: list[DnsServerMetricsSample],
+    servers: list[DnsServer],
+    sites: dict[UUID, Site],
+    qps_now_per_server: dict[UUID, float | None],
+) -> list[_DashSitePanel]:
+    """One row per site that has at least one DnsServer. Sites with
+    zero traffic still show up (server_count > 0) so an operator can
+    see them in the table before any qps has accrued."""
+    servers_by_site: dict[UUID, list[DnsServer]] = {}
+    for srv in servers:
+        if srv.site_id:
+            servers_by_site.setdefault(srv.site_id, []).append(srv)
+
+    server_to_site = {srv.id: srv.site_id for srv in servers if srv.site_id}
+    samples_by_site: dict[UUID, list[DnsServerMetricsSample]] = {}
+    for s in samples:
+        site_id = server_to_site.get(s.server_id)
+        if site_id is not None:
+            samples_by_site.setdefault(site_id, []).append(s)
+
+    out: list[_DashSitePanel] = []
+    for site_id, srv_list in servers_by_site.items():
+        site_samples = samples_by_site.get(site_id, [])
+        q = sum(s.queries for s in site_samples)
+        out.append(_DashSitePanel(
+            site_id=site_id,
+            site_name=sites[site_id].name if site_id in sites else str(site_id),
+            qps_now=round(
+                sum((qps_now_per_server.get(srv.id) or 0.0) for srv in srv_list),
+                2,
+            ),
+            queries_total=q,
+            nxdomain_pct=_pct(sum(s.nxdomain for s in site_samples), q),
+            servfail_pct=_pct(sum(s.servfail for s in site_samples), q),
+            p95_ms=_weighted_latency(site_samples, "p95_ms"),
+            server_count=len(srv_list),
+        ))
+    out.sort(key=lambda r: r.qps_now, reverse=True)
+    return out
+
+
+def _build_server_health(
+    *,
+    servers: list[DnsServer],
+    fabrics: dict[UUID, Fabric],
+    sites: dict[UUID, Site],
+    qps_now_per_server: dict[UUID, float | None],
+) -> list[_DashServerHealth]:
+    """One row per registered DnsServer. `last_render_status` may be a
+    stringy enum or already a value — normalize either to .value so
+    the response shape is stable."""
+    out: list[_DashServerHealth] = []
+    for srv in servers:
+        site_obj = sites.get(srv.site_id) if srv.site_id else None
+        render_status = (
+            srv.last_render_status.value
+            if srv.last_render_status is not None
+            and hasattr(srv.last_render_status, "value")
+            else srv.last_render_status
+        )
+        out.append(_DashServerHealth(
+            server_id=srv.id,
+            name=srv.name,
+            role=srv.role.value,
+            engine=_engine_for(srv, fabrics.get(srv.fabric_id)),
+            site_id=srv.site_id,
+            site_name=site_obj.name if site_obj else None,
+            last_render_status=render_status,
+            last_render_at=srv.last_render_at,
+            last_render_etag=srv.last_render_etag,
+            qps_now=qps_now_per_server.get(srv.id),
+        ))
+    out.sort(key=lambda r: (r.qps_now or 0.0), reverse=True)
+    return out
+
+
+@router.get("/dashboard", response_model=DnsDashboardOut)
+async def dns_dashboard(
+    minutes: int = Query(60, ge=5, le=24 * 60),
+    _: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """One-shot aggregate the DNS Overview page polls. Folded together
+    so the dashboard renders in a single round-trip instead of
+    fan-out queries.
+
+    Includes:
+      - Global KPIs (QPS now/avg, error %, p50/p95, zone + server counts).
+      - A bucketed series for the QPS / error-rate / latency chart.
+      - Per-site rollup (one row per site that has DNS servers).
+      - Server health (one row per server with the most recent sample
+        attached, so the UI can show a status chip + qps trend).
+    """
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=minutes)
+
+    samples = (
+        await db.execute(
+            select(DnsServerMetricsSample)
+            .where(DnsServerMetricsSample.observed_at >= cutoff)
+            .order_by(DnsServerMetricsSample.observed_at.asc())
+        )
+    ).scalars().all()
+    servers = (await db.execute(select(DnsServer))).scalars().all()
+    sites = {s.id: s for s in (await db.execute(select(Site))).scalars().all()}
+    fabrics = {f.id: f for f in (await db.execute(select(Fabric))).scalars().all()}
+    zones = (await db.execute(select(DnsZone))).scalars().all()
+    ag_count = int(
+        (await db.execute(select(func.count(AnycastGroup.id)))).scalar_one()
+    )
+
+    # Latest sample per server — walking the sorted list once is cheaper
+    # than a per-server LIMIT 1 query for each. The qps_now numbers on
+    # both the global KPI strip and the per-site rollup derive from
+    # this same map so the dashboard stays internally consistent.
+    latest_per_server: dict[UUID, DnsServerMetricsSample] = {}
+    for s in samples:
+        latest_per_server[s.server_id] = s
+    qps_now_per_server: dict[UUID, float | None] = {
+        sid: _qps_from_last_sample(latest_per_server.get(sid))
+        for sid in {srv.id for srv in servers}
+    }
+
+    return DnsDashboardOut(
+        generated_at=now,
+        window_minutes=minutes,
+        overall=_build_global_kpis(
+            samples=samples, servers=servers, fabrics=fabrics,
+            zones=zones, qps_now_per_server=qps_now_per_server,
+            ag_count=ag_count, minutes=minutes,
+        ),
+        series=_bucket_series(samples, minutes),
+        by_site=_build_by_site(
+            samples=samples, servers=servers, sites=sites,
+            qps_now_per_server=qps_now_per_server,
+        ),
+        server_health=_build_server_health(
+            servers=servers, fabrics=fabrics, sites=sites,
+            qps_now_per_server=qps_now_per_server,
+        ),
+        top_names=None,
+    )
 
 
 # ----------------------- Anycast groups -----------------------

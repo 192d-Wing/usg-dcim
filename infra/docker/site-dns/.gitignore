@@ -3,3 +3,7 @@
 # should ever land in version control.
 collector.yaml
 token
+# Per-host overrides — currently used for DNS_RECURSIVE_BIND_IP so the
+# Hickory overlay can publish 53 on the operator's LAN IP without
+# baking the address into the tracked compose file.
+.env

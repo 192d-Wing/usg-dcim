@@ -53,7 +53,18 @@ services:
     environment:
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
+      # Front-channel URL (issuer + tokens + OIDC discovery): must
+      # match what the api container expects in the `iss` claim.
+      # host.docker.internal resolves on both sides under Docker
+      # Desktop (Windows/Mac) and via the api service's extra_hosts
+      # entry on Linux.
       KC_HOSTNAME: http://host.docker.internal:8080
+      # Back-channel admin-console URL: browsers on Windows hosts
+      # don't always resolve host.docker.internal, so the redirect
+      # from /admin → /admin/master/console/ would land on an
+      # unreachable URL. Pinning the admin console to localhost
+      # keeps the UI clickable without affecting the issuer URL.
+      KC_HOSTNAME_ADMIN: http://localhost:8080
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
     ports: ["8080:8080"]

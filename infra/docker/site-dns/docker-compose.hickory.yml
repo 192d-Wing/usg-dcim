@@ -26,13 +26,23 @@ services:
     networks:
       dns-net:
         ipv4_address: 172.30.42.20
-    # Reachable on the dns-net bridge at 172.30.42.20:53 for smoke
-    # tests from sibling containers (collector + alpine dig pods).
-    # Production sites carry the anycast IP via the gobgp sidecar
-    # and host networking — the base compose's `10.0.100.5:53`
-    # host-port mapping is intentionally not inherited here because
-    # local dev rarely has that LAN IP assigned.
-    ports: !reset []
+    # Reachable on the dns-net bridge at 172.30.42.20:53 for sibling
+    # containers AND on the host IP supplied via DNS_RECURSIVE_BIND_IP
+    # for external test machines. Default is `127.0.0.1` so a generic
+    # `docker compose up` never tries to bind a LAN IP that may not be
+    # assigned to this host. Operators export the var (or set it in a
+    # local .env file) when they want to expose port 53 to the LAN:
+    #
+    #   DNS_RECURSIVE_BIND_IP=10.0.100.35 docker compose ... up -d
+    #
+    # `!override` replaces the base compose's `10.0.100.5:53` mapping
+    # outright — Compose merges ports as a list by default, so without
+    # the tag Docker would try both binds and fail on the unassigned
+    # base IP. Production sites carry the anycast IP via the gobgp
+    # sidecar with host networking and don't use this mapping at all.
+    ports: !override
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:53:53/udp"
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:53:53/tcp"
     # `-c` points at the rendered TOML; `--zone-dir` lets Hickory
     # resolve relative zone-file paths inside the bundle (we don't
     # use it today for the recursive but it's harmless).

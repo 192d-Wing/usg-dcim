@@ -41,6 +41,7 @@ const AdminPage       = lazy(() => import('@/pages/admin').then((m) => ({ defaul
 const NotificationsPage = lazy(() => import('@/pages/notifications').then((m) => ({ default: m.NotificationsPage })));
 const IpamPage          = lazy(() => import('@/pages/ipam').then((m) => ({ default: m.IpamPage })));
 const VrfShowPage       = lazy(() => import('@/pages/vrf-show').then((m) => ({ default: m.VrfShowPage })));
+const DnsDashboardPage  = lazy(() => import('@/pages/dns-dashboard').then((m) => ({ default: m.DnsDashboardPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -107,6 +108,7 @@ export function App() {
               <Route path="/settings/notifications" element={<NotificationsPage />} />
               <Route path="/ipam" element={<IpamPage />} />
               <Route path="/ipam/vrfs/:id" element={<VrfShowPage />} />
+              <Route path="/dns" element={<DnsDashboardPage />} />
             </Route>
           </Route>
           <Route element={

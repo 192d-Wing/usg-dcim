@@ -40,6 +40,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/maintenance', text: 'Maintenance' },
   { href: '/collectors', text: 'Collectors' },
   { href: '/ipam',       text: 'IPAM',       cap: 'ipam:subnets:read' },
+  { href: '/dns',        text: 'DNS',        cap: 'dns:servers:read' },
   { href: '/import',     text: 'Import',     cap: 'inventory:bulk:execute' },
   { href: '/audit',      text: 'Audit log',  cap: 'audit:events:read' },
   { href: '/admin',      text: 'Admin',      cap: ['admin:users:read', 'admin:roles:read'] },
