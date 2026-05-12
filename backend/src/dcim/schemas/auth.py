@@ -15,6 +15,11 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
+    # OIDC id_token from the IdP — only set on the /auth/oidc/callback
+    # response. SPA stashes it in localStorage so app logout can pass
+    # it as `id_token_hint` to Keycloak's end-session endpoint for
+    # RP-initiated logout (terminates the IdP session, not just ours).
+    id_token: str | None = None
 
 
 class TokenIssue(BaseModel):

@@ -164,7 +164,43 @@ async def oidc_callback(
             idp_roles=sorted(_extract_idp_roles(claims)),
         ),
         expires_in=settings.jwt_ttl_seconds,
+        # Returned so the SPA can stash it for RP-initiated logout
+        # (passed as `id_token_hint` to /auth/oidc/logout).
+        id_token=tokens.get("id_token"),
     )
+
+
+@router.get("/oidc/logout")
+async def oidc_logout(
+    id_token_hint: str | None = None,
+    post_logout_redirect_uri: str | None = None,
+) -> RedirectResponse:
+    """RP-initiated logout: 302 to the IdP's end-session endpoint.
+
+    Browser-initiated. The SPA's logout flow sends the user here with
+    the id_token it stashed at callback time; this handler forwards
+    the request to the IdP, which terminates the SSO session and
+    redirects back to `post_logout_redirect_uri` (must be allowlisted
+    in the client's post.logout.redirect.uris).
+
+    No-ops gracefully (302 to /login) if OIDC isn't configured.
+    """
+    settings = get_settings()
+    fallback = post_logout_redirect_uri or "/login"
+    if not settings.oidc_issuer:
+        return RedirectResponse(url=fallback, status_code=302)
+    meta = await _oidc_metadata()
+    end_session = meta.get("end_session_endpoint")
+    if not end_session:
+        return RedirectResponse(url=fallback, status_code=302)
+    params: dict[str, str] = {}
+    if id_token_hint:
+        params["id_token_hint"] = id_token_hint
+    if post_logout_redirect_uri:
+        params["post_logout_redirect_uri"] = post_logout_redirect_uri
+    sep = "&" if "?" in end_session else "?"
+    url = f"{end_session}{sep}{urlencode(params)}" if params else end_session
+    return RedirectResponse(url=url, status_code=302)
 
 def _extract_idp_roles(claims: dict) -> set[str]:
     """Pull role strings from the standard claim locations.

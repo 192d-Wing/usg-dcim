@@ -8,6 +8,7 @@ type Identity = {
 };
 
 const IDENTITY_KEY = 'dcim.identity';
+const ID_TOKEN_KEY = 'dcim.id_token';
 
 export const authProvider: AuthProvider = {
   async login({ email, password }: { email: string; password: string }) {
@@ -28,8 +29,23 @@ export const authProvider: AuthProvider = {
   },
 
   async logout() {
+    // Capture the id_token before wiping local state, so we can pass
+    // it to Keycloak's end-session endpoint and terminate the SSO
+    // session — without this, the IdP cookie stays alive and the
+    // next "Login using DOD E-ICAM" click silently re-signs the user in.
+    const idToken = localStorage.getItem(ID_TOKEN_KEY);
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(IDENTITY_KEY);
+    localStorage.removeItem(ID_TOKEN_KEY);
+    if (idToken) {
+      const redirect = encodeURIComponent(`${globalThis.location.origin}/login`);
+      const hint = encodeURIComponent(idToken);
+      globalThis.location.href =
+        `/api/v1/auth/oidc/logout?id_token_hint=${hint}&post_logout_redirect_uri=${redirect}`;
+      // The browser navigation above wins over any redirectTo Refine
+      // tries to apply, so we just acknowledge success.
+      return { success: true };
+    }
     return { success: true, redirectTo: '/login' };
   },
 

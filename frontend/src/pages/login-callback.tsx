@@ -11,6 +11,7 @@ import Alert from '@cloudscape-design/components/alert';
 import { http, TOKEN_KEY } from '@/lib/http';
 
 const IDENTITY_KEY = 'dcim.identity';
+const ID_TOKEN_KEY = 'dcim.id_token';
 
 export function LoginCallbackPage() {
   const [params] = useSearchParams();
@@ -38,6 +39,12 @@ export function LoginCallbackPage() {
           params: { code, redirect_uri: redirectUri },
         });
         localStorage.setItem(TOKEN_KEY, tokenResp.data.access_token);
+        // Stash the IdP id_token so authProvider.logout() can pass it
+        // to /auth/oidc/logout as `id_token_hint` and terminate the
+        // Keycloak session, not just our local one.
+        if (tokenResp.data.id_token) {
+          localStorage.setItem(ID_TOKEN_KEY, tokenResp.data.id_token);
+        }
         const me = await http.get('/auth/me');
         localStorage.setItem(IDENTITY_KEY, JSON.stringify({
           id: me.data.user.id,
