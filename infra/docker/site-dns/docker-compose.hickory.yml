@@ -25,7 +25,7 @@ services:
     # drop-in replacement otherwise; switch via the `HICKORY_IMAGE`
     # env var if you want to test against upstream temporarily.
     # See infra/hickory-prom/ for the Dockerfile + build instructions.
-    image: ${HICKORY_IMAGE:-ghcr.io/192d-wing/hickory-prom:v0.26.0-1}
+    image: ${HICKORY_IMAGE:-ghcr.io/192d-wing/hickory-prom:v0.26.0-2}
     pid: "host"
     user: "0:0"
     networks:
@@ -48,6 +48,13 @@ services:
     ports: !override
       - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:53:53/udp"
       - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:53:53/tcp"
+      # DoT (RFC 7858) + DoH (RFC 8484). Only effective when the
+      # central api has DCIM_DNS_HICKORY_DOT_ENABLED /
+      # DCIM_DNS_HICKORY_DOH_ENABLED set (otherwise Hickory doesn't
+      # bind these inside the container and the host ports just
+      # dangle harmlessly).
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:853:853/tcp"
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:443:443/tcp"
     # `-c` points at the rendered TOML; `--zone-dir` lets Hickory
     # resolve relative zone-file paths inside the bundle (we don't
     # use it today for the recursive but it's harmless).
@@ -62,5 +69,11 @@ services:
       - "/var/lib/dcim-dns/recursive/zones"
     volumes:
       - dns-state:/var/lib/dcim-dns
+      # DoT / DoH TLS material. The ./tls/ directory is gitignored
+      # (operators provision their own cert + key per environment);
+      # the central api renders the in-container path into the
+      # Hickory config when DCIM_DNS_HICKORY_TLS_CERT_PATH /
+      # DCIM_DNS_HICKORY_TLS_KEY_PATH are set.
+      - ./tls:/etc/dcim-dns:ro
     restart: unless-stopped
     depends_on: [collector]

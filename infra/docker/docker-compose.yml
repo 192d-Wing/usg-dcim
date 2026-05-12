@@ -118,6 +118,17 @@ services:
       #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       # ). Optional in dev; required for any real production zone.
       DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
+      # DoT / DoH on the Hickory recursive. Cert + key paths are the
+      # in-container paths Hickory reads (the site-dns Hickory overlay
+      # mounts the operator's `tls/` directory onto /etc/dcim-dns).
+      # Off-by-default disable flags ride env vars so flipping
+      # encrypted DNS on/off is a redeploy of api alone, not a code
+      # change. Empty cert/key paths short-circuit the renderer
+      # regardless of the enable flags.
+      DCIM_DNS_HICKORY_DOT_ENABLED: "true"
+      DCIM_DNS_HICKORY_DOH_ENABLED: "true"
+      DCIM_DNS_HICKORY_TLS_CERT_PATH: /etc/dcim-dns/tls.crt.pem
+      DCIM_DNS_HICKORY_TLS_KEY_PATH: /etc/dcim-dns/tls.key.pem
     ports: ["8000:8000"]
     extra_hosts:
       # On Docker Desktop this is automatic; declared explicitly for

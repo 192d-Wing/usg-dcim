@@ -7,3 +7,9 @@ token
 # Hickory overlay can publish 53 on the operator's LAN IP without
 # baking the address into the tracked compose file.
 .env
+# DoT / DoH TLS material the recursive Hickory pod loads. Cert + key
+# live as separate PEM files per Hickory 0.26's `TlsCertConfig`
+# shape. Operators provision their own (self-signed for lab,
+# proper CA-issued for prod) and mount this directory into the
+# recursive container.
+tls/
