@@ -64,6 +64,12 @@ type DashSitePanel = {
   server_count: number;
 };
 
+type DashTopName = {
+  name: string;
+  type: string;
+  count: number;
+};
+
 type DashServerHealth = {
   server_id: string;
   name: string;
@@ -84,7 +90,10 @@ type Dashboard = {
   series: DashSeriesPoint[];
   by_site: DashSitePanel[];
   server_health: DashServerHealth[];
-  top_names: unknown | null;
+  // Null when no server in the deployment has dnstap wired (the
+  // collector is the only thing that ships this). Empty list means
+  // dnstap is wired but the window saw zero queries.
+  top_names: DashTopName[] | null;
 };
 
 // Render-status → Cloudscape status chip. Matches the chip pattern on
@@ -114,6 +123,152 @@ function Kpi({
       </Box>
       {hint && <Box color="text-status-inactive" fontSize="body-s">{hint}</Box>}
     </div>
+  );
+}
+
+// Cell renderers extracted from the top-names Table so they don't
+// re-define a component on every row render. Each gets the row item
+// as a positional argument — Cloudscape's column API hands the cell
+// function the whole row.
+function TopNameCell(item: Readonly<DashTopName>) {
+  return (
+    <span style={{ fontFamily: 'ui-monospace, monospace' }}>{item.name}</span>
+  );
+}
+
+function TopTypeCell(item: Readonly<DashTopName>) {
+  const color = item.type === 'A' || item.type === 'AAAA' ? 'blue' : 'grey';
+  return <Badge color={color}>{item.type}</Badge>;
+}
+
+function TopCountCell(item: Readonly<DashTopName>) {
+  return item.count.toLocaleString();
+}
+
+type TopNamesPanelProps = Readonly<{
+  topNames: DashTopName[] | null | undefined;
+  windowMinutes: number;
+  isLoading: boolean;
+}>;
+
+function TopNamesPanel({
+  topNames,
+  windowMinutes,
+  isLoading,
+}: TopNamesPanelProps) {
+  // Null `top_names` means no server in the deployment is shipping a
+  // dnstap reservoir yet — render a hint card instead of an empty
+  // table so operators know the gap is "not wired" vs "no traffic".
+  if (topNames === null) {
+    return (
+      <Container
+        header={
+          <Header
+            variant="h2"
+            description="dnstap not wired on any DnsServer"
+          >
+            Top queried names
+          </Header>
+        }
+      >
+        <Box color="text-status-inactive" padding="l" textAlign="center">
+          <SpaceBetween size="s">
+            <Box variant="strong">No per-name data yet</Box>
+            <Box>
+              The collector ships a top-K reservoir of query names
+              when a server has{' '}
+              <code>dnstap_socket</code>
+              {' '}set. Hickory recursives can&apos;t supply this (no
+              dnstap support upstream); CoreDNS auth pods do once{' '}
+              <code>DCIM_DNS_DNSTAP_ENABLED</code>
+              {' '}is true.
+            </Box>
+          </SpaceBetween>
+        </Box>
+      </Container>
+    );
+  }
+  return (
+    <Table
+      header={
+        <Header
+          variant="h2"
+          counter={`(${topNames?.length ?? 0})`}
+          description={`Last ${windowMinutes}-minute window`}
+        >
+          Top queried names
+        </Header>
+      }
+      variant="container"
+      items={topNames ?? []}
+      loading={isLoading}
+      loadingText="Loading…"
+      empty={
+        <Box color="text-status-inactive" padding="m">
+          No queries observed in the window.
+        </Box>
+      }
+      columnDefinitions={[
+        { id: 'name', header: 'Name', cell: TopNameCell, isRowHeader: true },
+        { id: 'type', header: 'Type', cell: TopTypeCell },
+        {
+          id: 'count', header: 'Count', cell: TopCountCell,
+          sortingField: 'count',
+        },
+      ]}
+    />
+  );
+}
+
+function GlobalKpiStrip({ overall }: Readonly<{ overall: DashGlobal | undefined }>) {
+  return (
+    <Container header={<Header variant="h2">Global</Header>}>
+      <ColumnLayout columns={5} variant="text-grid">
+        <Kpi
+          title="QPS now"
+          value={overall ? overall.qps_now.toLocaleString() : null}
+          hint={
+            overall
+              ? `${overall.qps_avg.toLocaleString()} avg / ${overall.queries_total.toLocaleString()} queries in window`
+              : undefined
+          }
+        />
+        <Kpi
+          title="NXDOMAIN"
+          value={overall ? `${overall.nxdomain_pct.toFixed(2)}%` : null}
+          hint={
+            overall ? `SERVFAIL ${overall.servfail_pct.toFixed(2)}%` : undefined
+          }
+        />
+        <Kpi
+          title="Latency p95"
+          value={overall && overall.p95_ms !== null ? `${overall.p95_ms.toFixed(2)} ms` : '—'}
+          hint={
+            overall && overall.p50_ms !== null
+              ? `p50 ${overall.p50_ms.toFixed(2)} ms`
+              : 'no samples'
+          }
+        />
+        <Kpi
+          title="Zones"
+          value={overall ? overall.zones_total.toLocaleString() : null}
+          hint={
+            overall
+              ? `${overall.zones_signed} signed · ${overall.zones_nsec3} NSEC3`
+              : undefined
+          }
+        />
+        <Kpi
+          title="Servers"
+          value={overall ? overall.servers_total.toLocaleString() : null}
+          hint={
+            overall
+              ? `Recursive: ${overall.engines.coredns} CoreDNS / ${overall.engines.hickory} Hickory · ${overall.anycast_groups} anycast`
+              : undefined
+          }
+        />
+      </ColumnLayout>
+    </Container>
   );
 }
 
@@ -158,53 +313,7 @@ export function DnsDashboardPage() {
     >
       <SpaceBetween size="l">
         {/* ---- KPI strip ---- */}
-        <Container header={<Header variant="h2">Global</Header>}>
-          <ColumnLayout columns={5} variant="text-grid">
-            <Kpi
-              title="QPS now"
-              value={overall ? overall.qps_now.toLocaleString() : null}
-              hint={
-                overall
-                  ? `${overall.qps_avg.toLocaleString()} avg / ${overall.queries_total.toLocaleString()} queries in window`
-                  : undefined
-              }
-            />
-            <Kpi
-              title="NXDOMAIN"
-              value={overall ? `${overall.nxdomain_pct.toFixed(2)}%` : null}
-              hint={
-                overall ? `SERVFAIL ${overall.servfail_pct.toFixed(2)}%` : undefined
-              }
-            />
-            <Kpi
-              title="Latency p95"
-              value={overall && overall.p95_ms !== null ? `${overall.p95_ms.toFixed(2)} ms` : '—'}
-              hint={
-                overall && overall.p50_ms !== null
-                  ? `p50 ${overall.p50_ms.toFixed(2)} ms`
-                  : 'no samples'
-              }
-            />
-            <Kpi
-              title="Zones"
-              value={overall ? overall.zones_total.toLocaleString() : null}
-              hint={
-                overall
-                  ? `${overall.zones_signed} signed · ${overall.zones_nsec3} NSEC3`
-                  : undefined
-              }
-            />
-            <Kpi
-              title="Servers"
-              value={overall ? overall.servers_total.toLocaleString() : null}
-              hint={
-                overall
-                  ? `Recursive: ${overall.engines.coredns} CoreDNS / ${overall.engines.hickory} Hickory · ${overall.anycast_groups} anycast`
-                  : undefined
-              }
-            />
-          </ColumnLayout>
-        </Container>
+        <GlobalKpiStrip overall={overall} />
 
         {/* ---- Timeline ---- */}
         <Container header={<Header variant="h2">QPS · last 60 minutes</Header>}>
@@ -327,32 +436,11 @@ export function DnsDashboardPage() {
             ]}
           />
 
-          {/* Top-N queried names — placeholder until the collector
-              grows per-name instrumentation. Showing the rationale
-              inline so operators know what to expect without diffing
-              against the dashboard plan. */}
-          <Container
-            header={
-              <Header
-                variant="h2"
-                description="Per-name counters land in a follow-up commit"
-              >
-                Top queried names
-              </Header>
-            }
-          >
-            <Box color="text-status-inactive" padding="l" textAlign="center">
-              <SpaceBetween size="s">
-                <Box variant="strong">Coming soon</Box>
-                <Box>
-                  CoreDNS and Hickory both expose per-name counters in
-                  their Prometheus output. The collector currently
-                  aggregates by rcode only — extending it to keep a
-                  top-K reservoir per server is the next change.
-                </Box>
-              </SpaceBetween>
-            </Box>
-          </Container>
+          <TopNamesPanel
+            topNames={data?.top_names}
+            windowMinutes={data?.window_minutes ?? 60}
+            isLoading={isLoading}
+          />
         </ColumnLayout>
 
         {/* ---- Server health ---- */}
