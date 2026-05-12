@@ -31,7 +31,10 @@ class Settings(BaseSettings):
     # Auth
     jwt_secret: str = "change-me-in-prod"
     jwt_algorithm: str = "HS256"
-    jwt_ttl_seconds: int = 3600
+    # Zero-trust posture: short JWT TTL so an IdP role revocation
+    # propagates within this window. 15 minutes is the tradeoff between
+    # security (faster propagation) and UX (less-frequent re-auth).
+    jwt_ttl_seconds: int = 900
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None

@@ -18,7 +18,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.auth import RoleScope, ScopeType, User, UserRole
+from ..models.auth import OidcRoleMapping, Role, RoleScope, ScopeType, User, UserRole
 from ..models.inventory import Site, SiteGroupMembership
 
 
@@ -64,8 +64,6 @@ async def scope_for_user(db: AsyncSession, user: User) -> dict[str, Scope]:
         role = await db.get(UserRole, assignment.id)
         if role is None or role.role_id is None:
             continue
-        # Load role capabilities
-        from ..models.auth import Role  # local import to avoid cycle at module import time
         role_obj = await db.get(Role, role.role_id)
         if role_obj is None:
             continue
@@ -73,6 +71,40 @@ async def scope_for_user(db: AsyncSession, user: User) -> dict[str, Scope]:
         scope = await _scope_from_assignment(db, assignment.id)
         for cap in role_obj.permission_codes:
             out[cap] = out.get(cap, Scope()).union(scope)
+    return out
+
+
+async def caps_from_idp_roles(
+    db: AsyncSession, idp_roles: Iterable[str],
+) -> dict[str, Scope]:
+    """Materialize capabilities for IdP-asserted role names.
+
+    Joins each `idp_role` to the `oidc_role_mappings` table, follows
+    the FK to the DCIM Role, and unions the role's `permission_codes`
+    into the returned cap dict. Each cap gets Scope(is_global=True) —
+    ABAC scope restrictions only apply via manual UserRole + RoleScope
+    rows, which the caller unions on top of this result.
+
+    Returns an empty dict if `idp_roles` is empty or no mapping matches.
+    """
+    names = [r for r in idp_roles if isinstance(r, str) and r]
+    if not names:
+        return {}
+    mappings = (
+        await db.execute(
+            select(OidcRoleMapping).where(OidcRoleMapping.idp_role.in_(names))
+        )
+    ).scalars().all()
+    if not mappings:
+        return {}
+    out: dict[str, Scope] = {}
+    global_scope = Scope(is_global=True)
+    for mapping in mappings:
+        role = await db.get(Role, mapping.dcim_role_id)
+        if role is None:
+            continue
+        for cap in role.permission_codes:
+            out[cap] = out.get(cap, Scope()).union(global_scope)
     return out
 
 

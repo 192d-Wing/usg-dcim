@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import AuthError, ForbiddenError
-from ..models.auth import ApiToken, OidcRoleMapping, Role, User, UserRole
+from ..models.auth import ApiToken, User
 from ..schemas.auth import ApiTokenOut, LoginRequest, TokenIssue, TokenOut
 
 from ..security.deps import AuthenticatedUser, Principal, find_matching_capability, require_capability
@@ -154,11 +154,15 @@ async def oidc_callback(
     email = claims.get("email") or claims.get("preferred_username")
     if not sub or not email:
         raise AuthError("oidc claims missing sub/email")
-    user = await _upsert_oidc_user(
-        db, sub=sub, email=email, name=claims.get("name"), claims=claims,
-    )
+    user = await _upsert_oidc_user(db, sub=sub, email=email, name=claims.get("name"))
+    # Zero-trust: embed the IdP-asserted role names in our session JWT.
+    # No UserRole rows are written from OIDC — caps are re-resolved per
+    # request in deps._principal_from_jwt against oidc_role_mappings.
     return TokenOut(
-        access_token=issue_user_jwt(str(user.id)),
+        access_token=issue_user_jwt(
+            str(user.id),
+            idp_roles=sorted(_extract_idp_roles(claims)),
+        ),
         expires_in=settings.jwt_ttl_seconds,
     )
 
@@ -190,41 +194,9 @@ def _extract_idp_roles(claims: dict) -> set[str]:
     _add(claims.get("roles"))
     return roles
 
-async def _sync_oidc_roles(db: AsyncSession, user: User, claims: dict) -> None:
-    """Add any DCIM roles that the user's IdP-asserted roles map to.
-
-    Idempotent — duplicates are skipped. We don't currently remove
-    previously-assigned roles when an IdP role disappears; that needs
-    a 'source' column on UserRole to distinguish OIDC-managed rows
-    from manual admin assignments. Tracked as a follow-up.
-    """
-    idp_roles = _extract_idp_roles(claims)
-    if not idp_roles:
-        return
-    mappings = (
-        await db.execute(
-            select(OidcRoleMapping).where(OidcRoleMapping.idp_role.in_(idp_roles))
-        )
-    ).scalars().all()
-    if not mappings:
-        return
-    existing = {
-        ur.role_id
-        for ur in (
-            await db.execute(select(UserRole).where(UserRole.user_id == user.id))
-        ).scalars().all()
-    }
-    for m in mappings:
-        if m.dcim_role_id in existing:
-            continue
-        # Confirm the DCIM role still exists before binding.
-        if (await db.get(Role, m.dcim_role_id)) is None:
-            continue
-        db.add(UserRole(user_id=user.id, role_id=m.dcim_role_id))
-        existing.add(m.dcim_role_id)
 
 async def _upsert_oidc_user(
-    db: AsyncSession, *, sub: str, email: str, name: str | None, claims: dict,
+    db: AsyncSession, *, sub: str, email: str, name: str | None,
 ) -> User:
     """Match by sso_subject first, then email — handles users who pre-exist as
     local break-glass accounts before SSO went live."""
@@ -236,13 +208,11 @@ async def _upsert_oidc_user(
     if user is None:
         user = User(email=email, display_name=name, sso_subject=sub, is_active=True)
         db.add(user)
-        await db.flush()  # need user.id for role sync
     else:
         user.sso_subject = sub
         if name and not user.display_name:
             user.display_name = name
     user.last_login_at = datetime.now(UTC)  # type: ignore[assignment]
-    await _sync_oidc_roles(db, user, claims)
     await db.commit()
     await db.refresh(user)
     return user

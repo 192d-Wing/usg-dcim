@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..errors import AuthError, ScopeError
 from ..models.auth import ApiToken, User
-from .scope import Scope, scope_for_user, site_matches_scope
+from .scope import Scope, caps_from_idp_roles, scope_for_user, site_matches_scope
 from .tokens import decode_user_jwt, hash_api_token
 
 bearer = HTTPBearer(auto_error=False)
@@ -58,7 +58,17 @@ async def _principal_from_jwt(
     user = await db.get(User, user_id)
     if user is None or not user.is_active:
         raise AuthError("user not found or inactive")
+
+    # Persistent caps (manual UserRole assignments + their RoleScope rows).
     caps = await scope_for_user(db, user)
+
+    # IdP-derived caps — zero-trust: re-resolved from the JWT's idp_roles
+    # claim against oidc_role_mappings on every request, never persisted.
+    # The JWT TTL bounds how long an IdP revocation can take effect.
+    idp_caps = await caps_from_idp_roles(db, claims.get("idp_roles") or [])
+    for code, scope in idp_caps.items():
+        caps[code] = caps.get(code, Scope()).union(scope)
+
     return Principal(user=user, token=None, capabilities=caps, label=user.email, ip=ip)
 
 

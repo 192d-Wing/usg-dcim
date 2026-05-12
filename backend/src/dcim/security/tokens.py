@@ -14,10 +14,29 @@ from ..settings import get_settings
 _settings = get_settings()
 
 
-def issue_user_jwt(user_id: str, *, ttl: int | None = None) -> str:
+def issue_user_jwt(
+    user_id: str,
+    *,
+    ttl: int | None = None,
+    idp_roles: list[str] | None = None,
+) -> str:
+    """Mint a session JWT for `user_id`.
+
+    Pass `idp_roles` to embed the role strings the IdP asserted for
+    this user. The Principal builder reads them and resolves caps
+    via `oidc_role_mappings` per request — that's the zero-trust
+    pivot: no persisted UserRole row carries OIDC-derived authority.
+    """
     now = datetime.now(UTC)
     exp = now + timedelta(seconds=ttl or _settings.jwt_ttl_seconds)
-    payload = {"sub": user_id, "iat": int(now.timestamp()), "exp": int(exp.timestamp()), "kind": "user"}
+    payload: dict = {
+        "sub": user_id,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "kind": "user",
+    }
+    if idp_roles:
+        payload["idp_roles"] = sorted(set(idp_roles))
     return jwt.encode(payload, _settings.jwt_secret, algorithm=_settings.jwt_algorithm)
 
 
