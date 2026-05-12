@@ -22,7 +22,12 @@ from ..security.rate_limit import SlidingWindowLimiter
 from ..schemas.auth import ApiTokenOut, LoginRequest, TokenIssue, TokenOut
 
 from ..security.deps import AuthenticatedUser, Principal, find_matching_capability, require_capability
-from ..security.tokens import generate_api_token, issue_user_jwt
+from ..security.tokens import (
+    decrypt_refresh_token,
+    encrypt_refresh_token,
+    generate_api_token,
+    issue_user_jwt,
+)
 from ..settings import get_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -267,7 +272,13 @@ async def oidc_callback(
     if not sub or not email:
         await _audit_login_failure(db, ip=ip, email=email, reason="missing_claims")
         raise AuthError("oidc claims missing sub/email")
-    user = await _upsert_oidc_user(db, sub=sub, email=email, name=claims.get("name"))
+    user = await _upsert_oidc_user(
+        db,
+        sub=sub,
+        email=email,
+        name=claims.get("name"),
+        refresh_token=tokens.get("refresh_token"),
+    )
     # MFA flag: RFC 8176 amr claim. We treat any of the configured
     # mfa_amr_values as satisfying the policy (Keycloak emits "mfa"
     # when its flow enforced one; "otp"/"hwk" appear with specific
@@ -354,7 +365,12 @@ def _extract_idp_roles(claims: dict) -> set[str]:
 
 
 async def _upsert_oidc_user(
-    db: AsyncSession, *, sub: str, email: str, name: str | None,
+    db: AsyncSession,
+    *,
+    sub: str,
+    email: str,
+    name: str | None,
+    refresh_token: str | None = None,
 ) -> User:
     """Match by sso_subject first, then email — handles users who pre-exist as
     local break-glass accounts before SSO went live."""
@@ -371,6 +387,14 @@ async def _upsert_oidc_user(
         if name and not user.display_name:
             user.display_name = name
     user.last_login_at = datetime.now(UTC)  # type: ignore[assignment]
+    # Stash the IdP refresh_token (encrypted) so /auth/refresh can mint
+    # a fresh session JWT without an interactive Keycloak round-trip.
+    # Keycloak only emits a refresh_token when offline_access scope was
+    # requested OR for confidential clients in standard flow — both apply
+    # to our dcim-spa client, so this is normally present.
+    if refresh_token:
+        user.idp_refresh_token = encrypt_refresh_token(refresh_token)
+        user.idp_refresh_token_iat = datetime.now(UTC)  # type: ignore[assignment]
     await db.commit()
     await db.refresh(user)
     return user
@@ -385,6 +409,114 @@ async def whoami(principal: AuthenticatedUser) -> dict:
         "via_token": principal.token is not None,
         "capabilities": sorted(principal.capabilities.keys()),
     }
+
+
+@router.post("/refresh", response_model=TokenOut)
+async def refresh_session(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenOut:
+    """Mint a fresh session JWT for the caller using their IdP refresh_token.
+
+    Identifies the caller by decoding the bearer token (with expiry
+    verification disabled — that's the whole point), then uses the
+    encrypted IdP refresh_token stored on User.idp_refresh_token to
+    hit Keycloak's token endpoint and obtain new tokens. Updates
+    idp_roles + mfa from the fresh id_token.
+
+    Returns 401 if no bearer present, the token is unparseable, the
+    user has no stored refresh_token, or the IdP rejects it (the
+    refresh_token has its own TTL — typically 30 days for Keycloak's
+    default). On IdP rejection we also clear the stored token so the
+    next attempt fails fast.
+    """
+    settings = get_settings()
+    if not settings.oidc_issuer or not settings.oidc_client_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, _OIDC_NOT_CONFIGURED)
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        raise AuthError("missing bearer")
+    raw = auth_header[7:]
+    try:
+        claims = jose_jwt.decode(
+            raw,
+            settings.jwt_secret,
+            algorithms=[settings.jwt_algorithm],
+            options={"verify_exp": False},
+        )
+    except Exception as exc:
+        raise AuthError("invalid bearer") from exc
+    user = await db.get(User, UUID(claims["sub"]))
+    if user is None or not user.is_active:
+        raise AuthError("user not found or inactive")
+    if not user.idp_refresh_token:
+        raise AuthError("no refresh token on file; sign in again")
+    try:
+        plain_refresh = decrypt_refresh_token(user.idp_refresh_token)
+    except Exception as exc:
+        raise AuthError("refresh token unreadable") from exc
+
+    meta = await _oidc_metadata()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            meta["token_endpoint"],
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": plain_refresh,
+                "client_id": settings.oidc_client_id,
+                "client_secret": settings.oidc_client_secret or "",
+            },
+        )
+        if resp.status_code != 200:
+            # Refresh token rejected by IdP — clear it so we don't try
+            # again on the next refresh call. Operator must re-auth.
+            user.idp_refresh_token = None
+            user.idp_refresh_token_iat = None
+            await db.commit()
+            raise AuthError(f"idp refresh rejected: {resp.text}")
+        new_tokens = resp.json()
+        new_id_token = new_tokens.get("id_token")
+        if not new_id_token:
+            raise AuthError("idp refresh response missing id_token")
+        jwks_resp = await client.get(meta["jwks_uri"])
+        jwks_resp.raise_for_status()
+        jwks = jwks_resp.json()
+
+    # Verify signature/aud/iss on the fresh id_token, then re-derive
+    # idp_roles + mfa from its claims. Skip nonce check on refresh —
+    # the refreshed id_token doesn't carry the original session nonce.
+    try:
+        new_claims = jose_jwt.decode(
+            new_id_token, jwks,
+            algorithms=["RS256"],
+            audience=settings.oidc_client_id,
+            issuer=meta["issuer"],
+            access_token=new_tokens.get("access_token"),
+            options={"verify_at_hash": bool(new_tokens.get("access_token"))},
+        )
+    except Exception as exc:
+        raise AuthError(f"refreshed id_token invalid: {exc}") from exc
+
+    amr_claim = new_claims.get("amr") or []
+    mfa_satisfied = isinstance(amr_claim, list) and any(
+        v in settings.mfa_amr_values for v in amr_claim
+    )
+    # Keycloak rotates the refresh_token by default — stash the new one.
+    if new_tokens.get("refresh_token"):
+        user.idp_refresh_token = encrypt_refresh_token(new_tokens["refresh_token"])
+        user.idp_refresh_token_iat = datetime.now(UTC)  # type: ignore[assignment]
+    user.last_login_at = datetime.now(UTC)  # type: ignore[assignment]
+    await db.commit()
+
+    return TokenOut(
+        access_token=issue_user_jwt(
+            str(user.id),
+            idp_roles=sorted(_extract_idp_roles(new_claims)),
+            mfa=mfa_satisfied,
+        ),
+        expires_in=settings.jwt_ttl_seconds,
+        id_token=new_id_token,
+    )
 
 
 @router.post("/logout", status_code=204)

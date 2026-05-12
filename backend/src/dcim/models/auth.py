@@ -5,7 +5,7 @@ from __future__ import annotations
 import enum
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,6 +50,11 @@ class User(UUIDPrimaryKey, Timestamped, Base):
     sso_subject: Mapped[str | None] = mapped_column(String(255))
     password_hash: Mapped[str | None] = mapped_column(String(255))  # break-glass only
     last_login_at: Mapped[str | None] = mapped_column(DateTime(timezone=True))
+    # Encrypted (Fernet) IdP refresh_token + its issue time. Powers
+    # /auth/refresh — lets the SPA mint a fresh session JWT without
+    # an interactive Keycloak round-trip until the IdP itself expires.
+    idp_refresh_token: Mapped[str | None] = mapped_column(Text)
+    idp_refresh_token_iat: Mapped[str | None] = mapped_column(DateTime(timezone=True))
 
     role_assignments: Mapped[list[UserRole]] = relationship(back_populates="user")
 

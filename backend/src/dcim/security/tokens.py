@@ -93,3 +93,39 @@ def hash_api_token(plaintext: str) -> str:
 
 def constant_time_eq(a: str, b: str) -> bool:
     return hmac.compare_digest(a, b)
+
+
+# IdP refresh-token at-rest encryption. Same Fernet key (dns_dnssec_secret)
+# the DNS plane uses for DnsKey.private_pem; reusing avoids one more
+# secret to manage. Prefix lets us distinguish encrypted from legacy
+# plaintext rows (none should exist post-migration, but defense in depth).
+_REFRESH_ENC_PREFIX = "enc:v1:"
+
+
+def _refresh_fernet():
+    """Lazy Fernet keyed by settings.dns_dnssec_secret. None if unset —
+    callers fall back to plaintext storage with a structlog warning."""
+    secret = _settings.dns_dnssec_secret
+    if not secret:
+        return None
+    from cryptography.fernet import Fernet
+    return Fernet(secret.encode("ascii") if isinstance(secret, str) else secret)
+
+
+def encrypt_refresh_token(plain: str) -> str:
+    f = _refresh_fernet()
+    if f is None:
+        return plain
+    return _REFRESH_ENC_PREFIX + f.encrypt(plain.encode("utf-8")).decode("ascii")
+
+
+def decrypt_refresh_token(stored: str) -> str:
+    if not stored.startswith(_REFRESH_ENC_PREFIX):
+        return stored
+    f = _refresh_fernet()
+    if f is None:
+        raise RuntimeError(
+            "dns_dnssec_secret is unset but the stored refresh_token "
+            "is encrypted; set DCIM_DNS_DNSSEC_SECRET to the original key",
+        )
+    return f.decrypt(stored[len(_REFRESH_ENC_PREFIX):].encode("ascii")).decode("utf-8")
