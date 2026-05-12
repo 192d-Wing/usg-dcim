@@ -493,6 +493,85 @@ back to its previous config.
 - NSEC3 → NSEC: `DELETE /api/v1/dns/zones/$ZONE_ID/nsec3`. The
   renderer switches back to the upstream `dnssec` plugin block.
 
+## DoH / DoT on the recursive
+
+Encrypted DNS to clients (DNS-over-HTTPS, RFC 8484; DNS-over-TLS,
+RFC 7858). Both ride the same TLS cert and listen on the recursive
+Hickory pod alongside the existing plain DNS on :53.
+
+**Image:** requires the custom `hickory-prom:v0.26.0-2`+ image built
+with `tls-ring` + `https-ring` Cargo features (the v0.26.0-1 image
+shipped before this feature lands rejects `tls_listen_port` on
+parse). Pull `ghcr.io/192d-wing/hickory-prom:latest` or rebuild
+from `infra/hickory-prom/` if you maintain your own registry.
+
+**Cert format:** Hickory wants the certificate chain + private key
+concatenated into a single PEM file. Mount it into the recursive
+container at a known path (e.g. `/etc/dcim-dns/tls.pem`).
+
+**Enable:** set these on the central api environment:
+
+```bash
+DCIM_DNS_HICKORY_DOH_ENABLED=true
+DCIM_DNS_HICKORY_DOT_ENABLED=true
+DCIM_DNS_HICKORY_TLS_CERT_PATH=/etc/dcim-dns/tls.pem
+# defaults below — override only if you need non-standard ports
+DCIM_DNS_HICKORY_TLS_LISTEN_PORT=853
+DCIM_DNS_HICKORY_HTTPS_LISTEN_PORT=443
+DCIM_DNS_HICKORY_DOH_PATH=/dns-query
+```
+
+The next bundle poll renders a `[tls_cert]` block + the listener
+ports into the recursive's config.toml; Hickory reloads on SIGHUP
+and starts answering on 853/443. Plain DNS on :53 stays on
+regardless — operators flip individual clients to DoT/DoH on their
+own schedule.
+
+**Test the listeners:**
+
+```bash
+# DoT — kdig from `knot-dnsutils` is the canonical client
+kdig +tls @<recursive-ip> -p 853 example.com
+
+# DoH — curl with the dns-message MIME type
+curl --resolve dns.example.com:443:<recursive-ip> \
+  -H 'accept: application/dns-message' \
+  "https://dns.example.com:443/dns-query?dns=$(printf 'example.com' | base64url-encode)"
+```
+
+If the cert's SAN doesn't include the address clients hit, they'll
+trip on hostname verification — use a real DNS name in the cert and
+have clients resolve it (typically via the same recursive 😅).
+
+## Recursive rate-limiting
+
+**Status: not natively supported.** Hickory 0.26 exposes
+`allow_networks` / `deny_networks` (CIDR allow/deny lists) but no
+QPS-based rate-limiter. The roadmap item is parked pending either
+an upstream PR to Hickory or one of the out-of-band approaches
+below.
+
+**Today's options** for sites that need protection from
+amplification / DoS:
+
+- **Host-side nftables/iptables `hashlimit`** on UDP/TCP 53. This
+  is the standard production answer; not driven from DCIM but
+  works regardless of resolver. Sample rule on the recursive host:
+
+  ```bash
+  nft add rule inet filter input udp dport 53 \
+    meter ratelimit { ip saddr limit rate 100/second } accept
+  ```
+
+- **`deny_networks` for known abusers** via a per-fabric setting —
+  DCIM can render this into the Hickory config today, but it's
+  binary allow/deny rather than per-second budget. Use for blocking
+  scanner IPs after the fact, not as DoS prevention.
+
+- **A dnsdist sidecar** in front of Hickory if you need real
+  per-client QPS limits + selective blocking. Heaviest option but
+  the most flexible.
+
 ## Pointers
 
 - Admin / deployment: [admin-guide.md](admin-guide.md)

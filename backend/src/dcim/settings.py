@@ -135,6 +135,27 @@ class Settings(BaseSettings):
     dns_hickory_prom_metrics: bool = True
     dns_hickory_prom_port: int = 9090
 
+    # DoT / DoH on the Hickory recursive. Requires the
+    # `hickory-prom:v0.26.0-2`+ image (built with `tls-ring` +
+    # `https-ring` Cargo features). When BOTH cert and key paths
+    # are set AND a matching enable flag is true, the renderer
+    # emits the listener config + a `[tls_cert]` block. Hickory
+    # 0.26 wants cert and key in two separate PEM files (not one
+    # bundle) — operators mount both files into the recursive
+    # container, typically `/etc/dcim-dns/tls.crt` +
+    # `/etc/dcim-dns/tls.key`. Either path empty means TLS/HTTPS
+    # stay off, even when the enable flag is true.
+    dns_hickory_dot_enabled: bool = False
+    dns_hickory_doh_enabled: bool = False
+    dns_hickory_tls_listen_port: int = 853
+    dns_hickory_https_listen_port: int = 443
+    dns_hickory_tls_cert_path: str = ""
+    dns_hickory_tls_key_path: str = ""
+    # HTTP path the DoH listener answers on. Most clients hard-code
+    # `/dns-query` per RFC 8484 §4.1; override only if pinning a
+    # different path for a private deployment.
+    dns_hickory_doh_path: str = "/dns-query"
+
     # Emit a `dnstap` directive in the CoreDNS auth Corefile so every
     # query lands on a UNIX socket the collector tails. Powers the
     # per-name top-K reservoir behind the dashboard's "Top queried

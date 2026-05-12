@@ -34,19 +34,24 @@ RUN git clone --depth=1 --branch ${HICKORY_VERSION} https://github.com/hickory-d
 
 WORKDIR /src/hickory-dns
 
-# Build the bin with prometheus-metrics + dnssec-ring on top of the
-# default feature set (sqlite, resolver, rustls-platform-verifier).
+# Build the bin with prometheus-metrics + dnssec-ring + DoT + DoH on
+# top of the default feature set (sqlite, resolver,
+# rustls-platform-verifier).
 #
 #   prometheus-metrics : exposes /metrics for the collector to scrape
 #   dnssec-ring        : validates RRSIGs on forwarded answers, so a
 #                        recursive that forwards to a signed auth zone
 #                        actually catches tampering
+#   tls-ring           : DNS-over-TLS listener on port 853
+#   https-ring         : DNS-over-HTTPS listener on port 443
 #
-# We deliberately don't enable __tls / __https / __quic — none of the
-# site stack's DoT/DoH paths are wired today, and pulling rustls in
-# bloats the binary by ~5 MB for unused code.
+# QUIC (DoQ) is intentionally left out — it lives behind feature
+# `quic-ring` and the rustls quic flavor needs a different cipher
+# config; the operator demand for it isn't there yet. The TLS +
+# HTTPS combo adds ~7 MB of rustls + tower deps to the binary,
+# acceptable now that DoH/DoT are first-class features in DCIM.
 RUN cargo build --release --bin hickory-dns \
-    --features "prometheus-metrics dnssec-ring"
+    --features "prometheus-metrics dnssec-ring tls-ring https-ring"
 
 # ---------- runtime stage -----------------------------------------------------
 

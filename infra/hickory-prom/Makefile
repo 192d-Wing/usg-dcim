@@ -4,7 +4,7 @@
 
 IMAGE           ?= ghcr.io/192d-wing/hickory-prom
 HICKORY_VERSION ?= v0.26.0
-REVISION        ?= 1
+REVISION        ?= 2
 TAG             ?= $(HICKORY_VERSION)-$(REVISION)
 
 .PHONY: build push clean

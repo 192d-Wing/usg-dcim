@@ -1038,6 +1038,7 @@ def render_hickory_recursive_config(
         port = get_settings().dns_hickory_prom_port
         lines.append(f'prometheus_listen_addr = "0.0.0.0:{port}"')
         lines.append("")
+    lines.extend(_hickory_tls_lines(get_settings()))
     # Forward queries back to the local auth pod for each apex —
     # internal lookups never leave the site.
     if auth_unicast_ip:
@@ -1103,6 +1104,47 @@ def _hickory_primary_zone(zone_name: str, file_path: str) -> list[str]:
         f'file = "{file_path}"',
         "",
     ]
+
+
+def _hickory_tls_lines(settings) -> list[str]:
+    """DoT + DoH listener config. Both modes share one `[tls_cert]`
+    block — Hickory uses the same cert for TLS and HTTPS listeners.
+    Hickory 0.26's `TlsCertConfig` requires `path` (cert) AND
+    `private_key` (key) as separate files, hence two settings.
+
+    Empty cert OR key path disables emission entirely so the
+    renderer is safe on operators who haven't provisioned a cert
+    yet. Either enable flag being true with missing paths skips
+    the block silently; the alternative (rendering with stub
+    paths) would crash Hickory at config-load time.
+
+    Requires the `hickory-prom:v0.26.0-2`+ image (tls-ring +
+    https-ring features compiled in). The stock upstream image
+    rejects `tls_listen_port` / `https_listen_port` on parse."""
+    cert = settings.dns_hickory_tls_cert_path
+    key = settings.dns_hickory_tls_key_path
+    dot = settings.dns_hickory_dot_enabled
+    doh = settings.dns_hickory_doh_enabled
+    if not cert or not key or not (dot or doh):
+        return []
+    lines: list[str] = []
+    if dot:
+        lines.append(
+            f"tls_listen_port = {settings.dns_hickory_tls_listen_port}"
+        )
+    if doh:
+        lines.append(
+            f"https_listen_port = {settings.dns_hickory_https_listen_port}"
+        )
+        lines.append(
+            f'http_endpoint = "{settings.dns_hickory_doh_path}"'
+        )
+    lines.append("")
+    lines.append("[tls_cert]")
+    lines.append(f'path = "{cert}"')
+    lines.append(f'private_key = "{key}"')
+    lines.append("")
+    return lines
 
 
 def _hickory_forward_zone(
