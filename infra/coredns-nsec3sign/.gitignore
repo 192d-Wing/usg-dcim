@@ -1,0 +1,7 @@
+# Go build artifacts. go.sum is intentionally NOT ignored — we want
+# checksums in version control once the module first builds.
+/coredns
+/out/
+*.test
+*.out
+vendor/

@@ -1,0 +1,13 @@
+# The Dockerfile vendors this directory into the build context with
+# COPY . /src/plugin, so we only want the Go module + its files.
+# Everything below either isn't needed at build time or would bloat
+# the build context.
+
+.git
+.gitignore
+.dockerignore
+Dockerfile
+Makefile
+README.md
+**/*.md
+**/*_test.go

@@ -1,0 +1,69 @@
+# Custom CoreDNS image with the `nsec3sign` plugin compiled in.
+#
+# CoreDNS plugins are linked at build time, not loaded at runtime, so
+# adding a new plugin means rebuilding the binary. This Dockerfile
+# clones CoreDNS at a pinned version, splices nsec3sign into its
+# plugin.cfg, points its module graph at our local source via a
+# `replace` directive, and runs the upstream's own `go generate` +
+# `go build` sequence to produce the binary.
+#
+# The output image is a drop-in for `coredns/coredns:<version>` — same
+# entrypoint, same `-conf` flag, same listening ports. The
+# `coredns-auth` service in infra/docker/site-dns/docker-compose.yml
+# can swap to this image without other config changes.
+
+ARG COREDNS_VERSION=v1.11.3
+ARG GO_VERSION=1.22
+
+# ---------- builder stage -----------------------------------------------------
+
+FROM golang:${GO_VERSION}-bookworm AS builder
+
+ARG COREDNS_VERSION
+
+WORKDIR /src
+
+# Vendor our plugin into the build context first. `.dockerignore`
+# trims down what comes in so we don't ship the rest of the monorepo.
+COPY . /src/plugin
+
+# Clone CoreDNS at the pinned tag. --depth=1 keeps the image build
+# fast; we never need its full history.
+RUN git clone --depth=1 --branch ${COREDNS_VERSION} https://github.com/coredns/coredns.git
+
+WORKDIR /src/coredns
+
+# Splice the plugin into plugin.cfg directly after `dnssec` so the
+# two siblings live in the same response-chain slot. plugin.cfg order
+# matters: CoreDNS invokes plugins top-down on the request and
+# bottom-up on the response, so a misplaced entry would put the
+# signer in the wrong position relative to the data source.
+#
+# The grep guards against an upstream change moving the dnssec line —
+# we'd rather fail loudly than silently misorder the chain.
+RUN grep -q '^dnssec:dnssec$' plugin.cfg \
+    || (echo 'dnssec line moved in plugin.cfg; revisit the splice' >&2 && exit 1) \
+ && sed -i '/^dnssec:dnssec$/a nsec3sign:github.com/192d-wing/coredns-nsec3sign/nsec3sign' plugin.cfg \
+ && grep '^nsec3sign:' plugin.cfg
+
+# Redirect the dep to our local copy. The require line takes a
+# placeholder version because `replace` overrides version resolution
+# entirely; Go still needs *some* require to know the import is in
+# the module graph.
+ENV GOFLAGS=-mod=mod
+RUN go mod edit -require=github.com/192d-wing/coredns-nsec3sign@v0.0.0-00010101000000-000000000000 \
+ && go mod edit -replace=github.com/192d-wing/coredns-nsec3sign=/src/plugin \
+ && go generate \
+ && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/coredns .
+
+# ---------- runtime stage -----------------------------------------------------
+
+# Match the stock coredns image: distroless, non-root, statically
+# linked. Operators can swap image references without revisiting
+# anything else in the compose / k8s manifests.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=builder /out/coredns /coredns
+
+EXPOSE 53 53/udp
+ENTRYPOINT ["/coredns"]
