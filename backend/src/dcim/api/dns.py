@@ -1539,6 +1539,9 @@ async def create_anycast_group(
     principal: Principal = Depends(require_capability("dns:anycast-groups:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "dns:anycast-groups:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -1567,6 +1570,7 @@ async def update_anycast_group(
     obj = await db.get(AnycastGroup, group_id)
     if obj is None:
         raise NotFoundError(_ANYCAST_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:anycast-groups:update")
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -1588,6 +1592,7 @@ async def delete_anycast_group(
     obj = await db.get(AnycastGroup, group_id)
     if obj is None:
         raise NotFoundError(_ANYCAST_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:anycast-groups:delete")
     bound = (
         await db.execute(
             select(DnsServer.id).where(DnsServer.anycast_group_id == group_id).limit(1)
@@ -1632,6 +1637,9 @@ async def create_forwarder(
     principal: Principal = Depends(require_capability("dns:forwarders:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "dns:forwarders:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -1664,6 +1672,7 @@ async def update_forwarder(
     obj = await db.get(DnsForwarder, forwarder_id)
     if obj is None:
         raise NotFoundError(_FORWARDER_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:forwarders:update")
     diff = payload.model_dump(exclude_unset=True)
     if "upstreams" in diff and diff["upstreams"] is not None and not diff["upstreams"]:
         raise ValidationError("at least one upstream is required")
@@ -1687,6 +1696,7 @@ async def delete_forwarder(
     obj = await db.get(DnsForwarder, forwarder_id)
     if obj is None:
         raise NotFoundError(_FORWARDER_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:forwarders:delete")
     # Snapshot before deletion so the audit row stands on its own.
     snapshot = {
         "name": obj.name,
@@ -1731,6 +1741,9 @@ async def create_blocklist(
     principal: Principal = Depends(require_capability("dns:blocklists:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "dns:blocklists:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -1759,6 +1772,7 @@ async def update_blocklist(
     obj = await db.get(DnsBlocklist, blocklist_id)
     if obj is None:
         raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:blocklists:update")
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -1780,6 +1794,7 @@ async def delete_blocklist(
     obj = await db.get(DnsBlocklist, blocklist_id)
     if obj is None:
         raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:blocklists:delete")
     snapshot = {"name": obj.name, "action": obj.action.value}
     # ON DELETE CASCADE on dns_blocklist_entries cleans up children.
     await db.execute(delete(DnsBlocklist).where(DnsBlocklist.id == blocklist_id))
@@ -1795,11 +1810,15 @@ async def delete_blocklist(
 async def list_blocklist_entries(
     blocklist_id: UUID,
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability("dns:blocklists:read")),
+    principal: Principal = Depends(require_capability("dns:blocklists:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    if (await db.get(DnsBlocklist, blocklist_id)) is None:
+    blocklist = await db.get(DnsBlocklist, blocklist_id)
+    if blocklist is None:
         raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, blocklist.fabric_id, "dns:blocklists:read",
+    )
     stmt = select(DnsBlocklistEntry).where(DnsBlocklistEntry.blocklist_id == blocklist_id)
     return await paginate(
         db, stmt, model=DnsBlocklistEntry,
@@ -1817,8 +1836,12 @@ async def create_blocklist_entry(
     principal: Principal = Depends(require_capability("dns:blocklists:update")),
     db: AsyncSession = Depends(get_db),
 ):
-    if (await db.get(DnsBlocklist, blocklist_id)) is None:
+    blocklist = await db.get(DnsBlocklist, blocklist_id)
+    if blocklist is None:
         raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, blocklist.fabric_id, "dns:blocklists:update",
+    )
     obj = DnsBlocklistEntry(blocklist_id=blocklist_id, **payload.model_dump())
     db.add(obj)
     await db.flush()
@@ -1842,8 +1865,12 @@ async def bulk_add_blocklist_entries(
     """Idempotent bulk insert for threat-feed style imports. Existing
     (blocklist, pattern) pairs are silently skipped via the unique
     constraint; the response reports the net adds."""
-    if (await db.get(DnsBlocklist, blocklist_id)) is None:
+    blocklist = await db.get(DnsBlocklist, blocklist_id)
+    if blocklist is None:
         raise NotFoundError(_BLOCKLIST_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, blocklist.fabric_id, "dns:blocklists:update",
+    )
     # Dedup within the payload first so the audit count is honest.
     incoming = {p.strip().lower() for p in payload.patterns if p.strip()}
     if not incoming:
@@ -1878,6 +1905,12 @@ async def delete_blocklist_entry(
     obj = await db.get(DnsBlocklistEntry, entry_id)
     if obj is None or obj.blocklist_id != blocklist_id:
         raise NotFoundError(_BLOCKLIST_ENTRY_NOT_FOUND)
+    blocklist = await db.get(DnsBlocklist, blocklist_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        blocklist.fabric_id if blocklist else None,
+        "dns:blocklists:update",
+    )
     snapshot = {"pattern": obj.pattern}
     await db.execute(delete(DnsBlocklistEntry).where(DnsBlocklistEntry.id == entry_id))
     await audit.record(
@@ -1917,6 +1950,9 @@ async def create_view(
     principal: Principal = Depends(require_capability("dns:views:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "dns:views:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -1943,6 +1979,7 @@ async def update_view(
     obj = await db.get(DnsView, view_id)
     if obj is None:
         raise NotFoundError(_VIEW_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:views:update")
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -1964,6 +2001,7 @@ async def delete_view(
     obj = await db.get(DnsView, view_id)
     if obj is None:
         raise NotFoundError(_VIEW_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:views:delete")
     # ON DELETE SET NULL on dns_records.view_id keeps records around
     # but un-scopes them — they revert to the default-view answer.
     snapshot = {"name": obj.name, "match_cidrs": list(obj.match_cidrs or [])}
@@ -2005,6 +2043,9 @@ async def create_health_check(
     principal: Principal = Depends(require_capability("dns:health-checks:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "dns:health-checks:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -2035,6 +2076,7 @@ async def update_health_check(
     obj = await db.get(DnsHealthCheck, check_id)
     if obj is None:
         raise NotFoundError(_HC_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:health-checks:update")
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -2056,6 +2098,7 @@ async def delete_health_check(
     obj = await db.get(DnsHealthCheck, check_id)
     if obj is None:
         raise NotFoundError(_HC_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:health-checks:delete")
     # ON DELETE SET NULL on dns_records.health_check_id keeps records
     # but stops gating them.
     await db.execute(delete(DnsHealthCheck).where(DnsHealthCheck.id == check_id))

@@ -367,6 +367,9 @@ async def create_vrf_bgp_peer(
     vrf = await db.get(Vrf, payload.vrf_id)
     if vrf is None:
         raise NotFoundError(_VRF_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, vrf.fabric_id, "ipam:vrf-bgp-peers:create",
+    )
     peer = await db.get(BgpPeer, payload.bgp_peer_id)
     if peer is None:
         raise NotFoundError("bgp peer not found")
@@ -407,6 +410,12 @@ async def update_vrf_bgp_peer(
     obj = await db.get(VrfBgpPeer, binding_id)
     if obj is None:
         raise NotFoundError(_VRF_BGP_PEER_NOT_FOUND)
+    vrf = await db.get(Vrf, obj.vrf_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        vrf.fabric_id if vrf else None,
+        "ipam:vrf-bgp-peers:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -428,6 +437,12 @@ async def delete_vrf_bgp_peer(
     obj = await db.get(VrfBgpPeer, binding_id)
     if obj is None:
         raise NotFoundError(_VRF_BGP_PEER_NOT_FOUND)
+    vrf = await db.get(Vrf, obj.vrf_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        vrf.fabric_id if vrf else None,
+        "ipam:vrf-bgp-peers:delete",
+    )
     await db.execute(delete(VrfBgpPeer).where(VrfBgpPeer.id == binding_id))
     await audit.record(
         db, principal, action="vrf_bgp_peer.delete",
@@ -474,6 +489,9 @@ async def create_supernet(
     principal: Principal = Depends(require_capability("ipam:supernets:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "ipam:supernets:create",
+    )
     vrf = await db.get(Vrf, payload.vrf_id)
     if vrf is None or vrf.fabric_id != payload.fabric_id:
         raise ValidationError("vrf does not belong to that fabric")
@@ -516,6 +534,9 @@ async def update_supernet(
     obj = await db.get(Supernet, supernet_id)
     if obj is None:
         raise NotFoundError(_SUPERNET_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:supernets:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     if "parent_supernet_id" in diff and diff["parent_supernet_id"] is not None:
         if diff["parent_supernet_id"] == supernet_id:
@@ -553,6 +574,9 @@ async def delete_supernet(
     obj = await db.get(Supernet, supernet_id)
     if obj is None:
         raise NotFoundError(_SUPERNET_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:supernets:delete",
+    )
     in_use = (
         await db.execute(select(Subnet.id).where(Subnet.supernet_id == supernet_id).limit(1))
     ).scalar_one_or_none()
@@ -1125,6 +1149,9 @@ async def create_overlay(
     principal: Principal = Depends(require_capability("ipam:overlays:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "ipam:overlays:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -1155,6 +1182,9 @@ async def update_overlay(
     obj = await db.get(Overlay, overlay_id)
     if obj is None:
         raise NotFoundError(_OVERLAY_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:overlays:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     if "underlay_vrf_id" in diff and diff["underlay_vrf_id"] is not None:
         vrf = await db.get(Vrf, diff["underlay_vrf_id"])
@@ -1180,6 +1210,9 @@ async def delete_overlay(
     obj = await db.get(Overlay, overlay_id)
     if obj is None:
         raise NotFoundError(_OVERLAY_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:overlays:delete",
+    )
     blocked = (
         await db.execute(select(Vni.id).where(Vni.overlay_id == overlay_id).limit(1))
     ).scalar_one_or_none()
@@ -1228,6 +1261,9 @@ async def create_vni(
     overlay = await db.get(Overlay, payload.overlay_id)
     if overlay is None:
         raise ValidationError(f"overlay {payload.overlay_id} not found")
+    await enforce_fabric_scope(
+        db, principal.capabilities, overlay.fabric_id, "ipam:vnis:create",
+    )
     ipam_svc.assert_vni_in_range(payload.vni)
     ipam_svc.assert_vni_kind_consistent(
         kind=payload.kind, vlan_id=payload.vlan_id, vrf_id=payload.vrf_id,
@@ -1269,6 +1305,12 @@ async def update_vni(
     obj = await db.get(Vni, vni_id)
     if obj is None:
         raise NotFoundError(_VNI_NOT_FOUND)
+    overlay = await db.get(Overlay, obj.overlay_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        overlay.fabric_id if overlay else None,
+        "ipam:vnis:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     new_kind = diff.get("kind", obj.kind)
     new_vlan = diff.get("vlan_id", obj.vlan_id)
@@ -1299,6 +1341,12 @@ async def delete_vni(
     obj = await db.get(Vni, vni_id)
     if obj is None:
         raise NotFoundError(_VNI_NOT_FOUND)
+    overlay = await db.get(Overlay, obj.overlay_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        overlay.fabric_id if overlay else None,
+        "ipam:vnis:delete",
+    )
     bound_subnet = (
         await db.execute(select(Subnet.id).where(Subnet.vni_id == vni_id).limit(1))
     ).scalar_one_or_none()
@@ -1343,6 +1391,9 @@ async def create_vtep(
     overlay = await db.get(Overlay, payload.overlay_id)
     if overlay is None:
         raise ValidationError(f"overlay {payload.overlay_id} not found")
+    await enforce_fabric_scope(
+        db, principal.capabilities, overlay.fabric_id, "ipam:vteps:create",
+    )
     existing = (
         await db.execute(
             select(Vtep).where(
@@ -1375,6 +1426,12 @@ async def update_vtep(
     obj = await db.get(Vtep, vtep_id)
     if obj is None:
         raise NotFoundError(_VTEP_NOT_FOUND)
+    overlay = await db.get(Overlay, obj.overlay_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        overlay.fabric_id if overlay else None,
+        "ipam:vteps:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -1396,6 +1453,12 @@ async def delete_vtep(
     obj = await db.get(Vtep, vtep_id)
     if obj is None:
         raise NotFoundError(_VTEP_NOT_FOUND)
+    overlay = await db.get(Overlay, obj.overlay_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        overlay.fabric_id if overlay else None,
+        "ipam:vteps:delete",
+    )
     # Memberships cascade away cleanly because the VTEP is going.
     await db.execute(delete(VtepVniMembership).where(VtepVniMembership.vtep_id == vtep_id))
     await db.execute(delete(Vtep).where(Vtep.id == vtep_id))
@@ -1441,6 +1504,12 @@ async def create_vtep_membership(
     # row asserts something the data plane can't honor.
     if vtep.overlay_id != vni.overlay_id:
         raise ValidationError("vtep and vni must belong to the same overlay")
+    overlay = await db.get(Overlay, vtep.overlay_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        overlay.fabric_id if overlay else None,
+        "ipam:vtep-memberships:create",
+    )
     existing = (
         await db.execute(
             select(VtepVniMembership).where(
@@ -1473,6 +1542,13 @@ async def delete_vtep_membership(
     obj = await db.get(VtepVniMembership, membership_id)
     if obj is None:
         raise NotFoundError(_MEMBERSHIP_NOT_FOUND)
+    vtep = await db.get(Vtep, obj.vtep_id)
+    overlay = await db.get(Overlay, vtep.overlay_id) if vtep else None
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        overlay.fabric_id if overlay else None,
+        "ipam:vtep-memberships:delete",
+    )
     await db.execute(delete(VtepVniMembership).where(VtepVniMembership.id == membership_id))
     await audit.record(
         db, principal, action="vtep_vni_membership.delete",
@@ -1511,6 +1587,9 @@ async def create_dhcp_server(
     principal: Principal = Depends(require_capability("ipam:dhcp-servers:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "ipam:dhcp-servers:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -1542,6 +1621,9 @@ async def update_dhcp_server(
     obj = await db.get(DhcpServer, server_id)
     if obj is None:
         raise NotFoundError(_DHCP_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:dhcp-servers:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     # Don't echo the password into the audit diff.
     redacted = {k: ("***" if k == "auth_password" else v) for k, v in diff.items()}
@@ -1565,6 +1647,9 @@ async def delete_dhcp_server(
     obj = await db.get(DhcpServer, server_id)
     if obj is None:
         raise NotFoundError(_DHCP_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:dhcp-servers:delete",
+    )
     await db.execute(delete(DhcpServer).where(DhcpServer.id == server_id))
     await audit.record(
         db, principal, action="dhcp_server.delete",
@@ -1585,6 +1670,9 @@ async def sync_dhcp_server_now(
     obj = await db.get(DhcpServer, server_id)
     if obj is None:
         raise NotFoundError(_DHCP_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:dhcp-servers:update",
+    )
     result = await kea_svc.sync_dhcp_server(db, obj)
     await audit.record(
         db, principal, action="dhcp_server.sync",
