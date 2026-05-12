@@ -47,7 +47,25 @@ echo "$ISSUED_BEARER_TOKEN" > token
 chmod 0600 token
 ```
 
-### 3. Bring it up
+### 3. Authenticate to ghcr (one-time per host)
+
+The `coredns-auth` service pulls
+`ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-1` — a private package
+under the 192d-Wing org. Each Docker host that runs the site stack
+needs a one-time login with a PAT carrying `read:packages` scope and
+membership in the team granted access to the package:
+
+```bash
+echo "$GHCR_PAT" | docker login ghcr.io -u <github-user> --password-stdin
+```
+
+The login persists in `~/.docker/config.json` and survives host
+reboots; you only redo it when the PAT expires. If the pull fails
+with `denied`, double-check both that the user is a member of the
+team with read access on the package and that the PAT carries
+`read:packages` (not just `repo`).
+
+### 4. Bring it up
 
 ```bash
 docker compose -p site42 \
@@ -58,7 +76,7 @@ docker compose -p site42 \
 `-p site42` is the project name — change it per site so multiple site
 stacks can coexist on one Docker host.
 
-### 4. Verify
+### 5. Verify
 
 ```bash
 # Collector log should show dns_bundle_applied within ~30s
