@@ -17,6 +17,7 @@
     "@cloudscape-design/global-styles": "^1.0.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/utilities": "^3.2.2",
+    "@fontsource/lato": "^5.2.7",
     "@hookform/resolvers": "^3.9.0",
     "@refinedev/core": "^5.0.12",
     "@refinedev/react-hook-form": "^5.0.4",

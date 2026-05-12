@@ -2,8 +2,12 @@
    we keep a tiny shim for body typography + the dark-class wiring our
    index.html / main.tsx still toggles. */
 
+/* Lato is loaded by main.tsx via @fontsource. The --awsui-font-family-base
+   override propagates the font to Cloudscape components; body picks it
+   up via direct font-family for everything else. */
 :root {
   color-scheme: light;
+  --awsui-font-family-base: 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .dark {
@@ -16,6 +20,7 @@ html, body {
 }
 
 body {
+  font-family: 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 

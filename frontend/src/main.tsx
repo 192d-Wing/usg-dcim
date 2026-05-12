@@ -9,6 +9,10 @@ import { App } from './App';
 // look broken; dense data still reads fine at standard row heights.
 import '@cloudscape-design/global-styles/index.css';
 import { applyDensity, applyMode, Density, Mode } from '@cloudscape-design/global-styles';
+// Lato — self-hosted via @fontsource so the bundle doesn't depend on
+// Google Fonts at runtime. Two weights cover body (400) and headings (700).
+import '@fontsource/lato/400.css';
+import '@fontsource/lato/700.css';
 import './globals.css';
 
 applyDensity(Density.Comfortable);
