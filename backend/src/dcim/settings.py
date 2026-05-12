@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     # propagates within this window. 15 minutes is the tradeoff between
     # security (faster propagation) and UX (less-frequent re-auth).
     jwt_ttl_seconds: int = 900
+    # When true, /auth/login (form login with email+password) returns 403.
+    # admin@dcim.local remains in the DB for break-glass via the API token
+    # path if the seed creates one. Flip on in any deployment with SSO.
+    local_login_disabled: bool = False
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None

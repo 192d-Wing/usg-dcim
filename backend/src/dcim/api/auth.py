@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 import bcrypt
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from jose import jwt as jose_jwt
 from sqlalchemy import select
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..errors import AuthError, ForbiddenError
 from ..models.auth import ApiToken, User
+from ..security import audit
 from ..schemas.auth import ApiTokenOut, LoginRequest, TokenIssue, TokenOut
 
 from ..security.deps import AuthenticatedUser, Principal, find_matching_capability, require_capability
@@ -26,19 +27,56 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _OIDC_NOT_CONFIGURED = "OIDC not configured"
 
+def _anon_principal(label: str, ip: str | None) -> Principal:
+    """A Principal for unauthenticated audit events. Has no caps,
+    no user, no token — just an actor label + ip for the trail."""
+    return Principal(user=None, token=None, capabilities={}, label=label, ip=ip)
+
+
+async def _audit_login_failure(
+    db: AsyncSession, *, ip: str | None, email: str | None, reason: str,
+) -> None:
+    """Record a failed-login audit row, then commit it. Wrapped so the
+    AuthError raised after still surfaces; we don't want a failed audit
+    insert to mask the auth error, hence the try/except + best-effort
+    rollback."""
+    try:
+        await audit.record(
+            db,
+            _anon_principal(label=f"anonymous:{email or 'unknown'}", ip=ip),
+            action="login.failed",
+            success=False,
+            metadata={"email": email, "reason": reason},
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+
+
 @router.post("/login", response_model=TokenOut)
-async def login_local(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenOut:
+async def login_local(
+    payload: LoginRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> TokenOut:
     """Local password login — break-glass only. Production must use OIDC/SAML."""
     settings = get_settings()
-    if settings.env == "prod" and not settings.oidc_issuer and not settings.saml_metadata_url:
-        # allow only if explicitly configured to allow it
-        pass
+    ip = request.client.host if request.client else None
+    if settings.local_login_disabled:
+        await _audit_login_failure(db, ip=ip, email=payload.email, reason="local_login_disabled")
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail={"error": {"code": "local_login_disabled",
+                              "message": "local password login is disabled; use SSO"}},
+        )
 
     res = await db.execute(select(User).where(User.email == payload.email))
     user = res.scalar_one_or_none()
     if user is None or not user.is_active or not user.password_hash:
+        await _audit_login_failure(db, ip=ip, email=payload.email, reason="unknown_user")
         raise AuthError("invalid credentials")
     if not bcrypt.checkpw(payload.password.encode(), user.password_hash.encode()):
+        await _audit_login_failure(db, ip=ip, email=payload.email, reason="bad_password")
         raise AuthError("invalid credentials")
 
     user.last_login_at = datetime.now(UTC)  # type: ignore[assignment]
@@ -145,6 +183,7 @@ def _validate_id_token(tokens: dict, jwks: dict) -> dict:
 
 @router.get("/oidc/callback", response_model=TokenOut)
 async def oidc_callback(
+    request: Request,
     code: str,
     redirect_uri: str | None = None,
     nonce: str | None = None,
@@ -156,26 +195,34 @@ async def oidc_callback(
     ID-token signature validation hits the issuer's JWKS over HTTP. We
     accept the issuer's RS256 alg only — no symmetric algs.
 
-    When the SPA passes `nonce`, it's the value it minted before the
-    authorize redirect; we require it to match the id_token's `nonce`
-    claim. Defends against id_token substitution: an attacker who
-    obtains a token from a different OIDC flow can't replay it here
-    without knowing the victim's session-private nonce. Absent
-    `nonce` we don't enforce — kept optional during the rollout
-    window; can be tightened to required once the SPA always sends it.
+    `nonce` is required: the SPA mints it before the authorize redirect
+    and we assert claims["nonce"] == nonce post-id_token-validation.
+    Defends against id_token substitution: an attacker who obtains a
+    token from a different OIDC flow can't replay it here without
+    knowing the victim's session-private nonce.
     """
     settings = get_settings()
+    ip = request.client.host if request.client else None
     if not settings.oidc_issuer or not settings.oidc_client_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, _OIDC_NOT_CONFIGURED)
-    tokens, jwks = await _exchange_oidc_code(
-        code, redirect_uri or settings.oidc_redirect_uri,
-    )
-    claims = _validate_id_token(tokens, jwks)
-    if nonce is not None and claims.get("nonce") != nonce:
+    if not nonce:
+        await _audit_login_failure(db, ip=ip, email=None, reason="missing_nonce")
+        raise AuthError("oidc nonce required")
+    try:
+        tokens, jwks = await _exchange_oidc_code(
+            code, redirect_uri or settings.oidc_redirect_uri,
+        )
+        claims = _validate_id_token(tokens, jwks)
+    except AuthError as exc:
+        await _audit_login_failure(db, ip=ip, email=None, reason=f"token_exchange:{exc}")
+        raise
+    if claims.get("nonce") != nonce:
+        await _audit_login_failure(db, ip=ip, email=claims.get("email"), reason="nonce_mismatch")
         raise AuthError("oidc id_token nonce mismatch")
     sub = claims.get("sub")
     email = claims.get("email") or claims.get("preferred_username")
     if not sub or not email:
+        await _audit_login_failure(db, ip=ip, email=email, reason="missing_claims")
         raise AuthError("oidc claims missing sub/email")
     user = await _upsert_oidc_user(db, sub=sub, email=email, name=claims.get("name"))
     # Zero-trust: embed the IdP-asserted role names in our session JWT.
