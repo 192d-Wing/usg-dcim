@@ -23,6 +23,7 @@ package nsec3sign
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/miekg/dns"
 )
@@ -32,6 +33,16 @@ import (
 // intent reads clearly at call sites — the literal `1` would look
 // like a magic number sitting next to iteration counts.
 const nsec3HashSHA1 uint8 = 1
+
+// nsec3Hash wraps `miekg/dns.HashName` and forces lowercase output.
+// miekg/dns returns uppercase base32hex, but RFC 5155 examples, dig,
+// and every operator-facing tool we care about use lowercase — and
+// internal consistency keeps the string-equality comparisons in
+// matchingNSEC3 / coveringNSEC3 honest no matter where the input
+// came from (chain build vs. query-time QNAME hash).
+func nsec3Hash(name, salt string, iterations uint16) string {
+	return strings.ToLower(dns.HashName(name, nsec3HashSHA1, iterations, salt))
+}
 
 // nsec3Node is one entry in the precomputed chain. Each node maps a
 // zone owner name to its NSEC3 hash; the slice in `chain.nodes` is
@@ -119,7 +130,7 @@ func buildChain(apex, salt string, iterations uint16, optOut bool, names []nameI
 			continue
 		}
 		nodes = append(nodes, nsec3Node{
-			Hash:      dns.HashName(n.Name, nsec3HashSHA1, iterations, salt),
+			Hash:      nsec3Hash(n.Name, salt, iterations),
 			OwnerName: dns.CanonicalName(n.Name),
 			Types:     sortedTypes(n.Types),
 			OptedOut:  n.OptedOut,
@@ -140,9 +151,10 @@ func buildChain(apex, salt string, iterations uint16, optOut bool, names []nameI
 // hashName is a thin convenience for callers that need the same
 // hash the chain uses (denial.go computes the hash of QNAME, the
 // closest encloser, and the wildcard form). Centralizing here keeps
-// the salt/iterations parameters in one place.
+// the salt/iterations parameters — and the lowercase normalization
+// — in one place.
 func (c *chain) hashName(name string) string {
-	return dns.HashName(name, nsec3HashSHA1, c.Iterations, c.Salt)
+	return nsec3Hash(name, c.Salt, c.Iterations)
 }
 
 // ownerForNode returns the full DNS name where the NSEC3 RR for n
