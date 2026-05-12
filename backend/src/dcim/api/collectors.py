@@ -18,6 +18,7 @@ from ..schemas.common import Page, PageParams
 from ..security import audit
 
 from ..security.deps import Principal, require_capability
+from ..security.scope import enforce_site_scope, scope_filtered_site_ids
 from ..security.tokens import hash_api_token
 from ._pagination import paginate
 
@@ -26,10 +27,18 @@ router = APIRouter(prefix="/collectors", tags=["collectors"])
 @router.get("", response_model=Page[CollectorOut])
 async def list_collectors(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability("collectors:collectors:read")),
+    principal: Principal = Depends(require_capability("collectors:collectors:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await paginate(db, select(Collector), model=Collector, params=params, out_model=CollectorOut)
+    stmt = select(Collector)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "collectors:collectors:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[CollectorOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Collector.site_id.in_(in_scope))
+    return await paginate(db, stmt, model=Collector, params=params, out_model=CollectorOut)
 
 @router.post("/enroll")
 async def enroll_collector(
@@ -38,6 +47,10 @@ async def enroll_collector(
     db: AsyncSession = Depends(get_db),
 ):
     """Issue a one-time enrollment token. The collector exchanges it for an mTLS cert + API token."""
+    # Operators can't enroll a collector at a site outside their scope.
+    await enforce_site_scope(
+        db, principal.capabilities, payload.site_id, "collectors:collectors:enroll",
+    )
     raw = "enroll_" + secrets.token_urlsafe(32)
     obj = Collector(
         site_id=payload.site_id,

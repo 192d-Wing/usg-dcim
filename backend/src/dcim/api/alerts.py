@@ -26,9 +26,31 @@ from ..schemas.common import Page, PageParams
 from ..security import audit
 
 from ..security.deps import Principal, require_capability
+from ..security.scope import enforce_site_scope, scope_filtered_site_ids
 from ._pagination import paginate
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+
+async def _deny_global_for_scoped(
+    db: AsyncSession, capabilities, site_id: UUID | None, cap_code: str,
+) -> None:
+    """Read-style scope check for resources whose site column is
+    nullable and NULL means 'enterprise-wide'. Scoped users can VIEW
+    a global resource (handled by the list query), but can't act on
+    it via single-resource endpoints — we'd be letting them mutate
+    state that affects sites outside their reach."""
+    from ..errors import ForbiddenError
+    if site_id is not None:
+        await enforce_site_scope(db, capabilities, site_id, cap_code)
+        return
+    # site_id is NULL → "global". Allow only if the caller's scope for
+    # this cap is global.
+    from ..security.deps import find_matching_capability
+    scope = find_matching_capability(capabilities, cap_code)
+    if scope is not None and not scope.is_global:
+        raise ForbiddenError("global resource not editable in scoped role")
+
 
 @router.get("", response_model=Page[AlertOut])
 async def list_alerts(
@@ -36,7 +58,7 @@ async def list_alerts(
     site_id: UUID | None = Query(None),
     state: AlertState | None = Query(None),
     severity: str | None = Query(None),
-    _: Principal = Depends(require_capability("alerts:alerts:read")),
+    principal: Principal = Depends(require_capability("alerts:alerts:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Alert)
@@ -46,6 +68,13 @@ async def list_alerts(
         stmt = stmt.where(Alert.state == state)
     if severity is not None:
         stmt = stmt.where(Alert.severity == severity)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "alerts:alerts:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[AlertOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Alert.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Alert, params=params, out_model=AlertOut)
 
 @router.post("/{alert_id}/ack", response_model=AlertOut)
@@ -58,6 +87,9 @@ async def ack_alert(
     obj = await db.get(Alert, alert_id)
     if obj is None:
         raise NotFoundError("alert not found")
+    await enforce_site_scope(
+        db, principal.capabilities, obj.site_id, "alerts:alerts:ack",
+    )
     obj.state = AlertState.acknowledged
     obj.acked_by = principal.label
     obj.acked_at = datetime.now(UTC)
@@ -71,10 +103,22 @@ async def ack_alert(
 @router.get("/rules", response_model=Page[AlertRuleOut])
 async def list_rules(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability("alerts:rules:read")),
+    principal: Principal = Depends(require_capability("alerts:rules:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await paginate(db, select(AlertRule), model=AlertRule, params=params, out_model=AlertRuleOut)
+    stmt = select(AlertRule)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "alerts:rules:read",
+    )
+    if in_scope is not None:
+        # Scoped users see rules in their reach AND enterprise-wide
+        # defaults (site_scope_id IS NULL). Empty in_scope still
+        # returns the NULL-scoped rules.
+        from sqlalchemy import or_
+        stmt = stmt.where(
+            or_(AlertRule.site_scope_id.is_(None), AlertRule.site_scope_id.in_(in_scope or [None])),
+        )
+    return await paginate(db, stmt, model=AlertRule, params=params, out_model=AlertRuleOut)
 
 @router.post("/rules", response_model=AlertRuleOut, status_code=201)
 async def create_rule(
@@ -82,6 +126,9 @@ async def create_rule(
     principal: Principal = Depends(require_capability("alerts:rules:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await _deny_global_for_scoped(
+        db, principal.capabilities, payload.site_scope_id, "alerts:rules:create",
+    )
     obj = AlertRule(**payload.model_dump())
     db.add(obj)
     await db.flush()
@@ -96,12 +143,19 @@ _RULE_NOT_FOUND = "alert rule not found"
 @router.get("/rules/{rule_id}", response_model=AlertRuleOut)
 async def get_rule(
     rule_id: UUID,
-    _: Principal = Depends(require_capability("alerts:rules:read")),
+    principal: Principal = Depends(require_capability("alerts:rules:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(AlertRule, rule_id)
     if obj is None:
         raise NotFoundError(_RULE_NOT_FOUND)
+    # Read-side: a scoped user can VIEW an enterprise default (NULL
+    # site_scope_id) since it applies to their sites. Only block when
+    # the rule belongs to a site outside their reach.
+    if obj.site_scope_id is not None:
+        await enforce_site_scope(
+            db, principal.capabilities, obj.site_scope_id, "alerts:rules:read",
+        )
     return obj
 
 @router.patch("/rules/{rule_id}", response_model=AlertRuleOut)
@@ -114,6 +168,9 @@ async def update_rule(
     obj = await db.get(AlertRule, rule_id)
     if obj is None:
         raise NotFoundError(_RULE_NOT_FOUND)
+    await _deny_global_for_scoped(
+        db, principal.capabilities, obj.site_scope_id, "alerts:rules:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -134,6 +191,9 @@ async def delete_rule(
     obj = await db.get(AlertRule, rule_id)
     if obj is None:
         raise NotFoundError(_RULE_NOT_FOUND)
+    await _deny_global_for_scoped(
+        db, principal.capabilities, obj.site_scope_id, "alerts:rules:delete",
+    )
     site_id = obj.site_scope_id
     await db.execute(delete(AlertRule).where(AlertRule.id == rule_id))
     await audit.record(
@@ -160,7 +220,7 @@ async def list_maintenance_windows(
         None, description="Return only windows covering this instant.",
     ),
     upcoming: bool = Query(False, description="Only return windows ending in the future."),
-    _: Principal = Depends(require_capability("maintenance:windows:read")),
+    principal: Principal = Depends(require_capability("maintenance:windows:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(MaintenanceWindow)
@@ -173,6 +233,14 @@ async def list_maintenance_windows(
         )
     if upcoming:
         stmt = stmt.where(MaintenanceWindow.ends_at >= datetime.now(UTC))
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "maintenance:windows:read",
+    )
+    if in_scope is not None:
+        from sqlalchemy import or_
+        stmt = stmt.where(
+            or_(MaintenanceWindow.site_id.is_(None), MaintenanceWindow.site_id.in_(in_scope or [None])),
+        )
     return await paginate(
         db, stmt, model=MaintenanceWindow, params=params, out_model=MaintenanceWindowOut,
     )
@@ -184,6 +252,9 @@ async def create_maintenance_window(
     db: AsyncSession = Depends(get_db),
 ):
     _validate_window(payload.starts_at, payload.ends_at)
+    await _deny_global_for_scoped(
+        db, principal.capabilities, payload.site_id, "maintenance:windows:create",
+    )
     obj = MaintenanceWindow(**payload.model_dump(), created_by=principal.label)
     db.add(obj)
     await db.flush()
@@ -198,12 +269,16 @@ async def create_maintenance_window(
 @router.get("/maintenance-windows/{window_id}", response_model=MaintenanceWindowOut)
 async def get_maintenance_window(
     window_id: UUID,
-    _: Principal = Depends(require_capability("maintenance:windows:read")),
+    principal: Principal = Depends(require_capability("maintenance:windows:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(MaintenanceWindow, window_id)
     if obj is None:
         raise NotFoundError(_MW_NOT_FOUND)
+    if obj.site_id is not None:
+        await enforce_site_scope(
+            db, principal.capabilities, obj.site_id, "maintenance:windows:read",
+        )
     return obj
 
 @router.patch("/maintenance-windows/{window_id}", response_model=MaintenanceWindowOut)
@@ -216,6 +291,9 @@ async def update_maintenance_window(
     obj = await db.get(MaintenanceWindow, window_id)
     if obj is None:
         raise NotFoundError(_MW_NOT_FOUND)
+    await _deny_global_for_scoped(
+        db, principal.capabilities, obj.site_id, "maintenance:windows:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     new_start = diff.get("starts_at", obj.starts_at)
     new_end = diff.get("ends_at", obj.ends_at)
@@ -240,6 +318,9 @@ async def delete_maintenance_window(
     obj = await db.get(MaintenanceWindow, window_id)
     if obj is None:
         raise NotFoundError(_MW_NOT_FOUND)
+    await _deny_global_for_scoped(
+        db, principal.capabilities, obj.site_id, "maintenance:windows:delete",
+    )
     site_id = obj.site_id
     await db.execute(delete(MaintenanceWindow).where(MaintenanceWindow.id == window_id))
     await audit.record(

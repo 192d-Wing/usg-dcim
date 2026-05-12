@@ -15,6 +15,7 @@ from ..models.audit import AuditLog
 from ..schemas.common import Page, PageParams
 
 from ..security.deps import Principal, require_capability
+from ..security.scope import scope_filtered_site_ids
 from ._pagination import paginate
 
 router = APIRouter(prefix="/audit", tags=["audit"])
@@ -55,11 +56,24 @@ async def list_audit_log(
     since: datetime | None = Query(None, description="Only entries at or after this timestamp."),
     until: datetime | None = Query(None, description="Only entries at or before this timestamp."),
     success: bool | None = Query(None),
-    _: Principal = Depends(require_capability("audit:events:read")),
+    principal: Principal = Depends(require_capability("audit:events:read")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Filtered audit-log listing. Sorts newest-first by default."""
+    """Filtered audit-log listing. Sorts newest-first by default.
+
+    ABAC: scoped users only see events whose `site_id` is within their
+    reach. Events with NULL site_id (user.create, login.failed,
+    role.update, etc.) are deliberately hidden from scoped users — a
+    regional admin shouldn't see fleet-wide user management.
+    """
     stmt = select(AuditLog)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "audit:events:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[AuditLogOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(AuditLog.site_id.in_(in_scope))
     if actor_user_id is not None:
         stmt = stmt.where(AuditLog.actor_user_id == actor_user_id)
     if action is not None:
@@ -91,9 +105,22 @@ async def list_audit_log(
 
 @router.get("/actions", response_model=list[str])
 async def list_distinct_actions(
-    _: Principal = Depends(require_capability("audit:events:read")),
+    principal: Principal = Depends(require_capability("audit:events:read")),
     db: AsyncSession = Depends(get_db),
 ) -> list[str]:
-    """Distinct action codes present in the log — used to populate the filter UI."""
-    rows = (await db.execute(select(AuditLog.action).distinct())).all()
+    """Distinct action codes present in the log — used to populate the filter UI.
+
+    Scoped users only see action names from events within their reach,
+    so the dropdown doesn't leak the existence of, say, `user.create`
+    events to a regional admin who can't see any.
+    """
+    stmt = select(AuditLog.action).distinct()
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "audit:events:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return []
+        stmt = stmt.where(AuditLog.site_id.in_(in_scope))
+    rows = (await db.execute(stmt)).all()
     return sorted({r[0] for r in rows if r[0]})

@@ -15,7 +15,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..errors import ForbiddenError, NotFoundError, ValidationError
+from ..errors import NotFoundError, ValidationError
 from ..models.inventory import (
     Asset,
     AssetFace,
@@ -56,22 +56,16 @@ from ..schemas.inventory import (
 )
 from ..security import audit
 from ..security.deps import Principal, find_matching_capability, require_capability
-from ..security.scope import scope_filtered_site_ids, site_matches_scope
+from ..security.scope import enforce_site_scope, scope_filtered_site_ids
 from ._pagination import paginate
 
 
 async def _enforce_site_scope(
     db: AsyncSession, principal: Principal, site_id: UUID | None, cap_code: str,
 ) -> None:
-    """Single-resource ABAC check: 404-shape forbidden if the principal
-    holds `cap_code` but the target's `site_id` is outside their scope."""
-    if site_id is None:
-        return
-    scope = find_matching_capability(principal.capabilities, cap_code)
-    if scope is None or scope.is_global:
-        return
-    if not await site_matches_scope(db, scope, site_id):
-        raise ForbiddenError("resource is outside your scope")
+    """Thin local wrapper kept for call-site readability — the real
+    work lives in security.scope.enforce_site_scope."""
+    await enforce_site_scope(db, principal.capabilities, site_id, cap_code)
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 

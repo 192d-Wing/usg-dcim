@@ -227,6 +227,28 @@ async def filter_sites_in_scope(db: AsyncSession, scope: Scope, candidate_ids: I
     return out
 
 
+async def enforce_site_scope(
+    db: AsyncSession,
+    capabilities: dict[str, Scope],
+    site_id: UUID | None,
+    cap_code: str,
+) -> None:
+    """Single-resource ABAC: raise ForbiddenError if the principal holds
+    `cap_code` but `site_id` is outside their scope. Global / unscoped
+    grants and resources with no site (`site_id=None`) pass."""
+    if site_id is None:
+        return
+    # Local import to keep the security package free of api/* dependencies.
+    from .deps import find_matching_capability
+
+    scope = find_matching_capability(capabilities, cap_code)
+    if scope is None or scope.is_global:
+        return
+    if not await site_matches_scope(db, scope, site_id):
+        from ..errors import ForbiddenError
+        raise ForbiddenError("resource is outside your scope")
+
+
 async def scope_filtered_site_ids(
     db: AsyncSession,
     capabilities: dict[str, Scope],
