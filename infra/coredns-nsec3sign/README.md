@@ -83,19 +83,18 @@ need the custom image — only authoritative zones sign.
 
 ## Status
 
-This is **step 1** of the planned build-out described in the
-conversation that kicked off this module:
+Build-out plan, with the current cursor on step 4:
 
-| Step | What | Status |
-|------|------|--------|
-| 1 | Module scaffolding + custom CoreDNS image + noop plugin | **in progress** |
-| 2 | BIND key loader (`Kname+alg+tag.{key,private}` reader) | todo |
-| 3 | NSEC3 chain builder (one-shot, sorted by hash) | todo |
-| 4 | Positive-response RRSIG signing | todo |
-| 5 | Denial proofs (NODATA, NXDOMAIN, wildcard) | todo |
-| 6 | Signature cache + zone-reload (SIGUSR1) + Prometheus metrics | todo |
-| 7 | DCIM renderer change — emit `nsec3sign` for NSEC3 zones | todo |
-| 8 | End-to-end smoke against `site-dns/docker-compose.yml` | todo |
+| Step | What                                                         | Status   |
+| ---- | ------------------------------------------------------------ | -------- |
+| 1    | Module scaffolding + custom CoreDNS image + noop plugin      | done     |
+| 2    | BIND key loader (`Kname+alg+tag.{key,private}` reader)       | done     |
+| 3    | NSEC3 chain builder (one-shot, sorted by hash)               | done     |
+| 4    | Positive-response RRSIG signing                              | **next** |
+| 5    | Denial proofs (NODATA, NXDOMAIN, wildcard)                   | todo     |
+| 6    | Signature cache + zone-reload (SIGUSR1) + Prometheus metrics | todo     |
+| 7    | DCIM renderer change — emit `nsec3sign` for NSEC3 zones      | todo     |
+| 8    | End-to-end smoke against `site-dns/docker-compose.yml`       | todo     |
 
 The step-1 plugin is a deliberate no-op: it parses its Corefile
 block, registers itself in the chain, and forwards every query
@@ -105,7 +104,7 @@ cryptographic code lands.
 
 ## Layout
 
-```
+```text
 infra/coredns-nsec3sign/
 ├── README.md          (this file)
 ├── go.mod             github.com/192d-wing/coredns-nsec3sign

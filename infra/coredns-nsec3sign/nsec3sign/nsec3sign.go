@@ -58,6 +58,12 @@ type Nsec3Sign struct {
 	// that have no `key file` directives.
 	Keys []*signingKey
 
+	// Chain is the pre-computed NSEC3 chain for this zone. nil until
+	// the file-plugin integration (later step) walks the zone tree
+	// and calls buildChain. ServeDNS only uses the chain for denial
+	// proofs, so positive responses work even before it's populated.
+	Chain *chain
+
 	// Salt + Iterations + OptOut control NSEC3 chain generation per
 	// RFC 5155. Defaults set by parse() follow RFC 9276 guidance
 	// (empty salt, zero iterations).
