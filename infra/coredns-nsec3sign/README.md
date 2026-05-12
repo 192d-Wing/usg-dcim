@@ -33,6 +33,7 @@ example.mil:53 {
     file /var/lib/dcim-dns/auth/example.mil.zone
     nsec3sign {
         key file /var/lib/dcim-dns/auth/keys/Kexample.mil.+013+12345
+        zone file /var/lib/dcim-dns/auth/example.mil.zone
         salt ""           # empty salt (RFC 9276 recommended default)
         iterations 0      # 0 iterations (RFC 9276 recommended default)
         opt_out           # optional; skip NSEC3 for insecure delegations
@@ -40,6 +41,14 @@ example.mil:53 {
     }
 }
 ```
+
+The duplicate `zone file` path is intentional: the chain builder re-
+parses the zone file via `miekg/dns.ZoneParser` rather than walking
+the `file` plugin's private zone tree. Trades a small duplicate
+parse cost (~10 ms per zone at startup, ~600 KB resident per
+thousand owner names) for zero coupling to CoreDNS internals.
+DCIM's renderer fills both lines from the same source so operators
+only see this duplication in the rendered Corefile.
 
 The key file format matches BIND's `Kname+alg+tag.{key,private}` pair
 — the same format DCIM already renders via
@@ -83,7 +92,7 @@ need the custom image — only authoritative zones sign.
 
 ## Status
 
-Build-out plan, with the current cursor on step 5b:
+Build-out plan, with the current cursor on step 6:
 
 | Step | What                                                         | Status   |
 | ---- | ------------------------------------------------------------ | -------- |
@@ -92,16 +101,18 @@ Build-out plan, with the current cursor on step 5b:
 | 3    | NSEC3 chain builder (one-shot, sorted by hash)               | done     |
 | 4    | Positive-response RRSIG signing                              | done     |
 | 5    | Denial-proof algorithm (NXDOMAIN closest-encloser, NODATA)   | done     |
-| 5b   | File-plugin integration — walk live zone tree into chain     | **next** |
-| 6    | Signature cache + zone-reload (SIGUSR1) + Prometheus metrics | todo     |
+| 5b   | Zone-file ingestion — chain populated from BIND zone at boot | done     |
+| 6    | Signature cache + zone-reload (SIGUSR1) + Prometheus metrics | **next** |
 | 7    | DCIM renderer change — emit `nsec3sign` for NSEC3 zones      | todo     |
 | 8    | End-to-end smoke against `site-dns/docker-compose.yml`       | todo     |
 
-The step-1 plugin is a deliberate no-op: it parses its Corefile
-block, registers itself in the chain, and forwards every query
-unchanged to the next plugin. That's enough to validate the image
-build, the chain wiring, and `coredns -plugins` discovery before any
-cryptographic code lands.
+As of step 5b the plugin is functionally complete for authoritative
+DCIM zones: positive responses ship signed; NXDOMAIN and NODATA
+ship with the NSEC3 closest-encloser / matching proofs validators
+need; the chain is populated at startup from the same BIND zone
+file the `file` plugin reads. The remaining build-out steps target
+production hardening (signature cache, reload, metrics, DCIM-side
+renderer change, end-to-end smoke against the site stack).
 
 ## Layout
 
@@ -113,11 +124,12 @@ infra/coredns-nsec3sign/
 ├── Makefile           build / push / test targets
 └── nsec3sign/
     ├── setup.go       Corefile parser + plugin registration
-    ├── nsec3sign.go   ServeDNS — step 1: no-op pass-through
-    ├── chain.go       (step 3) NSEC3 chain builder
-    ├── denial.go      (step 5) closest-encloser / covering proofs
-    ├── signer.go      (step 4+6) RRSIG generation + LRU cache
-    └── keys.go        (step 2) BIND-format key file loader
+    ├── nsec3sign.go   plugin handler — ServeDNS interceptor
+    ├── keys.go        BIND-format DNSSEC key pair loader
+    ├── zone.go        BIND-format zone file → chain ingestion
+    ├── chain.go       sorted NSEC3 hash chain + lookup primitives
+    ├── signer.go      RRSIG generation over RRsets
+    └── denial.go      NXDOMAIN / NODATA proof construction
 ```
 
 ## References

@@ -47,6 +47,14 @@ func setup(c *caddy.Controller) error {
 		return plugin.Error("nsec3sign", err)
 	}
 
+	// Build the NSEC3 chain from the configured zone file. Same
+	// rationale as loadKeys: surface parse / I/O failures at startup,
+	// not at first denial query. No-op when no zone file is set
+	// (operator opted out of denial proofs).
+	if err := n.loadChain(); err != nil {
+		return plugin.Error("nsec3sign", err)
+	}
+
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		n.Next = next
 		return n
@@ -94,6 +102,7 @@ func parse(c *caddy.Controller) (*Nsec3Sign, error) {
 // and the top-level function stays linear.
 var directiveParsers = map[string]func(*caddy.Controller, *Nsec3Sign) error{
 	"key":            parseKey,
+	"zone":           parseZone,
 	"salt":           parseSalt,
 	"iterations":     parseIterations,
 	"opt_out":        parseOptOut,
@@ -117,6 +126,24 @@ func parseKey(c *caddy.Controller, n *Nsec3Sign) error {
 		return c.ArgErr()
 	}
 	n.KeyFiles = append(n.KeyFiles, args[1])
+	return nil
+}
+
+// parseZone accepts `zone file <path>` — the BIND-format zone the
+// chain builder parses. Only one per block; multi-zone setups
+// should use one `nsec3sign` block per zone so each gets its own
+// chain. The duplicate of the parent `file` directive's path is
+// deliberate: option 1 (walking the file plugin's private tree)
+// would couple us to CoreDNS internals.
+func parseZone(c *caddy.Controller, n *Nsec3Sign) error {
+	args := c.RemainingArgs()
+	if len(args) != 2 || args[0] != "file" {
+		return c.ArgErr()
+	}
+	if n.ZoneFile != "" {
+		return c.Errf("zone file already set to %q; one zone file per nsec3sign block", n.ZoneFile)
+	}
+	n.ZoneFile = args[1]
 	return nil
 }
 

@@ -295,18 +295,38 @@ def _parse_prom_line(line: str) -> tuple[str, dict[str, str], float] | None:
 
 _RCODE_KEYS = {"NOERROR": "noerror", "NXDOMAIN": "nxdomain", "SERVFAIL": "servfail"}
 
+# Engine-agnostic suffix matching — CoreDNS prefixes its series with
+# `coredns_`, Hickory with `hickory_`. Strip the engine-specific
+# prefix so the rest of the parser doesn't care which one is talking.
+_METRIC_PREFIXES = ("coredns_", "hickory_")
+
+
+def _strip_engine_prefix(name: str) -> str | None:
+    """Return the engine-agnostic suffix of a DNS-engine metric name,
+    or None if it's a series we don't care about. Lets one parser
+    cover both CoreDNS and Hickory without a flavor hint."""
+    for prefix in _METRIC_PREFIXES:
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return None
+
 
 def _absorb_metric(counters: dict, name: str, labels: dict, value: float) -> None:
-    """Fold one parsed sample into the running counters dict."""
-    if name == "coredns_dns_requests_total":
+    """Fold one parsed sample into the running counters dict. Engine
+    prefix (`coredns_` / `hickory_`) is stripped before matching so
+    both resolvers feed the same downstream schema."""
+    suffix = _strip_engine_prefix(name)
+    if suffix is None:
+        return
+    if suffix == "dns_requests_total":
         counters["requests_total"] += int(value)
         return
-    if name == "coredns_dns_responses_total":
+    if suffix == "dns_responses_total":
         key = _RCODE_KEYS.get(labels.get("rcode", "").upper())
         if key:
             counters[key] += int(value)
         return
-    if name == "coredns_dns_request_duration_seconds_bucket":
+    if suffix == "dns_request_duration_seconds_bucket":
         try:
             le = float(labels.get("le", "+Inf"))
         except ValueError:
@@ -315,16 +335,16 @@ def _absorb_metric(counters: dict, name: str, labels: dict, value: float) -> Non
             counters["duration_buckets"].get(le, 0) + int(value)
         )
         return
-    if name == "coredns_dns_request_duration_seconds_count":
+    if suffix == "dns_request_duration_seconds_count":
         counters["duration_count"] += int(value)
 
 
 def _parse_prom_text(text: str) -> dict:
-    """Minimal Prometheus text-format parser. Only the CoreDNS series
-    we care about — request count, responses by rcode, and the
-    request-duration histogram for p50/p95 — are extracted; everything
-    else is ignored. Multi-line samples for the same series (different
-    label combos) are summed."""
+    """Minimal Prometheus text-format parser. Matches the engine-
+    agnostic DNS series (request count, responses by rcode, request-
+    duration histogram for p50/p95) under either the `coredns_` or
+    `hickory_` prefix; everything else is ignored. Multi-line samples
+    for the same series (different label combos) are summed."""
     counters: dict[str, dict] = {
         "requests_total": 0,
         "noerror": 0,

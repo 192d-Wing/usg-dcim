@@ -51,6 +51,13 @@ type Nsec3Sign struct {
 	// re-open them without revisiting the Corefile.
 	KeyFiles []string
 
+	// ZoneFile is the BIND-format zone file the chain builder parses
+	// to enumerate owner names. Typically the same path the parent
+	// `file` plugin block uses; DCIM's renderer emits both pointing
+	// at the same path. Empty disables denial-of-existence — the
+	// plugin still signs RRsets but doesn't synthesize NSEC3 RRs.
+	ZoneFile string
+
 	// Keys are the parsed key pairs ready for signing. Populated by
 	// loadKeys() in setup() after parse(); empty in step-1 plugins
 	// that have no `key file` directives.
