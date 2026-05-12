@@ -3,9 +3,24 @@
 // color fields are exposed to globals.css as CSS custom properties on
 // the .login-shell element.
 
+// To swap the logo, drop a file into src/logo/ and update the import
+// below. Vite bundles the asset and rewrites the URL at build time.
+import dowSealBlue from '@/logo/DOW-Seal-Blue.png';
+
+export type LoginLogo = {
+  /** Resolved URL — import the asset above and pass the binding. */
+  src: string;
+  /** Alt text for screen readers. */
+  alt: string;
+  /** Rendered height in pixels. Width auto-scales. Default 160. */
+  height?: number;
+};
+
 export type LoginBranding = {
-  /** Wordmark shown next to the accent dot in the brand panel. */
+  /** Hero name centered in the brand panel. */
   productName: string;
+  /** Logo image rendered under the product name. Null hides it. */
+  logo: LoginLogo | null;
   /** Large heading on the brand panel. */
   headline: string;
   /** Paragraph below the headline. Empty string hides it. */
@@ -45,12 +60,17 @@ export type LoginBranding = {
 };
 
 export const loginBranding: LoginBranding = {
-  productName: 'USG DCIM',
+  productName: 'Department of War DCIM',
+  logo: {
+    src: dowSealBlue,
+    alt: 'Department of War seal',
+    height: 160,
+  },
   headline: 'Operate your fleet at every scale.',
   tagline:
     'Unified inventory, capacity, and observability for enterprise ' +
     'data-center operations — from a single rack to a global footprint.',
-  meta: 'v0.2 · enterprise edition',
+  meta: 'v0.2 · Department of the Air Force Enterprise Instance',
   formTitle: 'Welcome back',
   formSubtitle:
     'Sign in to continue. Production deployments use OIDC/SAML; ' +

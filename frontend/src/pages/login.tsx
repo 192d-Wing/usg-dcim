@@ -61,12 +61,19 @@ export function LoginPage() {
   return (
     <div className="login-shell" style={styleVars}>
       <aside className="login-brand" aria-hidden="true">
-        <div className="login-wordmark">
-          <span className="login-dot" />
-          <span>{loginBranding.productName}</span>
-        </div>
-        <div>
-          <h1 className="login-headline">{loginBranding.headline}</h1>
+        <div className="login-hero">
+          <h1 className="login-product-name">{loginBranding.productName}</h1>
+          {loginBranding.logo && (
+            <img
+              className="login-logo"
+              src={loginBranding.logo.src}
+              alt={loginBranding.logo.alt}
+              style={{ height: loginBranding.logo.height ?? 160 }}
+            />
+          )}
+          {loginBranding.headline && (
+            <h2 className="login-headline">{loginBranding.headline}</h2>
+          )}
           {loginBranding.tagline && (
             <p className="login-sub">{loginBranding.tagline}</p>
           )}
