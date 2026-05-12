@@ -1,7 +1,8 @@
-"""Admin CRUD: users, roles, role assignments + scopes.
+"""Admin CRUD: users, roles, role assignments + scopes, OIDC mappings.
 
-These endpoints back the Admin settings UI. They're capability-gated on
-USERS_MANAGE / ROLES_MANAGE so non-admin users never see them.
+These endpoints back the Admin settings UI. Each route is gated on a
+specific granular capability under `admin:<resource>:<action>` — e.g.
+`admin:users:create`, `admin:roles:update`, `admin:oidc-mappings:read`.
 """
 
 from __future__ import annotations
@@ -31,8 +32,8 @@ from ..schemas.auth import (
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
-from ..security.capabilities import ROLES_MANAGE, USERS_MANAGE
-from ..security.deps import Principal, require_capability
+
+from ..security.deps import Principal, find_matching_capability, require_capability
 from ._pagination import paginate
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -42,21 +43,19 @@ _ROLE_NOT_FOUND = "role not found"
 _ASSIGNMENT_NOT_FOUND = "role assignment not found"
 _OIDC_MAPPING_NOT_FOUND = "oidc role mapping not found"
 
-
 # ----------------------- Users -----------------------
 @router.get("/users", response_model=Page[UserOut])
 async def list_users(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(USERS_MANAGE)),
+    _: Principal = Depends(require_capability("admin:users:read")),
     db: AsyncSession = Depends(get_db),
 ):
     return await paginate(db, select(User), model=User, params=params, out_model=UserOut)
 
-
 @router.post("/users", response_model=UserOut, status_code=201)
 async def create_user(
     payload: UserCreate,
-    principal: Principal = Depends(require_capability(USERS_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:users:create")),
     db: AsyncSession = Depends(get_db),
 ):
     existing = (await db.execute(select(User).where(User.email == payload.email))).scalar_one_or_none()
@@ -76,12 +75,11 @@ async def create_user(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/users/{user_id}", response_model=UserOut)
 async def update_user(
     user_id: UUID,
     payload: UserUpdate,
-    principal: Principal = Depends(require_capability(USERS_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:users:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(User, user_id)
@@ -98,31 +96,35 @@ async def update_user(
     await db.refresh(obj)
     return obj
 
-
 # ----------------------- Roles -----------------------
 @router.get("/roles", response_model=Page[RoleOut])
 async def list_roles(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(ROLES_MANAGE)),
+    _: Principal = Depends(require_capability("admin:roles:read")),
     db: AsyncSession = Depends(get_db),
 ):
     return await paginate(db, select(Role), model=Role, params=params, out_model=RoleOut)
 
-
 @router.post("/roles", response_model=RoleOut, status_code=201)
 async def create_role(
     payload: RoleCreate,
-    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:roles:create")),
     db: AsyncSession = Depends(get_db),
 ):
     existing = (await db.execute(select(Role).where(Role.name == payload.name))).scalar_one_or_none()
     if existing is not None:
         raise ConflictError("a role with that name already exists")
-    extra = set(payload.permission_codes) - set(principal.capabilities.keys())
+    # No-escalation check, wildcard-aware: a code is grantable if the
+    # principal has a matching capability (exact, resource-wildcard,
+    # domain-wildcard, or `*`).
+    extra = sorted(
+        c for c in payload.permission_codes
+        if find_matching_capability(principal.capabilities, c) is None
+    )
     if extra:
         raise ValidationError(
-            f"cannot grant capabilities you don't hold: {sorted(extra)}",
-            details={"missing": sorted(extra)},
+            f"cannot grant capabilities you don't hold: {extra}",
+            details={"missing": extra},
         )
     obj = Role(
         name=payload.name,
@@ -139,12 +141,11 @@ async def create_role(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/roles/{role_id}", response_model=RoleOut)
 async def update_role(
     role_id: UUID,
     payload: RoleUpdate,
-    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:roles:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Role, role_id)
@@ -154,11 +155,14 @@ async def update_role(
         raise ValidationError("system roles are read-only")
     diff = payload.model_dump(exclude_unset=True)
     if "permission_codes" in diff:
-        extra = set(diff["permission_codes"]) - set(principal.capabilities.keys())
+        extra = sorted(
+            c for c in diff["permission_codes"]
+            if find_matching_capability(principal.capabilities, c) is None
+        )
         if extra:
             raise ValidationError(
-                f"cannot grant capabilities you don't hold: {sorted(extra)}",
-                details={"missing": sorted(extra)},
+                f"cannot grant capabilities you don't hold: {extra}",
+                details={"missing": extra},
             )
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -170,11 +174,10 @@ async def update_role(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/roles/{role_id}", status_code=204)
 async def delete_role(
     role_id: UUID,
-    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:roles:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Role, role_id)
@@ -192,7 +195,6 @@ async def delete_role(
         db, principal, action="role.delete", target_type="role", target_id=str(role_id),
     )
     await db.commit()
-
 
 # ----------------------- Assignments -----------------------
 async def _hydrate_assignment(db: AsyncSession, assignment: UserRole) -> AssignmentOut:
@@ -215,11 +217,10 @@ async def _hydrate_assignment(db: AsyncSession, assignment: UserRole) -> Assignm
         ],
     )
 
-
 @router.get("/users/{user_id}/assignments", response_model=list[AssignmentOut])
 async def list_user_assignments(
     user_id: UUID,
-    _: Principal = Depends(require_capability(USERS_MANAGE)),
+    _: Principal = Depends(require_capability("admin:users:read")),
     db: AsyncSession = Depends(get_db),
 ) -> list[AssignmentOut]:
     user = await db.get(User, user_id)
@@ -230,11 +231,10 @@ async def list_user_assignments(
     ).scalars().all()
     return [await _hydrate_assignment(db, r) for r in rows]
 
-
 @router.post("/assignments", response_model=AssignmentOut, status_code=201)
 async def create_assignment(
     payload: AssignmentCreate,
-    principal: Principal = Depends(require_capability(USERS_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:users:update")),
     db: AsyncSession = Depends(get_db),
 ):
     user = await db.get(User, payload.user_id)
@@ -282,11 +282,10 @@ async def create_assignment(
     await db.refresh(assignment)
     return await _hydrate_assignment(db, assignment)
 
-
 @router.delete("/assignments/{assignment_id}", status_code=204)
 async def delete_assignment(
     assignment_id: UUID,
-    principal: Principal = Depends(require_capability(USERS_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:users:update")),
     db: AsyncSession = Depends(get_db),
 ):
     assignment = await db.get(UserRole, assignment_id)
@@ -303,9 +302,7 @@ async def delete_assignment(
     )
     await db.commit()
 
-
 # ----------------------- OIDC role mappings -----------------------
-
 
 async def _hydrate_mapping(db: AsyncSession, m: OidcRoleMapping) -> OidcRoleMappingOut:
     role = await db.get(Role, m.dcim_role_id)
@@ -319,11 +316,10 @@ async def _hydrate_mapping(db: AsyncSession, m: OidcRoleMapping) -> OidcRoleMapp
         created_at=m.created_at,
     )
 
-
 @router.get("/oidc-role-mappings", response_model=Page[OidcRoleMappingOut])
 async def list_oidc_mappings(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(ROLES_MANAGE)),
+    _: Principal = Depends(require_capability("admin:oidc-mappings:read")),
     db: AsyncSession = Depends(get_db),
 ):
     # Join Role so we can return the human-readable role name in one
@@ -366,11 +362,10 @@ async def list_oidc_mappings(
         has_more=(params.page * params.page_size) < int(total or 0),
     )
 
-
 @router.post("/oidc-role-mappings", response_model=OidcRoleMappingOut, status_code=201)
 async def create_oidc_mapping(
     payload: OidcRoleMappingCreate,
-    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:oidc-mappings:create")),
     db: AsyncSession = Depends(get_db),
 ):
     if (await db.get(Role, payload.dcim_role_id)) is None:
@@ -399,12 +394,11 @@ async def create_oidc_mapping(
     await db.refresh(obj)
     return await _hydrate_mapping(db, obj)
 
-
 @router.patch("/oidc-role-mappings/{mapping_id}", response_model=OidcRoleMappingOut)
 async def update_oidc_mapping(
     mapping_id: UUID,
     payload: OidcRoleMappingUpdate,
-    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:oidc-mappings:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(OidcRoleMapping, mapping_id)
@@ -426,11 +420,10 @@ async def update_oidc_mapping(
     await db.refresh(obj)
     return await _hydrate_mapping(db, obj)
 
-
 @router.delete("/oidc-role-mappings/{mapping_id}", status_code=204)
 async def delete_oidc_mapping(
     mapping_id: UUID,
-    principal: Principal = Depends(require_capability(ROLES_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:oidc-mappings:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(OidcRoleMapping, mapping_id)

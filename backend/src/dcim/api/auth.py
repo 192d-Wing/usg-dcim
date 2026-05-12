@@ -17,15 +17,14 @@ from ..db import get_db
 from ..errors import AuthError, ForbiddenError
 from ..models.auth import ApiToken, OidcRoleMapping, Role, User, UserRole
 from ..schemas.auth import ApiTokenOut, LoginRequest, TokenIssue, TokenOut
-from ..security.capabilities import TOKENS_MANAGE
-from ..security.deps import AuthenticatedUser, Principal, require_capability
+
+from ..security.deps import AuthenticatedUser, Principal, find_matching_capability, require_capability
 from ..security.tokens import generate_api_token, issue_user_jwt
 from ..settings import get_settings
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _OIDC_NOT_CONFIGURED = "OIDC not configured"
-
 
 @router.post("/login", response_model=TokenOut)
 async def login_local(payload: LoginRequest, db: AsyncSession = Depends(get_db)) -> TokenOut:
@@ -46,7 +45,6 @@ async def login_local(payload: LoginRequest, db: AsyncSession = Depends(get_db))
     await db.commit()
     return TokenOut(access_token=issue_user_jwt(str(user.id)), expires_in=settings.jwt_ttl_seconds)
 
-
 async def _oidc_metadata() -> dict:
     """Fetch + lightly cache the OIDC discovery document."""
     settings = get_settings()
@@ -62,7 +60,6 @@ async def _oidc_metadata() -> dict:
         doc = resp.json()
     _oidc_metadata._cache = {"issuer": settings.oidc_issuer, "doc": doc}  # type: ignore[attr-defined]
     return doc
-
 
 @router.get("/oidc/login")
 async def oidc_login(redirect_uri: str | None = None) -> RedirectResponse:
@@ -90,7 +87,6 @@ async def oidc_login(redirect_uri: str | None = None) -> RedirectResponse:
     })
     return RedirectResponse(url=f"{auth_endpoint}?{qs}", status_code=302)
 
-
 async def _exchange_oidc_code(code: str, callback: str | None) -> tuple[dict, dict]:
     """Token-exchange + JWKS fetch. Returns (tokens, jwks)."""
     settings = get_settings()
@@ -116,7 +112,6 @@ async def _exchange_oidc_code(code: str, callback: str | None) -> tuple[dict, di
         jwks = jwks_resp.json()
     return tokens, jwks
 
-
 def _validate_id_token(tokens: dict, jwks: dict) -> dict:
     """Verify signature, audience, issuer, and at_hash binding."""
     settings = get_settings()
@@ -135,7 +130,6 @@ def _validate_id_token(tokens: dict, jwks: dict) -> dict:
         )
     except Exception as exc:
         raise AuthError(f"oidc id_token invalid: {exc}") from exc
-
 
 @router.get("/oidc/callback", response_model=TokenOut)
 async def oidc_callback(
@@ -168,7 +162,6 @@ async def oidc_callback(
         expires_in=settings.jwt_ttl_seconds,
     )
 
-
 def _extract_idp_roles(claims: dict) -> set[str]:
     """Pull role strings from the standard claim locations.
 
@@ -196,7 +189,6 @@ def _extract_idp_roles(claims: dict) -> set[str]:
     _add(claims.get("groups"))
     _add(claims.get("roles"))
     return roles
-
 
 async def _sync_oidc_roles(db: AsyncSession, user: User, claims: dict) -> None:
     """Add any DCIM roles that the user's IdP-asserted roles map to.
@@ -231,7 +223,6 @@ async def _sync_oidc_roles(db: AsyncSession, user: User, claims: dict) -> None:
         db.add(UserRole(user_id=user.id, role_id=m.dcim_role_id))
         existing.add(m.dcim_role_id)
 
-
 async def _upsert_oidc_user(
     db: AsyncSession, *, sub: str, email: str, name: str | None, claims: dict,
 ) -> User:
@@ -256,7 +247,6 @@ async def _upsert_oidc_user(
     await db.refresh(user)
     return user
 
-
 @router.get("/me")
 async def whoami(principal: AuthenticatedUser) -> dict:
     return {
@@ -268,10 +258,9 @@ async def whoami(principal: AuthenticatedUser) -> dict:
         "capabilities": sorted(principal.capabilities.keys()),
     }
 
-
 @router.get("/tokens", response_model=list[ApiTokenOut])
 async def list_tokens(
-    principal: Principal = Depends(require_capability(TOKENS_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:api-tokens:read")),
     db: AsyncSession = Depends(get_db),
 ) -> list[ApiTokenOut]:
     """List the caller's own API tokens. Plaintext is never returned for existing tokens."""
@@ -285,19 +274,22 @@ async def list_tokens(
     tokens = res.scalars().all()
     return [ApiTokenOut.model_validate(t) for t in tokens]
 
-
 @router.post("/tokens", response_model=ApiTokenOut)
 async def issue_token(
     payload: TokenIssue,
-    principal: Principal = Depends(require_capability(TOKENS_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:api-tokens:create")),
     db: AsyncSession = Depends(get_db),
 ) -> ApiTokenOut:
     if not principal.user:
         raise ForbiddenError("only users can issue tokens")
-    # Disallow escalation: token's permissions must be a subset of the issuer's caps.
-    extra = set(payload.permission_codes) - set(principal.capabilities.keys())
+    # Disallow escalation: every requested code must be granted by an
+    # existing capability the issuer holds (exact or wildcard match).
+    extra = sorted(
+        c for c in payload.permission_codes
+        if find_matching_capability(principal.capabilities, c) is None
+    )
     if extra:
-        raise ForbiddenError(f"cannot grant capabilities you don't hold: {sorted(extra)}")
+        raise ForbiddenError(f"cannot grant capabilities you don't hold: {extra}")
 
     raw, digest = generate_api_token()
     tok = ApiToken(
@@ -315,11 +307,10 @@ async def issue_token(
     out.plaintext = raw  # only returned once
     return out
 
-
 @router.delete("/tokens/{token_id}")
 async def revoke_token(
     token_id: str,
-    principal: Principal = Depends(require_capability(TOKENS_MANAGE)),
+    principal: Principal = Depends(require_capability("admin:api-tokens:delete")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     res = await db.execute(select(ApiToken).where(ApiToken.id == token_id))

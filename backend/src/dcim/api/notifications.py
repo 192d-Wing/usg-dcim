@@ -21,7 +21,7 @@ from ..schemas.notifications import (
     NotificationChannelUpdate,
 )
 from ..security import audit
-from ..security.capabilities import ALERTS_CONFIGURE, ALERTS_READ
+
 from ..security.deps import Principal, require_capability
 from ..services import notifications as notif_svc
 from ._pagination import paginate
@@ -30,11 +30,10 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 _CHANNEL_NOT_FOUND = "notification channel not found"
 
-
 @router.get("/channels", response_model=Page[NotificationChannelOut])
 async def list_channels(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(ALERTS_READ)),
+    _: Principal = Depends(require_capability("notifications:channels:read")),
     db: AsyncSession = Depends(get_db),
 ):
     return await paginate(
@@ -42,11 +41,10 @@ async def list_channels(
         model=NotificationChannel, params=params, out_model=NotificationChannelOut,
     )
 
-
 @router.post("/channels", response_model=NotificationChannelOut, status_code=201)
 async def create_channel(
     payload: NotificationChannelCreate,
-    principal: Principal = Depends(require_capability(ALERTS_CONFIGURE)),
+    principal: Principal = Depends(require_capability("notifications:channels:create")),
     db: AsyncSession = Depends(get_db),
 ):
     existing = (
@@ -66,12 +64,11 @@ async def create_channel(
     await db.refresh(obj)
     return obj
 
-
 @router.patch("/channels/{channel_id}", response_model=NotificationChannelOut)
 async def update_channel(
     channel_id: UUID,
     payload: NotificationChannelUpdate,
-    principal: Principal = Depends(require_capability(ALERTS_CONFIGURE)),
+    principal: Principal = Depends(require_capability("notifications:channels:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(NotificationChannel, channel_id)
@@ -88,11 +85,10 @@ async def update_channel(
     await db.refresh(obj)
     return obj
 
-
 @router.delete("/channels/{channel_id}", status_code=204)
 async def delete_channel(
     channel_id: UUID,
-    principal: Principal = Depends(require_capability(ALERTS_CONFIGURE)),
+    principal: Principal = Depends(require_capability("notifications:channels:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(NotificationChannel, channel_id)
@@ -105,11 +101,10 @@ async def delete_channel(
     )
     await db.commit()
 
-
 @router.post("/channels/{channel_id}/test")
 async def test_channel(
     channel_id: UUID,
-    principal: Principal = Depends(require_capability(ALERTS_CONFIGURE)),
+    principal: Principal = Depends(require_capability("notifications:channels:update")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Dispatch a synthetic alert through a single channel.

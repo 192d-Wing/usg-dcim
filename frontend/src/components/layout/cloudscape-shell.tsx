@@ -39,16 +39,27 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/alerts',     text: 'Alerts' },
   { href: '/maintenance', text: 'Maintenance' },
   { href: '/collectors', text: 'Collectors' },
-  { href: '/ipam',       text: 'IPAM',       cap: 'inventory:read' },
-  { href: '/import',     text: 'Import',     cap: 'inventory:bulk' },
-  { href: '/audit',      text: 'Audit log',  cap: 'audit:read' },
-  { href: '/admin',      text: 'Admin',      cap: ['users:manage', 'roles:manage'] },
+  { href: '/ipam',       text: 'IPAM',       cap: 'ipam:subnets:read' },
+  { href: '/import',     text: 'Import',     cap: 'inventory:bulk:execute' },
+  { href: '/audit',      text: 'Audit log',  cap: 'audit:events:read' },
+  { href: '/admin',      text: 'Admin',      cap: ['admin:users:read', 'admin:roles:read'] },
 ];
 
-function hasCap(caps: string[], cap: string | string[] | undefined): boolean {
-  if (!cap) return true;
-  if (Array.isArray(cap)) return cap.some((c) => caps.includes(c));
-  return caps.includes(cap);
+/** Mirror of the backend's find_matching_capability wildcard fallback:
+ *  exact → <prefix>:* progressively → `*`. Returns true if any of
+ *  `required` is granted by something the user holds. */
+function hasCap(caps: string[], required: string | string[] | undefined): boolean {
+  if (!required) return true;
+  const needs = Array.isArray(required) ? required : [required];
+  const owned = new Set(caps);
+  return needs.some((code) => {
+    if (owned.has(code)) return true;
+    const parts = code.split(':');
+    for (let i = parts.length - 1; i > 0; i--) {
+      if (owned.has(parts.slice(0, i).join(':') + ':*')) return true;
+    }
+    return owned.has('*');
+  });
 }
 
 /** Convert a path like `/racks/abc-123` into Cloudscape breadcrumb items.

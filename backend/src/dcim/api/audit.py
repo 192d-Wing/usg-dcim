@@ -13,12 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..models.audit import AuditLog
 from ..schemas.common import Page, PageParams
-from ..security.capabilities import AUDIT_READ
+
 from ..security.deps import Principal, require_capability
 from ._pagination import paginate
 
 router = APIRouter(prefix="/audit", tags=["audit"])
-
 
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -36,7 +35,6 @@ class AuditLogOut(BaseModel):
     success: bool
     diff_json: dict
     metadata_json: dict
-
 
 @router.get("/log", response_model=Page[AuditLogOut])
 async def list_audit_log(
@@ -57,7 +55,7 @@ async def list_audit_log(
     since: datetime | None = Query(None, description="Only entries at or after this timestamp."),
     until: datetime | None = Query(None, description="Only entries at or before this timestamp."),
     success: bool | None = Query(None),
-    _: Principal = Depends(require_capability(AUDIT_READ)),
+    _: Principal = Depends(require_capability("audit:events:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Filtered audit-log listing. Sorts newest-first by default."""
@@ -91,10 +89,9 @@ async def list_audit_log(
         stmt = stmt.order_by(AuditLog.occurred_at.desc())
     return await paginate(db, stmt, model=AuditLog, params=params, out_model=AuditLogOut)
 
-
 @router.get("/actions", response_model=list[str])
 async def list_distinct_actions(
-    _: Principal = Depends(require_capability(AUDIT_READ)),
+    _: Principal = Depends(require_capability("audit:events:read")),
     db: AsyncSession = Depends(get_db),
 ) -> list[str]:
     """Distinct action codes present in the log — used to populate the filter UI."""
