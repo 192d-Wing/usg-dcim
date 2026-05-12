@@ -17,6 +17,7 @@ import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
 import Header from '@cloudscape-design/components/header';
 import Link from '@cloudscape-design/components/link';
+import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator, {
@@ -26,6 +27,17 @@ import Table, { TableProps } from '@cloudscape-design/components/table';
 
 import { http } from '@/lib/http';
 import { relativeTime } from '@/lib/utils';
+import { useFabricScope } from '@/contexts/fabric-scope';
+
+// Window options for the dashboard's time-range selector. Values are
+// the `minutes` query-string the backend accepts; labels are what
+// operators see on the segmented control.
+const WINDOW_OPTIONS = [
+  { id: '60',   text: '1h'  },
+  { id: '360',  text: '6h'  },
+  { id: '1440', text: '24h' },
+] as const;
+type WindowId = typeof WINDOW_OPTIONS[number]['id'];
 
 type DashGlobal = {
   qps_now: number;
@@ -308,15 +320,28 @@ function GlobalKpiStrip({ overall }: Readonly<{ overall: DashGlobal | undefined 
 
 export function DnsDashboardPage() {
   const navigate = useNavigate();
+  const { fabricId, fabrics } = useFabricScope();
+  const [windowId, setWindowId] = useState<WindowId>('60');
+  const minutes = Number(windowId);
 
+  // Dashboard endpoint accepts `fabric_id` to scope every aggregate
+  // to one fabric — server-health, by-site, the bucketed series, and
+  // global KPIs all narrow consistently. When the top-nav fabric
+  // picker hasn't resolved yet (null), we skip the query string and
+  // get the global view.
+  const fabricQS = fabricId ? `&fabric_id=${fabricId}` : '';
   const { data, isLoading } = useQuery({
-    queryKey: ['dns-dashboard', 60],
+    queryKey: ['dns-dashboard', minutes, fabricId],
     queryFn: async () => (
-      (await http.get<Dashboard>('/dns/dashboard?minutes=60')).data
+      (await http.get<Dashboard>(
+        `/dns/dashboard?minutes=${minutes}${fabricQS}`,
+      )).data
     ),
     refetchInterval: 30_000,
     staleTime: 25_000,
   });
+
+  const activeFabric = fabrics.find((f) => f.id === fabricId);
 
   const overall = data?.overall;
   // Recharts wants Date objects (or numeric ms) — Cloudscape ships
@@ -330,6 +355,11 @@ export function DnsDashboardPage() {
     }))
   ), [data?.series]);
 
+  const scopeLabel = activeFabric
+    ? `fabric: ${activeFabric.name}`
+    : 'all fabrics';
+  const timelineLabel = WINDOW_OPTIONS.find((o) => o.id === windowId)?.text ?? `${minutes}m`;
+
   return (
     <ContentLayout
       header={
@@ -337,8 +367,16 @@ export function DnsDashboardPage() {
           variant="h1"
           description={
             data
-              ? `Window: last ${data.window_minutes} min · updated ${relativeTime(data.generated_at)}`
+              ? `Window: last ${data.window_minutes} min · ${scopeLabel} · updated ${relativeTime(data.generated_at)}`
               : 'Loading…'
+          }
+          actions={
+            <SegmentedControl
+              selectedId={windowId}
+              onChange={({ detail }) => setWindowId(detail.selectedId as WindowId)}
+              options={WINDOW_OPTIONS.map((o) => ({ id: o.id, text: o.text }))}
+              label="Time window"
+            />
           }
         >
           DNS overview
@@ -350,7 +388,7 @@ export function DnsDashboardPage() {
         <GlobalKpiStrip overall={overall} />
 
         {/* ---- Timeline ---- */}
-        <Container header={<Header variant="h2">QPS · last 60 minutes</Header>}>
+        <Container header={<Header variant="h2">{`QPS · last ${timelineLabel}`}</Header>}>
           <div style={{ height: 240 }}>
             {isLoading || series.length === 0 ? (
               <Box color="text-status-inactive" padding="m" textAlign="center">

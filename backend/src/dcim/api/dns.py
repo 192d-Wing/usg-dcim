@@ -1325,6 +1325,9 @@ def _build_server_health(
 @router.get("/dashboard", response_model=DnsDashboardOut)
 async def dns_dashboard(
     minutes: int = Query(60, ge=5, le=24 * 60),
+    fabric_id: UUID | None = Query(
+        None, description="Scope all aggregates to a single fabric"
+    ),
     _: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1338,24 +1341,46 @@ async def dns_dashboard(
       - Per-site rollup (one row per site that has DNS servers).
       - Server health (one row per server with the most recent sample
         attached, so the UI can show a status chip + qps trend).
+
+    When `fabric_id` is set, every aggregate is scoped to that fabric:
+    only servers/zones/anycast-groups bound to it count, and the
+    sample window filters down to samples emitted by those servers.
+    The series, by-site rollup, and server-health table all derive
+    from the same filtered set so the dashboard stays internally
+    consistent under scope.
     """
     now = datetime.now(UTC)
     cutoff = now - timedelta(minutes=minutes)
 
-    samples = (
-        await db.execute(
-            select(DnsServerMetricsSample)
-            .where(DnsServerMetricsSample.observed_at >= cutoff)
-            .order_by(DnsServerMetricsSample.observed_at.asc())
+    server_stmt = select(DnsServer)
+    zone_stmt = select(DnsZone)
+    ag_stmt = select(func.count(AnycastGroup.id))
+    if fabric_id is not None:
+        server_stmt = server_stmt.where(DnsServer.fabric_id == fabric_id)
+        zone_stmt = zone_stmt.where(DnsZone.fabric_id == fabric_id)
+        ag_stmt = ag_stmt.where(AnycastGroup.fabric_id == fabric_id)
+
+    servers = (await db.execute(server_stmt)).scalars().all()
+    server_ids = {srv.id for srv in servers}
+
+    sample_stmt = (
+        select(DnsServerMetricsSample)
+        .where(DnsServerMetricsSample.observed_at >= cutoff)
+        .order_by(DnsServerMetricsSample.observed_at.asc())
+    )
+    if fabric_id is not None and server_ids:
+        sample_stmt = sample_stmt.where(
+            DnsServerMetricsSample.server_id.in_(server_ids)
         )
-    ).scalars().all()
-    servers = (await db.execute(select(DnsServer))).scalars().all()
+    elif fabric_id is not None:
+        # Fabric scope with zero servers — short-circuit to empty
+        # rather than letting `.in_({})` blow up downstream.
+        sample_stmt = sample_stmt.where(False)
+    samples = (await db.execute(sample_stmt)).scalars().all()
     sites = {s.id: s for s in (await db.execute(select(Site))).scalars().all()}
     fabrics = {f.id: f for f in (await db.execute(select(Fabric))).scalars().all()}
-    zones = (await db.execute(select(DnsZone))).scalars().all()
-    ag_count = int(
-        (await db.execute(select(func.count(AnycastGroup.id)))).scalar_one()
-    )
+    zones = (await db.execute(zone_stmt)).scalars().all()
+    ag_count = int((await db.execute(ag_stmt)).scalar_one())
 
     # Latest sample per server — walking the sorted list once is cheaper
     # than a per-server LIMIT 1 query for each. The qps_now numbers on
