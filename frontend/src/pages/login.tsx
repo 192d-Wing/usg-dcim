@@ -1,8 +1,9 @@
 // Login — split-screen layout. Brand panel on the left, form on the right.
 // Layout/styles live in globals.css (.login-shell); form logic is unchanged.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLogin } from '@refinedev/core';
+import { applyMode, Mode } from '@cloudscape-design/global-styles';
 
 import Button from '@cloudscape-design/components/button';
 import Form from '@cloudscape-design/components/form';
@@ -18,6 +19,15 @@ export function LoginPage() {
   const [password, setPassword] = useState('changeme');
   const [emailErr, setEmailErr] = useState<string | undefined>();
   const [passwordErr, setPasswordErr] = useState<string | undefined>();
+
+  // Force Cloudscape dark mode while the login page is mounted so the
+  // form inputs render against the dark DOW-branded surface. Restore
+  // the previous mode on unmount based on the <html> .dark class.
+  useEffect(() => {
+    const wasDark = document.documentElement.classList.contains('dark');
+    applyMode(Mode.Dark);
+    return () => applyMode(wasDark ? Mode.Dark : Mode.Light);
+  }, []);
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
