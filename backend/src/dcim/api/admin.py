@@ -19,6 +19,7 @@ from ..models.auth import OidcRoleMapping, Role, RoleScope, ScopeType, User, Use
 from ..schemas.auth import (
     AssignmentCreate,
     AssignmentOut,
+    CapabilityCatalogOut,
     OidcRoleMappingCreate,
     OidcRoleMappingOut,
     OidcRoleMappingUpdate,
@@ -32,7 +33,7 @@ from ..schemas.auth import (
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
-
+from ..security.capabilities import CAPABILITY_CATALOG, SPECIALTY_CAPABILITIES
 from ..security.deps import Principal, find_matching_capability, require_capability
 from ._pagination import paginate
 
@@ -436,3 +437,19 @@ async def delete_oidc_mapping(
         metadata={"idp_role": obj.idp_role},
     )
     await db.commit()
+
+
+# ----------------------- Capability catalog -----------------------
+
+
+@router.get("/capabilities/catalog", response_model=CapabilityCatalogOut)
+async def get_capabilities_catalog(
+    _: Principal = Depends(require_capability("admin:roles:read")),
+) -> CapabilityCatalogOut:
+    """Return the granular capability catalog so the admin UI can
+    render a grouped picker. Static for the lifetime of the process —
+    callers can cache aggressively."""
+    return CapabilityCatalogOut(
+        catalog=CAPABILITY_CATALOG,
+        specialties=SPECIALTY_CAPABILITIES,
+    )

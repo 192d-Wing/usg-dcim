@@ -132,3 +132,13 @@ class OidcRoleMappingOut(BaseModel):
     dcim_role_name: str
     description: str | None
     created_at: datetime
+
+
+class CapabilityCatalogOut(BaseModel):
+    """The granular capability surface, used by the admin role editor
+    to render a grouped picker. `catalog` is keyed domain -> resource ->
+    [actions]; `specialties` is a flat map of 2-segment codes
+    (e.g. power:control) to human descriptions."""
+
+    catalog: dict[str, dict[str, list[str]]]
+    specialties: dict[str, str]

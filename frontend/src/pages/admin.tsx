@@ -1,7 +1,7 @@
 // Admin — Users + Roles management with assignments manager.
 // Cloudscape Tabs + Table + Modal + Form everywhere.
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useTable, useGetIdentity, useList } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -12,6 +12,7 @@ import Button from '@cloudscape-design/components/button';
 import Checkbox from '@cloudscape-design/components/checkbox';
 import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
+import ExpandableSection from '@cloudscape-design/components/expandable-section';
 import Form from '@cloudscape-design/components/form';
 import FormField from '@cloudscape-design/components/form-field';
 import Header from '@cloudscape-design/components/header';
@@ -517,6 +518,154 @@ function RolesTab({ myCapabilities }: Readonly<{ myCapabilities: string[] }>) {
   );
 }
 
+type CapabilityCatalog = {
+  catalog: Record<string, Record<string, string[]>>;
+  specialties: Record<string, string>;
+};
+
+/** Mirror of backend find_matching_capability: exact, then
+ *  progressively shorter `<prefix>:*`, then `*`. */
+function canGrantCode(myCaps: string[], code: string): boolean {
+  if (myCaps.includes(code)) return true;
+  const parts = code.split(':');
+  for (let i = parts.length - 1; i > 0; i--) {
+    if (myCaps.includes(parts.slice(0, i).join(':') + ':*')) return true;
+  }
+  return myCaps.includes('*');
+}
+
+type CapabilityRowProps = Readonly<{
+  domain: string;
+  resource: string;
+  actions: string[];
+  myCapabilities: string[];
+  selectedSet: Set<string>;
+  search: string;
+  onToggle: (code: string, checked: boolean) => void;
+}>;
+
+function CapabilityRow({ domain, resource, actions, myCapabilities, selectedSet, search, onToggle }: CapabilityRowProps) {
+  const matchesSearch = (c: string) => !search || c.toLowerCase().includes(search.toLowerCase());
+  const visibleActions = actions.filter((a) => matchesSearch(`${domain}:${resource}:${a}`));
+  if (visibleActions.length === 0) return null;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', alignItems: 'center', gap: 12 }}>
+      <Box variant="awsui-key-label">{resource}</Box>
+      <SpaceBetween size="xs" direction="horizontal">
+        {visibleActions.map((action) => {
+          const code = `${domain}:${resource}:${action}`;
+          return (
+            <Checkbox
+              key={code}
+              checked={selectedSet.has(code)}
+              disabled={!canGrantCode(myCapabilities, code)}
+              onChange={({ detail }) => onToggle(code, detail.checked)}
+            >
+              {action}
+            </Checkbox>
+          );
+        })}
+      </SpaceBetween>
+    </div>
+  );
+}
+
+type SpecialtyRowProps = Readonly<{
+  codes: string[];
+  myCapabilities: string[];
+  selectedSet: Set<string>;
+  search: string;
+  onToggle: (code: string, checked: boolean) => void;
+}>;
+
+function SpecialtyRow({ codes, myCapabilities, selectedSet, search, onToggle }: SpecialtyRowProps) {
+  const matchesSearch = (c: string) => !search || c.toLowerCase().includes(search.toLowerCase());
+  const visible = codes.filter(matchesSearch);
+  if (visible.length === 0) return null;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', alignItems: 'flex-start', gap: 12, marginTop: 4 }}>
+      <Box variant="awsui-key-label" color="text-status-inactive">specialty</Box>
+      <SpaceBetween size="xs" direction="horizontal">
+        {visible.map((code) => (
+          <Checkbox
+            key={code}
+            checked={selectedSet.has(code)}
+            disabled={!canGrantCode(myCapabilities, code)}
+            onChange={({ detail }) => onToggle(code, detail.checked)}
+          >
+            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{code}</span>
+          </Checkbox>
+        ))}
+      </SpaceBetween>
+    </div>
+  );
+}
+
+type DomainSectionProps = Readonly<{
+  domain: string;
+  catalog: CapabilityCatalog;
+  domainCodes: string[];
+  myCapabilities: string[];
+  selectedSet: Set<string>;
+  search: string;
+  onToggle: (code: string, checked: boolean) => void;
+  onSetMany: (codes: string[], on: boolean) => void;
+}>;
+
+function DomainSection({
+  domain, catalog, domainCodes, myCapabilities, selectedSet, search, onToggle, onSetMany,
+}: DomainSectionProps) {
+  const grantable = domainCodes.filter((c) => canGrantCode(myCapabilities, c));
+  const matchesSearch = (c: string) => !search || c.toLowerCase().includes(search.toLowerCase());
+  const visible = grantable.filter(matchesSearch);
+  if (visible.length === 0 && search) return null;
+  const selectedInDomain = grantable.filter((c) => selectedSet.has(c)).length;
+  const allOn = grantable.length > 0 && selectedInDomain === grantable.length;
+  const resources = catalog.catalog[domain] ?? {};
+  const specialtyCodes = Object.keys(catalog.specialties).filter((s) => s.startsWith(domain + ':'));
+
+  return (
+    <ExpandableSection
+      variant="container"
+      defaultExpanded={!!search || selectedInDomain > 0}
+      headerText={`${domain} — ${selectedInDomain} / ${grantable.length} selected`}
+      headerActions={
+        <Checkbox
+          checked={allOn}
+          disabled={grantable.length === 0}
+          onChange={({ detail }) => onSetMany(grantable, detail.checked)}
+        >
+          all
+        </Checkbox>
+      }
+    >
+      <SpaceBetween size="xs">
+        {Object.entries(resources).map(([resource, actions]) => (
+          <CapabilityRow
+            key={resource}
+            domain={domain}
+            resource={resource}
+            actions={actions}
+            myCapabilities={myCapabilities}
+            selectedSet={selectedSet}
+            search={search}
+            onToggle={onToggle}
+          />
+        ))}
+        {specialtyCodes.length > 0 && (
+          <SpecialtyRow
+            codes={specialtyCodes}
+            myCapabilities={myCapabilities}
+            selectedSet={selectedSet}
+            search={search}
+            onToggle={onToggle}
+          />
+        )}
+      </SpaceBetween>
+    </ExpandableSection>
+  );
+}
+
 function RoleForm({
   myCapabilities, role, onSaved,
 }: Readonly<{
@@ -530,9 +679,49 @@ function RoleForm({
   const [selected, setSelected] = useState<string[]>(role?.permission_codes ?? []);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [search, setSearch] = useState('');
+  const [catalog, setCatalog] = useState<CapabilityCatalog | null>(null);
+
+  useEffect(() => {
+    http.get<CapabilityCatalog>('/admin/capabilities/catalog')
+      .then((r) => setCatalog(r.data))
+      .catch((err) => toast.error(err?.message ?? 'failed to load capability catalog'));
+  }, []);
+
+  // Pre-compute the universe of grantable codes per domain so per-domain
+  // counters and "grant all" actions don't reflow on every search edit.
+  const codesByDomain = useMemo(() => {
+    if (!catalog) return new Map<string, string[]>();
+    const out = new Map<string, string[]>();
+    for (const [domain, resources] of Object.entries(catalog.catalog)) {
+      const codes: string[] = [];
+      for (const [resource, actions] of Object.entries(resources)) {
+        for (const action of actions) codes.push(`${domain}:${resource}:${action}`);
+      }
+      for (const specialty of Object.keys(catalog.specialties)) {
+        if (specialty.startsWith(domain + ':')) codes.push(specialty);
+      }
+      if (codes.length > 0) out.set(domain, codes);
+    }
+    // Domains that only have specialty codes (none in CAPABILITY_CATALOG).
+    for (const specialty of Object.keys(catalog.specialties)) {
+      const domain = specialty.split(':')[0];
+      if (!out.has(domain)) out.set(domain, [specialty]);
+    }
+    return out;
+  }, [catalog]);
+
+  const selectedSet = useMemo(() => new Set(selected), [selected]);
 
   function toggle(cap: string, checked: boolean) {
     setSelected((cur) => checked ? [...cur, cap] : cur.filter((c) => c !== cap));
+  }
+  function setMany(codes: string[], on: boolean) {
+    setSelected((cur) => {
+      const s = new Set(cur);
+      for (const c of codes) on ? s.add(c) : s.delete(c);
+      return Array.from(s);
+    });
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -573,24 +762,34 @@ function RoleForm({
             <Input value={description ?? ''} onChange={({ detail }) => setDescription(detail.value)} />
           </FormField>
           <FormField
-            label="Capabilities"
-            description="You can only grant capabilities you hold yourself."
+            label={`Capabilities (${selected.length} selected)`}
+            description="Grouped by domain. You can only grant capabilities you hold yourself; disabled rows are outside your reach."
             errorText={errors.caps}
           >
-            <div style={{
-              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6,
-              maxHeight: 200, overflowY: 'auto',
-            }}>
-              {myCapabilities.map((c) => (
-                <Checkbox
-                  key={c}
-                  checked={selected.includes(c)}
-                  onChange={({ detail }) => toggle(c, detail.checked)}
-                >
-                  <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{c}</span>
-                </Checkbox>
-              ))}
-            </div>
+            <SpaceBetween size="xs">
+              <Input
+                value={search}
+                onChange={({ detail }) => setSearch(detail.value)}
+                placeholder="Filter codes (e.g. dns:zones, audit, *:read)"
+                type="search"
+              />
+              {catalog === null && <Box color="text-status-inactive">Loading catalog…</Box>}
+              {catalog !== null && Array.from(codesByDomain.entries())
+                .sort(([a], [b]) => a.localeCompare(b))
+                .map(([domain, allCodes]) => (
+                  <DomainSection
+                    key={domain}
+                    domain={domain}
+                    catalog={catalog}
+                    domainCodes={allCodes}
+                    myCapabilities={myCapabilities}
+                    selectedSet={selectedSet}
+                    search={search}
+                    onToggle={toggle}
+                    onSetMany={setMany}
+                  />
+                ))}
+            </SpaceBetween>
           </FormField>
         </SpaceBetween>
       </Form>
