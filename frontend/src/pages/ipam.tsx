@@ -51,6 +51,8 @@ type Fabric = {
   id: string; name: string; slug: string; description: string | null;
   enclave: string | null; classification: string | null;
   dns_recursive_upstreams: string[] | null;
+  dns_deny_networks: string[] | null;
+  dns_allow_networks: string[] | null;
 };
 type Vrf = {
   id: string; fabric_id: string; name: string;
@@ -674,6 +676,12 @@ function FabricForm({
   const [upstreams, setUpstreams] = useState(
     (fabric?.dns_recursive_upstreams ?? []).join('\n'),
   );
+  const [denyNetworks, setDenyNetworks] = useState(
+    (fabric?.dns_deny_networks ?? []).join('\n'),
+  );
+  const [allowNetworks, setAllowNetworks] = useState(
+    (fabric?.dns_allow_networks ?? []).join('\n'),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -687,10 +695,11 @@ function FabricForm({
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
-    const upstreamList = upstreams
-      .split(/\r?\n/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+    const splitLines = (s: string) =>
+      s.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const upstreamList = splitLines(upstreams);
+    const denyList = splitLines(denyNetworks);
+    const allowList = splitLines(allowNetworks);
     const body: Record<string, unknown> = {
       name,
       description: description || null,
@@ -699,6 +708,11 @@ function FabricForm({
       // Empty list -> NULL on the backend so the renderer falls back
       // to settings.dns_recursive_upstreams.
       dns_recursive_upstreams: upstreamList.length > 0 ? upstreamList : null,
+      // Empty list -> NULL so the renderer emits nothing — an explicit
+      // `allow_networks = []` in the rendered TOML would lock everyone
+      // out, which is almost never the operator's intent.
+      dns_deny_networks: denyList.length > 0 ? denyList : null,
+      dns_allow_networks: allowList.length > 0 ? allowList : null,
     };
     try {
       if (editing) {
@@ -763,6 +777,55 @@ function FabricForm({
               onChange={(e) => setUpstreams(e.target.value)}
               rows={4}
               placeholder={'10.7.0.53\n10.7.0.54:5353'}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
+            />
+          </FormField>
+          <FormField
+            label="DNS allow networks (optional)"
+            description={
+              <>
+                One CIDR per line. When set, the Hickory recursive only
+                answers queries from these client ranges. Leave blank
+                for no restriction (any client allowed).
+              </>
+            }
+          >
+            <textarea
+              value={allowNetworks}
+              onChange={(e) => setAllowNetworks(e.target.value)}
+              rows={3}
+              placeholder={'10.0.0.0/8\n192.168.0.0/16'}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
+            />
+          </FormField>
+          <FormField
+            label="DNS deny networks (optional)"
+            description={
+              <>
+                One CIDR per line. Queries from these ranges are
+                rejected even when the allow list above is empty.
+              </>
+            }
+          >
+            <textarea
+              value={denyNetworks}
+              onChange={(e) => setDenyNetworks(e.target.value)}
+              rows={3}
+              placeholder={'203.0.113.0/24'}
               style={{
                 width: '100%', padding: 8,
                 fontFamily: 'ui-monospace, monospace', fontSize: 12,

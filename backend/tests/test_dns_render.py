@@ -308,3 +308,97 @@ def test_etag_changes_when_corefile_changes():
 def test_etag_stable_across_call_for_same_input():
     bundle = ("CF", {"a.example": "zone-a", "b.example": "zone-b"}, {"global": {"as": 65000}})
     assert bundle_etag(*bundle) == bundle_etag(*bundle)
+
+
+# ---------- Hickory ACL emission ----------
+
+def test_hickory_acl_lines_returns_empty_when_both_none():
+    """NULL fabric ACLs render to nothing — the resolver stays open."""
+    from dcim.services.dns import _hickory_acl_lines
+
+    assert _hickory_acl_lines(None, None) == []
+
+
+def test_hickory_acl_lines_returns_empty_when_both_empty_lists():
+    """`[]` is treated the same as None — explicit "no restriction".
+    Emitting `allow_networks = []` would lock everyone out, which is
+    almost never what an operator wants from a blank form field."""
+    from dcim.services.dns import _hickory_acl_lines
+
+    assert _hickory_acl_lines([], []) == []
+
+
+def test_hickory_acl_lines_emits_deny_only():
+    from dcim.services.dns import _hickory_acl_lines
+
+    out = _hickory_acl_lines(["10.0.0.0/24", "192.168.1.0/24"], None)
+    assert out[0] == 'deny_networks = ["10.0.0.0/24", "192.168.1.0/24"]'
+    assert not any(line.startswith("allow_networks") for line in out)
+    assert out[-1] == ""  # trailing blank to separate from next block
+
+
+def test_hickory_acl_lines_emits_allow_only():
+    from dcim.services.dns import _hickory_acl_lines
+
+    out = _hickory_acl_lines(None, ["10.0.0.0/8"])
+    assert out[0] == 'allow_networks = ["10.0.0.0/8"]'
+    assert not any(line.startswith("deny_networks") for line in out)
+
+
+def test_hickory_acl_lines_emits_both():
+    from dcim.services.dns import _hickory_acl_lines
+
+    out = _hickory_acl_lines(["1.1.1.1/32"], ["10.0.0.0/8"])
+    body = [line for line in out if line]
+    assert body == [
+        'deny_networks = ["1.1.1.1/32"]',
+        'allow_networks = ["10.0.0.0/8"]',
+    ]
+
+
+def test_hickory_acl_lines_sorts_for_deterministic_etag():
+    """Bundle etag is hashed over the rendered config; the renderer
+    sorts CIDRs so re-ordering the input doesn't churn the etag and
+    trigger a no-op collector roll."""
+    from dcim.services.dns import _hickory_acl_lines
+
+    a = _hickory_acl_lines(None, ["10.2.0.0/16", "10.0.0.0/16", "10.1.0.0/16"])
+    b = _hickory_acl_lines(None, ["10.1.0.0/16", "10.2.0.0/16", "10.0.0.0/16"])
+    assert a == b
+    assert "10.0.0.0/16" in a[0]
+    # Verify the order in the rendered line.
+    assert a[0].index("10.0.0.0/16") < a[0].index("10.1.0.0/16") < a[0].index("10.2.0.0/16")
+
+
+def test_hickory_acl_lines_dedupes_input():
+    """Duplicate CIDRs in the input render once — defensive against
+    the UI re-sending an existing value plus a fresh add."""
+    from dcim.services.dns import _hickory_acl_lines
+
+    out = _hickory_acl_lines(["10.0.0.0/8", "10.0.0.0/8"], None)
+    assert out[0] == 'deny_networks = ["10.0.0.0/8"]'
+
+
+def test_hickory_acl_lands_before_tls_cert_in_full_render():
+    """Order invariant: ACL lines are top-level TOML fields, so they
+    MUST land before any `[tls_cert]` table header. Otherwise Hickory
+    parses `allow_networks` as a field of `tls_cert` and the load
+    fails. This test exercises the full render to lock that in."""
+    from dcim.services.dns import render_hickory_recursive_config
+
+    cfg = render_hickory_recursive_config(
+        fabric_apexes=["apex.example"],
+        auth_unicast_ip="10.0.0.1",
+        upstream_resolvers=["1.1.1.1"],
+        deny_networks=["10.0.0.0/8"],
+        allow_networks=["192.168.0.0/16"],
+    )
+    # ACL fields exist
+    assert 'deny_networks = ["10.0.0.0/8"]' in cfg
+    assert 'allow_networks = ["192.168.0.0/16"]' in cfg
+    # When the operator hasn't configured TLS, [tls_cert] isn't
+    # rendered — but ACL lines should still appear at the top level
+    # ahead of the first `[[zones]]` or `[[stores]]` table.
+    first_table = cfg.find("\n[")
+    assert cfg.index("deny_networks") < first_table
+    assert cfg.index("allow_networks") < first_table
