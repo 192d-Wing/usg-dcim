@@ -1,13 +1,18 @@
 // Plugin entry point — declares the `Nsec3Sign` handler type and
-// implements `plugin.Handler.ServeDNS`. As of step 4, ServeDNS does
-// positive-response signing: it intercepts the downstream plugin's
-// response via a `nonwriter` and attaches RRSIGs over every RRset in
-// the answer and authority sections when the client signals DO=1.
+// implements `plugin.Handler.ServeDNS`. As of step 5, ServeDNS does
+// the full online-signing pass: intercept the downstream response,
+// attach NSEC3 denial proofs to NODATA / NXDOMAIN authority sections
+// (via `denial.go`), then sign every RRset in answer + authority
+// (via `signer.go`) when the client signals DO=1.
 //
-// Still to land in later steps: NSEC3 denial proofs (closest-
-// encloser, covering, wildcard) on NODATA / NXDOMAIN responses, and
-// the LRU signature cache that will collapse duplicate-RRset signing
-// work across queries.
+// The chain that powers denial proofs is still populated by hand in
+// tests — the file-plugin integration that walks a live zone tree
+// lands in step 5b. Until then `Nsec3Sign.Chain` defaults to nil and
+// attachDenialProof short-circuits, so positive responses keep
+// working without the chain.
+//
+// Still to land: LRU signature cache (step 6) that will collapse
+// duplicate-RRset signing work across queries; per-query metrics.
 
 package nsec3sign
 
@@ -112,6 +117,12 @@ func (n *Nsec3Sign) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.M
 		return code, nil
 	}
 
-	signed := n.signMessage(nw.Msg, zone, time.Now().UTC())
+	now := time.Now().UTC()
+	// Attach NSEC3 denial proofs BEFORE signing, so the new NSEC3
+	// RRsets get picked up by signMessage's authority-section walk.
+	// Positive responses go through both calls unchanged — neither
+	// step modifies a message it has nothing to do.
+	signed := n.attachDenialProof(nw.Msg, state.Name(), now)
+	signed = n.signMessage(signed, zone, now)
 	return code, w.WriteMsg(signed)
 }
