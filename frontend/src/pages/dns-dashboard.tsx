@@ -3,7 +3,7 @@
 // server health table, and a placeholder for the top-queried-names tile
 // that lands once the collector grows per-name counters.
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -22,7 +22,7 @@ import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator, {
   StatusIndicatorProps,
 } from '@cloudscape-design/components/status-indicator';
-import Table from '@cloudscape-design/components/table';
+import Table, { TableProps } from '@cloudscape-design/components/table';
 
 import { http } from '@/lib/http';
 import { relativeTime } from '@/lib/utils';
@@ -151,11 +151,46 @@ type TopNamesPanelProps = Readonly<{
   isLoading: boolean;
 }>;
 
+const _TOP_NAME_COLUMNS: TableProps.ColumnDefinition<DashTopName>[] = [
+  {
+    id: 'name', header: 'Name', cell: TopNameCell,
+    isRowHeader: true, sortingField: 'name',
+  },
+  { id: 'type', header: 'Type', cell: TopTypeCell, sortingField: 'type' },
+  {
+    id: 'count', header: 'Count', cell: TopCountCell,
+    sortingField: 'count',
+  },
+];
+
+
 function TopNamesPanel({
   topNames,
   windowMinutes,
   isLoading,
 }: TopNamesPanelProps) {
+  // Default sort: count descending — same order central already ships
+  // but explicit so the column-header click toggles work intuitively.
+  const [sorting, setSorting] = useState<{
+    sortingColumn: TableProps.SortingColumn<DashTopName>;
+    sortingDescending: boolean;
+  }>({
+    sortingColumn: _TOP_NAME_COLUMNS[2],
+    sortingDescending: true,
+  });
+  const sortedItems = useMemo(() => {
+    const field = sorting.sortingColumn.sortingField as keyof DashTopName | undefined;
+    if (!field || !topNames || topNames.length === 0) return topNames ?? [];
+    const copy = [...topNames];
+    copy.sort((a, b) => {
+      const av = a[field];
+      const bv = b[field];
+      if (av === bv) return 0;
+      const less = av < bv ? -1 : 1;
+      return sorting.sortingDescending ? -less : less;
+    });
+    return copy;
+  }, [topNames, sorting]);
   // Null `top_names` means no server in the deployment is shipping a
   // dnstap reservoir yet — render a hint card instead of an empty
   // table so operators know the gap is "not wired" vs "no traffic".
@@ -200,7 +235,7 @@ function TopNamesPanel({
         </Header>
       }
       variant="container"
-      items={topNames ?? []}
+      items={sortedItems}
       loading={isLoading}
       loadingText="Loading…"
       empty={
@@ -208,14 +243,13 @@ function TopNamesPanel({
           No queries observed in the window.
         </Box>
       }
-      columnDefinitions={[
-        { id: 'name', header: 'Name', cell: TopNameCell, isRowHeader: true },
-        { id: 'type', header: 'Type', cell: TopTypeCell },
-        {
-          id: 'count', header: 'Count', cell: TopCountCell,
-          sortingField: 'count',
-        },
-      ]}
+      columnDefinitions={_TOP_NAME_COLUMNS}
+      sortingColumn={sorting.sortingColumn}
+      sortingDescending={sorting.sortingDescending}
+      onSortingChange={({ detail }) => setSorting({
+        sortingColumn: detail.sortingColumn,
+        sortingDescending: detail.isDescending ?? false,
+      })}
     />
   );
 }
