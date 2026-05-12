@@ -48,8 +48,15 @@ type Nsec3Sign struct {
 
 	// KeyFiles are BIND-style basenames (no `.key`/`.private` suffix)
 	// for the KSK + ZSK material this zone is signed with. The loader
-	// in keys.go (step 2) reads both halves and groups them by tag.
+	// in keys.go reads both halves and groups them by tag. Stored
+	// here even after loadKeys() runs so a future SIGUSR1 reload can
+	// re-open them without revisiting the Corefile.
 	KeyFiles []string
+
+	// Keys are the parsed key pairs ready for signing. Populated by
+	// loadKeys() in setup() after parse(); empty in step-1 plugins
+	// that have no `key file` directives.
+	Keys []*signingKey
 
 	// Salt + Iterations + OptOut control NSEC3 chain generation per
 	// RFC 5155. Defaults set by parse() follow RFC 9276 guidance

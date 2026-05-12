@@ -39,12 +39,20 @@ func setup(c *caddy.Controller) error {
 		return plugin.Error("nsec3sign", err)
 	}
 
+	// Load key material at startup so file I/O / parse errors abort
+	// CoreDNS before it starts answering queries. Silent fall-through
+	// to unsigned responses is the worst failure mode for a signing
+	// plugin — better to fail loud and visible at boot.
+	if err := n.loadKeys(); err != nil {
+		return plugin.Error("nsec3sign", err)
+	}
+
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		n.Next = next
 		return n
 	})
 
-	log.Infof("nsec3sign registered for %v (step-1 noop)", n.Zones)
+	log.Infof("nsec3sign registered for %v with %d key(s)", n.Zones, len(n.Keys))
 	return nil
 }
 
@@ -57,8 +65,8 @@ func setup(c *caddy.Controller) error {
 func parse(c *caddy.Controller) (*Nsec3Sign, error) {
 	n := &Nsec3Sign{
 		// RFC 9276 recommended defaults — empty salt, zero iterations.
-		// Setting these as defaults means an operator who writes only
-		// `nsec3sign { key file ... }` gets the safe modern profile.
+		// An operator who writes only `nsec3sign { key file ... }`
+		// gets the safe modern profile.
 		Salt:          "",
 		Iterations:    0,
 		CacheCapacity: 10000,
@@ -71,76 +79,109 @@ func parse(c *caddy.Controller) (*Nsec3Sign, error) {
 		n.Zones = plugin.OriginsFromArgsOrServerBlock(c.RemainingArgs(), c.ServerBlockKeys)
 
 		for c.NextBlock() {
-			switch c.Val() {
-			case "key":
-				// `key file <basename>` — the BIND-format key pair the
-				// signer will load (basename without the `.key` /
-				// `.private` suffix). Repeatable to mix KSK + ZSK.
-				args := c.RemainingArgs()
-				if len(args) != 2 || args[0] != "file" {
-					return nil, c.ArgErr()
-				}
-				n.KeyFiles = append(n.KeyFiles, args[1])
-
-			case "salt":
-				// Hex-encoded NSEC3 salt, or "" / "-" for empty. RFC
-				// 9276 recommends empty; we accept both spellings so
-				// generated Corefiles can use whichever is more
-				// readable.
-				args := c.RemainingArgs()
-				if len(args) != 1 {
-					return nil, c.ArgErr()
-				}
-				salt := args[0]
-				if salt == `""` || salt == "-" {
-					salt = ""
-				}
-				n.Salt = salt
-
-			case "iterations":
-				args := c.RemainingArgs()
-				if len(args) != 1 {
-					return nil, c.ArgErr()
-				}
-				it, err := strconv.Atoi(args[0])
-				if err != nil || it < 0 {
-					return nil, c.Errf("iterations must be a non-negative integer, got %q", args[0])
-				}
-				// RFC 9276 §3.1: do not exceed 0 for new deployments.
-				// We still allow up to 150 (the historic BIND cap) for
-				// operators migrating from existing NSEC3 chains, but
-				// we log a warning so the value doesn't slip through
-				// review unnoticed.
-				if it > 0 {
-					log.Warningf("iterations=%d set on %v — RFC 9276 recommends 0", it, n.Zones)
-				}
-				if it > 150 {
-					return nil, c.Errf("iterations=%d exceeds the maximum of 150", it)
-				}
-				n.Iterations = uint16(it)
-
-			case "opt_out":
-				if len(c.RemainingArgs()) != 0 {
-					return nil, c.ArgErr()
-				}
-				n.OptOut = true
-
-			case "cache_capacity":
-				args := c.RemainingArgs()
-				if len(args) != 1 {
-					return nil, c.ArgErr()
-				}
-				cap, err := strconv.Atoi(args[0])
-				if err != nil || cap <= 0 {
-					return nil, c.Errf("cache_capacity must be a positive integer, got %q", args[0])
-				}
-				n.CacheCapacity = cap
-
-			default:
-				return nil, c.Errf("unknown nsec3sign directive %q", c.Val())
+			if err := parseDirective(c, n); err != nil {
+				return nil, err
 			}
 		}
 	}
 
 	return n, nil
+}
+
+// directiveParsers dispatches one Corefile keyword to its handler.
+// Pulled out of parse() so adding a directive doesn't grow the
+// switch any further — each keyword owns its own validation logic
+// and the top-level function stays linear.
+var directiveParsers = map[string]func(*caddy.Controller, *Nsec3Sign) error{
+	"key":            parseKey,
+	"salt":           parseSalt,
+	"iterations":     parseIterations,
+	"opt_out":        parseOptOut,
+	"cache_capacity": parseCacheCapacity,
+}
+
+func parseDirective(c *caddy.Controller, n *Nsec3Sign) error {
+	fn, ok := directiveParsers[c.Val()]
+	if !ok {
+		return c.Errf("unknown nsec3sign directive %q", c.Val())
+	}
+	return fn(c, n)
+}
+
+// parseKey accepts `key file <basename>`. The basename omits the
+// `.key` / `.private` suffix; loadKey appends them. Repeatable so
+// one block can carry both KSK and ZSK material.
+func parseKey(c *caddy.Controller, n *Nsec3Sign) error {
+	args := c.RemainingArgs()
+	if len(args) != 2 || args[0] != "file" {
+		return c.ArgErr()
+	}
+	n.KeyFiles = append(n.KeyFiles, args[1])
+	return nil
+}
+
+// parseSalt accepts a hex-encoded NSEC3 salt, or "" / "-" for empty.
+// RFC 9276 recommends empty; we accept both spellings so a renderer
+// can use whichever reads better in its template.
+func parseSalt(c *caddy.Controller, n *Nsec3Sign) error {
+	args := c.RemainingArgs()
+	if len(args) != 1 {
+		return c.ArgErr()
+	}
+	salt := args[0]
+	if salt == `""` || salt == "-" {
+		salt = ""
+	}
+	n.Salt = salt
+	return nil
+}
+
+// parseIterations enforces a non-negative integer up to 150 (the
+// historic BIND cap). RFC 9276 §3.1 recommends 0 for new
+// deployments; any non-zero value gets logged so it doesn't slip
+// through review unnoticed.
+func parseIterations(c *caddy.Controller, n *Nsec3Sign) error {
+	args := c.RemainingArgs()
+	if len(args) != 1 {
+		return c.ArgErr()
+	}
+	it, err := strconv.Atoi(args[0])
+	if err != nil || it < 0 {
+		return c.Errf("iterations must be a non-negative integer, got %q", args[0])
+	}
+	if it > 150 {
+		return c.Errf("iterations=%d exceeds the maximum of 150", it)
+	}
+	if it > 0 {
+		log.Warningf("iterations=%d set on %v — RFC 9276 recommends 0", it, n.Zones)
+	}
+	n.Iterations = uint16(it)
+	return nil
+}
+
+// parseOptOut is a flag — no arguments. Setting it opts insecure
+// delegations out of the NSEC3 chain per RFC 5155 §6.
+func parseOptOut(c *caddy.Controller, n *Nsec3Sign) error {
+	if len(c.RemainingArgs()) != 0 {
+		return c.ArgErr()
+	}
+	n.OptOut = true
+	return nil
+}
+
+// parseCacheCapacity sets the LRU size for the signature cache.
+// Zero is rejected because a cache that never holds anything is a
+// pathological config — operators who want signing without caching
+// should remove the directive and rely on the default.
+func parseCacheCapacity(c *caddy.Controller, n *Nsec3Sign) error {
+	args := c.RemainingArgs()
+	if len(args) != 1 {
+		return c.ArgErr()
+	}
+	capN, err := strconv.Atoi(args[0])
+	if err != nil || capN <= 0 {
+		return c.Errf("cache_capacity must be a positive integer, got %q", args[0])
+	}
+	n.CacheCapacity = capN
+	return nil
 }
