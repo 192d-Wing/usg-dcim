@@ -102,6 +102,7 @@ from ..schemas.dns import (
 from ..security import audit
 
 from ..security.deps import Principal, require_capability
+from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
 from ..services import dns as dns_svc
 from ..settings import get_settings
 from ._pagination import paginate
@@ -143,7 +144,7 @@ async def list_zones(
     fabric_id: UUID | None = Query(None),
     site_id: UUID | None = Query(None),
     kind: str | None = Query(None, regex="^(apex|site|reverse)$"),
-    _: Principal = Depends(require_capability("dns:zones:read")),
+    principal: Principal = Depends(require_capability("dns:zones:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsZone)
@@ -153,6 +154,13 @@ async def list_zones(
         stmt = stmt.where(DnsZone.site_id == site_id)
     if kind is not None:
         stmt = stmt.where(DnsZone.kind == kind)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "dns:zones:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[DnsZoneOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(DnsZone.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=DnsZone, params=params, out_model=DnsZoneOut)
 
 
@@ -670,7 +678,7 @@ async def list_records(
     zone_id: UUID | None = Query(None),
     type_: str | None = Query(None, alias="type"),
     source: str | None = Query(None, regex="^(ipam|manual)$"),
-    _: Principal = Depends(require_capability("dns:records:read")),
+    principal: Principal = Depends(require_capability("dns:records:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsRecord)
@@ -680,6 +688,17 @@ async def list_records(
         stmt = stmt.where(DnsRecord.type == type_)
     if source is not None:
         stmt = stmt.where(DnsRecord.source == source)
+    # Records have no direct fabric_id — join to DnsZone for the
+    # filter. Subquery is cheap (zones table is small).
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "dns:records:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[DnsRecordOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(DnsRecord.zone_id.in_(
+            select(DnsZone.id).where(DnsZone.fabric_id.in_(in_scope))
+        ))
     return await paginate(db, stmt, model=DnsRecord, params=params, out_model=DnsRecordOut)
 
 
@@ -808,7 +827,7 @@ async def list_servers(
     site_id: UUID | None = Query(None),
     fabric_id: UUID | None = Query(None),
     role: str | None = Query(None, regex="^(auth|recursive)$"),
-    _: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
+    principal: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsServer)
@@ -818,6 +837,13 @@ async def list_servers(
         stmt = stmt.where(DnsServer.fabric_id == fabric_id)
     if role is not None:
         stmt = stmt.where(DnsServer.role == role)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, _CAP_SERVERS_READ,
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[DnsServerOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(DnsServer.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=DnsServer, params=params, out_model=DnsServerOut)
 
 
@@ -1464,12 +1490,19 @@ async def dns_dashboard(
 async def list_anycast_groups(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("dns:anycast-groups:read")),
+    principal: Principal = Depends(require_capability("dns:anycast-groups:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(AnycastGroup)
     if fabric_id is not None:
         stmt = stmt.where(AnycastGroup.fabric_id == fabric_id)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "dns:anycast-groups:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[AnycastGroupOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(AnycastGroup.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=AnycastGroup, params=params, out_model=AnycastGroupOut)
 
 
@@ -1548,12 +1581,19 @@ async def delete_anycast_group(
 async def list_forwarders(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("dns:forwarders:read")),
+    principal: Principal = Depends(require_capability("dns:forwarders:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsForwarder)
     if fabric_id is not None:
         stmt = stmt.where(DnsForwarder.fabric_id == fabric_id)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "dns:forwarders:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[DnsForwarderOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(DnsForwarder.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsForwarder, params=params, out_model=DnsForwarderOut,
     )
@@ -1640,12 +1680,19 @@ async def delete_forwarder(
 async def list_blocklists(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("dns:blocklists:read")),
+    principal: Principal = Depends(require_capability("dns:blocklists:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsBlocklist)
     if fabric_id is not None:
         stmt = stmt.where(DnsBlocklist.fabric_id == fabric_id)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "dns:blocklists:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[DnsBlocklistOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(DnsBlocklist.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsBlocklist, params=params, out_model=DnsBlocklistOut,
     )
@@ -1819,12 +1866,19 @@ async def delete_blocklist_entry(
 async def list_views(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("dns:views:read")),
+    principal: Principal = Depends(require_capability("dns:views:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsView)
     if fabric_id is not None:
         stmt = stmt.where(DnsView.fabric_id == fabric_id)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "dns:views:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[DnsViewOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(DnsView.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsView, params=params, out_model=DnsViewOut,
     )
@@ -1900,12 +1954,19 @@ async def delete_view(
 async def list_health_checks(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("dns:health-checks:read")),
+    principal: Principal = Depends(require_capability("dns:health-checks:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DnsHealthCheck)
     if fabric_id is not None:
         stmt = stmt.where(DnsHealthCheck.fabric_id == fabric_id)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "dns:health-checks:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[DnsHealthCheckOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(DnsHealthCheck.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsHealthCheck, params=params, out_model=DnsHealthCheckOut,
     )

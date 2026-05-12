@@ -63,6 +63,7 @@ const SCOPE_DIMENSION_OPTIONS: SelectProps.Option[] = [
   { value: 'site_group', label: 'site_group (target = SiteGroup.name)' },
   { value: 'enclave', label: 'enclave (target = literal string)' },
   { value: 'organization', label: 'organization (target = literal string)' },
+  { value: 'fabric', label: 'fabric (target = Fabric.slug; gates DNS + IPAM)' },
 ];
 
 const SCOPE_TYPES: SelectProps.Option[] = [
@@ -1064,6 +1065,7 @@ function MappingForm({
                   scopeDim.value === 'region' ? 'e.g. EUCOM' :
                   scopeDim.value === 'site' ? 'e.g. EUCOM-001' :
                   scopeDim.value === 'site_group' ? 'site group name' :
+                  scopeDim.value === 'fabric' ? 'e.g. prod (Fabric.slug)' :
                   'literal string value'
                 }
               />

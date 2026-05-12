@@ -32,6 +32,7 @@ class Scope:
     site_group_ids: frozenset[UUID] = field(default_factory=frozenset)
     enclaves: frozenset[str] = field(default_factory=frozenset)
     organizations: frozenset[str] = field(default_factory=frozenset)
+    fabric_ids: frozenset[UUID] = field(default_factory=frozenset)
 
     def union(self, other: Scope) -> Scope:
         return Scope(
@@ -41,6 +42,7 @@ class Scope:
             site_group_ids=self.site_group_ids | other.site_group_ids,
             enclaves=self.enclaves | other.enclaves,
             organizations=self.organizations | other.organizations,
+            fabric_ids=self.fabric_ids | other.fabric_ids,
         )
 
 
@@ -99,6 +101,11 @@ async def _resolve_mapping_scope(
         return Scope(enclaves=frozenset([target]))
     if dimension is ScopeType.organization:
         return Scope(organizations=frozenset([target]))
+    if dimension is ScopeType.fabric:
+        # Local import to dodge a cycle: ipam.Fabric -> base -> security.
+        from ..models.ipam import Fabric
+        row = (await db.execute(select(Fabric.id).where(Fabric.slug == target))).scalar_one_or_none()
+        return Scope(fabric_ids=frozenset([row])) if row else None
     if dimension is ScopeType.global_:
         return Scope(is_global=True)
     return None
@@ -157,6 +164,7 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
     group_ids: set[UUID] = set()
     enclaves: set[str] = set()
     orgs: set[str] = set()
+    fabric_ids: set[UUID] = set()
     is_global = False
     for r in rows:
         match r.scope_type:
@@ -177,6 +185,9 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
             case ScopeType.organization:
                 if r.target_id:
                     orgs.add(r.target_id)
+            case ScopeType.fabric:
+                if r.target_id:
+                    fabric_ids.add(UUID(r.target_id))
     return Scope(
         is_global=is_global,
         region_ids=frozenset(region_ids),
@@ -184,6 +195,7 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
         site_group_ids=frozenset(group_ids),
         enclaves=frozenset(enclaves),
         organizations=frozenset(orgs),
+        fabric_ids=frozenset(fabric_ids),
     )
 
 
@@ -225,6 +237,51 @@ async def filter_sites_in_scope(db: AsyncSession, scope: Scope, candidate_ids: I
         if await site_matches_scope(db, scope, sid):
             out.add(sid)
     return out
+
+
+def fabric_matches_scope(scope: Scope, fabric_id: UUID) -> bool:
+    """Whether a fabric is reachable under `scope`. Pure: no DB query.
+    Fabric is a leaf dimension (no hierarchy expansion like Site has
+    region/group), so the check is just `fabric_id in scope.fabric_ids`."""
+    if scope.is_global:
+        return True
+    return fabric_id in scope.fabric_ids
+
+
+async def scope_filtered_fabric_ids(
+    db: AsyncSession,
+    capabilities: dict[str, Scope],
+    cap_code: str,
+) -> set[UUID] | None:
+    """Fabric equivalent of scope_filtered_site_ids: returns None for
+    globally-scoped principals, otherwise the explicit set of in-scope
+    fabric UUIDs. List endpoints push this into a `.in_(...)` filter."""
+    from .deps import find_matching_capability
+
+    scope = find_matching_capability(capabilities, cap_code)
+    if scope is None or scope.is_global:
+        return None
+    return set(scope.fabric_ids)
+
+
+async def enforce_fabric_scope(
+    db: AsyncSession,
+    capabilities: dict[str, Scope],
+    fabric_id: UUID | None,
+    cap_code: str,
+) -> None:
+    """Single-resource fabric-ABAC check. Raises ForbiddenError when
+    the principal's cap is fabric-scoped and `fabric_id` isn't in scope."""
+    if fabric_id is None:
+        return
+    from .deps import find_matching_capability
+
+    scope = find_matching_capability(capabilities, cap_code)
+    if scope is None or scope.is_global:
+        return
+    if not fabric_matches_scope(scope, fabric_id):
+        from ..errors import ForbiddenError
+        raise ForbiddenError("resource is outside your fabric scope")
 
 
 async def enforce_site_scope(

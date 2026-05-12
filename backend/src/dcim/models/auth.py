@@ -22,6 +22,10 @@ class ScopeType(str, enum.Enum):
     site_group = "site_group"
     enclave = "enclave"
     organization = "organization"
+    # Fabric — DNS / IPAM resources hang off a Fabric, not a Site.
+    # Resolved via Fabric.slug at sign-in (OIDC mappings) or stored as
+    # UUID in role_scopes.target_id for manual assignments.
+    fabric = "fabric"
 
 
 class Permission(UUIDPrimaryKey, Timestamped, Base):
