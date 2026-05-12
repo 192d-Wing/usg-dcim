@@ -55,13 +55,7 @@ from ..schemas.inventory import (
     SiteUpdate,
 )
 from ..security import audit
-from ..security.capabilities import (
-    INVENTORY_BULK,
-    INVENTORY_READ,
-    INVENTORY_WRITE,
-    SITES_MANAGE,
-)
-from ..security.deps import Principal, require_capability
+from ..security.deps import Principal, find_matching_capability, require_capability
 from ..security.scope import filter_sites_in_scope
 from ._pagination import paginate
 
@@ -74,7 +68,7 @@ _ASSET_NOT_FOUND = "asset not found"
 @router.get("/regions", response_model=Page[RegionOut])
 async def list_regions(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:regions:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Region)
@@ -84,7 +78,7 @@ async def list_regions(
 @router.post("/regions", response_model=RegionOut, status_code=201)
 async def create_region(
     payload: RegionCreate,
-    principal: Principal = Depends(require_capability(SITES_MANAGE)),
+    principal: Principal = Depends(require_capability("inventory:regions:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = Region(**payload.model_dump())
@@ -100,7 +94,7 @@ async def create_region(
 async def update_region(
     region_id: UUID,
     payload: RegionUpdate,
-    principal: Principal = Depends(require_capability(SITES_MANAGE)),
+    principal: Principal = Depends(require_capability("inventory:regions:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Region, region_id)
@@ -122,7 +116,7 @@ async def list_sites(
     enclave: str | None = Query(None),
     organization: str | None = Query(None),
     lifecycle_state: str | None = Query(None),
-    principal: Principal = Depends(require_capability(INVENTORY_READ)),
+    principal: Principal = Depends(require_capability("inventory:sites:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Site)
@@ -139,7 +133,7 @@ async def list_sites(
 
     page = await paginate(db, stmt, model=Site, params=params, out_model=SiteOut)
 
-    scope = principal.capabilities.get(INVENTORY_READ)
+    scope = find_matching_capability(principal.capabilities, "inventory:sites:read")
     if scope and not scope.is_global:
         allowed = await filter_sites_in_scope(db, scope, [s.id for s in page.items])
         page.items = [s for s in page.items if s.id in allowed]
@@ -150,7 +144,7 @@ async def list_sites(
 @router.post("/sites", response_model=SiteOut, status_code=201)
 async def create_site(
     payload: SiteCreate,
-    principal: Principal = Depends(require_capability(SITES_MANAGE)),
+    principal: Principal = Depends(require_capability("inventory:sites:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = Site(**payload.model_dump())
@@ -166,7 +160,7 @@ async def create_site(
 @router.get("/sites/{site_id}", response_model=SiteOut)
 async def get_site(
     site_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:sites:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Site, site_id)
@@ -179,7 +173,7 @@ async def get_site(
 async def update_site(
     site_id: UUID,
     payload: SiteUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:sites:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Site, site_id)
@@ -199,7 +193,7 @@ async def update_site(
 async def list_buildings(
     params: PageParams = Depends(PageParams.from_query),
     site_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:buildings:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Building)
@@ -212,7 +206,7 @@ async def list_buildings(
 async def list_rooms(
     params: PageParams = Depends(PageParams.from_query),
     building_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:rooms:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Room)
@@ -225,7 +219,7 @@ async def list_rooms(
 async def list_rows(
     params: PageParams = Depends(PageParams.from_query),
     room_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:rows:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Row)
@@ -237,7 +231,7 @@ async def list_rows(
 @router.post("/buildings", response_model=BuildingOut, status_code=201)
 async def create_building(
     payload: BuildingCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:buildings:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = Building(**payload.model_dump())
@@ -253,7 +247,7 @@ async def create_building(
 @router.post("/rooms", response_model=RoomOut, status_code=201)
 async def create_room(
     payload: RoomCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:rooms:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = Room(**payload.model_dump())
@@ -268,7 +262,7 @@ async def create_room(
 @router.post("/rows", response_model=RowOut, status_code=201)
 async def create_row(
     payload: RowCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:rows:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = Row(**payload.model_dump())
@@ -286,7 +280,7 @@ async def list_racks(
     params: PageParams = Depends(PageParams.from_query),
     site_id: UUID | None = Query(None),
     row_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:racks:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Rack)
@@ -300,7 +294,7 @@ async def list_racks(
 @router.get("/racks/{rack_id}", response_model=RackOut)
 async def get_rack(
     rack_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:racks:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Rack, rack_id)
@@ -312,7 +306,7 @@ async def get_rack(
 @router.post("/racks", response_model=RackOut, status_code=201)
 async def create_rack(
     payload: RackCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:racks:create")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = Rack(**payload.model_dump())
@@ -329,7 +323,7 @@ async def create_rack(
 async def update_rack(
     rack_id: UUID,
     payload: RackUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:racks:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Rack, rack_id)
@@ -385,7 +379,7 @@ async def list_assets(
     lifecycle_state: str | None = Query(None),
     serial: str | None = Query(None),
     hostname: str | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:assets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Asset)
@@ -407,7 +401,7 @@ async def list_assets(
 @router.get("/assets/{asset_id}", response_model=AssetOut)
 async def get_asset(
     asset_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:assets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Asset, asset_id)
@@ -419,7 +413,7 @@ async def get_asset(
 @router.post("/assets", response_model=AssetOut, status_code=201)
 async def create_asset(
     payload: AssetCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:assets:create")),
     db: AsyncSession = Depends(get_db),
 ):
     from ..models.inventory import AssetKind, PduSide
@@ -526,7 +520,7 @@ async def _validate_placement_and_resolve_target(
 async def update_asset(
     asset_id: UUID,
     payload: AssetUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:assets:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Asset, asset_id)
@@ -563,7 +557,7 @@ class _DecommissionPayload(BaseModel):
 async def decommission_asset(
     asset_id: UUID,
     payload: _DecommissionPayload,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:assets:update")),
     db: AsyncSession = Depends(get_db),
 ):
     """Mark an asset decommissioned and drop its power connections.
@@ -614,7 +608,7 @@ async def decommission_asset(
 @router.post("/assets/bulk", response_model=BulkResult)
 async def bulk_upsert_assets(
     payload: list[AssetCreate],
-    principal: Principal = Depends(require_capability(INVENTORY_BULK)),
+    principal: Principal = Depends(require_capability("inventory:bulk:execute")),
     db: AsyncSession = Depends(get_db),
 ):
     """Upsert by (manufacturer, serial). Use for site-wide imports."""
@@ -712,7 +706,7 @@ async def list_cables(
     site_id: UUID | None = Query(None),
     rack_id: UUID | None = Query(None),
     asset_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:cables:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """List cables. `rack_id` matches cables touching any asset in that rack."""
@@ -730,7 +724,7 @@ async def list_cables(
 @router.get("/cables/{cable_id}", response_model=CableOut)
 async def get_cable(
     cable_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:cables:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Cable, cable_id)
@@ -742,7 +736,7 @@ async def get_cable(
 @router.post("/cables", response_model=CableOut, status_code=201)
 async def create_cable(
     payload: CableCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:cables:create")),
     db: AsyncSession = Depends(get_db),
 ):
     a, b = await _validate_cable_endpoints(db, payload.a_asset_id, payload.b_asset_id)
@@ -771,7 +765,7 @@ async def create_cable(
 async def update_cable(
     cable_id: UUID,
     payload: CableUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:cables:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Cable, cable_id)
@@ -808,7 +802,7 @@ async def update_cable(
 @router.delete("/cables/{cable_id}", status_code=204)
 async def delete_cable(
     cable_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("inventory:cables:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Cable, cable_id)

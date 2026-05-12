@@ -82,7 +82,7 @@ from ..schemas.ipam import (
     VtepVniMembershipOut,
 )
 from ..security import audit
-from ..security.capabilities import INVENTORY_READ, INVENTORY_WRITE
+
 from ..security.deps import Principal, require_capability
 from ..services import ipam as ipam_svc
 from ..services import kea as kea_svc
@@ -104,7 +104,7 @@ _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$")
 async def list_fabrics(
     params: PageParams = Depends(PageParams.from_query),
     enclave: str | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:fabrics:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Fabric)
@@ -116,7 +116,7 @@ async def list_fabrics(
 @router.post("/fabrics", response_model=FabricOut, status_code=201)
 async def create_fabric(
     payload: FabricCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:fabrics:create")),
     db: AsyncSession = Depends(get_db),
 ):
     if not _SLUG_RE.match(payload.slug):
@@ -145,7 +145,7 @@ async def create_fabric(
 @router.get("/fabrics/{fabric_id}", response_model=FabricOut)
 async def get_fabric(
     fabric_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:fabrics:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Fabric, fabric_id)
@@ -158,7 +158,7 @@ async def get_fabric(
 async def update_fabric(
     fabric_id: UUID,
     payload: FabricUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:fabrics:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Fabric, fabric_id)
@@ -184,7 +184,7 @@ async def update_fabric(
 @router.delete("/fabrics/{fabric_id}", status_code=204)
 async def delete_fabric(
     fabric_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:fabrics:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Fabric, fabric_id)
@@ -207,7 +207,7 @@ async def delete_fabric(
 async def list_vrfs(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:vrfs:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Vrf)
@@ -219,7 +219,7 @@ async def list_vrfs(
 @router.get("/vrfs/{vrf_id}", response_model=VrfOut)
 async def get_vrf(
     vrf_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:vrfs:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vrf, vrf_id)
@@ -231,7 +231,7 @@ async def get_vrf(
 @router.post("/vrfs", response_model=VrfOut, status_code=201)
 async def create_vrf(
     payload: VrfCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vrfs:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -252,7 +252,7 @@ async def create_vrf(
 async def update_vrf(
     vrf_id: UUID,
     payload: VrfUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vrfs:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vrf, vrf_id)
@@ -273,7 +273,7 @@ async def update_vrf(
 @router.delete("/vrfs/{vrf_id}", status_code=204)
 async def delete_vrf(
     vrf_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vrfs:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vrf, vrf_id)
@@ -309,7 +309,7 @@ async def list_vrf_bgp_peers(
     vrf_id: UUID | None = Query(None),
     bgp_peer_id: UUID | None = Query(None),
     address_family: BgpAddressFamily | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:vrf-bgp-peers:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(VrfBgpPeer)
@@ -327,7 +327,7 @@ async def list_vrf_bgp_peers(
 @router.post("/vrf-bgp-peers", response_model=VrfBgpPeerOut, status_code=201)
 async def create_vrf_bgp_peer(
     payload: VrfBgpPeerCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vrf-bgp-peers:create")),
     db: AsyncSession = Depends(get_db),
 ):
     vrf = await db.get(Vrf, payload.vrf_id)
@@ -367,7 +367,7 @@ async def create_vrf_bgp_peer(
 async def update_vrf_bgp_peer(
     binding_id: UUID,
     payload: VrfBgpPeerUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vrf-bgp-peers:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(VrfBgpPeer, binding_id)
@@ -388,7 +388,7 @@ async def update_vrf_bgp_peer(
 @router.delete("/vrf-bgp-peers/{binding_id}", status_code=204)
 async def delete_vrf_bgp_peer(
     binding_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vrf-bgp-peers:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(VrfBgpPeer, binding_id)
@@ -412,7 +412,7 @@ async def list_supernets(
         None, description="Filter by parent. Pass the literal string 'null' to fetch top-level supernets only.",
     ),
     top_level: bool = Query(False, description="Shortcut for parent_supernet_id IS NULL."),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:supernets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Supernet)
@@ -430,7 +430,7 @@ async def list_supernets(
 @router.post("/supernets", response_model=SupernetOut, status_code=201)
 async def create_supernet(
     payload: SupernetCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:supernets:create")),
     db: AsyncSession = Depends(get_db),
 ):
     vrf = await db.get(Vrf, payload.vrf_id)
@@ -469,7 +469,7 @@ async def create_supernet(
 async def update_supernet(
     supernet_id: UUID,
     payload: SupernetUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:supernets:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Supernet, supernet_id)
@@ -506,7 +506,7 @@ async def update_supernet(
 @router.delete("/supernets/{supernet_id}", status_code=204)
 async def delete_supernet(
     supernet_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:supernets:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Supernet, supernet_id)
@@ -535,7 +535,7 @@ async def delete_supernet(
 @router.get("/supernets/{supernet_id}/utilization")
 async def supernet_utilization(
     supernet_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:supernets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     sn = await db.get(Supernet, supernet_id)
@@ -567,7 +567,7 @@ async def list_subnets(
     vrf_id: UUID | None = Query(None),
     supernet_id: UUID | None = Query(None),
     site_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:subnets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Subnet)
@@ -585,7 +585,7 @@ async def list_subnets(
 @router.post("/subnets", response_model=SubnetOut, status_code=201)
 async def create_subnet(
     payload: SubnetCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:subnets:create")),
     db: AsyncSession = Depends(get_db),
 ):
     parent = await ipam_svc.assert_subnet_inside_supernet(
@@ -621,7 +621,7 @@ async def create_subnet(
 async def update_subnet(
     subnet_id: UUID,
     payload: SubnetUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:subnets:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Subnet, subnet_id)
@@ -673,7 +673,7 @@ async def update_subnet(
 @router.delete("/subnets/{subnet_id}", status_code=204)
 async def delete_subnet(
     subnet_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:subnets:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Subnet, subnet_id)
@@ -695,7 +695,7 @@ async def delete_subnet(
 @router.get("/subnets/{subnet_id}/utilization", response_model=SubnetUtilization)
 async def subnet_utilization(
     subnet_id: UUID,
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:subnets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     subnet = await db.get(Subnet, subnet_id)
@@ -726,7 +726,7 @@ async def list_addresses(
     role: str | None = Query(None),
     status_: str | None = Query(None, alias="status"),
     source: str | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:addresses:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(IPAddress)
@@ -746,7 +746,7 @@ async def list_addresses(
 @router.post("/addresses", response_model=IPAddressOut, status_code=201)
 async def create_address(
     payload: IPAddressCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:addresses:create")),
     db: AsyncSession = Depends(get_db),
 ):
     await ipam_svc.assert_address_in_subnet(
@@ -782,7 +782,7 @@ async def create_address(
 async def update_address(
     ip_id: UUID,
     payload: IPAddressUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:addresses:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(IPAddress, ip_id)
@@ -803,7 +803,7 @@ async def update_address(
 @router.delete("/addresses/{ip_id}", status_code=204)
 async def delete_address(
     ip_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:addresses:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(IPAddress, ip_id)
@@ -827,7 +827,7 @@ async def free_space_in_subnets(
     family: str | None = Query(None, regex="^(v4|v6)$"),
     min_free: int = Query(1, ge=1, description="Minimum free addresses required."),
     limit: int = Query(50, ge=1, le=500),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:subnets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Subnets with at least `min_free` addresses available, sorted by
@@ -951,7 +951,7 @@ async def free_space_prefixes(
     supernet_id: UUID | None = Query(None),
     family: str | None = Query(None, regex="^(v4|v6)$"),
     limit_per_supernet: int = Query(20, ge=1, le=200),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:supernets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """Find unallocated CIDR blocks of a specific size inside supernets.
@@ -1012,7 +1012,7 @@ _MEMBERSHIP_NOT_FOUND = "vtep/vni membership not found"
 async def list_overlays(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:overlays:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Overlay)
@@ -1024,7 +1024,7 @@ async def list_overlays(
 @router.post("/overlays", response_model=OverlayOut, status_code=201)
 async def create_overlay(
     payload: OverlayCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:overlays:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -1051,7 +1051,7 @@ async def create_overlay(
 async def update_overlay(
     overlay_id: UUID,
     payload: OverlayUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:overlays:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Overlay, overlay_id)
@@ -1076,7 +1076,7 @@ async def update_overlay(
 @router.delete("/overlays/{overlay_id}", status_code=204)
 async def delete_overlay(
     overlay_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:overlays:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Overlay, overlay_id)
@@ -1106,7 +1106,7 @@ async def list_vnis(
     overlay_id: UUID | None = Query(None),
     fabric_id: UUID | None = Query(None),
     kind: str | None = Query(None, regex="^(l2|l3)$"),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:vnis:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Vni)
@@ -1124,7 +1124,7 @@ async def list_vnis(
 @router.post("/vnis", response_model=VniOut, status_code=201)
 async def create_vni(
     payload: VniCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vnis:create")),
     db: AsyncSession = Depends(get_db),
 ):
     overlay = await db.get(Overlay, payload.overlay_id)
@@ -1165,7 +1165,7 @@ async def create_vni(
 async def update_vni(
     vni_id: UUID,
     payload: VniUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vnis:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vni, vni_id)
@@ -1195,7 +1195,7 @@ async def update_vni(
 @router.delete("/vnis/{vni_id}", status_code=204)
 async def delete_vni(
     vni_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vnis:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vni, vni_id)
@@ -1225,7 +1225,7 @@ async def list_vteps(
     params: PageParams = Depends(PageParams.from_query),
     overlay_id: UUID | None = Query(None),
     asset_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:vteps:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Vtep)
@@ -1239,7 +1239,7 @@ async def list_vteps(
 @router.post("/vteps", response_model=VtepOut, status_code=201)
 async def create_vtep(
     payload: VtepCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vteps:create")),
     db: AsyncSession = Depends(get_db),
 ):
     overlay = await db.get(Overlay, payload.overlay_id)
@@ -1271,7 +1271,7 @@ async def create_vtep(
 async def update_vtep(
     vtep_id: UUID,
     payload: VtepUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vteps:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vtep, vtep_id)
@@ -1292,7 +1292,7 @@ async def update_vtep(
 @router.delete("/vteps/{vtep_id}", status_code=204)
 async def delete_vtep(
     vtep_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vteps:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vtep, vtep_id)
@@ -1312,7 +1312,7 @@ async def list_vtep_memberships(
     params: PageParams = Depends(PageParams.from_query),
     vtep_id: UUID | None = Query(None),
     vni_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:vtep-memberships:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(VtepVniMembership)
@@ -1330,7 +1330,7 @@ async def list_vtep_memberships(
 )
 async def create_vtep_membership(
     payload: VtepVniMembershipCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vtep-memberships:create")),
     db: AsyncSession = Depends(get_db),
 ):
     vtep = await db.get(Vtep, payload.vtep_id)
@@ -1369,7 +1369,7 @@ async def create_vtep_membership(
 @router.delete("/vtep-memberships/{membership_id}", status_code=204)
 async def delete_vtep_membership(
     membership_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:vtep-memberships:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(VtepVniMembership, membership_id)
@@ -1391,7 +1391,7 @@ _DHCP_NOT_FOUND = "dhcp server not found"
 async def list_dhcp_servers(
     params: PageParams = Depends(PageParams.from_query),
     fabric_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("ipam:dhcp-servers:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(DhcpServer)
@@ -1403,7 +1403,7 @@ async def list_dhcp_servers(
 @router.post("/dhcp/servers", response_model=DhcpServerOut, status_code=201)
 async def create_dhcp_server(
     payload: DhcpServerCreate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:dhcp-servers:create")),
     db: AsyncSession = Depends(get_db),
 ):
     fabric = await db.get(Fabric, payload.fabric_id)
@@ -1431,7 +1431,7 @@ async def create_dhcp_server(
 async def update_dhcp_server(
     server_id: UUID,
     payload: DhcpServerUpdate,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:dhcp-servers:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DhcpServer, server_id)
@@ -1454,7 +1454,7 @@ async def update_dhcp_server(
 @router.delete("/dhcp/servers/{server_id}", status_code=204)
 async def delete_dhcp_server(
     server_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:dhcp-servers:delete")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DhcpServer, server_id)
@@ -1471,7 +1471,7 @@ async def delete_dhcp_server(
 @router.post("/dhcp/servers/{server_id}/sync")
 async def sync_dhcp_server_now(
     server_id: UUID,
-    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    principal: Principal = Depends(require_capability("ipam:dhcp-servers:update")),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Trigger an on-demand sync. The cron job runs the same code path

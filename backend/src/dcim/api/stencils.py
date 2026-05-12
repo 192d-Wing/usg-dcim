@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from ..security.capabilities import INVENTORY_READ
+
 from ..security.deps import Principal, require_capability
 
 router = APIRouter(prefix="/stencils", tags=["stencils"])
@@ -94,7 +94,7 @@ CATALOG: list[dict] = [
 
 @router.get("")
 async def list_stencils(
-    _: Principal = Depends(require_capability(INVENTORY_READ)),
+    _: Principal = Depends(require_capability("inventory:stencils:read")),
 ) -> dict:
     """Return the vendor stencil catalog and palette for the frontend renderer."""
     return {"palette": VENDOR_PALETTE, "stencils": CATALOG}
