@@ -1,15 +1,12 @@
-// Login — single-card centered form. Uses Cloudscape primitives so
-// there's no Tailwind dependency once we remove it.
+// Login — split-screen layout. Brand panel on the left, form on the right.
+// Layout/styles live in globals.css (.login-shell); form logic is unchanged.
 
 import { useState } from 'react';
 import { useLogin } from '@refinedev/core';
 
-import Box from '@cloudscape-design/components/box';
 import Button from '@cloudscape-design/components/button';
-import Container from '@cloudscape-design/components/container';
 import Form from '@cloudscape-design/components/form';
 import FormField from '@cloudscape-design/components/form-field';
-import Header from '@cloudscape-design/components/header';
 import Input from '@cloudscape-design/components/input';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 
@@ -32,31 +29,49 @@ export function LoginPage() {
   }
 
   return (
-    <Box padding="xxl" textAlign="center">
-      <div style={{ display: 'inline-block', minWidth: 380, textAlign: 'left', marginTop: '12vh' }}>
-        <Container
-          header={
-            <Header
-              variant="h1"
-              description="Sign in to continue. Production deployments use OIDC/SAML; local dev accepts the seeded admin."
-            >
-              USG DCIM
-            </Header>
-          }
-        >
+    <div className="login-shell">
+      <aside className="login-brand" aria-hidden="true">
+        <div className="login-wordmark">
+          <span className="login-dot" />
+          <span>USG DCIM</span>
+        </div>
+        <div>
+          <h1 className="login-headline">Operate your fleet at every scale.</h1>
+          <p className="login-sub">
+            Unified inventory, capacity, and observability for enterprise
+            data-center operations — from a single rack to a global footprint.
+          </p>
+        </div>
+        <div className="login-meta">v0.2 · enterprise edition</div>
+      </aside>
+
+      <main className="login-form-panel">
+        <div className="login-form-card">
+          <h2 className="login-title">Welcome back</h2>
+          <p className="login-subtitle">
+            Sign in to continue. Production deployments use OIDC/SAML; local
+            dev accepts the seeded admin.
+          </p>
+
           <form onSubmit={onSubmit}>
             <Form
               actions={
-                <Button variant="primary" formAction="submit" loading={isPending}>
+                <Button
+                  variant="primary"
+                  formAction="submit"
+                  loading={isPending}
+                  fullWidth
+                >
                   {isPending ? 'Signing in…' : 'Sign in'}
                 </Button>
               }
             >
-              <SpaceBetween size="m">
+              <SpaceBetween size="l">
                 <FormField label="Email" errorText={emailErr}>
                   <Input
                     type="email"
                     autoComplete="username"
+                    placeholder="you@company.com"
                     value={email}
                     onChange={({ detail }) => setEmail(detail.value)}
                   />
@@ -65,6 +80,7 @@ export function LoginPage() {
                   <Input
                     type="password"
                     autoComplete="current-password"
+                    placeholder="••••••••"
                     value={password}
                     onChange={({ detail }) => setPassword(detail.value)}
                   />
@@ -72,8 +88,12 @@ export function LoginPage() {
               </SpaceBetween>
             </Form>
           </form>
-        </Container>
-      </div>
-    </Box>
+
+          <p className="login-footer-note">
+            Trouble signing in? Contact your system administrator.
+          </p>
+        </div>
+      </main>
+    </div>
   );
 }
