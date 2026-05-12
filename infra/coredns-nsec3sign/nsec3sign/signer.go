@@ -49,19 +49,21 @@ type rrsetKey struct {
 // typically found there (glue, OPT) don't gain much from a signature
 // that doubles the response size.
 //
-// Returns m for call-chain convenience. With no keys loaded, m is
-// returned unchanged — the no-op path is the responsibility of
-// ServeDNS, which short-circuits before calling here, but the guard
-// is cheap and prevents an empty-loop reallocation.
-func (n *Nsec3Sign) signMessage(m *dns.Msg, signerName string, now time.Time) *dns.Msg {
+// `server` is the request's server-block label (used as the metric
+// dimension for cache hits / misses). Returns m for call-chain
+// convenience. With no keys loaded, m is returned unchanged — the
+// no-op path is the responsibility of ServeDNS, which short-circuits
+// before calling here, but the guard is cheap and prevents an
+// empty-loop reallocation.
+func (n *Nsec3Sign) signMessage(m *dns.Msg, signerName, server string, now time.Time) *dns.Msg {
 	if len(n.Keys) == 0 {
 		return m
 	}
 	incep := uint32(now.Add(-sigInceptionOffset).Unix())
 	expir := uint32(now.Add(sigValidity).Unix())
 
-	m.Answer = n.appendRRSIGs(m.Answer, signerName, incep, expir)
-	m.Ns = n.appendRRSIGs(m.Ns, signerName, incep, expir)
+	m.Answer = n.appendRRSIGs(m.Answer, signerName, server, incep, expir)
+	m.Ns = n.appendRRSIGs(m.Ns, signerName, server, incep, expir)
 	return m
 }
 
@@ -69,22 +71,39 @@ func (n *Nsec3Sign) signMessage(m *dns.Msg, signerName string, now time.Time) *d
 // applicable signing key. The map iteration happens against a
 // snapshot built from the input slice, so the in-place append
 // doesn't invalidate the iteration.
-func (n *Nsec3Sign) appendRRSIGs(section []dns.RR, signerName string, incep, expir uint32) []dns.RR {
+func (n *Nsec3Sign) appendRRSIGs(section []dns.RR, signerName, server string, incep, expir uint32) []dns.RR {
 	for _, rrset := range groupByRRset(section) {
-		section = append(section, n.signRRset(rrset, signerName, incep, expir)...)
+		section = append(section, n.signRRset(rrset, signerName, server, incep, expir)...)
 	}
 	return section
 }
 
 // signRRset returns RRSIGs over rrs, one per key applicable to the
-// RRset's type. Returns nil when no keys apply. Individual key
-// errors are logged at warning level and the offending key skipped
-// — the remaining signatures still ship, which is preferable to
-// dropping a positive response entirely on one key's failure.
-func (n *Nsec3Sign) signRRset(rrs []dns.RR, signerName string, incep, expir uint32) []dns.RR {
+// RRset's type. Cache-aware: on hit, the previously-signed RRSIGs
+// are returned without re-running the signature math (which costs
+// 50–500 µs per RR depending on algorithm). Individual key errors
+// are logged at warning level and the offending key skipped — the
+// remaining signatures still ship, which is preferable to dropping
+// a positive response entirely on one key's failure.
+func (n *Nsec3Sign) signRRset(rrs []dns.RR, signerName, server string, incep, expir uint32) []dns.RR {
 	if len(rrs) == 0 {
 		return nil
 	}
+
+	// Cache lookup: the key hashes the RRset's presentation form, so
+	// a content change (zone reload, DDNS update) misses naturally
+	// and forces a re-sign. Stale entries past 75 % of validity get
+	// evicted by the janitor goroutine.
+	var cacheKey uint64
+	if n.SigCache != nil {
+		cacheKey = rrsetCacheKey(rrs)
+		if v, ok := n.SigCache.Get(cacheKey); ok {
+			cacheHits.WithLabelValues(server).Inc()
+			return v.([]dns.RR)
+		}
+		cacheMisses.WithLabelValues(server).Inc()
+	}
+
 	keys := n.signingKeysFor(rrs[0].Header().Rrtype)
 	if len(keys) == 0 {
 		return nil
@@ -100,6 +119,11 @@ func (n *Nsec3Sign) signRRset(rrs []dns.RR, signerName string, incep, expir uint
 			continue
 		}
 		sigs = append(sigs, sig)
+	}
+
+	if n.SigCache != nil && len(sigs) > 0 {
+		n.SigCache.Add(cacheKey, sigs)
+		cacheEntries.WithLabelValues(server, "signature").Set(float64(n.SigCache.Len()))
 	}
 	return sigs
 }

@@ -6,12 +6,14 @@ require (
 	github.com/coredns/caddy v1.1.1
 	github.com/coredns/coredns v1.11.3
 	github.com/miekg/dns v1.1.58
+	github.com/prometheus/client_golang v1.19.0
 )
 
 require (
 	github.com/apparentlymart/go-cidr v1.1.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
+	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
@@ -20,7 +22,6 @@ require (
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/onsi/ginkgo/v2 v2.13.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
-	github.com/prometheus/client_golang v1.19.0 // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
 	github.com/prometheus/common v0.53.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect

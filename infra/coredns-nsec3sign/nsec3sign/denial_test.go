@@ -350,7 +350,7 @@ func TestAttachDenialProofIsNoOpWithoutChain(t *testing.T) {
 	m.Rcode = dns.RcodeNameError
 	m.Ns = []dns.RR{soaFor(zone)}
 
-	got := n.attachDenialProof(m, "missing."+zone, time.Now().UTC())
+	got := n.attachDenialProof(m, "missing."+zone, "", time.Now().UTC())
 	for _, rr := range got.Ns {
 		if _, ok := rr.(*dns.NSEC3); ok {
 			t.Fatal("attached NSEC3 even though Chain==nil")

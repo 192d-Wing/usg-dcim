@@ -19,6 +19,7 @@ import (
 	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/plugin/pkg/cache"
 	clog "github.com/coredns/coredns/plugin/pkg/log"
 )
 
@@ -55,12 +56,25 @@ func setup(c *caddy.Controller) error {
 		return plugin.Error("nsec3sign", err)
 	}
 
+	// Spin up the signature cache + its janitor. The janitor evicts
+	// RRSIGs past 75 % of validity so the next query touching that
+	// RRset re-signs with a fresh inception. Both shut down on
+	// OnShutdown — leaking the goroutine would survive Corefile
+	// reloads and pile up across restarts.
+	n.SigCache = cache.New(n.CacheCapacity)
+	n.stopJanitor = make(chan struct{})
+	go runSigCacheJanitor(n.SigCache, n.stopJanitor)
+	c.OnShutdown(func() error {
+		close(n.stopJanitor)
+		return nil
+	})
+
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		n.Next = next
 		return n
 	})
 
-	log.Infof("nsec3sign registered for %v with %d key(s)", n.Zones, len(n.Keys))
+	log.Infof("nsec3sign registered for %v with %d key(s), cache capacity %d", n.Zones, len(n.Keys), n.CacheCapacity)
 	return nil
 }
 

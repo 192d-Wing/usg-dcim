@@ -92,7 +92,7 @@ need the custom image — only authoritative zones sign.
 
 ## Status
 
-Build-out plan, with the current cursor on step 6:
+Build-out plan, with the current cursor on step 7:
 
 | Step | What                                                         | Status   |
 | ---- | ------------------------------------------------------------ | -------- |
@@ -102,8 +102,8 @@ Build-out plan, with the current cursor on step 6:
 | 4    | Positive-response RRSIG signing                              | done     |
 | 5    | Denial-proof algorithm (NXDOMAIN closest-encloser, NODATA)   | done     |
 | 5b   | Zone-file ingestion — chain populated from BIND zone at boot | done     |
-| 6    | Signature cache + zone-reload (SIGUSR1) + Prometheus metrics | **next** |
-| 7    | DCIM renderer change — emit `nsec3sign` for NSEC3 zones      | todo     |
+| 6    | Signature cache + Prometheus metrics                         | done     |
+| 7    | DCIM renderer change — emit `nsec3sign` for NSEC3 zones      | **next** |
 | 8    | End-to-end smoke against `site-dns/docker-compose.yml`       | todo     |
 
 As of step 5b the plugin is functionally complete for authoritative
@@ -129,8 +129,29 @@ infra/coredns-nsec3sign/
     ├── zone.go        BIND-format zone file → chain ingestion
     ├── chain.go       sorted NSEC3 hash chain + lookup primitives
     ├── signer.go      RRSIG generation over RRsets
-    └── denial.go      NXDOMAIN / NODATA proof construction
+    ├── sigcache.go    LRU signature cache + expiry janitor
+    ├── denial.go      NXDOMAIN / NODATA proof construction
+    └── metrics.go     Prometheus counters / gauges
 ```
+
+## Metrics
+
+Mirrors the upstream `dnssec` plugin's metric names so dashboards
+written for `coredns_dnssec_*` translate with only a name rewrite.
+All counters carry a `server` label set from
+`metrics.WithServer(ctx)`.
+
+| Metric                                 | Type    | Labels           |
+| -------------------------------------- | ------- | ---------------- |
+| `coredns_nsec3sign_cache_hits_total`   | counter | `server`         |
+| `coredns_nsec3sign_cache_misses_total` | counter | `server`         |
+| `coredns_nsec3sign_cache_entries`      | gauge   | `server`, `type` |
+| `coredns_nsec3sign_denials_total`      | counter | `server`, `type` |
+| `coredns_nsec3sign_chain_entries`      | gauge   | `zone`           |
+
+The `denials_total{type}` label is `nxdomain` or `nodata`; the
+`cache_entries{type}` label is `signature` (room for future cache
+types).
 
 ## References
 

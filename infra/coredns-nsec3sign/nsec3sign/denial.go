@@ -48,12 +48,13 @@ const defaultDenialTTL uint32 = 3600
 // happens before signMessage walks Ns, so the new NSEC3 RRsets pick
 // up RRSIGs automatically — the denial ships fully signed.
 //
-// No-op when the chain hasn't been populated yet (the file-plugin
-// integration that does that lands in step 5b). That's by design:
-// step 5 ships the algorithm + tests with manual chain injection,
-// so production wiring can land independently without holding up
-// the algorithm review.
-func (n *Nsec3Sign) attachDenialProof(m *dns.Msg, qname string, now time.Time) *dns.Msg {
+// `server` is the request's server-block label, used as the metric
+// dimension for the denials counter. No-op when the chain hasn't
+// been populated yet — the cache + signing path keeps working in
+// that mode, just without proofs (zones not in OptOut mode would
+// then have validators rejecting denials, but a configured zone
+// always has a chain after setup()).
+func (n *Nsec3Sign) attachDenialProof(m *dns.Msg, qname, server string, now time.Time) *dns.Msg {
 	if n.Chain == nil || len(n.Chain.nodes) == 0 {
 		return m
 	}
@@ -62,8 +63,10 @@ func (n *Nsec3Sign) attachDenialProof(m *dns.Msg, qname string, now time.Time) *
 	switch rt {
 	case response.NameError:
 		m.Ns = append(m.Ns, n.Chain.proofForNXDOMAIN(qname, ttl)...)
+		denialsIssued.WithLabelValues(server, "nxdomain").Inc()
 	case response.NoData:
 		m.Ns = append(m.Ns, n.Chain.proofForNODATA(qname, ttl)...)
+		denialsIssued.WithLabelValues(server, "nodata").Inc()
 	}
 	return m
 }

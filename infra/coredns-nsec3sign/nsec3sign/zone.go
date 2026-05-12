@@ -35,6 +35,7 @@ func (n *Nsec3Sign) loadChain() error {
 		return fmt.Errorf("nsec3sign: zone file %s: %w", n.ZoneFile, err)
 	}
 	n.Chain = buildChain(apex, n.Salt, n.Iterations, n.OptOut, names)
+	chainEntries.WithLabelValues(apex).Set(float64(len(n.Chain.nodes)))
 	log.Infof("nsec3sign: chain built for %s with %d owner names", apex, len(names))
 	return nil
 }

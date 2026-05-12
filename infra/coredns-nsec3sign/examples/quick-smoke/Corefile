@@ -3,6 +3,7 @@
 example.test:1053 {
     errors
     log
+    prometheus :9153
     file /data/example.test.zone
     nsec3sign {
         key file /data/Kexample.test.+013+19870

@@ -21,6 +21,8 @@ import (
 	"time"
 
 	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/plugin/metrics"
+	"github.com/coredns/coredns/plugin/pkg/cache"
 	"github.com/coredns/coredns/plugin/pkg/nonwriter"
 	"github.com/coredns/coredns/request"
 
@@ -79,6 +81,16 @@ type Nsec3Sign struct {
 	// CacheCapacity is the LRU size for the signature cache. Default
 	// 10 000 entries, matching the upstream `dnssec` plugin.
 	CacheCapacity int
+
+	// SigCache holds previously-computed RRSIGs keyed by RRset
+	// content. Populated by setup() once parse() has decided the
+	// capacity. A nil cache is permitted (test wiring) — signRRset
+	// short-circuits the cache path when it's absent.
+	SigCache *cache.Cache
+
+	// stopJanitor is closed by OnShutdown to terminate the cache's
+	// background cleanup goroutine. nil when no cache was created.
+	stopJanitor chan struct{}
 }
 
 // Name returns the plugin's name. Implements plugin.Handler. Used by
@@ -125,11 +137,12 @@ func (n *Nsec3Sign) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.M
 	}
 
 	now := time.Now().UTC()
+	server := metrics.WithServer(ctx)
 	// Attach NSEC3 denial proofs BEFORE signing, so the new NSEC3
 	// RRsets get picked up by signMessage's authority-section walk.
 	// Positive responses go through both calls unchanged — neither
 	// step modifies a message it has nothing to do.
-	signed := n.attachDenialProof(nw.Msg, state.Name(), now)
-	signed = n.signMessage(signed, zone, now)
+	signed := n.attachDenialProof(nw.Msg, state.Name(), server, now)
+	signed = n.signMessage(signed, zone, server, now)
 	return code, w.WriteMsg(signed)
 }
