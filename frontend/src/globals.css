@@ -164,6 +164,23 @@ body {
   color: color-mix(in srgb, var(--login-text, #e4ecf6) 55%, transparent);
   text-align: center;
 }
+.login-or-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--login-text, #e4ecf6) 50%, transparent);
+}
+.login-or-divider::before,
+.login-or-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--login-text, #e4ecf6) 18%, transparent);
+}
 @media (max-width: 900px) {
   .login-shell { grid-template-columns: 1fr; }
   .login-brand { padding: 40px 32px 56px; min-height: 320px; }

@@ -86,6 +86,23 @@ export function LoginPage() {
           <h2 className="login-title">{loginBranding.formTitle}</h2>
           <p className="login-subtitle">{loginBranding.formSubtitle}</p>
 
+          {loginBranding.sso.enabled && (
+            <>
+              <Button
+                variant="primary"
+                fullWidth
+                onClick={() => {
+                  globalThis.location.href = loginBranding.sso.loginUrl;
+                }}
+              >
+                {loginBranding.sso.label}
+              </Button>
+              <div className="login-or-divider" role="separator">
+                <span>or</span>
+              </div>
+            </>
+          )}
+
           <form onSubmit={onSubmit}>
             <Form
               actions={

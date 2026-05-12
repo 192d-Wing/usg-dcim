@@ -16,6 +16,19 @@ export type LoginLogo = {
   height?: number;
 };
 
+export type LoginSso = {
+  /** Render the SSO button. Hide entirely when false. */
+  enabled: boolean;
+  /** Button label, e.g. "Login using DOD E-ICAM". */
+  label: string;
+  /**
+   * URL the browser is sent to when the button is clicked. The
+   * backend at this path is expected to 302 to the IdP. Relative
+   * paths are resolved against the current origin.
+   */
+  loginUrl: string;
+};
+
 export type LoginBranding = {
   /** Hero name centered in the brand panel. */
   productName: string;
@@ -33,6 +46,9 @@ export type LoginBranding = {
   formSubtitle: string;
   /** Footer note centered below the sign-in button. */
   footerNote: string;
+
+  /** Single sign-on button shown above the email/password form. */
+  sso: LoginSso;
 
   /**
    * Cloudscape component theme while the login page is mounted.
@@ -76,6 +92,14 @@ export const loginBranding: LoginBranding = {
     'Sign in to continue. Production deployments use OIDC/SAML; ' +
     'local dev accepts the seeded admin.',
   footerNote: 'Trouble signing in? Contact your system administrator.',
+
+  sso: {
+    enabled: true,
+    label: 'Login using DOD E-ICAM',
+    // Backend handler at /api/v1/auth/oidc/login issues the 302 to
+    // Keycloak using DCIM_OIDC_* env vars. nginx proxies /api/ to api.
+    loginUrl: '/api/v1/auth/oidc/login',
+  },
 
   cloudscapeMode: 'dark',
 
