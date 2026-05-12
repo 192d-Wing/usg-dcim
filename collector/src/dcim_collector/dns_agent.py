@@ -67,6 +67,50 @@ def _read_pid(pidfile: str | None) -> int | None:
         return None
 
 
+def _find_pid_by_comm(comm: str) -> int | None:
+    """Walk `/proc/<pid>/comm` looking for a process whose name
+    matches `comm`. Used to locate resolvers that don't write a
+    pidfile of their own (Hickory) — the site-stack compose runs the
+    collector with `pid: host` so it shares the resolver pod's PID
+    namespace and can SIGHUP/SIGUSR1 by PID directly.
+
+    Linux truncates `/proc/<pid>/comm` to 15 chars (TASK_COMM_LEN), so
+    we compare on the truncated form; `hickory-dns` is 11 chars and
+    fits, but the helper handles longer process names gracefully.
+    """
+    if not comm:
+        return None
+    target = comm[:15]
+    try:
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/comm") as fh:
+                    if fh.read().strip() == target:
+                        return int(entry)
+            except OSError:
+                continue
+    except OSError:
+        return None
+    return None
+
+
+def _resolve_resolver_pid(server: DnsServerConfig, engine: str) -> int | None:
+    """Pick the right PID-discovery strategy per engine. CoreDNS
+    writes its own pidfile (set via `-pidfile`); Hickory doesn't, so
+    we fall back to scanning `/proc` for the binary name when the
+    pidfile is missing. The fallback is also tolerant of a Hickory
+    container that crash-loops mid-cycle — the next poll re-resolves
+    against the fresh PID."""
+    pid = _read_pid(server.coredns_pidfile)
+    if pid is not None:
+        return pid
+    if engine == "hickory":
+        return _find_pid_by_comm("hickory-dns")
+    return None
+
+
 def _signal_pid(pid: int | None, sig: signal.Signals) -> bool:
     if pid is None:
         return False
@@ -203,7 +247,7 @@ def _signal_reloads(server: DnsServerConfig, engine: str) -> dict:
     """Send the right reload signals. CoreDNS reloads on SIGUSR1;
     Hickory reloads on SIGHUP; GoBGP also uses SIGHUP. The bundle's
     engine hint drives which signal we send to the resolver pid."""
-    resolver_pid = _read_pid(server.coredns_pidfile)
+    resolver_pid = _resolve_resolver_pid(server, engine)
     resolver_sig = signal.SIGHUP if engine == "hickory" else signal.SIGUSR1
     gobgp_pid = _read_pid(server.gobgp_pidfile)
     return {
