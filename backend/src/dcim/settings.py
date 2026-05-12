@@ -80,6 +80,17 @@ class Settings(BaseSettings):
     # is a 4-byte private ASN (RFC 6996).
     dns_anycast_originate_asn: int = 4_200_000_000
 
+    # Emit `prometheus_listen_addr` into rendered Hickory configs so
+    # the resolver exposes /metrics for the collector to scrape. The
+    # site-dns Hickory overlay references our custom `hickory-prom`
+    # image (built with --features prometheus-metrics) by default, so
+    # this is on out of the box. Operators who point HICKORY_IMAGE
+    # at the upstream `hickorydns/hickory-dns` build MUST flip this
+    # off — the upstream binary doesn't recognize the field and
+    # would crash on TOML parse.
+    dns_hickory_prom_metrics: bool = True
+    dns_hickory_prom_port: int = 9090
+
     # DNSSEC private-key encryption secret. When set, DnsKey.private_pem
     # is encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA-256).
     # Generate with `python -c "from cryptography.fernet import Fernet;

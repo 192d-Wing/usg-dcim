@@ -1003,6 +1003,19 @@ def render_hickory_recursive_config(
         "tcp_request_timeout = 5",
         "",
     ]
+    # Prometheus exporter line — only emitted when the operator has
+    # opted in via `DCIM_DNS_HICKORY_PROM_METRICS=true`. The upstream
+    # `hickorydns/hickory-dns` image is built without the
+    # `prometheus-metrics` Cargo feature, so the field is unknown to
+    # its TOML parser and would crash the resolver on load. Our
+    # custom `hickory-prom` build (infra/hickory-prom) compiles it in
+    # and honors the line. Operators flip the env var on after
+    # swapping the compose image; the collector still needs
+    # `metrics_enabled: true` on its server entry to actually scrape.
+    if get_settings().dns_hickory_prom_metrics:
+        port = get_settings().dns_hickory_prom_port
+        lines.append(f'prometheus_listen_addr = "0.0.0.0:{port}"')
+        lines.append("")
     # Forward queries back to the local auth pod for each apex —
     # internal lookups never leave the site.
     if auth_unicast_ip:

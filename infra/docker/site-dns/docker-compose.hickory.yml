@@ -17,10 +17,15 @@
 
 services:
   coredns-recursive:
-    # Replace the CoreDNS image with Hickory. The container reads
-    # /var/lib/dcim-dns/recursive/config.toml that the collector
-    # renders.
-    image: hickorydns/hickory-dns:latest
+    # Custom Hickory build with the `prometheus-metrics` Cargo
+    # feature enabled — exposes /metrics for the collector to scrape.
+    # The upstream `hickorydns/hickory-dns:latest` image is built
+    # without that feature, so it has no observability surface
+    # (verified: nmap shows only port 53 open). The custom image is a
+    # drop-in replacement otherwise; switch via the `HICKORY_IMAGE`
+    # env var if you want to test against upstream temporarily.
+    # See infra/hickory-prom/ for the Dockerfile + build instructions.
+    image: ${HICKORY_IMAGE:-ghcr.io/192d-wing/hickory-prom:v0.26.0-1}
     pid: "host"
     user: "0:0"
     networks:

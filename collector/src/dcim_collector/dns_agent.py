@@ -295,56 +295,90 @@ def _parse_prom_line(line: str) -> tuple[str, dict[str, str], float] | None:
 
 _RCODE_KEYS = {"NOERROR": "noerror", "NXDOMAIN": "nxdomain", "SERVFAIL": "servfail"}
 
-# Engine-agnostic suffix matching — CoreDNS prefixes its series with
-# `coredns_`, Hickory with `hickory_`. Strip the engine-specific
-# prefix so the rest of the parser doesn't care which one is talking.
-_METRIC_PREFIXES = ("coredns_", "hickory_")
 
-
-def _strip_engine_prefix(name: str) -> str | None:
-    """Return the engine-agnostic suffix of a DNS-engine metric name,
-    or None if it's a series we don't care about. Lets one parser
-    cover both CoreDNS and Hickory without a flavor hint."""
-    for prefix in _METRIC_PREFIXES:
-        if name.startswith(prefix):
-            return name[len(prefix):]
-    return None
-
-
-def _absorb_metric(counters: dict, name: str, labels: dict, value: float) -> None:
-    """Fold one parsed sample into the running counters dict. Engine
-    prefix (`coredns_` / `hickory_`) is stripped before matching so
-    both resolvers feed the same downstream schema."""
-    suffix = _strip_engine_prefix(name)
-    if suffix is None:
-        return
-    if suffix == "dns_requests_total":
+def _absorb_coredns_metric(
+    counters: dict, name: str, labels: dict, value: float,
+) -> None:
+    """CoreDNS prometheus plugin shape: `coredns_dns_*` series with
+    rcode + duration histograms. Matches the schema since CoreDNS 1.x."""
+    if name == "coredns_dns_requests_total":
         counters["requests_total"] += int(value)
         return
-    if suffix == "dns_responses_total":
+    if name == "coredns_dns_responses_total":
         key = _RCODE_KEYS.get(labels.get("rcode", "").upper())
         if key:
             counters[key] += int(value)
         return
-    if suffix == "dns_request_duration_seconds_bucket":
-        try:
-            le = float(labels.get("le", "+Inf"))
-        except ValueError:
-            return
-        counters["duration_buckets"][le] = (
-            counters["duration_buckets"].get(le, 0) + int(value)
-        )
+    if name == "coredns_dns_request_duration_seconds_bucket":
+        _absorb_bucket(counters, labels, value)
         return
-    if suffix == "dns_request_duration_seconds_count":
+    if name == "coredns_dns_request_duration_seconds_count":
         counters["duration_count"] += int(value)
 
 
+def _absorb_hickory_metric(
+    counters: dict, name: str, labels: dict, value: float,
+) -> None:
+    """Hickory's metrics schema is fundamentally different from
+    CoreDNS's — no per-rcode response counter, no overall
+    request-duration histogram. Synthesize the downstream-uniform
+    shape from what Hickory does expose:
+
+      - **requests_total** : sum `hickory_request_record_types_total`
+        across all record-type labels.
+      - **noerror/nxdomain/servfail** : Hickory doesn't expose
+        per-rcode counters. We leave nxdomain/servfail at 0 and let
+        noerror absorb the whole response volume — the dashboard's
+        rcode pie is meaningful for CoreDNS auth pods (where most
+        DNSSEC chain math + zone-boundary checks happen) and roughly
+        unused for the recursive's forward path.
+      - **duration buckets + count** : taken from the
+        `hickory_resolver_cache_miss_duration_seconds_*` histogram,
+        which captures the time to forward + receive an upstream
+        answer. Cache-hit latency is sub-millisecond and would
+        otherwise drown the p95 of the actually-interesting tail.
+    """
+    if name == "hickory_request_record_types_total":
+        counters["requests_total"] += int(value)
+        return
+    if name == "hickory_resolver_cache_miss_duration_seconds_bucket":
+        _absorb_bucket(counters, labels, value)
+        return
+    if name == "hickory_resolver_cache_miss_duration_seconds_count":
+        counters["duration_count"] += int(value)
+
+
+def _absorb_bucket(counters: dict, labels: dict, value: float) -> None:
+    """Shared histogram-bucket folder — both engines emit `le` in
+    seconds, so the percentile computation below is engine-agnostic
+    once we've routed the right series into it."""
+    try:
+        le = float(labels.get("le", "+Inf"))
+    except ValueError:
+        return
+    counters["duration_buckets"][le] = (
+        counters["duration_buckets"].get(le, 0) + int(value)
+    )
+
+
+def _absorb_metric(counters: dict, name: str, labels: dict, value: float) -> None:
+    """Dispatch one parsed sample to the right engine-specific
+    absorber. Anything that doesn't start with a known engine prefix
+    is silently dropped (process_*, build_info, etc.)."""
+    if name.startswith("coredns_"):
+        _absorb_coredns_metric(counters, name, labels, value)
+    elif name.startswith("hickory_"):
+        _absorb_hickory_metric(counters, name, labels, value)
+
+
 def _parse_prom_text(text: str) -> dict:
-    """Minimal Prometheus text-format parser. Matches the engine-
-    agnostic DNS series (request count, responses by rcode, request-
-    duration histogram for p50/p95) under either the `coredns_` or
-    `hickory_` prefix; everything else is ignored. Multi-line samples
-    for the same series (different label combos) are summed."""
+    """Minimal Prometheus text-format parser. Folds per-engine series
+    (CoreDNS's `coredns_dns_*`, Hickory's `hickory_request_*` +
+    `hickory_resolver_cache_miss_duration_*`) into a uniform counters
+    dict the central API understands. Engine-specific gaps in the
+    upstream metric schema (Hickory doesn't expose per-rcode response
+    counts) are documented in the absorber comments. Multi-line
+    samples for the same series (different label combos) are summed."""
     counters: dict[str, dict] = {
         "requests_total": 0,
         "noerror": 0,

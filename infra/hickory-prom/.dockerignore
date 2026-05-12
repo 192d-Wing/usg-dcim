@@ -1,0 +1,6 @@
+# The Dockerfile pulls source via `git clone` inside the builder
+# stage, so we don't need anything from this directory in the
+# context. Keep the context tiny — only the Dockerfile itself ends
+# up in the build context once the matches below take effect.
+**
+!Dockerfile
