@@ -129,11 +129,15 @@ async def oidc_callback(
         jwks_resp.raise_for_status()
         jwks = jwks_resp.json()
     try:
+        # Pass access_token so python-jose can verify the at_hash claim
+        # (binds the id_token to this specific access_token). Keycloak
+        # includes at_hash in its id_tokens by default.
         claims = jose_jwt.decode(
             id_token, jwks,
             algorithms=["RS256"],
             audience=settings.oidc_client_id,
             issuer=meta["issuer"],
+            access_token=tokens.get("access_token"),
         )
     except Exception as exc:
         raise AuthError(f"oidc id_token invalid: {exc}") from exc
