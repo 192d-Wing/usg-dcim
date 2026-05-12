@@ -47,6 +47,91 @@ func writeZone(t *testing.T, content string) string {
 	return path
 }
 
+// hierarchicalZone has a record three labels deep with NO records
+// at the intermediate `floor3` label. `floor3.example.test.` is an
+// empty non-terminal (ENT) — required to be in the NSEC3 chain per
+// RFC 5155 §7.2.2 so direct queries for it return a verifiable
+// NODATA proof instead of looking like NXDOMAIN.
+const hierarchicalZone = `$ORIGIN example.test.
+$TTL 3600
+@                              IN SOA  ns1.example.test. hostmaster.example.test. 1 3600 600 86400 300
+@                              IN NS   ns1.example.test.
+ns1                            IN A    10.0.0.1
+printer-1.floor3.building-a    IN A    10.0.0.41
+printer-2.floor3.building-a    IN A    10.0.0.42
+`
+
+func TestParseZoneFileSynthesizesEmptyNonTerminals(t *testing.T) {
+	path := writeZone(t, hierarchicalZone)
+	names, _, err := parseZoneFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := make(map[string]nameInfo)
+	for _, n := range names {
+		byName[n.Name] = n
+	}
+	// `floor3.building-a.example.test.` and `building-a.example.test.`
+	// are ENTs — they have descendants but no records of their own.
+	// Both must be synthesized into the chain so direct queries for
+	// them return NODATA, not NXDOMAIN.
+	for _, ent := range []string{
+		"floor3.building-a.example.test.",
+		"building-a.example.test.",
+	} {
+		info, ok := byName[ent]
+		if !ok {
+			t.Errorf("ENT %s missing from parsed names", ent)
+			continue
+		}
+		// ENTs have empty type bitmaps — the absence of types is
+		// what the validator checks. A non-empty Types slice here
+		// would mean we accidentally promoted the ENT to a regular
+		// owner (e.g. by adding RRSIG unconditionally).
+		if len(info.Types) != 0 {
+			t.Errorf("ENT %s has Types %v, want empty", ent, info.Types)
+		}
+		if info.OptedOut {
+			t.Errorf("ENT %s flagged OptedOut — ENTs have no NS records", ent)
+		}
+	}
+	// Apex must NOT be flagged as an ENT — it's an explicit owner.
+	apex := byName["example.test."]
+	if len(apex.Types) == 0 {
+		t.Error("apex emitted with empty Types — should be explicit owner with SOA/NS/RRSIG")
+	}
+	// Sanity: the explicit leaf names still appear.
+	for _, leaf := range []string{
+		"printer-1.floor3.building-a.example.test.",
+		"printer-2.floor3.building-a.example.test.",
+	} {
+		if _, ok := byName[leaf]; !ok {
+			t.Errorf("explicit leaf %s missing from parsed names", leaf)
+		}
+	}
+}
+
+func TestLoadChainENTsAreMatchable(t *testing.T) {
+	// After loadChain runs, matchingNSEC3 against an ENT name must
+	// return a node — that's the proof shape a query for the ENT
+	// itself relies on. Validators see "matching NSEC3 with empty
+	// bitmap" and interpret it as NODATA-at-ENT.
+	n := &Nsec3Sign{
+		Salt:     "aabbccdd",
+		ZoneFile: writeZone(t, hierarchicalZone),
+	}
+	if err := n.loadChain(); err != nil {
+		t.Fatal(err)
+	}
+	node := n.Chain.matchingNSEC3("floor3.building-a.example.test.")
+	if node == nil {
+		t.Fatal("ENT floor3.building-a.example.test. missing from chain")
+	}
+	if len(node.Types) != 0 {
+		t.Fatalf("ENT chain node has Types %v, want empty", node.Types)
+	}
+}
+
 func TestParseZoneFileApexDetected(t *testing.T) {
 	path := writeZone(t, flatZone)
 	_, apex, err := parseZoneFile(path)

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/miekg/dns"
 )
@@ -123,9 +124,19 @@ func collectOwners(zp *dns.ZoneParser) (map[string]*ownerState, string) {
 // not the apex itself, is an insecure delegation per RFC 5155 §6.
 // buildChain elides those from the chain when the plugin's OptOut
 // flag is set.
+//
+// Empty non-terminals: if an owner has descendants in the zone but
+// no records of its own (e.g. zone has `host.deep.example.test.`
+// without records at `deep.example.test.`), RFC 5155 §7.2.2 requires
+// it to be in the NSEC3 chain with an empty type bitmap. Validators
+// distinguish NODATA-at-ENT from NXDOMAIN-below-apex by checking
+// for a matching NSEC3 with no types. We synthesize those entries
+// here after the explicit-owner pass.
 func ownersToNameInfo(owners map[string]*ownerState, apex string) []nameInfo {
+	seen := make(map[string]struct{}, len(owners))
 	out := make([]nameInfo, 0, len(owners))
 	for owner, os := range owners {
+		seen[owner] = struct{}{}
 		types := make([]uint16, 0, len(os.types)+1)
 		for t := range os.types {
 			types = append(types, t)
@@ -142,5 +153,36 @@ func ownersToNameInfo(owners map[string]*ownerState, apex string) []nameInfo {
 			OptedOut: os.hasNS && !os.hasDS && owner != apex,
 		})
 	}
+	for _, name := range synthesizeENTs(owners, apex, seen) {
+		// Empty type bitmap, no opt-out flag. The empty Types slice
+		// is what makes a validator treat a matching NSEC3 here as
+		// "name exists but has no RRsets" — i.e. NODATA at an ENT.
+		out = append(out, nameInfo{Name: name})
+	}
 	return out
+}
+
+// synthesizeENTs walks each explicit owner up toward the apex and
+// returns the set of intermediate names that need ENT entries.
+// Skips any name that's already in `seen` (already an explicit
+// owner — not an ENT). Skips the apex itself (always explicit per
+// the SOA + NS at the zone top).
+func synthesizeENTs(owners map[string]*ownerState, apex string, seen map[string]struct{}) []string {
+	apexLabels := dns.SplitDomainName(apex)
+	var ents []string
+	for owner := range owners {
+		ownerLabels := dns.SplitDomainName(owner)
+		// Walk up by stripping leftmost labels. i=1 is the first
+		// parent; we stop one short of the apex (len-apexLabels)
+		// because the apex is already an explicit owner.
+		for i := 1; i < len(ownerLabels)-len(apexLabels); i++ {
+			parent := strings.Join(ownerLabels[i:], ".") + "."
+			if _, ok := seen[parent]; ok {
+				continue
+			}
+			seen[parent] = struct{}{}
+			ents = append(ents, parent)
+		}
+	}
+	return ents
 }
