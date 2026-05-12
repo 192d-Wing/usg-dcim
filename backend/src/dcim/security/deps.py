@@ -84,9 +84,17 @@ async def _principal_from_api_token(
     if owner is None or not owner.is_active:
         raise AuthError("owner inactive")
     # API token scope is whatever was baked into scope_json at issue time.
-    # For simplicity here we hand back the owner's scope and intersect by capability codes.
+    # The token's effective caps are the requested permission_codes, kept
+    # only when the owner still has a cap that grants each one — wildcard
+    # owner caps (`*`, `dns:*`, `dns:servers:*`) count, otherwise admin-
+    # issued tokens silently end up with zero capabilities because the
+    # owner's role bundle only stores the wildcard literally.
     owner_caps = await scope_for_user(db, owner)
-    caps = {c: owner_caps[c] for c in token.permission_codes if c in owner_caps}
+    caps: dict[str, Scope] = {}
+    for code in token.permission_codes:
+        granting = find_matching_capability(owner_caps, code)
+        if granting is not None:
+            caps[code] = granting
     return Principal(user=owner, token=token, capabilities=caps, label=f"token:{token.name}", ip=ip)
 
 

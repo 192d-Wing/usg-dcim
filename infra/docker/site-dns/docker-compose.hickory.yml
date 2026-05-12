@@ -26,17 +26,24 @@ services:
     networks:
       dns-net:
         ipv4_address: 172.30.42.20
-    ports:
-      - "10.0.100.5:53:53/udp"
-      - "10.0.100.5:53:53/tcp"
+    # Reachable on the dns-net bridge at 172.30.42.20:53 for smoke
+    # tests from sibling containers (collector + alpine dig pods).
+    # Production sites carry the anycast IP via the gobgp sidecar
+    # and host networking — the base compose's `10.0.100.5:53`
+    # host-port mapping is intentionally not inherited here because
+    # local dev rarely has that LAN IP assigned.
+    ports: !reset []
     # `-c` points at the rendered TOML; `--zone-dir` lets Hickory
     # resolve relative zone-file paths inside the bundle (we don't
     # use it today for the recursive but it's harmless).
+    # The image's entrypoint is already `hickory-dns`, so the command
+    # is just the args. `--zone-dir` rebases relative zone-file paths
+    # in the config (harmless for forward-only setups, kept for when
+    # we add RPZ Primary zones).
     command:
-      - "hickory-dns"
       - "-c"
       - "/var/lib/dcim-dns/recursive/config.toml"
-      - "--zone-dir"
+      - "--zonedir"
       - "/var/lib/dcim-dns/recursive/zones"
     volumes:
       - dns-state:/var/lib/dcim-dns
