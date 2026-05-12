@@ -339,6 +339,182 @@ func TestServeDNSDenialProofVerifies(t *testing.T) {
 	}
 }
 
+// delegationHandler simulates a parent zone returning a referral
+// to a child zone: rcode=NOERROR, empty Answer, NS (and optionally
+// DS) records at the delegation owner in the authority section.
+// `response.Typify` classifies this shape as Delegation.
+type delegationHandler struct {
+	delOwner string
+	nsTarget string
+	ds       *dns.DS // nil for insecure delegations
+}
+
+func (h *delegationHandler) Name() string { return "delegation" }
+func (h *delegationHandler) ServeDNS(_ context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+	m := new(dns.Msg)
+	m.SetReply(r)
+	m.Rcode = dns.RcodeSuccess
+	ns := &dns.NS{
+		Hdr: dns.RR_Header{Name: h.delOwner, Rrtype: dns.TypeNS, Class: dns.ClassINET, Ttl: 3600},
+		Ns:  h.nsTarget,
+	}
+	m.Ns = []dns.RR{ns}
+	if h.ds != nil {
+		m.Ns = append(m.Ns, h.ds)
+	}
+	return dns.RcodeSuccess, w.WriteMsg(m)
+}
+
+// delegationChain holds three names: apex, a secure delegation
+// (NS + DS at owner), and an insecure delegation (NS only). The
+// secure delegation lands in the chain as an explicit owner; the
+// insecure one's chain shape depends on the OptOut flag.
+func delegationChain(t *testing.T, optOut bool) *chain {
+	t.Helper()
+	return buildChain("example.test.", "aabbccdd", 0, optOut, []nameInfo{
+		{Name: "example.test.", Types: []uint16{dns.TypeSOA, dns.TypeNS}},
+		{Name: "secure.example.test.", Types: []uint16{dns.TypeNS, dns.TypeDS}},
+		{
+			Name:     "insecure.example.test.",
+			Types:    []uint16{dns.TypeNS},
+			OptedOut: true,
+		},
+	})
+}
+
+func TestServeDNSAttachesDelegationProofForSecureDelegation(t *testing.T) {
+	const zone = "example.test."
+	zskDK, zskPriv := generateDNSKEY(t, zone, dns.ECDSAP256SHA256, 256, 256)
+	zsk := &signingKey{KeyTag: zskDK.KeyTag(), Public: zskDK, Private: zskPriv}
+
+	// Secure delegation referral: parent returns NS + DS.
+	ds := &dns.DS{
+		Hdr:        dns.RR_Header{Name: "secure." + zone, Rrtype: dns.TypeDS, Class: dns.ClassINET, Ttl: 3600},
+		KeyTag:     12345,
+		Algorithm:  13,
+		DigestType: 2,
+		Digest:     "abcd1234",
+	}
+	n := &Nsec3Sign{
+		Zones: []string{zone},
+		Keys:  []*signingKey{zsk},
+		Chain: delegationChain(t, false),
+		Next:  &delegationHandler{delOwner: "secure." + zone, nsTarget: "ns.secure." + zone, ds: ds},
+	}
+	w := &captureWriter{}
+	if _, err := n.ServeDNS(context.Background(), w, query("host.secure."+zone, dns.TypeA, true)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Authority must carry exactly one NSEC3 — the matching one for
+	// the delegation owner. Its type bitmap must list both NS and DS
+	// so the validator knows the delegation is secure.
+	var nsec3s []*dns.NSEC3
+	for _, rr := range w.captured.Ns {
+		if v, ok := rr.(*dns.NSEC3); ok {
+			nsec3s = append(nsec3s, v)
+		}
+	}
+	if len(nsec3s) != 1 {
+		t.Fatalf("got %d NSEC3s for secure delegation, want 1 (matching)", len(nsec3s))
+	}
+	got := nsec3s[0]
+	if !containsType(got.TypeBitMap, dns.TypeNS) || !containsType(got.TypeBitMap, dns.TypeDS) {
+		t.Errorf("matching NSEC3 type bitmap = %v, want NS+DS", got.TypeBitMap)
+	}
+	// The NSEC3 RRset must be signed — validators reject unsigned
+	// authority data when DO=1.
+	if findRRSIG(w.captured.Ns, dns.TypeNSEC3) == nil {
+		t.Error("NSEC3 RRset is unsigned")
+	}
+}
+
+func TestServeDNSAttachesDelegationProofForInsecureNonOptOut(t *testing.T) {
+	const zone = "example.test."
+	zskDK, zskPriv := generateDNSKEY(t, zone, dns.ECDSAP256SHA256, 256, 256)
+	zsk := &signingKey{KeyTag: zskDK.KeyTag(), Public: zskDK, Private: zskPriv}
+
+	// Insecure delegation referral: NS only, no DS. Non-opt-out
+	// chain — the delegation IS in the chain because OptOut=false
+	// means even insecure delegations get NSEC3 entries (RFC 5155
+	// §6 elides only when opt-out is in effect).
+	n := &Nsec3Sign{
+		Zones: []string{zone},
+		Keys:  []*signingKey{zsk},
+		Chain: delegationChain(t, false),
+		Next:  &delegationHandler{delOwner: "insecure." + zone, nsTarget: "ns.insecure." + zone},
+	}
+	w := &captureWriter{}
+	if _, err := n.ServeDNS(context.Background(), w, query("host.insecure."+zone, dns.TypeA, true)); err != nil {
+		t.Fatal(err)
+	}
+
+	var nsec3s []*dns.NSEC3
+	for _, rr := range w.captured.Ns {
+		if v, ok := rr.(*dns.NSEC3); ok {
+			nsec3s = append(nsec3s, v)
+		}
+	}
+	if len(nsec3s) != 1 {
+		t.Fatalf("got %d NSEC3s, want 1 matching for insecure delegation", len(nsec3s))
+	}
+	// Matching NSEC3 must list NS but NOT DS — that's the proof of
+	// "no DS at this delegation."
+	got := nsec3s[0]
+	if !containsType(got.TypeBitMap, dns.TypeNS) {
+		t.Errorf("NSEC3 missing NS in bitmap: %v", got.TypeBitMap)
+	}
+	if containsType(got.TypeBitMap, dns.TypeDS) {
+		t.Errorf("NSEC3 has DS in bitmap (delegation should be insecure): %v", got.TypeBitMap)
+	}
+}
+
+func TestServeDNSAttachesDelegationProofForOptOutCovering(t *testing.T) {
+	const zone = "example.test."
+	zskDK, zskPriv := generateDNSKEY(t, zone, dns.ECDSAP256SHA256, 256, 256)
+	zsk := &signingKey{KeyTag: zskDK.KeyTag(), Public: zskDK, Private: zskPriv}
+
+	// Opt-out chain: the insecure delegation was elided at build
+	// time. Referral response must include a *covering* NSEC3 with
+	// the opt-out flag set — proves the delegation falls in a
+	// chain gap (RFC 5155 §6).
+	c := delegationChain(t, true)
+	if c.matchingNSEC3("insecure."+zone) != nil {
+		t.Fatal("opt-out chain unexpectedly retains insecure delegation")
+	}
+	n := &Nsec3Sign{
+		Zones: []string{zone},
+		Keys:  []*signingKey{zsk},
+		Chain: c,
+		Next:  &delegationHandler{delOwner: "insecure." + zone, nsTarget: "ns.insecure." + zone},
+	}
+	w := &captureWriter{}
+	if _, err := n.ServeDNS(context.Background(), w, query("host.insecure."+zone, dns.TypeA, true)); err != nil {
+		t.Fatal(err)
+	}
+
+	var nsec3s []*dns.NSEC3
+	for _, rr := range w.captured.Ns {
+		if v, ok := rr.(*dns.NSEC3); ok {
+			nsec3s = append(nsec3s, v)
+		}
+	}
+	if len(nsec3s) != 1 {
+		t.Fatalf("got %d NSEC3s, want 1 covering for opt-out delegation", len(nsec3s))
+	}
+	got := nsec3s[0]
+	if got.Flags&1 == 0 {
+		t.Errorf("covering NSEC3 missing opt-out flag (Flags=%d)", got.Flags)
+	}
+}
+
+func TestProofForDelegationNoOpWhenChainEmpty(t *testing.T) {
+	c := buildChain("example.test.", "", 0, false, nil)
+	if got := c.proofForDelegation("any.example.test.", 300); got != nil {
+		t.Fatalf("proofForDelegation on empty chain returned %v, want nil", got)
+	}
+}
+
 func TestAttachDenialProofIsNoOpWithoutChain(t *testing.T) {
 	// Chain==nil is the production state in steps 1-5; we need the
 	// short-circuit to be airtight before step 5b plugs in the

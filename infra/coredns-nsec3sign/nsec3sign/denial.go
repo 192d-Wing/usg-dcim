@@ -69,8 +69,29 @@ func (n *Nsec3Sign) attachDenialProof(m *dns.Msg, qname, server string, now time
 	case response.NoData:
 		m.Ns = append(m.Ns, n.Chain.proofForNODATA(qname, ttl)...)
 		denialsIssued.WithLabelValues(server, "nodata").Inc()
+	case response.Delegation:
+		// Referral to a child zone — the validator needs to know
+		// whether the delegation is secure (DS present, follow into
+		// the child) or insecure (no DS, child stays unsigned).
+		if delOwner := delegationOwner(m.Ns); delOwner != "" {
+			m.Ns = append(m.Ns, n.Chain.proofForDelegation(delOwner, ttl)...)
+			denialsIssued.WithLabelValues(server, "delegation").Inc()
+		}
 	}
 	return m
+}
+
+// delegationOwner returns the owner name of the NS RRset in the
+// authority section — that's the delegation point per RFC 1034.
+// Empty when there's no NS record (defensive; response.Typify
+// would not have returned Delegation in that case).
+func delegationOwner(ns []dns.RR) string {
+	for _, rr := range ns {
+		if rr.Header().Rrtype == dns.TypeNS {
+			return dns.CanonicalName(rr.Header().Name)
+		}
+	}
+	return ""
 }
 
 // readDenialTTL pulls the SOA Minttl out of the authority section,
@@ -122,6 +143,40 @@ func (c *chain) proofForNODATA(qname string, ttl uint32) []dns.RR {
 		return c.dedupedNSEC3([]*nsec3Node{node}, ttl)
 	}
 	return c.proofForNXDOMAIN(qname, ttl)
+}
+
+// proofForDelegation returns the NSEC3 record(s) that prove a
+// delegation's security status per RFC 5155 §7.2.7 — used on
+// referral responses (NS+DS or NS-only in the authority section).
+//
+// Three cases:
+//
+//   - Delegation owner is in the chain: return the matching NSEC3.
+//     Its type bitmap shows `NS` (always) plus `DS` when the
+//     delegation is secure. Validators read the bitmap to decide
+//     whether to chase a DS into the child zone.
+//
+//   - Owner not in the chain, opt-out is enabled: the delegation
+//     was elided at chain-build time (RFC 5155 §6). Return the
+//     covering NSEC3 — its opt-out flag and the parent's chain
+//     position together prove the gap contains no DS.
+//
+//   - Owner not in the chain, opt-out is disabled: shouldn't
+//     happen for a well-formed zone, but return nil rather than
+//     fabricate a proof.
+func (c *chain) proofForDelegation(delOwner string, ttl uint32) []dns.RR {
+	if len(c.nodes) == 0 {
+		return nil
+	}
+	if node := c.matchingNSEC3(delOwner); node != nil {
+		return c.dedupedNSEC3([]*nsec3Node{node}, ttl)
+	}
+	if c.OptOut {
+		if node := c.coveringNSEC3(delOwner); node != nil {
+			return c.dedupedNSEC3([]*nsec3Node{node}, ttl)
+		}
+	}
+	return nil
 }
 
 // dedupedNSEC3 renders an ordered list of chain nodes into NSEC3 RRs,
