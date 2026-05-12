@@ -127,6 +127,16 @@ async def create_fabric(
     principal: Principal = Depends(require_capability("ipam:fabrics:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    # A fabric-scoped user has, by definition, no authority to create
+    # NEW fabrics — the new fabric would necessarily be outside their
+    # existing scope set. Only globally-scoped principals can mint
+    # fabrics. find_matching_capability returns the matching Scope
+    # (or None); is_global True means proceed, otherwise deny.
+    from ..errors import ForbiddenError
+    from ..security.deps import find_matching_capability
+    cap_scope = find_matching_capability(principal.capabilities, "ipam:fabrics:create")
+    if cap_scope is not None and not cap_scope.is_global:
+        raise ForbiddenError("creating fabrics requires a globally-scoped grant")
     if not _SLUG_RE.match(payload.slug):
         raise ValidationError(
             "slug must be lowercase alphanumeric with optional hyphens",
@@ -153,12 +163,13 @@ async def create_fabric(
 @router.get("/fabrics/{fabric_id}", response_model=FabricOut)
 async def get_fabric(
     fabric_id: UUID,
-    _: Principal = Depends(require_capability("ipam:fabrics:read")),
+    principal: Principal = Depends(require_capability("ipam:fabrics:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Fabric, fabric_id)
     if obj is None:
         raise NotFoundError(_FABRIC_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.id, "ipam:fabrics:read")
     return obj
 
 
@@ -172,6 +183,7 @@ async def update_fabric(
     obj = await db.get(Fabric, fabric_id)
     if obj is None:
         raise NotFoundError(_FABRIC_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.id, "ipam:fabrics:update")
     diff = payload.model_dump(exclude_unset=True)
     if "slug" in diff and not _SLUG_RE.match(diff["slug"]):
         raise ValidationError(
@@ -198,6 +210,7 @@ async def delete_fabric(
     obj = await db.get(Fabric, fabric_id)
     if obj is None:
         raise NotFoundError(_FABRIC_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.id, "ipam:fabrics:delete")
     in_use = (
         await db.execute(select(Vrf.id).where(Vrf.fabric_id == fabric_id).limit(1))
     ).scalar_one_or_none()
@@ -234,12 +247,13 @@ async def list_vrfs(
 @router.get("/vrfs/{vrf_id}", response_model=VrfOut)
 async def get_vrf(
     vrf_id: UUID,
-    _: Principal = Depends(require_capability("ipam:vrfs:read")),
+    principal: Principal = Depends(require_capability("ipam:vrfs:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Vrf, vrf_id)
     if obj is None:
         raise NotFoundError(_VRF_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "ipam:vrfs:read")
     return obj
 
 
@@ -249,6 +263,9 @@ async def create_vrf(
     principal: Principal = Depends(require_capability("ipam:vrfs:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "ipam:vrfs:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -273,6 +290,7 @@ async def update_vrf(
     obj = await db.get(Vrf, vrf_id)
     if obj is None:
         raise NotFoundError(_VRF_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "ipam:vrfs:update")
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -294,6 +312,7 @@ async def delete_vrf(
     obj = await db.get(Vrf, vrf_id)
     if obj is None:
         raise NotFoundError(_VRF_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "ipam:vrfs:delete")
     if obj.is_default:
         raise ValidationError("cannot delete a fabric's default VRF")
     in_use = (
@@ -620,6 +639,10 @@ async def create_subnet(
     parent = await ipam_svc.assert_subnet_inside_supernet(
         db, supernet_id=payload.supernet_id, prefix=payload.prefix,
     )
+    # Scope is inherited from the parent supernet's fabric.
+    await enforce_fabric_scope(
+        db, principal.capabilities, parent.fabric_id, "ipam:subnets:create",
+    )
     await ipam_svc.assert_subnet_unique_in_vrf(
         db, fabric_id=parent.fabric_id, vrf_id=parent.vrf_id, prefix=payload.prefix,
     )
@@ -656,6 +679,9 @@ async def update_subnet(
     obj = await db.get(Subnet, subnet_id)
     if obj is None:
         raise NotFoundError(_SUBNET_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:subnets:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
 
     # Move support: when supernet_id changes, re-validate containment +
@@ -666,6 +692,10 @@ async def update_subnet(
     if moving:
         new_parent = await ipam_svc.assert_subnet_inside_supernet(
             db, supernet_id=diff["supernet_id"], prefix=str(obj.prefix),
+        )
+        # If moving to a different fabric, that fabric must also be in scope.
+        await enforce_fabric_scope(
+            db, principal.capabilities, new_parent.fabric_id, "ipam:subnets:update",
         )
         await ipam_svc.assert_subnet_unique_in_vrf(
             db, fabric_id=new_parent.fabric_id, vrf_id=new_parent.vrf_id,
@@ -708,6 +738,9 @@ async def delete_subnet(
     obj = await db.get(Subnet, subnet_id)
     if obj is None:
         raise NotFoundError(_SUBNET_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id, "ipam:subnets:delete",
+    )
     in_use = (
         await db.execute(select(IPAddress.id).where(IPAddress.subnet_id == subnet_id).limit(1))
     ).scalar_one_or_none()
@@ -788,6 +821,13 @@ async def create_address(
     principal: Principal = Depends(require_capability("ipam:addresses:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    # Fabric scope: derive from the parent subnet.
+    subnet = await db.get(Subnet, payload.subnet_id)
+    if subnet is None:
+        raise ValidationError(f"subnet {payload.subnet_id} not found")
+    await enforce_fabric_scope(
+        db, principal.capabilities, subnet.fabric_id, "ipam:addresses:create",
+    )
     await ipam_svc.assert_address_in_subnet(
         db, subnet_id=payload.subnet_id, address=payload.address,
     )
@@ -827,6 +867,12 @@ async def update_address(
     obj = await db.get(IPAddress, ip_id)
     if obj is None:
         raise NotFoundError(_IP_NOT_FOUND)
+    subnet = await db.get(Subnet, obj.subnet_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        subnet.fabric_id if subnet else None,
+        "ipam:addresses:update",
+    )
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -848,6 +894,12 @@ async def delete_address(
     obj = await db.get(IPAddress, ip_id)
     if obj is None:
         raise NotFoundError(_IP_NOT_FOUND)
+    subnet = await db.get(Subnet, obj.subnet_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        subnet.fabric_id if subnet else None,
+        "ipam:addresses:delete",
+    )
     await db.execute(delete(IPAddress).where(IPAddress.id == ip_id))
     await audit.record(
         db, principal, action="ip_address.delete",

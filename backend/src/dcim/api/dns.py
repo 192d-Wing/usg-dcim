@@ -170,6 +170,9 @@ async def create_zone(
     principal: Principal = Depends(require_capability("dns:zones:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "dns:zones:create",
+    )
     fabric = await db.get(Fabric, payload.fabric_id)
     if fabric is None:
         raise ValidationError(f"fabric {payload.fabric_id} not found")
@@ -203,12 +206,13 @@ async def create_zone(
 @router.get("/zones/{zone_id}", response_model=DnsZoneOut)
 async def get_zone(
     zone_id: UUID,
-    _: Principal = Depends(require_capability("dns:zones:read")),
+    principal: Principal = Depends(require_capability("dns:zones:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsZone, zone_id)
     if obj is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:zones:read")
     return obj
 
 
@@ -222,6 +226,7 @@ async def update_zone(
     obj = await db.get(DnsZone, zone_id)
     if obj is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:zones:update")
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -244,6 +249,7 @@ async def delete_zone(
     obj = await db.get(DnsZone, zone_id)
     if obj is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:zones:delete")
     has_records = (
         await db.execute(select(DnsRecord.id).where(DnsRecord.zone_id == zone_id).limit(1))
     ).scalar_one_or_none()
@@ -711,6 +717,9 @@ async def create_record(
     zone = await db.get(DnsZone, payload.zone_id)
     if zone is None:
         raise ValidationError(f"zone {payload.zone_id} not found")
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, "dns:records:create",
+    )
     try:
         normalized_data = validate_record_data(payload.type, payload.data)
     except PydanticValidationError as e:
@@ -760,6 +769,12 @@ async def update_record(
     obj = await db.get(DnsRecord, record_id)
     if obj is None:
         raise NotFoundError(_RECORD_NOT_FOUND)
+    zone = await db.get(DnsZone, obj.zone_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        zone.fabric_id if zone else None,
+        "dns:records:update",
+    )
     if obj.source != DnsRecordSource.manual:
         raise ValidationError(
             "projector-owned records are managed by the IPAM/DHCP sync; "
@@ -795,6 +810,12 @@ async def delete_record(
     obj = await db.get(DnsRecord, record_id)
     if obj is None:
         raise NotFoundError(_RECORD_NOT_FOUND)
+    zone = await db.get(DnsZone, obj.zone_id)
+    await enforce_fabric_scope(
+        db, principal.capabilities,
+        zone.fabric_id if zone else None,
+        "dns:records:delete",
+    )
     if obj.source != DnsRecordSource.manual:
         raise ValidationError(
             "projector-owned records can't be deleted directly; "
@@ -853,6 +874,9 @@ async def create_server(
     principal: Principal = Depends(require_capability("dns:servers:create")),
     db: AsyncSession = Depends(get_db),
 ):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id, "dns:servers:create",
+    )
     site = await db.get(Site, payload.site_id)
     if site is None:
         raise ValidationError(f"site {payload.site_id} not found")
@@ -881,12 +905,13 @@ async def create_server(
 @router.get("/servers/{server_id}", response_model=DnsServerOut)
 async def get_server(
     server_id: UUID,
-    _: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
+    principal: Principal = Depends(require_capability(_CAP_SERVERS_READ)),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DnsServer, server_id)
     if obj is None:
         raise NotFoundError(_SERVER_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, _CAP_SERVERS_READ)
     return obj
 
 
@@ -900,6 +925,7 @@ async def update_server(
     obj = await db.get(DnsServer, server_id)
     if obj is None:
         raise NotFoundError(_SERVER_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:servers:update")
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -922,6 +948,7 @@ async def delete_server(
     obj = await db.get(DnsServer, server_id)
     if obj is None:
         raise NotFoundError(_SERVER_NOT_FOUND)
+    await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:servers:delete")
     # Memberships go with the server.
     await db.execute(delete(AnycastBgpBinding).where(AnycastBgpBinding.dns_server_id == server_id))
     await db.execute(delete(DnsServer).where(DnsServer.id == server_id))
