@@ -98,11 +98,35 @@ async def get_principal(
 AuthenticatedUser = Annotated[Principal, Depends(get_principal)]  # type: ignore[misc]
 
 
+def find_matching_capability(caps: dict[str, Scope], code: str) -> Scope | None:
+    """Find a capability in `caps` that grants `code`, walking wildcard fallbacks.
+
+    Order, from most-specific to least:
+      1. exact match
+      2. <domain>:<resource>:* (only meaningful for 3-segment codes)
+      3. <domain>:*
+      4. *
+
+    Returns the matching capability's Scope, or None if nothing grants.
+    """
+    if code in caps:
+        return caps[code]
+    parts = code.split(":")
+    # Drop the trailing segment one-by-one and try `<prefix>:*`.
+    for i in range(len(parts) - 1, 0, -1):
+        wildcard = ":".join(parts[:i]) + ":*"
+        if wildcard in caps:
+            return caps[wildcard]
+    if "*" in caps:
+        return caps["*"]
+    return None
+
+
 def require_capability(code: str):
     """Dependency: ensures the principal has the named capability anywhere in their scope."""
 
     async def _dep(principal: AuthenticatedUser) -> Principal:
-        if code not in principal.capabilities:
+        if find_matching_capability(principal.capabilities, code) is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"error": {"code": "missing_capability", "message": code}},
@@ -120,7 +144,8 @@ def require_capability_for_site(code: str, site_id_param: str = "site_id"):
         principal: AuthenticatedUser,
         db: AsyncSession = Depends(get_db),
     ) -> Principal:
-        if code not in principal.capabilities:
+        scope = find_matching_capability(principal.capabilities, code)
+        if scope is None:
             raise ScopeError(f"capability {code} not granted")
         sid = request.path_params.get(site_id_param) or request.query_params.get(site_id_param)
         if sid is None:
@@ -129,7 +154,7 @@ def require_capability_for_site(code: str, site_id_param: str = "site_id"):
             site_uuid = UUID(sid)
         except ValueError as e:
             raise ScopeError("invalid site_id") from e
-        if not await site_matches_scope(db, principal.capabilities[code], site_uuid):
+        if not await site_matches_scope(db, scope, site_uuid):
             raise ScopeError(f"site {site_uuid} outside your scope for {code}")
         return principal
 
