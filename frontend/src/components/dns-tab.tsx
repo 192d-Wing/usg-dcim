@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import Button from '@cloudscape-design/components/button';
+import Checkbox from '@cloudscape-design/components/checkbox';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
 import Form from '@cloudscape-design/components/form';
@@ -63,6 +64,12 @@ type DnsZone = {
   // 0 = manual rotation only. Otherwise the worker rotates the
   // active ZSK every N days.
   zsk_rotation_days: number;
+  // Denial-of-existence: null salt = NSEC mode (upstream `dnssec`
+  // plugin). Non-null salt (including "") = NSEC3 mode (custom
+  // `nsec3sign` plugin). Set via POST /zones/{id}/nsec3.
+  nsec3_salt: string | null;
+  nsec3_iterations: number;
+  nsec3_opt_out: boolean;
 };
 
 type DnsRecordSource = 'manual' | 'ipam' | 'ddns';
@@ -1477,9 +1484,25 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
                 ? `Every ${zone.zsk_rotation_days} day${zone.zsk_rotation_days === 1 ? '' : 's'}`
                 : <Box color="text-status-inactive">Manual only</Box>,
             },
+            {
+              label: 'Denial of existence',
+              value: zone.nsec3_salt !== null
+                ? (
+                  <span>
+                    <Badge color="blue">NSEC3</Badge>{' '}
+                    <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                      salt={zone.nsec3_salt || '""'} iter={zone.nsec3_iterations}
+                      {zone.nsec3_opt_out ? ' opt-out' : ''}
+                    </Box>
+                  </span>
+                )
+                : <Badge>NSEC</Badge>,
+            },
           ]}
         />
       </Container>
+
+      <ZoneNsec3Panel zone={zone} canWrite={canWrite} />
 
       <Table<DnssecKey>
         variant="container"
@@ -1689,6 +1712,159 @@ function ZoneDnssecTab({ zone, canWrite }: { zone: DnsZone & { signed?: boolean 
         </SpaceBetween>
       </Modal>
     </SpaceBetween>
+  );
+}
+
+// NSEC3 settings panel. Shows the current denial-of-existence
+// profile and (for canWrite operators) lets them flip the zone
+// between NSEC and NSEC3 modes. The renderer's behaviour is keyed
+// off whether `nsec3_salt` is null: anything else (including "")
+// emits the `nsec3sign` plugin block, which requires the custom
+// CoreDNS image at the auth pod.
+function ZoneNsec3Panel({ zone, canWrite }: { zone: DnsZone; canWrite: boolean }) {
+  const qc = useQueryClient();
+  const enabled = zone.nsec3_salt !== null;
+  // Form state lives separately from the persisted values so a
+  // half-typed salt doesn't immediately update the zone — operators
+  // confirm via the Save button.
+  const [salt, setSalt] = useState(zone.nsec3_salt ?? '');
+  const [iterations, setIterations] = useState(String(zone.nsec3_iterations ?? 0));
+  const [optOut, setOptOut] = useState(zone.nsec3_opt_out ?? false);
+  const [busy, setBusy] = useState(false);
+  // Re-sync the form when the zone prop changes (e.g. after a save
+  // or after another tab toggled NSEC3 — the parent's react-query
+  // refetch will re-render us with the new zone snapshot).
+  useEffect(() => {
+    setSalt(zone.nsec3_salt ?? '');
+    setIterations(String(zone.nsec3_iterations ?? 0));
+    setOptOut(zone.nsec3_opt_out ?? false);
+  }, [zone.id, zone.nsec3_salt, zone.nsec3_iterations, zone.nsec3_opt_out]);
+
+  // RFC 9276 §3.1: empty salt + zero iterations for new deployments.
+  // We accept operator overrides for legacy migrations but the form
+  // surfaces a hint when either is non-default.
+  const saltLooksValid = /^([0-9a-fA-F]{2})*$/.test(salt);
+  const iterN = Number(iterations);
+  const iterValid = Number.isFinite(iterN) && iterN >= 0 && iterN <= 150 && Number.isInteger(iterN);
+
+  async function save() {
+    if (!saltLooksValid) {
+      toast.error('Salt must be hex (empty or pairs of 0-9a-fA-F)');
+      return;
+    }
+    if (!iterValid) {
+      toast.error('Iterations must be an integer between 0 and 150');
+      return;
+    }
+    setBusy(true);
+    try {
+      await http.post(`/dns/zones/${zone.id}/nsec3`, {
+        salt, iterations: iterN, opt_out: optOut,
+      });
+      toast.success('NSEC3 parameters saved');
+      await qc.invalidateQueries({ queryKey: ['dns-zone', zone.id] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'save failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    if (!window.confirm(
+      `Revert ${zone.name} to NSEC?\n\nThe auth pod will go back to the upstream \`dnssec\` plugin (NSEC chains). Validators that walked the chain can re-walk to enumerate zone contents.`,
+    )) return;
+    setBusy(true);
+    try {
+      await http.delete(`/dns/zones/${zone.id}/nsec3`);
+      toast.success('Reverted to NSEC');
+      await qc.invalidateQueries({ queryKey: ['dns-zone', zone.id] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'disable failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Container
+      header={
+        <Header
+          variant="h3"
+          description={enabled
+            ? "NSEC3 hides zone contents from chain-walking. Requires the custom coredns-nsec3sign image on the auth pod."
+            : "This zone uses NSEC. Switch to NSEC3 to prevent zone enumeration via chain-walking."
+          }
+          actions={canWrite && enabled && (
+            <Button iconName="remove" loading={busy} onClick={disable}>
+              Revert to NSEC
+            </Button>
+          )}
+        >
+          Denial of existence
+        </Header>
+      }
+    >
+      {canWrite ? (
+        <SpaceBetween size="m">
+          <ColumnLayout columns={3}>
+            <FormField
+              label="Salt (hex)"
+              description='Empty ("") is the RFC 9276 default.'
+              errorText={!saltLooksValid ? 'Must be hex pairs or empty' : undefined}
+            >
+              <Input
+                value={salt}
+                onChange={(e) => setSalt(e.detail.value)}
+                placeholder='""'
+              />
+            </FormField>
+            <FormField
+              label="Iterations"
+              description="0 is the RFC 9276 default. Max 150."
+              errorText={!iterValid ? 'Integer 0–150' : undefined}
+            >
+              <Input
+                value={iterations}
+                onChange={(e) => setIterations(e.detail.value)}
+                type="number"
+                inputMode="numeric"
+              />
+            </FormField>
+            <FormField
+              label="Opt-out"
+              description="Elide insecure delegations from the NSEC3 chain (RFC 5155 §6)."
+            >
+              <Checkbox
+                checked={optOut}
+                onChange={(e) => setOptOut(e.detail.checked)}
+              >
+                Enable opt-out
+              </Checkbox>
+            </FormField>
+          </ColumnLayout>
+          <Box>
+            <Button
+              variant="primary"
+              loading={busy}
+              disabled={!saltLooksValid || !iterValid}
+              onClick={save}
+            >
+              {enabled ? 'Update NSEC3 parameters' : 'Enable NSEC3'}
+            </Button>
+          </Box>
+        </SpaceBetween>
+      ) : (
+        <KeyValuePairs
+          columns={3}
+          items={[
+            { label: 'Mode', value: enabled ? <Badge color="blue">NSEC3</Badge> : <Badge>NSEC</Badge> },
+            { label: 'Salt', value: enabled ? (zone.nsec3_salt || '""') : '—' },
+            { label: 'Iterations', value: enabled ? String(zone.nsec3_iterations) : '—' },
+          ]}
+        />
+      )}
+    </Container>
   );
 }
 

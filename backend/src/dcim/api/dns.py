@@ -94,6 +94,7 @@ from ..schemas.dns import (
     DnsServerOut,
     DnsServerUpdate,
     DnsZoneCreate,
+    DnsZoneNsec3Params,
     DnsZoneOut,
     DnsZoneUpdate,
     validate_record_data,
@@ -477,6 +478,79 @@ async def list_ds_records(
         await db.execute(select(DnsKey).where(DnsKey.zone_id == zone_id))
     ).scalars().all()
     return dns_svc.render_ds_records(zone, keys)
+
+
+@router.post("/zones/{zone_id}/nsec3", response_model=DnsZoneOut)
+async def set_zone_nsec3(
+    zone_id: UUID,
+    params: DnsZoneNsec3Params,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set NSEC3 parameters on a signed zone. Flipping a zone into
+    NSEC3 mode tells the renderer to emit the `nsec3sign` plugin
+    block instead of the upstream `dnssec` block — the deployed
+    auth pod has to be running the custom `coredns-nsec3sign` image
+    for that block to load.
+
+    Idempotent: re-posting with the same params is a no-op.
+    Operators clear NSEC3 (back to NSEC mode) via DELETE on the
+    same path.
+
+    A zone must be signed first — NSEC3 parameters on an unsigned
+    zone have nothing to chain off of. Trying to set them anyway
+    returns 422 so the UI can prompt the operator to enable DNSSEC
+    first."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    if not zone.signed:
+        raise ValidationError("zone is not signed — enable DNSSEC first")
+    zone.nsec3_salt = params.salt
+    zone.nsec3_iterations = params.iterations
+    zone.nsec3_opt_out = params.opt_out
+    await _touch_zone(db, zone_id)
+    await audit.record(
+        db, principal, action="dns_zone.set_nsec3",
+        target_type="dns_zone", target_id=str(zone_id),
+        metadata={
+            "salt": params.salt,
+            "iterations": params.iterations,
+            "opt_out": params.opt_out,
+        },
+    )
+    await db.commit()
+    await db.refresh(zone)
+    return zone
+
+
+@router.delete("/zones/{zone_id}/nsec3", response_model=DnsZoneOut)
+async def clear_zone_nsec3(
+    zone_id: UUID,
+    principal: Principal = Depends(require_capability(INVENTORY_WRITE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear NSEC3 parameters on a zone, reverting it to NSEC mode
+    (upstream `dnssec` plugin). Safe on a zone that was never in
+    NSEC3 mode — returns the unchanged zone. The signed flag and
+    keys are left in place; this only touches the denial-of-existence
+    profile."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    if zone.nsec3_salt is None and zone.nsec3_iterations == 0 and not zone.nsec3_opt_out:
+        return zone
+    zone.nsec3_salt = None
+    zone.nsec3_iterations = 0
+    zone.nsec3_opt_out = False
+    await _touch_zone(db, zone_id)
+    await audit.record(
+        db, principal, action="dns_zone.clear_nsec3",
+        target_type="dns_zone", target_id=str(zone_id),
+    )
+    await db.commit()
+    await db.refresh(zone)
+    return zone
 
 
 @router.post("/zones/{zone_id}/disable-dnssec", status_code=204)

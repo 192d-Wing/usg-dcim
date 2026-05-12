@@ -76,6 +76,14 @@ class DnsZoneOut(DnsZoneBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     signed: bool = False
+    # Denial-of-existence mode. nsec3_salt = None means NSEC (upstream
+    # `dnssec` plugin). A non-None salt (including "") means NSEC3
+    # (custom `nsec3sign` plugin). Operators flip the mode via
+    # POST/DELETE /zones/{id}/nsec3 rather than a free-form PATCH so
+    # the param validation lives at a single seam.
+    nsec3_salt: str | None = None
+    nsec3_iterations: int = 0
+    nsec3_opt_out: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -87,6 +95,30 @@ class DnsZoneOut(DnsZoneBase):
         only: operators don't set this directly. Mirrors the value the
         renderer emits in the zone file's SOA RR."""
         return int(self.updated_at.timestamp())
+
+
+class DnsZoneNsec3Params(BaseModel):
+    """Operator-set NSEC3 parameters for a signed zone. RFC 9276 §3.1
+    recommends salt="" and iterations=0 for new deployments; we accept
+    operator overrides for compatibility with legacy NSEC3 chains
+    being migrated in, but bound iterations at 150 (the historic BIND
+    cap) so a misconfigured value can't grind validators.
+
+    `salt` is hex-encoded — "" for the recommended empty salt, or
+    e.g. "aabbccdd" for a 4-byte salt. The validator rejects anything
+    that isn't an even-length hex string."""
+
+    salt: str = Field(
+        default="",
+        max_length=64,
+        # Even-length hex (or empty). The renderer passes the value
+        # straight through to the plugin's salt directive; trust at
+        # the boundary keeps downstream simpler.
+        pattern=r"^([0-9a-fA-F]{2})*$",
+        description='Hex-encoded salt; "" for the RFC 9276 default.',
+    )
+    iterations: int = Field(default=0, ge=0, le=150)
+    opt_out: bool = False
 
 
 # ---------- DnsRecord.data discriminated union ----------
