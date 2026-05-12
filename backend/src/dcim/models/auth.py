@@ -87,13 +87,22 @@ class RoleScope(UUIDPrimaryKey, Timestamped, Base):
 
 class OidcRoleMapping(UUIDPrimaryKey, Timestamped, Base):
     """Map a role name asserted by the IdP (Keycloak realm role,
-    Okta/ADFS group, etc.) to a DCIM Role.
+    Okta/ADFS group, etc.) to a DCIM Role, optionally with a scope
+    binding so the grant is constrained to a region/site/etc.
 
     On each OIDC sign-in we look at the id_token claims, extract role
     strings via the configured claim paths, and look up rows here to
     decide which DCIM roles the user should hold. claim_source is a
     free-form label ("keycloak", "okta", "adfs", ...) — it lets admins
     document where the value comes from but doesn't affect matching.
+
+    scope_dimension + scope_target describe the optional ABAC scope:
+      * both NULL  → global (mapped role applies fleet-wide)
+      * region     → scope_target matches Region.code
+      * site       → scope_target matches Site.code
+      * site_group → scope_target matches SiteGroup.code
+      * enclave    → scope_target is the literal string on Site.enclave
+      * organization → scope_target is Site.organization
     """
 
     __tablename__ = "oidc_role_mappings"
@@ -105,6 +114,10 @@ class OidcRoleMapping(UUIDPrimaryKey, Timestamped, Base):
         PgUUID(as_uuid=True), ForeignKey("roles.id"), nullable=False
     )
     description: Mapped[str | None] = mapped_column(String(255))
+    scope_dimension: Mapped[ScopeType | None] = mapped_column(
+        Enum(ScopeType, name="scope_type", create_type=False), nullable=True,
+    )
+    scope_target: Mapped[str | None] = mapped_column(String(255))
 
 
 class ApiToken(UUIDPrimaryKey, Timestamped, Base):

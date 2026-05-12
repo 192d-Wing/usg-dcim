@@ -120,12 +120,18 @@ class OidcRoleMappingCreate(BaseModel):
     claim_source: str = "keycloak"
     dcim_role_id: UUID
     description: str | None = None
+    # Optional ABAC scope. Both NULL → global. scope_dimension must be
+    # one of: region, site, site_group, enclave, organization.
+    scope_dimension: str | None = None
+    scope_target: str | None = None
 
 
 class OidcRoleMappingUpdate(BaseModel):
     claim_source: str | None = None
     dcim_role_id: UUID | None = None
     description: str | None = None
+    scope_dimension: str | None = None
+    scope_target: str | None = None
 
 
 class OidcRoleMappingOut(BaseModel):
@@ -136,6 +142,8 @@ class OidcRoleMappingOut(BaseModel):
     dcim_role_id: UUID
     dcim_role_name: str
     description: str | None
+    scope_dimension: str | None
+    scope_target: str | None
     created_at: datetime
 
 

@@ -51,8 +51,19 @@ type OidcMapping = {
   dcim_role_id: string;
   dcim_role_name: string;
   description: string | null;
+  scope_dimension: string | null;
+  scope_target: string | null;
   created_at: string;
 };
+
+const SCOPE_DIMENSION_OPTIONS: SelectProps.Option[] = [
+  { value: 'global', label: 'global (no restriction)' },
+  { value: 'region', label: 'region (target = Region.code)' },
+  { value: 'site', label: 'site (target = Site.code)' },
+  { value: 'site_group', label: 'site_group (target = SiteGroup.name)' },
+  { value: 'enclave', label: 'enclave (target = literal string)' },
+  { value: 'organization', label: 'organization (target = literal string)' },
+];
 
 const SCOPE_TYPES: SelectProps.Option[] = [
   { value: 'global', label: 'global' },
@@ -858,6 +869,13 @@ function OidcMappingsTab() {
             cell: (m) => <Badge color="blue">{m.dcim_role_name}</Badge>,
           },
           {
+            id: 'scope', header: 'Scope',
+            cell: (m) => m.scope_dimension
+              ? <Badge color="green">{`${m.scope_dimension}=${m.scope_target ?? '?'}`}</Badge>
+              : <Box variant="span" color="text-status-inactive" fontSize="body-s">global</Box>,
+            width: 200,
+          },
+          {
             id: 'description', header: 'Description',
             cell: (m) => <Box variant="span" color="text-status-inactive" fontSize="body-s">{m.description ?? '—'}</Box>,
           },
@@ -931,6 +949,11 @@ function MappingForm({
     mapping ? { value: mapping.dcim_role_id, label: mapping.dcim_role_name } : null,
   );
   const [description, setDescription] = useState(mapping?.description ?? '');
+  const [scopeDim, setScopeDim] = useState<SelectProps.Option>(
+    SCOPE_DIMENSION_OPTIONS.find((o) => o.value === (mapping?.scope_dimension ?? 'global'))
+    ?? SCOPE_DIMENSION_OPTIONS[0],
+  );
+  const [scopeTarget, setScopeTarget] = useState(mapping?.scope_target ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -939,28 +962,31 @@ function MappingForm({
     label: r.is_system ? `${r.name} (system)` : r.name,
   }));
 
+  const dimIsScoped = scopeDim.value !== 'global';
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (!idpRole.trim()) errs.idp_role = 'IdP role name required';
     if (!dcimRoleOpt?.value) errs.dcim_role = 'Pick a DCIM role';
+    if (dimIsScoped && !scopeTarget.trim()) errs.scope_target = 'Target required when scope is set';
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
+    const body = {
+      claim_source: claimSource.value,
+      dcim_role_id: dcimRoleOpt!.value,
+      description: description || null,
+      scope_dimension: scopeDim.value,
+      scope_target: dimIsScoped ? scopeTarget.trim() : null,
+    };
     try {
       if (editing && mapping) {
-        await http.patch(`/admin/oidc-role-mappings/${mapping.id}`, {
-          claim_source: claimSource.value,
-          dcim_role_id: dcimRoleOpt!.value,
-          description: description || null,
-        });
+        await http.patch(`/admin/oidc-role-mappings/${mapping.id}`, body);
         toast.success('Mapping updated');
       } else {
         await http.post('/admin/oidc-role-mappings', {
-          idp_role: idpRole.trim(),
-          claim_source: claimSource.value,
-          dcim_role_id: dcimRoleOpt!.value,
-          description: description || null,
+          ...body, idp_role: idpRole.trim(),
         });
         toast.success('Mapping created');
       }
@@ -1014,6 +1040,35 @@ function MappingForm({
           <FormField label="Description (optional)">
             <Input value={description ?? ''} onChange={({ detail }) => setDescription(detail.value)} />
           </FormField>
+          <FormField
+            label="Scope dimension"
+            description="Restrict this mapping to a single region / site / etc. Leave as 'global' for fleet-wide grants."
+          >
+            <Select
+              selectedOption={scopeDim}
+              onChange={({ detail }) => setScopeDim(detail.selectedOption)}
+              options={SCOPE_DIMENSION_OPTIONS}
+              expandToViewport
+            />
+          </FormField>
+          {dimIsScoped && (
+            <FormField
+              label="Scope target"
+              description="Resolved at sign-in against the matching column (e.g. 'EUCOM' against Region.code)."
+              errorText={errors.scope_target}
+            >
+              <Input
+                value={scopeTarget}
+                onChange={({ detail }) => setScopeTarget(detail.value)}
+                placeholder={
+                  scopeDim.value === 'region' ? 'e.g. EUCOM' :
+                  scopeDim.value === 'site' ? 'e.g. EUCOM-001' :
+                  scopeDim.value === 'site_group' ? 'site group name' :
+                  'literal string value'
+                }
+              />
+            </FormField>
+          )}
         </SpaceBetween>
       </Form>
     </form>

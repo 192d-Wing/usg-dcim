@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.auth import OidcRoleMapping, Role, RoleScope, ScopeType, User, UserRole
-from ..models.inventory import Site, SiteGroupMembership
+from ..models.inventory import Region, Site, SiteGroup, SiteGroupMembership
 
 
 @dataclass(frozen=True)
@@ -74,18 +74,49 @@ async def scope_for_user(db: AsyncSession, user: User) -> dict[str, Scope]:
     return out
 
 
+async def _resolve_mapping_scope(
+    db: AsyncSession, dimension: ScopeType | None, target: str | None,
+) -> Scope | None:
+    """Build a Scope from an OidcRoleMapping's (dimension, target) pair.
+
+    Returns None when the mapping is bound to a dimension+target but
+    the target can't be resolved (deleted region, typo'd code, etc.) —
+    fail-closed: the cap will not be granted on this login.
+    """
+    if dimension is None or not target:
+        return Scope(is_global=True)
+    if dimension is ScopeType.region:
+        row = (await db.execute(select(Region.id).where(Region.code == target))).scalar_one_or_none()
+        return Scope(region_ids=frozenset([row])) if row else None
+    if dimension is ScopeType.site:
+        row = (await db.execute(select(Site.id).where(Site.code == target))).scalar_one_or_none()
+        return Scope(site_ids=frozenset([row])) if row else None
+    if dimension is ScopeType.site_group:
+        # SiteGroup has no `code` column; match by `name`.
+        row = (await db.execute(select(SiteGroup.id).where(SiteGroup.name == target))).scalar_one_or_none()
+        return Scope(site_group_ids=frozenset([row])) if row else None
+    if dimension is ScopeType.enclave:
+        return Scope(enclaves=frozenset([target]))
+    if dimension is ScopeType.organization:
+        return Scope(organizations=frozenset([target]))
+    if dimension is ScopeType.global_:
+        return Scope(is_global=True)
+    return None
+
+
 async def caps_from_idp_roles(
     db: AsyncSession, idp_roles: Iterable[str],
 ) -> dict[str, Scope]:
     """Materialize capabilities for IdP-asserted role names.
 
-    Joins each `idp_role` to the `oidc_role_mappings` table, follows
-    the FK to the DCIM Role, and unions the role's `permission_codes`
-    into the returned cap dict. Each cap gets Scope(is_global=True) —
-    ABAC scope restrictions only apply via manual UserRole + RoleScope
-    rows, which the caller unions on top of this result.
+    Each `oidc_role_mappings` row maps an IdP role to a DCIM Role with
+    an optional ABAC scope binding (scope_dimension + scope_target).
+    Mappings without a scope grant the cap globally; mappings with one
+    constrain the cap to that target (region code, site code, etc.).
 
     Returns an empty dict if `idp_roles` is empty or no mapping matches.
+    A mapping whose scope_target can't be resolved is silently skipped
+    — fail-closed: the cap is not granted on that login.
     """
     names = [r for r in idp_roles if isinstance(r, str) and r]
     if not names:
@@ -98,13 +129,17 @@ async def caps_from_idp_roles(
     if not mappings:
         return {}
     out: dict[str, Scope] = {}
-    global_scope = Scope(is_global=True)
     for mapping in mappings:
         role = await db.get(Role, mapping.dcim_role_id)
         if role is None:
             continue
+        scope = await _resolve_mapping_scope(
+            db, mapping.scope_dimension, mapping.scope_target,
+        )
+        if scope is None:
+            continue
         for cap in role.permission_codes:
-            out[cap] = out.get(cap, Scope()).union(global_scope)
+            out[cap] = out.get(cap, Scope()).union(scope)
     return out
 
 

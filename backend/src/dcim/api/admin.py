@@ -314,8 +314,25 @@ async def _hydrate_mapping(db: AsyncSession, m: OidcRoleMapping) -> OidcRoleMapp
         dcim_role_id=m.dcim_role_id,
         dcim_role_name=role.name if role else "(deleted role)",
         description=m.description,
+        scope_dimension=m.scope_dimension.value if m.scope_dimension else None,
+        scope_target=m.scope_target,
         created_at=m.created_at,
     )
+
+
+_VALID_SCOPE_DIMS = {st.value for st in ScopeType if st is not ScopeType.global_}
+
+
+def _validate_scope_dimension(value: str | None) -> ScopeType | None:
+    """Coerce the wire string to a ScopeType. None / empty → unscoped."""
+    if value in (None, "", "global"):
+        return None
+    if value not in _VALID_SCOPE_DIMS:
+        raise ValidationError(
+            f"unknown scope_dimension {value!r}",
+            details={"valid": sorted(_VALID_SCOPE_DIMS)},
+        )
+    return ScopeType(value)
 
 @router.get("/oidc-role-mappings", response_model=Page[OidcRoleMappingOut])
 async def list_oidc_mappings(
@@ -351,6 +368,8 @@ async def list_oidc_mappings(
             dcim_role_id=m.dcim_role_id,
             dcim_role_name=r.name,
             description=m.description,
+            scope_dimension=m.scope_dimension.value if m.scope_dimension else None,
+            scope_target=m.scope_target,
             created_at=m.created_at,
         )
         for (m, r) in rows
@@ -378,11 +397,14 @@ async def create_oidc_mapping(
     ).scalar_one_or_none()
     if existing is not None:
         raise ConflictError("a mapping for that IdP role already exists")
+    scope_dim = _validate_scope_dimension(payload.scope_dimension)
     obj = OidcRoleMapping(
         idp_role=payload.idp_role,
         claim_source=payload.claim_source,
         dcim_role_id=payload.dcim_role_id,
         description=payload.description,
+        scope_dimension=scope_dim,
+        scope_target=payload.scope_target if scope_dim else None,
     )
     db.add(obj)
     await db.flush()
@@ -413,6 +435,19 @@ async def update_oidc_mapping(
         obj.claim_source = payload.claim_source
     if payload.description is not None:
         obj.description = payload.description
+    if payload.scope_dimension is not None:
+        scope_dim = _validate_scope_dimension(payload.scope_dimension)
+        obj.scope_dimension = scope_dim
+        # Clear target when unscoping, otherwise accept the incoming
+        # target (None is a valid 'I want to keep the dimension but
+        # drop the target' if scope_target also came through).
+        if scope_dim is None:
+            obj.scope_target = None
+        elif payload.scope_target is not None:
+            obj.scope_target = payload.scope_target
+    elif payload.scope_target is not None:
+        # Dimension unchanged but target updated.
+        obj.scope_target = payload.scope_target
     await audit.record(
         db, principal, action="oidc_role_mapping.update",
         target_type="oidc_role_mapping", target_id=str(obj.id),
