@@ -133,11 +133,13 @@ func (n *Nsec3Sign) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.M
 
 	now := time.Now().UTC()
 	server := metrics.WithServer(ctx)
-	// Attach NSEC3 denial proofs BEFORE signing, so the new NSEC3
-	// RRsets get picked up by signMessage's authority-section walk.
-	// Positive responses go through both calls unchanged — neither
-	// step modifies a message it has nothing to do.
+	// Order matters: attach NSEC3 proofs to the authority section
+	// BEFORE signing, so the new NSEC3 RRsets get picked up by
+	// signMessage's authority-section walk. Denial / delegation
+	// proofs first, then wildcard-expansion proofs for positive
+	// responses synthesized from a wildcard.
 	signed := n.attachDenialProof(nw.Msg, state.Name(), server, now)
+	signed = n.attachWildcardProof(signed, server)
 	signed = n.signMessage(signed, zone, server, now)
 	return code, w.WriteMsg(signed)
 }

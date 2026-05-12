@@ -515,6 +515,204 @@ func TestProofForDelegationNoOpWhenChainEmpty(t *testing.T) {
 	}
 }
 
+// wildcardChain holds an apex, a wildcard owner, and an intermediate
+// ENT (the deep wildcard's parent). Mirrors what synthesizeENTs +
+// the explicit-owner pass would produce for a zone like:
+//
+//	example.test.            SOA, NS
+//	*.example.test.          A 10.0.0.99
+//	dev.example.test.        (ENT — no records, but has descendant)
+//	*.dev.example.test.      A 10.0.0.55
+func wildcardChain(t *testing.T) *chain {
+	t.Helper()
+	return buildChain("example.test.", "aabbccdd", 0, false, []nameInfo{
+		{Name: "example.test.", Types: []uint16{dns.TypeSOA, dns.TypeNS}},
+		{Name: "*.example.test.", Types: []uint16{dns.TypeA}},
+		{Name: "dev.example.test."}, // ENT, empty Types
+		{Name: "*.dev.example.test.", Types: []uint16{dns.TypeA}},
+	})
+}
+
+func TestWildcardSourceDetectsExpansion(t *testing.T) {
+	c := wildcardChain(t)
+	cases := []struct {
+		owner string
+		want  string
+	}{
+		// Concrete chain entry — not a wildcard expansion.
+		{"example.test.", ""},
+		{"*.example.test.", ""},
+		// Top-level wildcard match.
+		{"host.example.test.", "*.example.test."},
+		// Deep wildcard match. Requires the `dev.example.test.` ENT
+		// in the chain — findClosestEncloser would otherwise climb
+		// past it to the apex and look for *.example.test., which is
+		// the wrong (less-specific) wildcard.
+		{"printer.dev.example.test.", "*.dev.example.test."},
+		// No wildcard ancestor at the right depth — the deep wildcard
+		// only covers `*.dev.example.test.`, not arbitrary parents.
+		{"nothing.below.dev.example.test.", "*.dev.example.test."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.owner, func(t *testing.T) {
+			if got := c.wildcardSource(tc.owner); got != tc.want {
+				t.Errorf("wildcardSource(%s) = %q, want %q", tc.owner, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRRSIGLabelsReflectWildcardOwner(t *testing.T) {
+	// RFC 4034 §3.1.3: when an RRset comes from a wildcard
+	// expansion, RRSIG.Labels MUST be the wildcard owner's label
+	// count minus one (the `*`). The validator reads Labels to
+	// reconstruct the canonical wildcard owner before verifying.
+	// A wrong Labels value → signature verification fails even
+	// though the math was correct, because the canonical form
+	// differs.
+	const zone = "example.test."
+	zskDK, zskPriv := generateDNSKEY(t, zone, dns.ECDSAP256SHA256, 256, 256)
+	zsk := &signingKey{KeyTag: zskDK.KeyTag(), Public: zskDK, Private: zskPriv}
+
+	// Answer the file plugin would produce for a wildcard match:
+	// owner is the queried name, NOT the wildcard owner.
+	a := &dns.A{
+		Hdr: dns.RR_Header{Name: "host." + zone, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   []byte{10, 0, 0, 99},
+	}
+	n := &Nsec3Sign{
+		Zones: []string{zone},
+		Keys:  []*signingKey{zsk},
+		Chain: wildcardChain(t),
+		Next:  &stubHandler{answer: []dns.RR{a}},
+	}
+	w := &captureWriter{}
+	if _, err := n.ServeDNS(context.Background(), w, query("host."+zone, dns.TypeA, true)); err != nil {
+		t.Fatal(err)
+	}
+	sig := findRRSIG(w.captured.Answer, dns.TypeA)
+	if sig == nil {
+		t.Fatal("no RRSIG over A")
+	}
+	// Wildcard is *.example.test. (2 non-* labels: example, test).
+	// Labels MUST be 2, not 3 (which would be the qname's label count).
+	if sig.Labels != 2 {
+		t.Errorf("RRSIG.Labels = %d, want 2 (wildcard owner *.example.test. has 2 non-* labels)", sig.Labels)
+	}
+	// And the signature must verify against the WILDCARD owner —
+	// miekg/dns reconstructs that owner from Labels before verifying.
+	if err := sig.Verify(zskDK, []dns.RR{a}); err != nil {
+		t.Fatalf("RRSIG.Verify failed — wildcard owner reconstruction broken: %v", err)
+	}
+}
+
+func TestRRSIGLabelsUnchangedForConcreteName(t *testing.T) {
+	// Regression guard: concrete (non-wildcard) names must still
+	// get Labels = full label count. The wildcard-detection branch
+	// is only meant to fire when the owner isn't in the chain.
+	const zone = "example.test."
+	zskDK, zskPriv := generateDNSKEY(t, zone, dns.ECDSAP256SHA256, 256, 256)
+	zsk := &signingKey{KeyTag: zskDK.KeyTag(), Public: zskDK, Private: zskPriv}
+
+	// Add a concrete owner to the chain so wildcardSource returns "".
+	c := buildChain("example.test.", "aabbccdd", 0, false, []nameInfo{
+		{Name: "example.test.", Types: []uint16{dns.TypeSOA, dns.TypeNS}},
+		{Name: "host.example.test.", Types: []uint16{dns.TypeA}},
+		{Name: "*.example.test.", Types: []uint16{dns.TypeA}}, // wildcard also exists
+	})
+	a := &dns.A{
+		Hdr: dns.RR_Header{Name: "host." + zone, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   []byte{10, 0, 0, 2},
+	}
+	n := &Nsec3Sign{
+		Zones: []string{zone},
+		Keys:  []*signingKey{zsk},
+		Chain: c,
+		Next:  &stubHandler{answer: []dns.RR{a}},
+	}
+	w := &captureWriter{}
+	if _, err := n.ServeDNS(context.Background(), w, query("host."+zone, dns.TypeA, true)); err != nil {
+		t.Fatal(err)
+	}
+	sig := findRRSIG(w.captured.Answer, dns.TypeA)
+	if sig == nil {
+		t.Fatal("no RRSIG over A")
+	}
+	// host.example.test. has 3 labels — concrete name keeps the
+	// full count even when a sibling wildcard exists.
+	if sig.Labels != 3 {
+		t.Errorf("RRSIG.Labels = %d, want 3 (concrete host.example.test. has 3 labels)", sig.Labels)
+	}
+}
+
+func TestServeDNSAttachesWildcardCoveringNSEC3(t *testing.T) {
+	// RFC 5155 §7.2.4: wildcard-expanded positive responses MUST
+	// include the covering NSEC3 for the "next closer" name — proof
+	// that the queried name doesn't exist concretely, so the
+	// wildcard match was legitimate.
+	const zone = "example.test."
+	zskDK, zskPriv := generateDNSKEY(t, zone, dns.ECDSAP256SHA256, 256, 256)
+	zsk := &signingKey{KeyTag: zskDK.KeyTag(), Public: zskDK, Private: zskPriv}
+
+	a := &dns.A{
+		Hdr: dns.RR_Header{Name: "host." + zone, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   []byte{10, 0, 0, 99},
+	}
+	n := &Nsec3Sign{
+		Zones: []string{zone},
+		Keys:  []*signingKey{zsk},
+		Chain: wildcardChain(t),
+		Next:  &stubHandler{answer: []dns.RR{a}},
+	}
+	w := &captureWriter{}
+	if _, err := n.ServeDNS(context.Background(), w, query("host."+zone, dns.TypeA, true)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Authority section must carry exactly one NSEC3 — the
+	// covering record for host.example.test. — plus its RRSIG.
+	var nsec3s []*dns.NSEC3
+	for _, rr := range w.captured.Ns {
+		if v, ok := rr.(*dns.NSEC3); ok {
+			nsec3s = append(nsec3s, v)
+		}
+	}
+	if len(nsec3s) != 1 {
+		t.Fatalf("got %d NSEC3s in authority, want 1 (wildcard covering)", len(nsec3s))
+	}
+	if findRRSIG(w.captured.Ns, dns.TypeNSEC3) == nil {
+		t.Error("wildcard-covering NSEC3 is unsigned")
+	}
+}
+
+func TestWildcardProofNoOpWhenAnswerIsConcrete(t *testing.T) {
+	// If the answer's owner IS a concrete chain entry, no wildcard
+	// expansion happened. Authority section stays unchanged.
+	const zone = "example.test."
+	zskDK, zskPriv := generateDNSKEY(t, zone, dns.ECDSAP256SHA256, 256, 256)
+	zsk := &signingKey{KeyTag: zskDK.KeyTag(), Public: zskDK, Private: zskPriv}
+
+	a := &dns.A{
+		Hdr: dns.RR_Header{Name: "ns1." + zone, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+		A:   []byte{10, 0, 0, 1},
+	}
+	n := &Nsec3Sign{
+		Zones: []string{zone},
+		Keys:  []*signingKey{zsk},
+		Chain: tinyChain(),
+		Next:  &stubHandler{answer: []dns.RR{a}},
+	}
+	w := &captureWriter{}
+	if _, err := n.ServeDNS(context.Background(), w, query("ns1."+zone, dns.TypeA, true)); err != nil {
+		t.Fatal(err)
+	}
+	for _, rr := range w.captured.Ns {
+		if _, ok := rr.(*dns.NSEC3); ok {
+			t.Errorf("unexpected NSEC3 in authority for concrete-name response")
+		}
+	}
+}
+
 func TestAttachDenialProofIsNoOpWithoutChain(t *testing.T) {
 	// Chain==nil is the production state in steps 1-5; we need the
 	// short-circuit to be airtight before step 5b plugs in the

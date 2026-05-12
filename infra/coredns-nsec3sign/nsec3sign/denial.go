@@ -94,6 +94,63 @@ func delegationOwner(ns []dns.RR) string {
 	return ""
 }
 
+// attachWildcardProof scans the answer section for RRsets that came
+// from a wildcard expansion (owner isn't in the chain, but a
+// sibling `*.<closest-encloser>` IS) and appends the §7.2.4
+// covering NSEC3 for the "next closer" name to the authority
+// section. Validators see the wildcard-shaped RRSIG.Labels in the
+// answer, look for the covering NSEC3, and use it to confirm that
+// the queried name doesn't exist as a concrete owner — proving
+// the wildcard match was legitimate.
+//
+// No-op when the chain isn't populated, when the answer is empty,
+// or when none of the answer RRsets came from a wildcard. Multiple
+// answer RRsets with different owners (rare) get one covering
+// NSEC3 per distinct next-closer, deduped.
+func (n *Nsec3Sign) attachWildcardProof(m *dns.Msg, server string) *dns.Msg {
+	if n.Chain == nil || len(n.Chain.nodes) == 0 || len(m.Answer) == 0 {
+		return m
+	}
+	ttl := readDenialTTL(m)
+	seenOwner := make(map[string]struct{})
+	covered := make(map[string]struct{})
+	var emitted bool
+	for _, rr := range m.Answer {
+		h := rr.Header()
+		if h.Rrtype == dns.TypeRRSIG {
+			continue
+		}
+		owner := dns.CanonicalName(h.Name)
+		if _, dup := seenOwner[owner]; dup {
+			continue
+		}
+		seenOwner[owner] = struct{}{}
+		if n.Chain.wildcardSource(owner) == "" {
+			continue
+		}
+		// Wildcard expansion confirmed — emit the covering NSEC3
+		// for the next-closer name. nextCloser equals `owner` here
+		// because findClosestEncloser walks up from `owner` and
+		// nextCloser is one label longer than the encloser on the
+		// path back to qname — i.e. qname itself.
+		_, nextCloser := n.Chain.findClosestEncloser(owner)
+		cover := n.Chain.coveringNSEC3(nextCloser)
+		if cover == nil {
+			continue
+		}
+		if _, dup := covered[cover.Hash]; dup {
+			continue
+		}
+		covered[cover.Hash] = struct{}{}
+		m.Ns = append(m.Ns, n.Chain.renderNSEC3(cover, ttl))
+		emitted = true
+	}
+	if emitted {
+		denialsIssued.WithLabelValues(server, "wildcard").Inc()
+	}
+	return m
+}
+
 // readDenialTTL pulls the SOA Minttl out of the authority section,
 // matching how validators expect to cache the denial. Falls back to
 // defaultDenialTTL when no SOA is present — that path mostly hits

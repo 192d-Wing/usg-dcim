@@ -110,15 +110,39 @@ func (n *Nsec3Sign) signRRset(rrs []dns.RR, signerName, server string, incep, ex
 	if len(keys) == 0 {
 		return nil
 	}
+	// Wildcard handling: if the answer came from a wildcard
+	// expansion, sign over the WILDCARD owner so miekg/dns produces
+	// the right canonical form + Labels field per RFC 4034 §3.1.3.
+	// `signRRs` becomes a clone of `rrs` with each header's Name
+	// rewritten; the original qname is restored on the resulting
+	// RRSIG below. (miekg/dns's `RRSIG.Sign` overwrites Labels
+	// from the RRset's owner name regardless of any pre-set value
+	// — so we can't just compute Labels separately.)
+	signRRs := rrs
+	var qnameOwner string
+	if n.Chain != nil {
+		if wcSource := n.Chain.wildcardSource(rrs[0].Header().Name); wcSource != "" {
+			qnameOwner = rrs[0].Header().Name
+			signRRs = wildcardOwnerClone(rrs, wcSource)
+		}
+	}
 	sigs := make([]dns.RR, 0, len(keys))
 	for _, k := range keys {
-		sig, err := signOne(rrs, k, signerName, incep, expir)
+		sig, err := signOne(signRRs, k, signerName, incep, expir)
 		if err != nil {
 			log.Warningf("sign %s/%s with keytag %d: %v",
 				rrs[0].Header().Name,
 				dns.TypeToString[rrs[0].Header().Rrtype],
 				k.KeyTag, err)
 			continue
+		}
+		if qnameOwner != "" {
+			// Restore the queried name as the RRSIG owner. Labels is
+			// already correct (miekg/dns set it from the wildcard
+			// owner during Sign); only Hdr.Name needs the patch so
+			// the RR ships out with the same owner as the answer
+			// RRset it covers.
+			sig.Hdr.Name = qnameOwner
 		}
 		sigs = append(sigs, sig)
 	}
@@ -152,6 +176,12 @@ func (n *Nsec3Sign) signingKeysFor(rrtype uint16) []*signingKey {
 // metadata and runs the actual signature via miekg/dns. The library
 // handles canonical RRset ordering and wire encoding per RFC 4034
 // §6, so we never have to think about byte-level details here.
+//
+// The Labels field is set by miekg/dns from the RRset's owner name
+// — it counts labels and subtracts one for a `*.` prefix per RFC
+// 4034 §3.1.3. Callers that need wildcard-aware Labels rewrite the
+// RRset's owner to the wildcard form before calling here (see
+// signRRset's wildcard branch).
 func signOne(rrs []dns.RR, k *signingKey, signerName string, incep, expir uint32) (*dns.RRSIG, error) {
 	rh := rrs[0].Header()
 	sig := &dns.RRSIG{
@@ -163,7 +193,6 @@ func signOne(rrs []dns.RR, k *signingKey, signerName string, incep, expir uint32
 		},
 		TypeCovered: rh.Rrtype,
 		Algorithm:   k.Public.Algorithm,
-		Labels:      rrsigLabels(rh.Name),
 		OrigTtl:     rh.Ttl,
 		Expiration:  expir,
 		Inception:   incep,
@@ -178,6 +207,21 @@ func signOne(rrs []dns.RR, k *signingKey, signerName string, incep, expir uint32
 		return nil, fmt.Errorf("RRSIG.Sign: %w", err)
 	}
 	return sig, nil
+}
+
+// wildcardOwnerClone returns a deep-enough copy of `rrs` with each
+// RR's owner-name header rewritten to `wildcardOwner`. The copies
+// share rdata (we don't mutate that), but miekg/dns canonical
+// encoding pulls owner names from the header, so this is enough to
+// drive the signer down the wildcard path.
+func wildcardOwnerClone(rrs []dns.RR, wildcardOwner string) []dns.RR {
+	out := make([]dns.RR, len(rrs))
+	for i, rr := range rrs {
+		c := dns.Copy(rr)
+		c.Header().Name = wildcardOwner
+		out[i] = c
+	}
+	return out
 }
 
 // rrsigLabels computes the RRSIG Labels field per RFC 4034 §3.1.3:

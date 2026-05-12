@@ -233,6 +233,35 @@ func (c *chain) nextHashedOwner(n *nsec3Node) string {
 	return c.nodes[next].Hash
 }
 
+// wildcardSource returns the synthetic wildcard owner name that
+// would have matched `owner` — i.e. `*.<closest-encloser-of-owner>`
+// — when `owner` itself isn't in the chain but a matching wildcard
+// IS. Returns "" when `owner` is a concrete chain entry or no
+// matching wildcard ancestor exists.
+//
+// Two consumers:
+//
+//   - The signer reads it to set RRSIG.Labels correctly (RFC 4034
+//     §3.1.3: Labels is the wildcard owner's label count minus 1).
+//   - The wildcard-proof attacher reads it to decide when to emit
+//     the §7.2.4 covering NSEC3 in the authority section.
+//
+// The function depends on the chain having ENTs for the wildcard's
+// ancestors — synthesizeENTs in zone.go produces those, so a
+// `*.dev.example.test.` wildcard works even when `dev.example.test.`
+// has no explicit records of its own.
+func (c *chain) wildcardSource(owner string) string {
+	if c.matchingNSEC3(owner) != nil {
+		return ""
+	}
+	encloser, _ := c.findClosestEncloser(owner)
+	candidate := "*." + encloser
+	if c.matchingNSEC3(candidate) != nil {
+		return candidate
+	}
+	return ""
+}
+
 // sortedTypes returns a freshly-allocated, ascending-sorted copy of
 // the input. The defensive copy stops the caller's slice from
 // changing under us, and the sort matches the NSEC3 type bitmap
