@@ -116,12 +116,20 @@ with the same `docker compose up` flow.
   server config (or derived from the fabric's engine).
 - Central API schemas unchanged.
 
-### Phase 5 — Documentation + cutover (half day)
+### Phase 5 — Documentation + cutover (half day) — DONE
 
-- Update `infra/docker/site-dns/README.md` covering both engine
-  options.
-- Smoke tests against an actual Hickory container.
-- Operator runbook for cutover.
+- README has both-engine sections + verify/rollback runbook.
+- Smoke against `hickorydns/hickory-dns:0.26.0` live container
+  exercised both code paths: `dig example.com` (catch-all upstream)
+  and `dig SOA prod.dcim.local` (apex stub → local auth pod).
+- The live smoke caught a real renderer bug: pre-0.26 drafts of
+  Hickory's config used `[server]` + `zone_type = "Forward"`. The
+  shipped 0.26 schema puts listener options at document root and
+  uses `zone_type = "External"` with `[[zones.stores.name_servers]]`
+  array-tables (each ns has `ip = "..."` + a `connections` array of
+  `{ port = N, protocol = { type = "udp"|"tcp" } }`). Renderer
+  updated to match; without this fix the recursive would fail to
+  start on cutover.
 
 **Total: ~5-6 days.** Each phase is reversible per-fabric via the
 `recursive_engine` enum.

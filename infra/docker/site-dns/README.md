@@ -122,7 +122,12 @@ default CoreDNS build — useful at sites with high client counts (30k+
 per site) where Hickory's no-GC latency tail and lower per-core CPU
 matter. The authoritative pod stays on CoreDNS either way.
 
-To switch:
+Tested against Hickory `0.26.0` (`hickorydns/hickory-dns:latest` as of
+2026-05-12). The renderer emits the
+`zone_type = "External"` forwarder shape; older `Forward` zone-type
+configs from pre-0.26 drafts are not compatible.
+
+### Cutover
 
 1. In central, flip the fabric to Hickory:
 
@@ -146,9 +151,56 @@ To switch:
 The collector recognizes the bundle's engine hint (`coredns` vs
 `hickory`), writes the matching filename (`Corefile` vs
 `config.toml`) into the recursive output_dir, and signals SIGHUP
-instead of SIGUSR1 on reload. Flipping the fabric back to
-`recursive_engine=coredns` reverses everything; just re-run with the
-base compose file only.
+instead of SIGUSR1 on reload.
+
+### Verify
+
+Three checks confirm a healthy cutover. Run them from any host that
+can reach the recursive pod (anycast IP, or directly on the per-site
+management IP):
+
+```bash
+# 1. External recursion succeeds — proves catch-all upstream config.
+dig +short @<recursive-ip> example.com A
+
+# 2. Apex stub forwards to local auth — proves the fabric-apex zone
+#    block points at the right CoreDNS-auth pod.
+dig @<recursive-ip> SOA <fabric_apex>
+
+# 3. Collector applied the bundle — `last_render_status` flips to ok
+#    and `last_render_etag` matches the latest bundle.
+curl /api/v1/dns/servers/$RECURSIVE_ID | jq '{last_render_status, last_render_etag}'
+```
+
+Smoke-test the rendered TOML offline without touching the live stack:
+
+```bash
+docker run --rm -v /etc/dcim-dns/recursive:/cfg:ro \
+  hickorydns/hickory-dns:latest \
+  --config /cfg/config.toml --validate
+```
+
+`--validate` exits 0 only when Hickory can parse every zone block,
+which catches schema drift the moment the upstream image version
+moves.
+
+### Rollback
+
+Flip the fabric back to `coredns` and re-run with the base compose
+file only — no Hickory state survives:
+
+```bash
+curl -X PATCH /api/v1/ipam/fabrics/$FABRIC_ID \
+  -H "content-type: application/json" \
+  -d '{"recursive_engine":"coredns"}'
+
+docker compose -p site42 \
+  -f infra/docker/site-dns/docker-compose.yml \
+  up -d --force-recreate coredns-recursive
+```
+
+The collector cleans up the stale `config.toml` on its next poll and
+re-writes `Corefile` in place.
 
 ## Production
 
