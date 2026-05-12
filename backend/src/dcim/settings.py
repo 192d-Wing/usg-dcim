@@ -44,6 +44,33 @@ class Settings(BaseSettings):
     # tight enough to slow credential stuffing. Set max to 0 to disable.
     login_rate_limit_max: int = 5
     login_rate_limit_window_seconds: int = 60
+    # Capabilities that require the IdP to have performed multi-factor
+    # auth. The session JWT carries an `mfa` boolean derived from the
+    # id_token's `amr` claim (RFC 8176: "mfa", "otp", "hwk", etc.);
+    # require_capability() rejects a request that asks for a code in
+    # this list when the session's mfa flag is False. Empty by default
+    # — opt in per deployment. Local form-login users always have
+    # mfa=False, so any cap listed here is effectively SSO-only.
+    mfa_required_caps: list[str] = Field(
+        default_factory=lambda: [
+            "power:control",
+            "power:approve",
+            "admin:roles:delete",
+            "admin:roles:create",
+            "admin:roles:update",
+            "admin:users:delete",
+            "admin:oidc-mappings:create",
+            "admin:oidc-mappings:update",
+            "admin:oidc-mappings:delete",
+            "dns:keys:rotate",
+        ],
+    )
+    # AMR (Authentication Method References, RFC 8176) values that
+    # count as "MFA satisfied" for the JWT mfa flag. If the id_token's
+    # `amr` claim contains any of these, mfa=True.
+    mfa_amr_values: list[str] = Field(
+        default_factory=lambda: ["mfa", "otp", "hwk", "swk", "fpt"],
+    )
     oidc_issuer: str | None = None
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None

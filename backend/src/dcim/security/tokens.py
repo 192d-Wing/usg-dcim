@@ -20,6 +20,7 @@ def issue_user_jwt(
     *,
     ttl: int | None = None,
     idp_roles: list[str] | None = None,
+    mfa: bool = False,
 ) -> str:
     """Mint a session JWT for `user_id`.
 
@@ -32,6 +33,11 @@ def issue_user_jwt(
     this user. The Principal builder reads them and resolves caps
     via `oidc_role_mappings` per request — that's the zero-trust
     pivot: no persisted UserRole row carries OIDC-derived authority.
+
+    Pass `mfa=True` when the underlying authentication satisfied the
+    deployment's MFA policy (derived from the id_token's `amr` claim
+    at OIDC callback time). The flag is checked by require_capability
+    for codes listed in settings.mfa_required_caps.
     """
     now = datetime.now(UTC)
     exp = now + timedelta(seconds=ttl or _settings.jwt_ttl_seconds)
@@ -41,6 +47,7 @@ def issue_user_jwt(
         "exp": int(exp.timestamp()),
         "jti": uuid.uuid4().hex,
         "kind": "user",
+        "mfa": bool(mfa),
     }
     if idp_roles:
         payload["idp_roles"] = sorted(set(idp_roles))

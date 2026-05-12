@@ -268,6 +268,14 @@ async def oidc_callback(
         await _audit_login_failure(db, ip=ip, email=email, reason="missing_claims")
         raise AuthError("oidc claims missing sub/email")
     user = await _upsert_oidc_user(db, sub=sub, email=email, name=claims.get("name"))
+    # MFA flag: RFC 8176 amr claim. We treat any of the configured
+    # mfa_amr_values as satisfying the policy (Keycloak emits "mfa"
+    # when its flow enforced one; "otp"/"hwk" appear with specific
+    # second factors). Bare "pwd" with no second factor leaves mfa=False.
+    amr_claim = claims.get("amr") or []
+    mfa_satisfied = isinstance(amr_claim, list) and any(
+        v in settings.mfa_amr_values for v in amr_claim
+    )
     # Zero-trust: embed the IdP-asserted role names in our session JWT.
     # No UserRole rows are written from OIDC — caps are re-resolved per
     # request in deps._principal_from_jwt against oidc_role_mappings.
@@ -275,6 +283,7 @@ async def oidc_callback(
         access_token=issue_user_jwt(
             str(user.id),
             idp_roles=sorted(_extract_idp_roles(claims)),
+            mfa=mfa_satisfied,
         ),
         expires_in=settings.jwt_ttl_seconds,
         # Returned so the SPA can stash it for RP-initiated logout

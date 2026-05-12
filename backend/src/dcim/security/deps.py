@@ -38,6 +38,11 @@ class Principal:
     capabilities: dict[str, Scope]  # capability_code -> Scope
     label: str  # for audit
     ip: str | None = None
+    # True when the underlying authentication satisfied the deployment's
+    # MFA policy. Form-login + API tokens are always False; OIDC users
+    # are True when the id_token's amr claim contained an MFA value.
+    # Checked by require_capability for codes in settings.mfa_required_caps.
+    mfa: bool = False
 
     @property
     def is_user(self) -> bool:
@@ -78,7 +83,10 @@ async def _principal_from_jwt(
     for code, scope in idp_caps.items():
         caps[code] = caps.get(code, Scope()).union(scope)
 
-    return Principal(user=user, token=None, capabilities=caps, label=user.email, ip=ip)
+    return Principal(
+        user=user, token=None, capabilities=caps,
+        label=user.email, ip=ip, mfa=bool(claims.get("mfa")),
+    )
 
 
 async def _principal_from_api_token(
@@ -157,13 +165,24 @@ def find_matching_capability(caps: dict[str, Scope], code: str) -> Scope | None:
 
 
 def require_capability(code: str):
-    """Dependency: ensures the principal has the named capability anywhere in their scope."""
+    """Dependency: ensures the principal has the named capability anywhere
+    in their scope, and that MFA was satisfied if `code` is in the
+    deployment's mfa_required_caps list."""
 
     async def _dep(principal: AuthenticatedUser) -> Principal:
         if find_matching_capability(principal.capabilities, code) is None:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail={"error": {"code": "missing_capability", "message": code}},
+            )
+        from ..settings import get_settings  # local to avoid cycle at import
+        if code in get_settings().mfa_required_caps and not principal.mfa:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"error": {
+                    "code": "mfa_required",
+                    "message": f"{code} requires multi-factor authentication",
+                }},
             )
         return principal
 
