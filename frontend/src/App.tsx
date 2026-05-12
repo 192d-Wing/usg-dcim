@@ -77,6 +77,11 @@ export function App() {
         ]}
       >
         <Routes>
+          {/* OIDC callback lives OUTSIDE the Authenticated wrappers so
+              its parent's auth check can't race the token exchange or
+              poison the cached "not authenticated" result that the
+              auth-required wrapper would then read on /. */}
+          <Route path="/login/callback" element={<LoginCallbackPage />} />
           <Route element={
             <Authenticated key="auth-required" fallback={<CatchAllNavigate to="/login" />}>
               <Shell />
@@ -110,11 +115,6 @@ export function App() {
             </Authenticated>
           }>
             <Route path="/login" element={<LoginPage />} />
-            {/* OIDC return URL — exchanges the ?code for our own token,
-                caches identity, then routes into the app. Lives under
-                the unauth wrapper so the user lands here before the
-                Authenticated check decides where to go. */}
-            <Route path="/login/callback" element={<LoginCallbackPage />} />
           </Route>
         </Routes>
         <Toaster theme="dark" />

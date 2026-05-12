@@ -3,7 +3,7 @@
 // own JWT via the backend, cache identity, then route into the app.
 
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import Box from '@cloudscape-design/components/box';
 import Spinner from '@cloudscape-design/components/spinner';
 import Alert from '@cloudscape-design/components/alert';
@@ -14,7 +14,6 @@ const IDENTITY_KEY = 'dcim.identity';
 
 export function LoginCallbackPage() {
   const [params] = useSearchParams();
-  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -45,13 +44,17 @@ export function LoginCallbackPage() {
           email: me.data.user.email,
           capabilities: me.data.capabilities ?? [],
         }));
-        navigate('/', { replace: true });
+        // Full navigation (not react-router navigate) so Refine's
+        // cached useIsAuthenticated query from the prior /login mount
+        // can't poison the next route's auth check.
+        globalThis.location.replace('/');
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err);
-        setError(message || 'OIDC callback failed.');
+        const message =
+          err instanceof Error ? err.message : 'OIDC callback failed.';
+        setError(message);
       }
     })();
-  }, [params, navigate]);
+  }, [params]);
 
   return (
     <Box padding="xxl" textAlign="center">
