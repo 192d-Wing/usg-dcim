@@ -610,6 +610,13 @@ class DnsBundle(BaseModel):
     # to drive per-name top-K tracking. The collector treats null as
     # "skip the dnstap loop entirely".
     dnstap_socket: str | None = None
+    # CIDR prefixes the collector advertises into the local gobgpd
+    # process via its gRPC API. Empty for servers without an
+    # AnycastGroup binding; for recursives bound to a group, contains
+    # the v4 `/32` and v6 `/128` strings. The collector reconciles
+    # these against gobgpd's RIB every cycle so a manual `gobgp
+    # global rib del` is healed without operator intervention.
+    anycast_prefixes: list[str] = Field(default_factory=list)
 
 
 class DnsRenderStatus(BaseModel):

@@ -98,6 +98,15 @@ class DnsServerConfig(BaseModel):
     # dnstap output. Set on the same shared volume as zones/keys so
     # both the resolver container and the collector see the same path.
     dnstap_socket: str | None = None
+    # gobgpd gRPC endpoint for advertising the recursive's anycast
+    # prefixes. Default `localhost:50051` works when the collector
+    # joins the host network namespace alongside gobgpd; otherwise
+    # operators point this at the host IP plus the API-host port the
+    # gobgpd command-line exposes (`--api-hosts 0.0.0.0:50051`).
+    # Empty string disables the advertise loop for this server even
+    # when the bundle carries prefixes — useful for debugging or
+    # for sites where the BGP fabric is managed out-of-band.
+    gobgp_api_host: str = "localhost:50051"
 
 
 class DnsAgentConfig(BaseModel):

@@ -12,6 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libsnmp40 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/.venv /app/.venv
+# `gobgp` CLI binary copied from the gobgpd image (statically-linked
+# Go binary, ~10MB). The collector shells out to it from the anycast
+# advertise loop — `gobgp -u <host>:50051 global rib add <cidr>`
+# reconciles each recursive server's anycast prefixes against
+# gobgpd's local RIB every 30 seconds.
+COPY --from=jauderho/gobgp:latest /usr/local/bin/gobgp /usr/local/bin/gobgp
 RUN mkdir -p /var/lib/dcim-collector
 VOLUME ["/var/lib/dcim-collector"]
 ENTRYPOINT ["dcim-collector"]

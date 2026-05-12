@@ -259,6 +259,165 @@ def _signal_reloads(server: DnsServerConfig, engine: str) -> dict:
     }
 
 
+# Per-server desired anycast prefixes. Populated on every bundle
+# apply, read by `_advertise_loop` so the gobgpd reconciliation runs
+# independently of the bundle-poll cadence. Empty set means "advertise
+# nothing"; the loop will withdraw any extras it finds in gobgpd's RIB.
+_ANYCAST_PREFIXES: dict[str, list[str]] = {}
+_ANYCAST_LOCK = asyncio.Lock()
+
+
+async def _set_desired_prefixes(server_id: str, prefixes: list[str]) -> None:
+    async with _ANYCAST_LOCK:
+        _ANYCAST_PREFIXES[server_id] = list(prefixes)
+
+
+async def _get_desired_prefixes(server_id: str) -> list[str]:
+    async with _ANYCAST_LOCK:
+        return list(_ANYCAST_PREFIXES.get(server_id, []))
+
+
+async def _gobgp(args: list[str]) -> tuple[int, str]:
+    """Run a `gobgp` CLI invocation in a subprocess. Returns the exit
+    code + combined stdout/stderr. Failures (binary missing,
+    connection refused) are turned into a non-zero return rather than
+    a raised exception so the advertise loop can log + retry."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gobgp", *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        return proc.returncode or 0, stdout.decode("utf-8", "replace")
+    except FileNotFoundError:
+        return 127, "gobgp binary not on PATH"
+    except OSError as e:
+        return 1, f"gobgp exec failed: {e}"
+
+
+def _rib_prefixes_from_output(text: str) -> set[str]:
+    """Parse the prefixes out of `gobgp global rib list ipv{4,6}`
+    output. Each non-header line looks like
+    `*> 10.255.0.53/32   0.0.0.0   00:01:23 [...]` — we take the
+    second whitespace-separated token. Empty set when the RIB
+    is empty or the output couldn't be parsed (treated identically
+    by the reconciliation loop)."""
+    out: set[str] = set()
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[0].startswith("*"):
+            continue
+        prefix = parts[1]
+        if "/" in prefix:
+            out.add(prefix)
+    return out
+
+
+def _gobgp_target_args(api_host: str) -> list[str]:
+    """Translate a `host:port` config value into the gobgp CLI's
+    `-u host -p port` flag pair. The CLI quietly accepts `-u host:port`
+    but routes it through Go's gRPC name resolver which fails with
+    `produced zero addresses` on raw IPs — separating host + port
+    sidesteps that path entirely."""
+    if ":" in api_host and api_host.count(":") == 1:
+        host, _, port = api_host.partition(":")
+        return ["-u", host, "-p", port]
+    return ["-u", api_host]
+
+
+async def _current_rib_prefixes(api_host: str) -> set[str]:
+    """Combined v4 + v6 prefixes currently in gobgpd's local RIB."""
+    target = _gobgp_target_args(api_host)
+    found: set[str] = set()
+    for family in ("ipv4", "ipv6"):
+        rc, text = await _gobgp([*target, "global", "rib", family])
+        if rc == 0:
+            found.update(_rib_prefixes_from_output(text))
+    return found
+
+
+def _family_for(prefix: str) -> str:
+    """gobgp CLI needs `-a ipv4` / `-a ipv6` to disambiguate the RIB
+    family; the binary defaults to ipv4 and rejects IPv6 prefixes
+    without the flag. A colon in the CIDR is a sufficient
+    discriminator since IPv4 forms can't contain one."""
+    return "ipv6" if ":" in prefix else "ipv4"
+
+
+async def _reconcile_advertise(
+    server: DnsServerConfig, desired: list[str],
+) -> dict:
+    """Bring gobgpd's RIB to match `desired`: add anything missing,
+    delete anything extra. Returns a {added, removed, errors} summary
+    so the caller can log a single structured line per cycle.
+
+    `gobgp global rib add` errors when the prefix already exists, so
+    we diff first rather than blind-adding. Same logic on the delete
+    side prevents log noise when nothing's drifted."""
+    api_host = server.gobgp_api_host
+    if not api_host:
+        return {"added": [], "removed": [], "errors": ["disabled"]}
+    target = _gobgp_target_args(api_host)
+    current = await _current_rib_prefixes(api_host)
+    want = set(desired)
+    added: list[str] = []
+    removed: list[str] = []
+    errors: list[str] = []
+    for prefix in sorted(want - current):
+        rc, msg = await _gobgp([
+            *target, "-a", _family_for(prefix),
+            "global", "rib", "add", prefix,
+        ])
+        if rc == 0:
+            added.append(prefix)
+        else:
+            errors.append(f"add {prefix}: {msg.strip()[:80]}")
+    for prefix in sorted(current - want):
+        rc, msg = await _gobgp([
+            *target, "-a", _family_for(prefix),
+            "global", "rib", "del", prefix,
+        ])
+        if rc == 0:
+            removed.append(prefix)
+        else:
+            errors.append(f"del {prefix}: {msg.strip()[:80]}")
+    return {"added": added, "removed": removed, "errors": errors}
+
+
+async def _advertise_loop(server: DnsServerConfig) -> None:
+    """Per-server reconcile loop for the anycast prefixes. The desired
+    set comes from the most-recent bundle apply (`_set_desired_prefixes`);
+    we run a diff every 30s so a manual `gobgp global rib del` from an
+    operator triaging a routing issue gets healed without an explicit
+    redeploy. Empty desired set is a valid state — the loop withdraws
+    any prefixes it finds in gobgpd's RIB so the recursive stops
+    attracting traffic cleanly when an operator removes the anycast
+    group binding from central."""
+    server_id = str(server.id)
+    log.info(
+        "advertise_loop_start",
+        server_id=server_id, gobgp_api_host=server.gobgp_api_host,
+    )
+    while True:
+        try:
+            desired = await _get_desired_prefixes(server_id)
+            result = await _reconcile_advertise(server, desired)
+            if result["added"] or result["removed"] or result["errors"]:
+                log.info(
+                    "anycast_reconcile",
+                    server_id=server_id, desired=desired, **result,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.warning(
+                "advertise_loop_cycle_failed",
+                server_id=server_id, err=str(e),
+            )
+        await asyncio.sleep(30)
+
+
 async def _apply_bundle(
     server: DnsServerConfig, bundle: dict, client: httpx.AsyncClient,
     api_base: str,
@@ -269,6 +428,15 @@ async def _apply_bundle(
     engine = bundle.get("engine") or "coredns"
     _write_bundle(server, bundle)
     sent = _signal_reloads(server, engine)
+    # Hand the desired anycast prefixes to the per-server advertise
+    # loop. The loop reconciles every 30s; we don't drive an immediate
+    # reconcile here because gobgpd may not be ready yet on a fresh
+    # bring-up (BGP session establishment is slower than the bundle
+    # apply). Empty list is a valid value — the loop withdraws any
+    # extras it finds in the RIB.
+    await _set_desired_prefixes(
+        str(server.id), bundle.get("anycast_prefixes") or [],
+    )
     etag = bundle.get("etag")
     log.info(
         "dns_bundle_applied",
@@ -657,6 +825,15 @@ async def run_dns_agent(cfg: CollectorConfig) -> None:
     tasks.extend(
         asyncio.create_task(_dnstap_loop(s))
         for s in cfg.dns.servers if s.dnstap_socket
+    )
+    # One anycast advertise loop per recursive server. Auth pods
+    # never bind an AnycastGroup so they always get an empty desired
+    # list — skipping them outright drops the chatter on the bundle
+    # apply side and saves an idle subprocess per cycle.
+    tasks.extend(
+        asyncio.create_task(_advertise_loop(s))
+        for s in cfg.dns.servers
+        if s.role == "recursive" and s.gobgp_api_host
     )
     try:
         await asyncio.gather(*tasks)

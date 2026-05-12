@@ -131,7 +131,17 @@ services:
     # gobgp_pidfile unset in collector.yaml so it doesn't try to
     # SIGHUP a process it can't find. `restart: unless-stopped` cycles
     # gobgpd quickly until the collector renders the initial yaml.
-    command: ["gobgpd", "-f", "/var/lib/dcim-dns/recursive/gobgp.yaml"]
+    # `--api-hosts :50051` matches gobgpd's documented default (bind
+    # on all interfaces) — needed so the collector (running on the
+    # dns-net bridge) can advertise anycast prefixes against the gRPC
+    # API. Explicit because some packagings of gobgpd disable the
+    # listener by default; passing the flag ensures it's always on.
+    command:
+      - "gobgpd"
+      - "-f"
+      - "/var/lib/dcim-dns/recursive/gobgp.yaml"
+      - "--api-hosts"
+      - ":50051"
     volumes:
       - dns-state:/var/lib/dcim-dns
     cap_add:

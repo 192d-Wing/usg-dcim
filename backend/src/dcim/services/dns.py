@@ -1230,11 +1230,14 @@ def bundle_etag(
     gobgp: dict | None,
     *,
     key_files: dict[str, str] | None = None,
+    anycast_prefixes: list[str] | None = None,
 ) -> str:
     """Stable hash over the bundle so the collector can skip no-op
     pulls. Sorted JSON keeps the etag deterministic across renders.
     DNSSEC key files are folded in too so the collector re-applies
-    after a key rotation."""
+    after a key rotation. Anycast prefixes are folded in so flipping
+    an `anycast_ipv4` value re-keys the bundle even when the gobgp
+    YAML (which doesn't carry the prefixes) hasn't changed."""
     h = hashlib.sha256()
     h.update(corefile.encode("utf-8"))
     h.update(b"\x00")
@@ -1251,6 +1254,11 @@ def bundle_etag(
             h.update(k.encode("utf-8"))
             h.update(b"\x00")
             h.update(key_files[k].encode("utf-8"))
+            h.update(b"\x00")
+    if anycast_prefixes:
+        h.update(b"\x02")  # discriminator vs the zone/key streams
+        for p in sorted(anycast_prefixes):
+            h.update(p.encode("utf-8"))
             h.update(b"\x00")
     return h.hexdigest()[:32]
 
@@ -1649,6 +1657,22 @@ def _bundle_dnstap_path(server: DnsServer, engine: str) -> str | None:
     return _dnstap_socket_for(server)
 
 
+def _anycast_prefixes(anycast: AnycastGroup | None) -> list[str]:
+    """v4 `/32` + v6 `/128` strings the collector should advertise
+    via gobgpd's gRPC. Empty when the server has no anycast group
+    bound (auth pods, or recursives without a group). Both families
+    ship when set so a fabric with dual-stack lands on a single
+    recursive without per-family fan-out."""
+    if anycast is None:
+        return []
+    out: list[str] = []
+    if anycast.anycast_ipv4:
+        out.append(f"{anycast.anycast_ipv4}/32")
+    if anycast.anycast_ipv6:
+        out.append(f"{anycast.anycast_ipv6}/128")
+    return out
+
+
 async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
     """One call returns the complete bundle a single server needs:
     Corefile, zone files, optional GoBGP config, etag.
@@ -1715,6 +1739,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             dnstap_socket=dnstap_socket_path,
         )
         gobgp: dict | None = None
+        anycast_prefixes: list[str] = []
     else:
         corefile, rpz_zones_recursive = await _render_recursive_config(db, server)
         # Hickory loads RPZ zones from the same `zones/` directory the
@@ -1732,8 +1757,12 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             server=server, peers=peers, peer_asns=peer_asns,
             local_asn=get_settings().dns_anycast_originate_asn,
         ) if anycast else None
+        anycast_prefixes = _anycast_prefixes(anycast)
     engine = await _engine_for_server(db, server)
-    etag = bundle_etag(corefile, zone_files, gobgp, key_files=key_files)
+    etag = bundle_etag(
+        corefile, zone_files, gobgp,
+        key_files=key_files, anycast_prefixes=anycast_prefixes,
+    )
     return {
         "engine": engine,
         "corefile": corefile,
@@ -1742,6 +1771,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         "key_files": key_files,
         "etag": etag,
         "dnstap_socket": _bundle_dnstap_path(server, engine),
+        "anycast_prefixes": anycast_prefixes,
     }
 
 
