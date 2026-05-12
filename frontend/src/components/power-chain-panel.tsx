@@ -83,7 +83,7 @@ function redundancyStatus(r: PerAsset['redundancy']) {
 }
 
 export function PowerChainPanel({ rackId, pdus, perAsset, assets }: Props) {
-  const canWrite = hasCapability('inventory:write');
+  const canWrite = hasCapability('power:outlets:create');
   const nonPdus = assets.filter((a) => a.kind !== 'pdu');
 
   const counts = useMemo(() => {

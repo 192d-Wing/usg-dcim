@@ -21,6 +21,7 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator, { StatusIndicatorProps } from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 
 const SEVERITIES = ['info', 'warning', 'minor', 'major', 'critical'] as const;
@@ -71,7 +72,7 @@ export function AlertRulesPage() {
   const sites = sitesRes.result.data ?? [];
   const sitesById = new Map(sites.map((s) => [s.id, s]));
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canConfigure = identity?.capabilities.includes('alerts:configure');
+  const canConfigure = hasCap(identity?.capabilities, 'alerts:rules:create');
   const data = result.data ?? [];
   const total = result.total ?? 0;
 

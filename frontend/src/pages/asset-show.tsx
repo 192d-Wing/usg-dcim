@@ -68,7 +68,7 @@ export function AssetShowPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [decomOpen, setDecomOpen] = useState(false);
-  const canWrite = hasCapability('inventory:write');
+  const canWrite = hasCapability('inventory:assets:update');
   const detail = useQuery({
     queryKey: ['asset-detail', id],
     queryFn: async () => (await http.get<AssetDetail>(`/dashboards/assets/${id}`)).data,

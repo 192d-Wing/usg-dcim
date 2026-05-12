@@ -21,6 +21,7 @@ import {
   colorBackgroundInputDisabled, colorBorderDividerDefault,
 } from '@cloudscape-design/design-tokens';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 import { parseCsv } from '@/lib/csv';
 
@@ -66,7 +67,7 @@ export function ImportPage() {
   );
 
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canBulk = identity?.capabilities.includes('inventory:bulk');
+  const canBulk = hasCap(identity?.capabilities, 'inventory:bulk:execute');
 
   const [filename, setFilename] = useState<string | null>(null);
   const [header, setHeader] = useState<string[]>([]);
@@ -131,7 +132,7 @@ export function ImportPage() {
     return (
       <ContentLayout header={<Header variant="h1">Bulk import</Header>}>
         <Box color="text-status-inactive">
-          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>inventory:bulk</code>.
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>inventory:bulk:execute</code>.
           Ask an admin for a role that includes it (EnterpriseAdmin).
         </Box>
       </ContentLayout>

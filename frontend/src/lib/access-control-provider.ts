@@ -1,64 +1,81 @@
 /**
- * Map Refine `can(action, resource)` checks to our capability strings.
+ * Map Refine `can(action, resource)` checks to the granular capability
+ * format used by the backend (`<domain>:<resource>:<action>`), with
+ * wildcard fallback (`*`, `<domain>:*`, `<domain>:<resource>:*`).
  *
- * - resource: maps a Refine resource name to a capability *prefix* (e.g. 'sites' -> 'inventory')
- * - action:   maps Refine actions ('list', 'show', 'create', 'edit', 'delete') to our verbs
- *
- * Capability format: <prefix>:<verb> — e.g. inventory:read, inventory:write, alerts:ack.
+ * Resources map to a (domain, resource) pair; actions map to one of
+ * the catalog verbs. Anything not in either map falls back to the
+ * resource/action name verbatim and will simply fail closed.
  */
 import type { AccessControlProvider } from '@refinedev/core';
 
+import { hasCap } from './caps';
+
 type Identity = { capabilities: string[] };
 
-const RESOURCE_TO_CAP_PREFIX: Record<string, string> = {
-  sites: 'inventory',
-  buildings: 'inventory',
-  rooms: 'inventory',
-  rows: 'inventory',
-  racks: 'inventory',
-  assets: 'inventory',
-  regions: 'inventory',
-  alerts: 'alerts',
-  'alerts/rules': 'alerts',
-  collectors: 'collector',
-  'api-tokens': 'tokens',
-  users: 'users',
-  roles: 'roles',
+const RESOURCE_TO_CODE: Record<string, [string, string]> = {
+  // Inventory plane
+  sites: ['inventory', 'sites'],
+  regions: ['inventory', 'regions'],
+  buildings: ['inventory', 'buildings'],
+  rooms: ['inventory', 'rooms'],
+  rows: ['inventory', 'rows'],
+  racks: ['inventory', 'racks'],
+  assets: ['inventory', 'assets'],
+  cables: ['inventory', 'cables'],
+  // Alerts plane
+  alerts: ['alerts', 'alerts'],
+  'alerts/rules': ['alerts', 'rules'],
+  // Collectors plane
+  collectors: ['collectors', 'collectors'],
+  // Admin plane
+  'api-tokens': ['admin', 'api-tokens'],
+  users: ['admin', 'users'],
+  roles: ['admin', 'roles'],
 };
 
 const ACTION_TO_VERB: Record<string, string> = {
   list: 'read',
   show: 'read',
-  create: 'write',
-  edit: 'write',
-  delete: 'write',
+  create: 'create',
+  edit: 'update',
+  delete: 'delete',
 };
 
-function getCaps(): Set<string> {
+function getCaps(): string[] {
   try {
     const raw = localStorage.getItem('dcim.identity');
-    if (!raw) return new Set();
+    if (!raw) return [];
     const id = JSON.parse(raw) as Identity;
-    return new Set(id.capabilities ?? []);
+    return id.capabilities ?? [];
   } catch {
-    return new Set();
+    return [];
   }
 }
 
 export const accessControlProvider: AccessControlProvider = {
   async can({ resource, action }) {
     const caps = getCaps();
-    const prefix = RESOURCE_TO_CAP_PREFIX[resource ?? ''] ?? resource;
     const verb = ACTION_TO_VERB[action] ?? action;
-    const cap = `${prefix}:${verb}`;
-    if (caps.has(cap)) return { can: true };
-    // Also allow reads via the dashboard cap (used for read-only views).
-    if (verb === 'read' && caps.has('dashboard:read')) return { can: true };
-    return { can: false, reason: `missing capability ${cap}` };
+    const mapped = RESOURCE_TO_CODE[resource ?? ''];
+    const code = mapped
+      ? `${mapped[0]}:${mapped[1]}:${verb}`
+      : `${resource}:${verb}`;
+    if (hasCap(caps, code)) return { can: true };
+    // Cross-cutting read fallback: anyone with dashboards:dashboards:read
+    // can see read-only listings even if their specific resource:read
+    // code isn't granted. Kept from the legacy provider.
+    if (verb === 'read' && hasCap(caps, 'dashboards:dashboards:read')) {
+      return { can: true };
+    }
+    return { can: false, reason: `missing capability ${code}` };
   },
   options: { buttons: { enableAccessControl: true, hideIfUnauthorized: true } },
 };
 
+/** Wildcard-aware capability check against the cached identity in
+ *  localStorage. Use this from components that aren't inside the
+ *  Refine identity hook (e.g. cable-panel, power-chain-panel). */
 export function hasCapability(cap: string): boolean {
-  return getCaps().has(cap);
+  return hasCap(getCaps(), cap);
 }

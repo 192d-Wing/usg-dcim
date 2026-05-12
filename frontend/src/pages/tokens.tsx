@@ -22,6 +22,7 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
 
@@ -40,7 +41,7 @@ type Token = {
 export function TokensPage() {
   const qc = useQueryClient();
   const { data: identity } = useGetIdentity<{ email: string | null; capabilities: string[] }>();
-  const canManage = identity?.capabilities.includes('tokens:manage');
+  const canManage = hasCap(identity?.capabilities, 'admin:api-tokens:read');
   const myCaps = identity?.capabilities ?? [];
 
   const tokens = useQuery({
@@ -69,7 +70,7 @@ export function TokensPage() {
     return (
       <ContentLayout header={<Header variant="h1">API tokens</Header>}>
         <Box color="text-status-inactive">
-          You don't have the <code style={{ fontFamily: 'ui-monospace, monospace' }}>tokens:manage</code>{' '}
+          You don't have the <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:api-tokens:read</code>{' '}
           capability. Ask an admin to grant a role that includes it (e.g. RegionalAdmin,
           EnterpriseAdmin).
         </Box>

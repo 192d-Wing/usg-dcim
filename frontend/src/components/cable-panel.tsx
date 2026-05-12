@@ -64,7 +64,7 @@ type Props = Readonly<{
 }>;
 
 export function CablePanel({ rackId, siteId, rackAssets }: Props) {
-  const canWrite = hasCapability('inventory:write');
+  const canWrite = hasCapability('inventory:cables:update');
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Cable | null>(null);

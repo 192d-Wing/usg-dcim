@@ -20,6 +20,7 @@ import StatusIndicator, { StatusIndicatorProps } from '@cloudscape-design/compon
 import Table from '@cloudscape-design/components/table';
 import { colorBorderInputDefault } from '@cloudscape-design/design-tokens';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 import { formatDate, relativeTime } from '@/lib/utils';
 
@@ -73,7 +74,7 @@ export function MaintenancePage() {
     resource: 'inventory/sites', pagination: { pageSize: 200 },
   });
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canConfigure = identity?.capabilities.includes('alerts:configure');
+  const canConfigure = hasCap(identity?.capabilities, 'maintenance:windows:create');
   const sites = sitesRes.result.data ?? [];
   const sitesById = new Map(sites.map((s) => [s.id, s]));
   const data = result.data ?? [];

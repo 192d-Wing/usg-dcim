@@ -67,7 +67,7 @@ export function RackShowPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [moving, setMoving] = useState<RackDetail['assets'][number] | null>(null);
-  const canWrite = hasCapability('inventory:write');
+  const canWrite = hasCapability('inventory:racks:update');
 
   const detail = useQuery({
     queryKey: ['rack-detail', id],

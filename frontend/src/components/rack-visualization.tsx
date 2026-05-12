@@ -76,7 +76,7 @@ export function RackVisualization({ rackId, uHeight, assets, mode = 'stencil', u
   const qc = useQueryClient();
   const updateMutation = useUpdate();
   const { data: catalog } = useStencilCatalog();
-  const canWrite = hasCapability('inventory:write');
+  const canWrite = hasCapability('inventory:racks:update');
 
   const [face, setFace] = useState<'front' | 'rear'>('front');
   const [draggingId, setDraggingId] = useState<string | null>(null);

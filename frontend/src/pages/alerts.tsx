@@ -19,6 +19,7 @@ import StatusIndicator, {
 } from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
 
@@ -55,7 +56,7 @@ export function AlertsPage() {
     filters: { permanent: [{ field: 'state', operator: 'eq', value: stateOpt.value! }] },
   });
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canAck = identity?.capabilities.includes('alerts:ack');
+  const canAck = hasCap(identity?.capabilities, 'alerts:alerts:ack');
   const data = result.data ?? [];
   const total = result.total ?? 0;
 

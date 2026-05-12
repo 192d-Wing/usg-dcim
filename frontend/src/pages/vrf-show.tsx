@@ -90,7 +90,7 @@ export function validateRdRt(s: string): string | null {
 export function VrfShowPage() {
   const { id = '' } = useParams<{ id: string }>();
   const nav = useNavigate();
-  const canWrite = hasCapability('inventory:write');
+  const canWrite = hasCapability('ipam:vrfs:update');
 
   const vrfQ = useQuery({
     queryKey: ['vrf', id],

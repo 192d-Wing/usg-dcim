@@ -25,6 +25,7 @@ import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
 import Tabs from '@cloudscape-design/components/tabs';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
 
@@ -64,16 +65,16 @@ const SCOPE_TYPES: SelectProps.Option[] = [
 
 export function AdminPage() {
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canUsers = identity?.capabilities.includes('users:manage');
-  const canRoles = identity?.capabilities.includes('roles:manage');
+  const canUsers = hasCap(identity?.capabilities, 'admin:users:read');
+  const canRoles = hasCap(identity?.capabilities, 'admin:roles:read');
   const myCaps = identity?.capabilities ?? [];
 
   if (!canUsers && !canRoles) {
     return (
       <ContentLayout header={<Header variant="h1">Admin</Header>}>
         <Box color="text-status-inactive">
-          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>users:manage</code> or{' '}
-          <code style={{ fontFamily: 'ui-monospace, monospace' }}>roles:manage</code>.
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:users:read</code> or{' '}
+          <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:roles:read</code>.
         </Box>
       </ContentLayout>
     );

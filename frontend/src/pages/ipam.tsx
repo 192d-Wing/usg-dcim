@@ -18,6 +18,7 @@ import {
   colorTextStatusSuccess, colorTextStatusWarning,
 } from '@cloudscape-design/design-tokens';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
 import { CapacityBar } from '@/components/capacity-bar';
@@ -146,8 +147,8 @@ const SKELETON_STYLE: React.CSSProperties = {
 
 export function IpamPage() {
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canRead = identity?.capabilities.includes('inventory:read');
-  const canWrite = identity?.capabilities.includes('inventory:write');
+  const canRead = hasCap(identity?.capabilities, 'ipam:subnets:read');
+  const canWrite = hasCap(identity?.capabilities, 'ipam:subnets:create');
 
   // Drill-down state. Supernets + Subnets share one view (the tree),
   // so we don't track a selected supernet — clicking a subnet inside the
@@ -160,7 +161,7 @@ export function IpamPage() {
     return (
       <ContentLayout header={<Header variant="h1">IPAM</Header>}>
         <Box color="text-status-inactive">
-          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>inventory:read</code>.
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>ipam:subnets:read</code>.
         </Box>
       </ContentLayout>
     );

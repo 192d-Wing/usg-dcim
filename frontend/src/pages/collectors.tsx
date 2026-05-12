@@ -21,6 +21,7 @@ import StatusIndicator, { StatusIndicatorProps } from '@cloudscape-design/compon
 import Table from '@cloudscape-design/components/table';
 import Tabs from '@cloudscape-design/components/tabs';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
 
@@ -55,7 +56,7 @@ export function CollectorsPage() {
   const sites = sitesRes.result.data ?? [];
   const sitesById = new Map(sites.map((s) => [s.id, s]));
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canEnroll = identity?.capabilities.includes('collector:enroll');
+  const canEnroll = hasCap(identity?.capabilities, 'collectors:collectors:enroll');
   const data = result.data ?? [];
 
   const [enrollOpen, setEnrollOpen] = useState(false);

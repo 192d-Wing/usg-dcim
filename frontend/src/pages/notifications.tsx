@@ -22,6 +22,7 @@ import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
 
+import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
 
 type Severity = 'info' | 'warning' | 'minor' | 'major' | 'critical';
@@ -69,7 +70,7 @@ export function NotificationsPage() {
     sorters: { initial: [{ field: 'name', order: 'asc' }] },
   });
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
-  const canConfigure = identity?.capabilities.includes('alerts:configure');
+  const canConfigure = hasCap(identity?.capabilities, 'notifications:channels:create');
   const data = result.data ?? [];
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -108,7 +109,7 @@ export function NotificationsPage() {
     return (
       <ContentLayout header={<Header variant="h1">Notifications</Header>}>
         <Box color="text-status-inactive">
-          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>alerts:configure</code>.
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>notifications:channels:create</code>.
           Ask an admin for a role that includes it.
         </Box>
       </ContentLayout>
