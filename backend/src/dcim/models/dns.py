@@ -41,7 +41,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import INET
+from sqlalchemy.dialects.postgresql import INET, JSONB
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -415,6 +415,13 @@ class DnsServerMetricsSample(UUIDPrimaryKey, Timestamped, Base):
     # histogram has too few samples to be meaningful.
     p50_ms: Mapped[float | None] = mapped_column(Float)
     p95_ms: Mapped[float | None] = mapped_column(Float)
+    # Top-K (name, type, count) tuples observed on this server during
+    # the interval. Sourced from the resolver's dnstap stream, which
+    # the collector reads off a UNIX socket on the shared volume.
+    # Null when the collector hasn't yet been wired to dnstap (or the
+    # operator opted out via config); the dashboard treats null and
+    # an empty list as "no data" interchangeably.
+    top_names: Mapped[list[dict] | None] = mapped_column(JSONB)
 
 
 class DnsBlocklistAction(str, enum.Enum):

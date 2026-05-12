@@ -54,7 +54,7 @@ from ..models.dns import (
 )
 from ..models.bgp import Asn, TcpAoKeyChain
 from ..models.inventory import Site
-from ..models.ipam import Fabric, RecursiveDnsEngine
+from ..models.ipam import Fabric
 from ..schemas.common import Page, PageParams
 from ..schemas.dns import (
     AnycastBgpBindingCreate,
@@ -974,6 +974,12 @@ async def post_server_metrics(
         noerror=payload.noerror,
         p50_ms=payload.p50_ms,
         p95_ms=payload.p95_ms,
+        # Top-K per-interval name counts. Older collectors omit this;
+        # JSONB column accepts None for backward compat.
+        top_names=(
+            [e.model_dump() for e in payload.top_names]
+            if payload.top_names is not None else None
+        ),
     )
     db.add(obj)
     await db.commit()
@@ -1061,6 +1067,12 @@ class _DashServerHealth(BaseModel):
     qps_now: float | None
 
 
+class _DashTopName(BaseModel):
+    name: str
+    type: str
+    count: int
+
+
 class DnsDashboardOut(BaseModel):
     generated_at: datetime
     window_minutes: int
@@ -1068,10 +1080,13 @@ class DnsDashboardOut(BaseModel):
     series: list[_DashSeriesPoint]
     by_site: list[_DashSitePanel]
     server_health: list[_DashServerHealth]
-    # Populated once the collector instrumentation for per-name
-    # counters lands. Null in MVP so the UI renders a "coming soon"
-    # tile without special-casing missing fields.
-    top_names: list | None = None
+    # Top-N most-queried names across all servers in the window.
+    # `null` (vs an empty list) means no collector in this deployment
+    # has shipped a top_names payload yet — the UI uses that to tell
+    # "dnstap not wired" apart from "wired but quiet". Populated by
+    # aggregating `DnsServerMetricsSample.top_names` per the dnstap
+    # plumbing tracked in .claude/plans/dns-top-names.md.
+    top_names: list[_DashTopName] | None = None
 
 
 def _pct(numerator: int, total: int) -> float:
@@ -1243,6 +1258,35 @@ def _build_by_site(
     return out
 
 
+def _aggregate_top_names(
+    samples: list[DnsServerMetricsSample], limit: int = 10,
+) -> list[_DashTopName] | None:
+    """Sum per-name counts across every sample in the window, then
+    return the top `limit` (name, type) pairs sorted by count.
+
+    Returns `None` when no sample in the window carries a `top_names`
+    payload — the UI uses null to mean "dnstap isn't wired on any
+    server" (placeholder card stays visible). An empty list means
+    dnstap is wired but the window saw zero queries (real card with a
+    "no traffic in window" state)."""
+    if not any(s.top_names is not None for s in samples):
+        return None
+    totals: dict[tuple[str, str], int] = {}
+    for s in samples:
+        if not s.top_names:
+            continue
+        for entry in s.top_names:
+            key = (entry.get("name", ""), entry.get("type", ""))
+            if not key[0]:
+                continue
+            totals[key] = totals.get(key, 0) + int(entry.get("count", 0))
+    ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+    return [
+        _DashTopName(name=n, type=t, count=c)
+        for (n, t), c in ranked[:limit]
+    ]
+
+
 def _build_server_health(
     *,
     servers: list[DnsServer],
@@ -1342,7 +1386,7 @@ async def dns_dashboard(
             servers=servers, fabrics=fabrics, sites=sites,
             qps_now_per_server=qps_now_per_server,
         ),
-        top_names=None,
+        top_names=_aggregate_top_names(samples),
     )
 
 

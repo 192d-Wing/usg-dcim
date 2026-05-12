@@ -86,6 +86,11 @@ class DnsServerConfig(BaseModel):
     # binds the prometheus plugin on :9153 in both our auth and
     # recursive Corefiles; override if the operator changes it.
     metrics_url: str = "http://127.0.0.1:9153/metrics"
+    # Skip the prometheus scrape for this server. Hickory's official
+    # image isn't built with the `prometheus` feature flag, so the
+    # endpoint doesn't exist — set this to False on Hickory recursives
+    # until the dnstap reader lands as the unified QPS source.
+    metrics_enabled: bool = True
 
 
 class DnsAgentConfig(BaseModel):

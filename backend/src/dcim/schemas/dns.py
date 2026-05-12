@@ -417,6 +417,15 @@ class DnsViewOut(DnsViewBase):
 
 # ---------- DnsServerMetricsSample ----------
 
+class DnsTopNameEntry(BaseModel):
+    """One row in the per-interval top-queried-names list. Collector
+    keeps a top-K reservoir over the scrape interval, then ships the
+    top entries (sorted by count) in the metrics POST."""
+    name: str
+    type: str
+    count: int = Field(ge=0)
+
+
 class DnsMetricsSampleIn(BaseModel):
     """One scrape from the collector. observed_at defaults to now()
     on the server side if missing — collectors usually omit it."""
@@ -428,6 +437,10 @@ class DnsMetricsSampleIn(BaseModel):
     noerror: int = Field(ge=0, default=0)
     p50_ms: float | None = None
     p95_ms: float | None = None
+    # Top-K per-interval name counts. Null when the collector isn't
+    # wired to dnstap on this resolver; an empty list means dnstap
+    # is wired but observed zero queries in the window.
+    top_names: list[DnsTopNameEntry] | None = None
 
 
 class DnsMetricsSampleOut(BaseModel):
@@ -442,6 +455,7 @@ class DnsMetricsSampleOut(BaseModel):
     noerror: int
     p50_ms: float | None
     p95_ms: float | None
+    top_names: list[DnsTopNameEntry] | None = None
 
 
 # ---------- DnsForwarder ----------

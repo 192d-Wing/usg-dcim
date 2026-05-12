@@ -475,9 +475,13 @@ async def run_dns_agent(cfg: CollectorConfig) -> None:
         for s in cfg.dns.servers
     ]
     if cfg.dns.metrics_enabled:
+        # Honor the per-server `metrics_enabled` knob too — Hickory
+        # recursives ship without a /metrics endpoint, so spawning a
+        # scrape loop just produces a steady stream of connection-
+        # refused warnings until dnstap-based observability lands.
         tasks.extend(
             asyncio.create_task(_metrics_loop(cfg, s, token))
-            for s in cfg.dns.servers
+            for s in cfg.dns.servers if s.metrics_enabled
         )
     try:
         await asyncio.gather(*tasks)
