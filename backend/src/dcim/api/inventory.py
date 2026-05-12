@@ -15,7 +15,7 @@ from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..errors import NotFoundError, ValidationError
+from ..errors import ForbiddenError, NotFoundError, ValidationError
 from ..models.inventory import (
     Asset,
     AssetFace,
@@ -56,8 +56,22 @@ from ..schemas.inventory import (
 )
 from ..security import audit
 from ..security.deps import Principal, find_matching_capability, require_capability
-from ..security.scope import filter_sites_in_scope
+from ..security.scope import scope_filtered_site_ids, site_matches_scope
 from ._pagination import paginate
+
+
+async def _enforce_site_scope(
+    db: AsyncSession, principal: Principal, site_id: UUID | None, cap_code: str,
+) -> None:
+    """Single-resource ABAC check: 404-shape forbidden if the principal
+    holds `cap_code` but the target's `site_id` is outside their scope."""
+    if site_id is None:
+        return
+    scope = find_matching_capability(principal.capabilities, cap_code)
+    if scope is None or scope.is_global:
+        return
+    if not await site_matches_scope(db, scope, site_id):
+        raise ForbiddenError("resource is outside your scope")
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -68,10 +82,18 @@ _ASSET_NOT_FOUND = "asset not found"
 @router.get("/regions", response_model=Page[RegionOut])
 async def list_regions(
     params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability("inventory:regions:read")),
+    principal: Principal = Depends(require_capability("inventory:regions:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Region)
+    # ABAC: restrict to regions that contain at least one in-scope site.
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:regions:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[RegionOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Region.id.in_(select(Site.region_id).where(Site.id.in_(in_scope))))
     return await paginate(db, stmt, model=Region, params=params, out_model=RegionOut)
 
 
@@ -131,14 +153,17 @@ async def list_sites(
     if lifecycle_state is not None:
         stmt = stmt.where(Site.lifecycle_state == lifecycle_state)
 
-    page = await paginate(db, stmt, model=Site, params=params, out_model=SiteOut)
+    # ABAC: push the scope filter into SQL so pagination counts are
+    # correct (the prior post-pagination filter broke page totals).
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:sites:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[SiteOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Site.id.in_(in_scope))
 
-    scope = find_matching_capability(principal.capabilities, "inventory:sites:read")
-    if scope and not scope.is_global:
-        allowed = await filter_sites_in_scope(db, scope, [s.id for s in page.items])
-        page.items = [s for s in page.items if s.id in allowed]
-        page.total = len(page.items)
-    return page
+    return await paginate(db, stmt, model=Site, params=params, out_model=SiteOut)
 
 
 @router.post("/sites", response_model=SiteOut, status_code=201)
@@ -160,12 +185,13 @@ async def create_site(
 @router.get("/sites/{site_id}", response_model=SiteOut)
 async def get_site(
     site_id: UUID,
-    _: Principal = Depends(require_capability("inventory:sites:read")),
+    principal: Principal = Depends(require_capability("inventory:sites:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Site, site_id)
     if obj is None:
         raise NotFoundError("site not found")
+    await _enforce_site_scope(db, principal, obj.id, "inventory:sites:read")
     return obj
 
 
@@ -193,12 +219,19 @@ async def update_site(
 async def list_buildings(
     params: PageParams = Depends(PageParams.from_query),
     site_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("inventory:buildings:read")),
+    principal: Principal = Depends(require_capability("inventory:buildings:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Building)
     if site_id is not None:
         stmt = stmt.where(Building.site_id == site_id)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:buildings:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[BuildingOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Building.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Building, params=params, out_model=BuildingOut)
 
 
@@ -206,12 +239,21 @@ async def list_buildings(
 async def list_rooms(
     params: PageParams = Depends(PageParams.from_query),
     building_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("inventory:rooms:read")),
+    principal: Principal = Depends(require_capability("inventory:rooms:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Room)
     if building_id is not None:
         stmt = stmt.where(Room.building_id == building_id)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:rooms:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[RoomOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Room.building_id.in_(
+            select(Building.id).where(Building.site_id.in_(in_scope))
+        ))
     return await paginate(db, stmt, model=Room, params=params, out_model=RoomOut)
 
 
@@ -219,12 +261,22 @@ async def list_rooms(
 async def list_rows(
     params: PageParams = Depends(PageParams.from_query),
     room_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("inventory:rows:read")),
+    principal: Principal = Depends(require_capability("inventory:rows:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Row)
     if room_id is not None:
         stmt = stmt.where(Row.room_id == room_id)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:rows:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[RowOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Row.room_id.in_(
+            select(Room.id).join(Building, Room.building_id == Building.id)
+            .where(Building.site_id.in_(in_scope))
+        ))
     return await paginate(db, stmt, model=Row, params=params, out_model=RowOut)
 
 
@@ -280,7 +332,7 @@ async def list_racks(
     params: PageParams = Depends(PageParams.from_query),
     site_id: UUID | None = Query(None),
     row_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("inventory:racks:read")),
+    principal: Principal = Depends(require_capability("inventory:racks:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Rack)
@@ -288,18 +340,26 @@ async def list_racks(
         stmt = stmt.where(Rack.site_id == site_id)
     if row_id is not None:
         stmt = stmt.where(Rack.row_id == row_id)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:racks:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[RackOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Rack.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Rack, params=params, out_model=RackOut)
 
 
 @router.get("/racks/{rack_id}", response_model=RackOut)
 async def get_rack(
     rack_id: UUID,
-    _: Principal = Depends(require_capability("inventory:racks:read")),
+    principal: Principal = Depends(require_capability("inventory:racks:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Rack, rack_id)
     if obj is None:
         raise NotFoundError("rack not found")
+    await _enforce_site_scope(db, principal, obj.site_id, "inventory:racks:read")
     return obj
 
 
@@ -379,7 +439,7 @@ async def list_assets(
     lifecycle_state: str | None = Query(None),
     serial: str | None = Query(None),
     hostname: str | None = Query(None),
-    _: Principal = Depends(require_capability("inventory:assets:read")),
+    principal: Principal = Depends(require_capability("inventory:assets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     stmt = select(Asset)
@@ -395,18 +455,26 @@ async def list_assets(
         stmt = stmt.where(Asset.serial == serial)
     if hostname is not None:
         stmt = stmt.where(Asset.hostname == hostname)
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:assets:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[AssetOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Asset.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Asset, params=params, out_model=AssetOut)
 
 
 @router.get("/assets/{asset_id}", response_model=AssetOut)
 async def get_asset(
     asset_id: UUID,
-    _: Principal = Depends(require_capability("inventory:assets:read")),
+    principal: Principal = Depends(require_capability("inventory:assets:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Asset, asset_id)
     if obj is None:
         raise NotFoundError(_ASSET_NOT_FOUND)
+    await _enforce_site_scope(db, principal, obj.site_id, "inventory:assets:read")
     return obj
 
 
@@ -706,7 +774,7 @@ async def list_cables(
     site_id: UUID | None = Query(None),
     rack_id: UUID | None = Query(None),
     asset_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("inventory:cables:read")),
+    principal: Principal = Depends(require_capability("inventory:cables:read")),
     db: AsyncSession = Depends(get_db),
 ):
     """List cables. `rack_id` matches cables touching any asset in that rack."""
@@ -718,18 +786,26 @@ async def list_cables(
     if rack_id is not None:
         rack_assets = select(Asset.id).where(Asset.rack_id == rack_id).scalar_subquery()
         stmt = stmt.where(or_(Cable.a_asset_id.in_(rack_assets), Cable.b_asset_id.in_(rack_assets)))
+    in_scope = await scope_filtered_site_ids(
+        db, principal.capabilities, "inventory:cables:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return Page[CableOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+        stmt = stmt.where(Cable.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Cable, params=params, out_model=CableOut)
 
 
 @router.get("/cables/{cable_id}", response_model=CableOut)
 async def get_cable(
     cable_id: UUID,
-    _: Principal = Depends(require_capability("inventory:cables:read")),
+    principal: Principal = Depends(require_capability("inventory:cables:read")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(Cable, cable_id)
     if obj is None:
         raise NotFoundError(_CABLE_NOT_FOUND)
+    await _enforce_site_scope(db, principal, obj.site_id, "inventory:cables:read")
     return obj
 
 

@@ -190,3 +190,38 @@ async def filter_sites_in_scope(db: AsyncSession, scope: Scope, candidate_ids: I
         if await site_matches_scope(db, scope, sid):
             out.add(sid)
     return out
+
+
+async def scope_filtered_site_ids(
+    db: AsyncSession,
+    capabilities: dict[str, Scope],
+    cap_code: str,
+) -> set[UUID] | None:
+    """Return the set of site UUIDs in scope for `cap_code`, or None if
+    the principal has global scope (no filter needed).
+
+    Use in list endpoints to push the ABAC filter into SQL:
+
+        in_scope = await scope_filtered_site_ids(db, principal.capabilities, "inventory:racks:read")
+        stmt = select(Rack)
+        if in_scope is not None:
+            stmt = stmt.where(Rack.site_id.in_(in_scope))
+        page = await paginate(db, stmt, ...)
+
+    Returns:
+      None       — principal has the cap with global scope; caller skips filter.
+      empty set  — principal has the cap but no site matches; caller should
+                   return an empty page (filter would short-circuit to false).
+      non-empty  — restrict the query to these site IDs.
+    """
+    # Local import to avoid a circular dependency at module load.
+    from .deps import find_matching_capability
+
+    scope = find_matching_capability(capabilities, cap_code)
+    if scope is None or scope.is_global:
+        return None
+    all_site_ids = {
+        row[0]
+        for row in (await db.execute(select(Site.id))).all()
+    }
+    return await filter_sites_in_scope(db, scope, all_site_ids)

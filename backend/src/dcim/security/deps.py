@@ -117,26 +117,33 @@ AuthenticatedUser = Annotated[Principal, Depends(get_principal)]  # type: ignore
 
 
 def find_matching_capability(caps: dict[str, Scope], code: str) -> Scope | None:
-    """Find a capability in `caps` that grants `code`, walking wildcard fallbacks.
+    """Find a capability in `caps` that grants `code`, with `*` glob semantics.
 
-    Order, from most-specific to least:
-      1. exact match
-      2. <domain>:<resource>:* (only meaningful for 3-segment codes)
-      3. <domain>:*
-      4. *
+    A held capability `pattern` grants `code` when, after splitting both on
+    `:`, the segment counts match and every segment in `pattern` is either
+    equal to or `*` (the wildcard) the matching segment in `code`. The
+    bare global `*` (single-segment) grants everything.
+
+    Examples:
+      "inventory:sites:read" matches itself, "inventory:sites:*",
+      "inventory:*:read", "inventory:*", "*".
+      "dns:*:read" does NOT match "dns:zones:create" — the action
+      segments don't align.
 
     Returns the matching capability's Scope, or None if nothing grants.
     """
     if code in caps:
         return caps[code]
-    parts = code.split(":")
-    # Drop the trailing segment one-by-one and try `<prefix>:*`.
-    for i in range(len(parts) - 1, 0, -1):
-        wildcard = ":".join(parts[:i]) + ":*"
-        if wildcard in caps:
-            return caps[wildcard]
     if "*" in caps:
+        # Bare global wildcard short-circuits any check.
         return caps["*"]
+    target = code.split(":")
+    for pattern, scope in caps.items():
+        parts = pattern.split(":")
+        if len(parts) != len(target):
+            continue
+        if all(p == "*" or p == t for p, t in zip(parts, target)):
+            return scope
     return None
 
 

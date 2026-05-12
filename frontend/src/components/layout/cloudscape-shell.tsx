@@ -46,20 +46,22 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/admin',      text: 'Admin',      cap: ['admin:users:read', 'admin:roles:read'] },
 ];
 
-/** Mirror of the backend's find_matching_capability wildcard fallback:
- *  exact → <prefix>:* progressively → `*`. Returns true if any of
- *  `required` is granted by something the user holds. */
+/** Mirror of the backend's find_matching_capability: a held pattern
+ *  grants a code when the segment counts match and every pattern
+ *  segment is either `*` or equal to the corresponding code segment.
+ *  Bare `*` short-circuits. */
 function hasCap(caps: string[], required: string | string[] | undefined): boolean {
   if (!required) return true;
   const needs = Array.isArray(required) ? required : [required];
-  const owned = new Set(caps);
+  if (caps.includes('*')) return true;
   return needs.some((code) => {
-    if (owned.has(code)) return true;
-    const parts = code.split(':');
-    for (let i = parts.length - 1; i > 0; i--) {
-      if (owned.has(parts.slice(0, i).join(':') + ':*')) return true;
-    }
-    return owned.has('*');
+    if (caps.includes(code)) return true;
+    const target = code.split(':');
+    return caps.some((pattern) => {
+      const parts = pattern.split(':');
+      if (parts.length !== target.length) return false;
+      return parts.every((p, i) => p === '*' || p === target[i]);
+    });
   });
 }
 
