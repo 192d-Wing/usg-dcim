@@ -62,14 +62,22 @@ async def _oidc_metadata() -> dict:
     return doc
 
 @router.get("/oidc/login")
-async def oidc_login(redirect_uri: str | None = None) -> RedirectResponse:
+async def oidc_login(
+    redirect_uri: str | None = None,
+    state: str | None = None,
+    nonce: str | None = None,
+) -> RedirectResponse:
     """Kick off the OIDC code flow.
 
-    Redirects the browser to the issuer's authorization endpoint with
-    the configured client_id + scope=openid+profile+email. The optional
-    `redirect_uri` query param overrides settings.oidc_redirect_uri so
-    the same backend can serve dev (localhost) and staging (https://...)
-    without redeploys.
+    Redirects the browser to the issuer's authorization endpoint. The
+    `state` and `nonce` params are forwarded verbatim — the SPA mints
+    them before navigating here and re-validates on callback:
+      * state: echoed by the IdP on the callback URL, SPA compares
+        against sessionStorage to defend against CSRF.
+      * nonce: embedded in the id_token by the IdP; SPA hands it back
+        to /auth/oidc/callback so the backend can verify it matches
+        the id_token's `nonce` claim (defense against id_token
+        substitution).
     """
     settings = get_settings()
     if not settings.oidc_issuer or not settings.oidc_client_id:
@@ -79,13 +87,17 @@ async def oidc_login(redirect_uri: str | None = None) -> RedirectResponse:
     callback = redirect_uri or settings.oidc_redirect_uri
     if not callback:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "redirect_uri required")
-    qs = urlencode({
+    params: dict[str, str] = {
         "client_id": settings.oidc_client_id,
         "redirect_uri": callback,
         "response_type": "code",
         "scope": "openid profile email",
-    })
-    return RedirectResponse(url=f"{auth_endpoint}?{qs}", status_code=302)
+    }
+    if state:
+        params["state"] = state
+    if nonce:
+        params["nonce"] = nonce
+    return RedirectResponse(url=f"{auth_endpoint}?{urlencode(params)}", status_code=302)
 
 async def _exchange_oidc_code(code: str, callback: str | None) -> tuple[dict, dict]:
     """Token-exchange + JWKS fetch. Returns (tokens, jwks)."""
@@ -135,6 +147,7 @@ def _validate_id_token(tokens: dict, jwks: dict) -> dict:
 async def oidc_callback(
     code: str,
     redirect_uri: str | None = None,
+    nonce: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> TokenOut:
     """Exchange the authorization code for tokens, validate the ID token,
@@ -142,6 +155,14 @@ async def oidc_callback(
 
     ID-token signature validation hits the issuer's JWKS over HTTP. We
     accept the issuer's RS256 alg only — no symmetric algs.
+
+    When the SPA passes `nonce`, it's the value it minted before the
+    authorize redirect; we require it to match the id_token's `nonce`
+    claim. Defends against id_token substitution: an attacker who
+    obtains a token from a different OIDC flow can't replay it here
+    without knowing the victim's session-private nonce. Absent
+    `nonce` we don't enforce — kept optional during the rollout
+    window; can be tightened to required once the SPA always sends it.
     """
     settings = get_settings()
     if not settings.oidc_issuer or not settings.oidc_client_id:
@@ -150,6 +171,8 @@ async def oidc_callback(
         code, redirect_uri or settings.oidc_redirect_uri,
     )
     claims = _validate_id_token(tokens, jwks)
+    if nonce is not None and claims.get("nonce") != nonce:
+        raise AuthError("oidc id_token nonce mismatch")
     sub = claims.get("sub")
     email = claims.get("email") or claims.get("preferred_username")
     if not sub or not email:

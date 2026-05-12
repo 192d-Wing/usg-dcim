@@ -92,7 +92,23 @@ export function LoginPage() {
                 variant="primary"
                 fullWidth
                 onClick={() => {
-                  globalThis.location.href = loginBranding.sso.loginUrl;
+                  // Mint per-session state + nonce, stash in sessionStorage
+                  // (per-tab so concurrent tabs don't collide), forward as
+                  // query params on the OIDC kickoff URL. The callback page
+                  // validates both before exchanging the code.
+                  const randomB64 = (bytes = 16) => {
+                    const buf = new Uint8Array(bytes);
+                    globalThis.crypto.getRandomValues(buf);
+                    return btoa(String.fromCodePoint(...buf))
+                      .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+                  };
+                  const state = randomB64();
+                  const nonce = randomB64();
+                  sessionStorage.setItem('dcim.oidc.state', state);
+                  sessionStorage.setItem('dcim.oidc.nonce', nonce);
+                  const sep = loginBranding.sso.loginUrl.includes('?') ? '&' : '?';
+                  globalThis.location.href =
+                    `${loginBranding.sso.loginUrl}${sep}state=${state}&nonce=${nonce}`;
                 }}
               >
                 {loginBranding.sso.label}

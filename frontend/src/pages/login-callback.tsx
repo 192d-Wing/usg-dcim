@@ -20,12 +20,28 @@ export function LoginCallbackPage() {
   useEffect(() => {
     const code = params.get('code');
     const oidcError = params.get('error');
+    const returnedState = params.get('state');
+
+    // Always consume the sessionStorage values once we land here — even
+    // on failure, leaving them around invites replay across tabs.
+    const expectedState = sessionStorage.getItem('dcim.oidc.state');
+    const expectedNonce = sessionStorage.getItem('dcim.oidc.nonce');
+    sessionStorage.removeItem('dcim.oidc.state');
+    sessionStorage.removeItem('dcim.oidc.nonce');
+
     if (oidcError) {
       setError(params.get('error_description') || oidcError);
       return;
     }
     if (!code) {
       setError('Missing authorization code in callback URL.');
+      return;
+    }
+    // CSRF defense: the state the IdP echoed back must match the value
+    // we minted before the authorize redirect. Mismatch means the user
+    // landed here via a forged URL or the flow was tampered with.
+    if (expectedState && returnedState !== expectedState) {
+      setError('Sign-in state mismatch. Please retry.');
       return;
     }
 
@@ -35,8 +51,14 @@ export function LoginCallbackPage() {
 
     (async () => {
       try {
+        const callbackParams: Record<string, string> = {
+          code, redirect_uri: redirectUri,
+        };
+        // Backend verifies this against id_token.nonce — defense
+        // against id_token substitution (replay from a different flow).
+        if (expectedNonce) callbackParams.nonce = expectedNonce;
         const tokenResp = await http.get('/auth/oidc/callback', {
-          params: { code, redirect_uri: redirectUri },
+          params: callbackParams,
         });
         localStorage.setItem(TOKEN_KEY, tokenResp.data.access_token);
         // Stash the IdP id_token so authProvider.logout() can pass it
