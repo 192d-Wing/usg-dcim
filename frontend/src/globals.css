@@ -19,27 +19,32 @@ body {
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 
-/* Login — split-screen layout with DOW-branded dark theme.
-   Primary blue: #355E93 (PMS 653 C). Anchors a tonal palette: deep
-   near-black on the outer edges, primary blue in the highlights. */
+/* Login — split-screen layout. Colors are driven by CSS custom
+   properties set on .login-shell from config/login-branding.ts; the
+   var() fallbacks reproduce the DOW dark theme if config is absent. */
 .login-shell {
   display: grid;
   grid-template-columns: 1fr 1fr;
   min-height: 100vh;
-  background: #0a1220;
+  background: var(--login-form-bg-end, #0a1220);
 }
 .login-brand {
   position: relative;
   overflow: hidden;
-  color: #fff;
+  color: var(--login-text, #fff);
   padding: 48px 56px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   background:
-    radial-gradient(1100px 600px at 12% 5%, rgba(53, 94, 147, 0.55), transparent 60%),
-    radial-gradient(900px 600px at 90% 95%, rgba(53, 94, 147, 0.30), transparent 65%),
-    linear-gradient(135deg, #07101f 0%, #0f1d36 45%, #16294a 100%);
+    radial-gradient(1100px 600px at 12% 5%, color-mix(in srgb, var(--login-primary, #355e93) 55%, transparent), transparent 60%),
+    radial-gradient(900px 600px at 90% 95%, color-mix(in srgb, var(--login-primary, #355e93) 30%, transparent), transparent 65%),
+    linear-gradient(
+      135deg,
+      var(--login-brand-bg-start, #07101f) 0%,
+      var(--login-brand-bg-mid, #0f1d36) 45%,
+      var(--login-brand-bg-end, #16294a) 100%
+    );
 }
 .login-brand::before {
   content: "";
@@ -61,14 +66,14 @@ body {
   letter-spacing: 0.08em;
   font-size: 13px;
   text-transform: uppercase;
-  color: #e4ecf6;
+  color: var(--login-text, #e4ecf6);
 }
 .login-dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #355e93;
-  box-shadow: 0 0 14px rgba(53, 94, 147, 0.85);
+  background: var(--login-primary, #355e93);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--login-primary, #355e93) 85%, transparent);
 }
 .login-headline {
   font-size: clamp(28px, 3vw, 40px);
@@ -91,18 +96,21 @@ body {
   text-transform: uppercase;
 }
 
-/* Right-hand form panel — dark surface, primary-blue accent strip on
-   the divider edge. */
+/* Right-hand form panel — driven by the same custom properties. */
 .login-form-panel {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 48px 32px;
-  color: #e4ecf6;
+  color: var(--login-text, #e4ecf6);
   background:
-    radial-gradient(700px 500px at 100% 0%, rgba(53, 94, 147, 0.18), transparent 65%),
-    linear-gradient(180deg, #0d1830 0%, #0a1220 100%);
+    radial-gradient(700px 500px at 100% 0%, color-mix(in srgb, var(--login-primary, #355e93) 18%, transparent), transparent 65%),
+    linear-gradient(
+      180deg,
+      var(--login-form-bg-start, #0d1830) 0%,
+      var(--login-form-bg-end, #0a1220) 100%
+    );
 }
 .login-form-panel::before {
   content: "";
@@ -111,7 +119,7 @@ body {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: linear-gradient(180deg, transparent, #355e93 50%, transparent);
+  background: linear-gradient(180deg, transparent, var(--login-primary, #355e93) 50%, transparent);
   opacity: 0.6;
   pointer-events: none;
 }
@@ -126,18 +134,18 @@ body {
   font-weight: 600;
   margin: 0 0 8px;
   letter-spacing: -0.01em;
-  color: #ffffff;
+  color: var(--login-form-heading, #ffffff);
 }
 .login-subtitle {
   font-size: 14px;
-  color: rgba(228, 236, 246, 0.7);
+  color: color-mix(in srgb, var(--login-text, #e4ecf6) 70%, transparent);
   margin: 0 0 32px;
   line-height: 1.5;
 }
 .login-footer-note {
   margin-top: 24px;
   font-size: 12px;
-  color: rgba(228, 236, 246, 0.55);
+  color: color-mix(in srgb, var(--login-text, #e4ecf6) 55%, transparent);
   text-align: center;
 }
 @media (max-width: 900px) {

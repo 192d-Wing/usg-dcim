@@ -1,7 +1,8 @@
 // Login — split-screen layout. Brand panel on the left, form on the right.
-// Layout/styles live in globals.css (.login-shell); form logic is unchanged.
+// Layout/styles live in globals.css (.login-shell). All visible copy,
+// colors, and the Cloudscape mode come from config/login-branding.ts.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { useLogin } from '@refinedev/core';
 import { applyMode, Mode } from '@cloudscape-design/global-styles';
 
@@ -11,7 +12,14 @@ import FormField from '@cloudscape-design/components/form-field';
 import Input from '@cloudscape-design/components/input';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 
+import { loginBranding } from '@/config/login-branding';
+
 type Values = { email: string; password: string };
+
+// CSS custom properties consumed by .login-shell and descendants in
+// globals.css. Typed as a CSSProperties extension so TS accepts the
+// `--var` keys.
+type BrandVars = CSSProperties & Record<`--login-${string}`, string>;
 
 export function LoginPage() {
   const { mutate: login, isPending } = useLogin<Values>();
@@ -20,12 +28,12 @@ export function LoginPage() {
   const [emailErr, setEmailErr] = useState<string | undefined>();
   const [passwordErr, setPasswordErr] = useState<string | undefined>();
 
-  // Force Cloudscape dark mode while the login page is mounted so the
-  // form inputs render against the dark DOW-branded surface. Restore
-  // the previous mode on unmount based on the <html> .dark class.
+  // Force the configured Cloudscape mode while the login page is
+  // mounted; restore the previous mode on unmount based on <html>.
   useEffect(() => {
     const wasDark = document.documentElement.classList.contains('dark');
-    applyMode(Mode.Dark);
+    const desired = loginBranding.cloudscapeMode === 'dark' ? Mode.Dark : Mode.Light;
+    applyMode(desired);
     return () => applyMode(wasDark ? Mode.Dark : Mode.Light);
   }, []);
 
@@ -38,30 +46,38 @@ export function LoginPage() {
     if (emailOk && passwordOk) login({ email, password });
   }
 
+  const c = loginBranding.colors;
+  const styleVars: BrandVars = {
+    '--login-primary': c.primary,
+    '--login-brand-bg-start': c.brandBgStart,
+    '--login-brand-bg-mid': c.brandBgMid,
+    '--login-brand-bg-end': c.brandBgEnd,
+    '--login-form-bg-start': c.formBgStart,
+    '--login-form-bg-end': c.formBgEnd,
+    '--login-text': c.text,
+    '--login-form-heading': c.formHeading,
+  };
+
   return (
-    <div className="login-shell">
+    <div className="login-shell" style={styleVars}>
       <aside className="login-brand" aria-hidden="true">
         <div className="login-wordmark">
           <span className="login-dot" />
-          <span>USG DCIM</span>
+          <span>{loginBranding.productName}</span>
         </div>
         <div>
-          <h1 className="login-headline">Operate your fleet at every scale.</h1>
-          <p className="login-sub">
-            Unified inventory, capacity, and observability for enterprise
-            data-center operations — from a single rack to a global footprint.
-          </p>
+          <h1 className="login-headline">{loginBranding.headline}</h1>
+          {loginBranding.tagline && (
+            <p className="login-sub">{loginBranding.tagline}</p>
+          )}
         </div>
-        <div className="login-meta">v0.2 · enterprise edition</div>
+        <div className="login-meta">{loginBranding.meta}</div>
       </aside>
 
       <main className="login-form-panel">
         <div className="login-form-card">
-          <h2 className="login-title">Welcome back</h2>
-          <p className="login-subtitle">
-            Sign in to continue. Production deployments use OIDC/SAML; local
-            dev accepts the seeded admin.
-          </p>
+          <h2 className="login-title">{loginBranding.formTitle}</h2>
+          <p className="login-subtitle">{loginBranding.formSubtitle}</p>
 
           <form onSubmit={onSubmit}>
             <Form
@@ -99,9 +115,7 @@ export function LoginPage() {
             </Form>
           </form>
 
-          <p className="login-footer-note">
-            Trouble signing in? Contact your system administrator.
-          </p>
+          <p className="login-footer-note">{loginBranding.footerNote}</p>
         </div>
       </main>
     </div>
