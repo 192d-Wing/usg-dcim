@@ -41,7 +41,7 @@ The `coredns-nsec3sign` plugin lives under
 its own README and SECURITY-REVIEW.md. Upstream CoreDNS's
 `dnssec` plugin only emits NSEC chains; the custom plugin fills
 the NSEC3 gap (RFC 5155) and ships as a drop-in image at
-`ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-N`.
+`ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-N`.
 
 ## Other entry points
 

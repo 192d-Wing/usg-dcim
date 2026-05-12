@@ -149,7 +149,7 @@ hashes owner names so the chain isn't directly walkable. The
 **Denial of existence** section on the DNSSEC tab lets you flip:
 
 1. Confirm the auth pod is running the
-   `ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-N` image. NSEC3
+   `ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-N` image. NSEC3
    responses from the stock `coredns/coredns` image won't work
    — there's no NSEC3 support in the upstream `dnssec` plugin.
 2. Set **Salt** to `""` (empty) — RFC 9276 §3.1 recommends this
@@ -309,6 +309,33 @@ pod's response path:
 
 Bulk import is supported — paste a list of patterns into the
 **Bulk add** modal.
+
+## Verifying a signed zone end-to-end
+
+Before pointing production traffic at a freshly-signed zone, run
+the [comprehensive-test
+harness](../../infra/coredns-nsec3sign/examples/comprehensive-test/)
+against your auth pod. It boots the deployed image against a
+hand-rolled zone exercising every code path the plugin handles —
+positive answers, NXDOMAIN, NODATA, wildcard expansion, empty
+non-terminals (deep hierarchies), and secure / insecure
+delegation referrals — and produces `dig +dnssec` output an
+operator can read in 30 seconds.
+
+Use it as the sanity check after:
+
+- **Enabling NSEC3** on a zone for the first time. Confirms the
+  custom image is actually running and the signing path works on
+  the wire.
+- **Bumping the plugin image** to a new tag. Confirms the new
+  build still produces validating responses across all the
+  shapes a real zone might hit.
+- **Rotating a key** (KSK or ZSK). The harness's RRSIG inception
+  field shows whether the new key is the one signing.
+
+The harness uses its own throwaway zone (`example.test.`) so it
+doesn't touch production data. Walk-through is in the
+[harness README](../../infra/coredns-nsec3sign/examples/comprehensive-test/README.md).
 
 ## Common troubleshooting
 

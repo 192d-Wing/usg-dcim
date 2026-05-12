@@ -94,7 +94,7 @@ deliberate operation.
 ### 3. Pulling the signing image (ghcr access)
 
 The custom CoreDNS image
-(`ghcr.io/192d-wing/coredns-nsec3sign:v1.11.3-N`) is a private
+(`ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-N`) is a private
 package — org policy disallows public ghcr packages. Each Docker
 host that runs the site stack needs a one-time login:
 
