@@ -154,35 +154,84 @@ def _write_key_files(out: Path, key_files: dict[str, str]) -> None:
                 pass
 
 
+_COREFILE_NAME = "Corefile"
+_HICKORY_CONFIG_NAME = "config.toml"
+
+
+def _config_filename(engine: str) -> str:
+    """CoreDNS reads `Corefile` from cwd; Hickory takes a `-c
+    config.toml`. The collector writes whichever the bundle calls
+    for so the same site stack can run either engine without
+    reshuffling the volume layout."""
+    return _HICKORY_CONFIG_NAME if engine == "hickory" else _COREFILE_NAME
+
+
 def _write_bundle(server: DnsServerConfig, bundle: dict) -> None:
-    """Materialize the bundle on disk in the layout CoreDNS expects:
-      <output_dir>/Corefile
-      <output_dir>/zones/<name>.zone     (one per zone)
-      <output_dir>/keys/<basename>.key   (DNSSEC, when zone is signed)
+    """Materialize the bundle on disk in the layout each engine
+    expects:
+      <output_dir>/Corefile        (CoreDNS) | config.toml (Hickory)
+      <output_dir>/zones/<name>.zone   (one per zone)
+      <output_dir>/keys/<basename>.key   (DNSSEC; CoreDNS auth only)
       <output_dir>/keys/<basename>.private
-      <output_dir>/gobgp.yaml            (recursive only)
-    """
+      <output_dir>/gobgp.yaml      (recursive only)
+
+    Stale engine-swap files (a leftover Corefile when the fabric
+    just moved to hickory) get removed so the resolver doesn't pick
+    up cached config."""
     out = Path(server.output_dir)
-    _atomic_write(out / "Corefile", bundle.get("corefile", ""))
+    engine = bundle.get("engine") or "coredns"
+    cfg_name = _config_filename(engine)
+    _atomic_write(out / cfg_name, bundle.get("corefile", ""))
+    # Drop the other engine's config file if it's still on disk —
+    # otherwise the resolver might read stale config after a
+    # mid-flight engine switch.
+    other = _COREFILE_NAME if cfg_name == _HICKORY_CONFIG_NAME else _HICKORY_CONFIG_NAME
+    other_path = out / other
+    if other_path.exists():
+        try:
+            other_path.unlink()
+        except OSError:
+            pass
     _write_zones(out, bundle.get("zones") or {})
     _write_key_files(out, bundle.get("key_files") or {})
     if server.role == "recursive" and bundle.get("gobgp") is not None:
         _atomic_write(out / "gobgp.yaml", yaml.safe_dump(bundle["gobgp"]))
 
 
-def _signal_reloads(server: DnsServerConfig) -> dict:
+def _signal_reloads(server: DnsServerConfig, engine: str) -> dict:
     """Send the right reload signals. CoreDNS reloads on SIGUSR1;
-    GoBGP picks up config changes on SIGHUP."""
-    coredns_pid = _read_pid(server.coredns_pidfile)
+    Hickory reloads on SIGHUP; GoBGP also uses SIGHUP. The bundle's
+    engine hint drives which signal we send to the resolver pid."""
+    resolver_pid = _read_pid(server.coredns_pidfile)
+    resolver_sig = signal.SIGHUP if engine == "hickory" else signal.SIGUSR1
     gobgp_pid = _read_pid(server.gobgp_pidfile)
-    sent = {
-        "coredns_reloaded": _signal_pid(coredns_pid, signal.SIGUSR1),
+    return {
+        "resolver_reloaded": _signal_pid(resolver_pid, resolver_sig),
         "gobgp_reloaded": (
             _signal_pid(gobgp_pid, signal.SIGHUP)
             if server.role == "recursive" else None
         ),
     }
-    return sent
+
+
+async def _apply_bundle(
+    server: DnsServerConfig, bundle: dict, client: httpx.AsyncClient,
+    api_base: str,
+) -> None:
+    """Materialize one bundle on disk + signal the resolver + post the
+    render-status callback. Pulled out of _server_loop so the loop's
+    cycle skeleton stays under the complexity cap."""
+    engine = bundle.get("engine") or "coredns"
+    _write_bundle(server, bundle)
+    sent = _signal_reloads(server, engine)
+    etag = bundle.get("etag")
+    log.info(
+        "dns_bundle_applied",
+        server_id=str(server.id), engine=engine, etag=etag, **sent,
+    )
+    await _post_status(client, api_base, str(server.id), {
+        "status": "ok", "etag": etag,
+    })
 
 
 async def _server_loop(
@@ -202,20 +251,9 @@ async def _server_loop(
                     await asyncio.sleep(cfg.dns.poll_interval_seconds)
                     continue
                 etag = bundle.get("etag")
-                if etag and etag == last_etag:
-                    # No-op: bundle unchanged since last poll.
-                    pass
-                else:
-                    _write_bundle(server, bundle)
-                    sent = _signal_reloads(server)
+                if etag != last_etag:
+                    await _apply_bundle(server, bundle, client, api_base)
                     last_etag = etag
-                    log.info(
-                        "dns_bundle_applied",
-                        server_id=str(server.id), etag=etag, **sent,
-                    )
-                    await _post_status(client, api_base, str(server.id), {
-                        "status": "ok", "etag": etag,
-                    })
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001

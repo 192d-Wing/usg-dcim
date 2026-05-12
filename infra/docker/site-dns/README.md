@@ -115,6 +115,41 @@ don't talk to central directly; they only read the bundle the
 collector dropped on the shared volume. Single credential, single
 audit trail.
 
+## Hickory for the recursive (opt-in)
+
+The recursive resolver supports a Hickory DNS variant alongside the
+default CoreDNS build — useful at sites with high client counts (30k+
+per site) where Hickory's no-GC latency tail and lower per-core CPU
+matter. The authoritative pod stays on CoreDNS either way.
+
+To switch:
+
+1. In central, flip the fabric to Hickory:
+
+   ```bash
+   curl -X PATCH /api/v1/ipam/fabrics/$FABRIC_ID \
+     -H "content-type: application/json" \
+     -d '{"recursive_engine":"hickory"}'
+   ```
+
+   The next bundle poll renders a TOML config instead of a Corefile.
+
+2. Layer the Hickory overlay on the compose bring-up:
+
+   ```bash
+   docker compose -p site42 \
+     -f infra/docker/site-dns/docker-compose.yml \
+     -f infra/docker/site-dns/docker-compose.hickory.yml \
+     up -d
+   ```
+
+The collector recognizes the bundle's engine hint (`coredns` vs
+`hickory`), writes the matching filename (`Corefile` vs
+`config.toml`) into the recursive output_dir, and signals SIGHUP
+instead of SIGUSR1 on reload. Flipping the fabric back to
+`recursive_engine=coredns` reverses everything; just re-run with the
+base compose file only.
+
 ## Production
 
 The compose stack is the local development surface. Production

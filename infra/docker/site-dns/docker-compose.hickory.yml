@@ -1,0 +1,44 @@
+# Overlay that swaps the recursive resolver from CoreDNS to Hickory.
+#
+# Run alongside the base compose:
+#   docker compose -p site42 \
+#     -f infra/docker/site-dns/docker-compose.yml \
+#     -f infra/docker/site-dns/docker-compose.hickory.yml \
+#     up -d
+#
+# Phase 2 of the Hickory migration (.claude/plans/hickory-migration.md).
+# The authoritative pod stays on CoreDNS — only the recursive moves.
+#
+# Before flipping, set the fabric's recursive_engine to "hickory" in
+# central (PATCH /api/v1/ipam/fabrics/{id}). The collector reads the
+# bundle's engine hint and writes `config.toml` (instead of `Corefile`)
+# into the recursive output_dir. Reload signal is SIGHUP rather than
+# SIGUSR1; the collector sends the right one automatically.
+
+services:
+  coredns-recursive:
+    # Replace the CoreDNS image with Hickory. The container reads
+    # /var/lib/dcim-dns/recursive/config.toml that the collector
+    # renders.
+    image: hickorydns/hickory-dns:latest
+    pid: "host"
+    user: "0:0"
+    networks:
+      dns-net:
+        ipv4_address: 172.30.42.20
+    ports:
+      - "10.0.100.5:53:53/udp"
+      - "10.0.100.5:53:53/tcp"
+    # `-c` points at the rendered TOML; `--zone-dir` lets Hickory
+    # resolve relative zone-file paths inside the bundle (we don't
+    # use it today for the recursive but it's harmless).
+    command:
+      - "hickory-dns"
+      - "-c"
+      - "/var/lib/dcim-dns/recursive/config.toml"
+      - "--zone-dir"
+      - "/var/lib/dcim-dns/recursive/zones"
+    volumes:
+      - dns-state:/var/lib/dcim-dns
+    restart: unless-stopped
+    depends_on: [collector]

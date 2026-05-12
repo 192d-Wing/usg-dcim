@@ -1326,6 +1326,20 @@ async def _bgp_for_server(
     return peers, peer_asns, anycast
 
 
+async def _engine_for_server(db: AsyncSession, server: DnsServer) -> str:
+    """Engine hint surfaced on the bundle response. Auth pods always
+    render Corefile (CoreDNS); recursive pods follow the fabric's
+    recursive_engine selector. The collector reads this to pick the
+    on-disk filename + reload signal."""
+    if server.role != DnsServerRole.recursive:
+        return "coredns"
+    from ..models.ipam import Fabric, RecursiveDnsEngine  # noqa: PLC0415
+    fabric = await db.get(Fabric, server.fabric_id)
+    if fabric and fabric.recursive_engine == RecursiveDnsEngine.hickory:
+        return "hickory"
+    return "coredns"
+
+
 async def _render_recursive_config(db: AsyncSession, server: DnsServer) -> str:
     """Assemble the recursive-side config text (Corefile or Hickory
     TOML) for one server. Pulled out of render_bundle_for_server so
@@ -1434,8 +1448,10 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             server=server, peers=peers, peer_asns=peer_asns,
             local_asn=get_settings().dns_anycast_originate_asn,
         ) if anycast else None
+    engine = await _engine_for_server(db, server)
     etag = bundle_etag(corefile, zone_files, gobgp, key_files=key_files)
     return {
+        "engine": engine,
         "corefile": corefile,
         "zones": zone_files,
         "gobgp": gobgp,

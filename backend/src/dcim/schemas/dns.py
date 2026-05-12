@@ -543,6 +543,12 @@ class DnsBundle(BaseModel):
     collector short-circuit no-op renders."""
 
     etag: str
+    # Which engine renders this server's config. Auth pods are
+    # always "coredns"; recursive pods pick up the fabric's
+    # recursive_engine. The collector reads this to decide whether
+    # corefile contains a Corefile (coredns) or TOML (hickory) and
+    # to pick the matching reload signal.
+    engine: str = "coredns"
     corefile: str
     zones: dict[str, str]   # filename -> zone-file text
     gobgp: dict | None      # GoBGP YAML (None for auth servers)
