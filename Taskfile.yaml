@@ -1,0 +1,121 @@
+version: '3'
+
+env:
+  COMPOSE_FILE: infra/docker/docker-compose.yml
+
+tasks:
+  help:
+    desc: Display available tasks
+    cmds:
+      - |
+        echo "USG DCIM dev tasks (Python via uv)"
+        echo "  task sync         install backend + collector deps into .venv"
+        echo "  task up           start full stack via docker-compose"
+        echo "  task down         stop stack"
+        echo "  task logs         tail all service logs"
+        echo "  task migrate      apply Alembic migrations against running stack"
+        echo "  task seed         load demo enterprise dataset"
+        echo "  task test         backend pytest + frontend vitest"
+        echo "  task lint         ruff + eslint"
+        echo "  task fmt          ruff format + prettier"
+        echo "  task backend      run API locally on :8000"
+        echo "  task worker       run arq worker locally"
+        echo "  task collector    run sample collector locally"
+        echo "  task frontend     vite dev server on :5173"
+    silent: true
+
+  # Dependency Management
+  sync:
+    desc: Install backend + collector deps into .venv
+    cmds:
+      - uv sync --all-packages --all-extras
+
+  # Docker Compose Tasks
+  up:
+    desc: Start full stack via docker-compose
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} up -d --build
+
+  down:
+    desc: Stop stack
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} down
+
+  logs:
+    desc: Tail all service logs
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} logs -f
+
+  build:
+    desc: Build docker images
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} build
+
+  # Database Migrations
+  migrate:
+    desc: Apply Alembic migrations against running stack
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} exec api alembic upgrade head
+
+  migrate-local:
+    desc: Apply Alembic migrations locally
+    cmds:
+      - uv run --project backend alembic -c backend/alembic.ini upgrade head
+
+  # Seeding
+  seed:
+    desc: Load demo enterprise dataset
+    cmds:
+      - docker compose -f {{.COMPOSE_FILE}} exec api python -m dcim.scripts.seed_demo
+
+  seed-local:
+    desc: Load demo enterprise dataset locally
+    cmds:
+      - uv run --project backend python -m dcim.scripts.seed_demo
+
+  # Testing & Code Quality
+  test:
+    desc: Run backend pytest + frontend vitest
+    cmds:
+      - uv run --project backend pytest backend/tests -q
+      - cd frontend && npm test --silent
+
+  lint:
+    desc: Run ruff + eslint
+    cmds:
+      - uv run --project backend ruff check backend
+      - cd frontend && npm run lint
+
+  fmt:
+    desc: Run ruff format + prettier
+    cmds:
+      - uv run --project backend ruff format backend
+      - cd frontend && npm run fmt
+
+  # Local Development
+  backend:
+    desc: Run API locally on :8000
+    cmds:
+      - uv run --project backend uvicorn dcim.main:app --reload --port 8000 --host 0.0.0.0
+
+  worker:
+    desc: Run arq worker locally
+    cmds:
+      - uv run --project backend arq dcim.worker.WorkerSettings
+
+  collector:
+    desc: Run sample collector locally
+    cmds:
+      - uv run --project collector dcim-collector --config collector/sample-config.yaml
+
+  frontend:
+    desc: Start frontend vite dev server on :5173
+    cmds:
+      - cd frontend && npm install && npm run dev
+
+  # Cleanup
+  clean:
+    desc: Clean up generated files and caches
+    cmds:
+      - rm -rf .venv backend/.pytest_cache backend/.ruff_cache backend/.mypy_cache
+      - rm -rf frontend/node_modules frontend/dist
