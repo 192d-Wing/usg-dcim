@@ -45,7 +45,7 @@ from ..models.ipam import (
     Vtep,
     VtepVniMembership,
 )
-from ..schemas.common import Page, PageParams
+from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.ipam import (
     DhcpServerCreate,
     DhcpServerOut,
@@ -95,6 +95,12 @@ _VRF_NOT_FOUND = "vrf not found"
 _SUPERNET_NOT_FOUND = "supernet not found"
 _SUBNET_NOT_FOUND = "subnet not found"
 _IP_NOT_FOUND = "ip address not found"
+
+# Capability code shared by the bulk endpoints (subnets + IPs). Hoisted
+# so the require_capability decorator and the per-row enforce_fabric_scope
+# call inside each loop reference the same constant rather than two
+# string literals that could drift apart on a future rename.
+_CAP_BULK = "ipam:bulk:execute"
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$")
 
@@ -756,6 +762,70 @@ async def update_subnet(
     return obj
 
 
+@router.post("/subnets/bulk", response_model=BulkResult)
+async def bulk_create_subnets(
+    payload: list[SubnetCreate],
+    principal: Principal = Depends(require_capability(_CAP_BULK)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-create subnets from a CSV import. Each row goes through the
+    same containment + per-VRF uniqueness + purpose + VNI checks the
+    single-row endpoint runs, so a malformed row fails closed without
+    rolling back the rest of the batch — exactly the asset-import
+    semantics operators are used to.
+
+    Skip semantics: rows whose (vrf, prefix) already exists are
+    counted in `skipped` rather than `failed`, so a re-run of the same
+    CSV is idempotent. Real errors (no supernet, prefix outside the
+    supernet, purpose mismatch, scope denied) land in `errors[]`."""
+    result = BulkResult()
+    for i, item in enumerate(payload):
+        try:
+            parent = await ipam_svc.assert_subnet_inside_supernet(
+                db, supernet_id=item.supernet_id, prefix=item.prefix,
+            )
+            await enforce_fabric_scope(
+                db, principal.capabilities, parent.fabric_id, _CAP_BULK,
+            )
+            try:
+                await ipam_svc.assert_subnet_unique_in_vrf(
+                    db, fabric_id=parent.fabric_id, vrf_id=parent.vrf_id,
+                    prefix=item.prefix,
+                )
+            except ConflictError:
+                result.skipped += 1
+                continue
+            ipam_svc.assert_purpose_compatible(
+                supernet_purpose=parent.purpose, subnet_purpose=item.purpose,
+            )
+            if item.vni_id is not None:
+                await ipam_svc.assert_subnet_vni_compatible(
+                    db, vni_id=item.vni_id, fabric_id=parent.fabric_id,
+                )
+            data = item.model_dump()
+            data["fabric_id"] = parent.fabric_id
+            data["vrf_id"] = parent.vrf_id
+            db.add(Subnet(**data))
+            result.inserted += 1
+        except Exception as e:
+            result.failed += 1
+            result.errors.append({
+                "row": i,
+                "prefix": item.prefix,
+                "supernet_id": str(item.supernet_id),
+                "error": str(e),
+            })
+    await audit.record(
+        db, principal, action="subnet.bulk_create", target_type="subnet",
+        metadata={
+            "inserted": result.inserted, "skipped": result.skipped,
+            "failed": result.failed,
+        },
+    )
+    await db.commit()
+    return result
+
+
 @router.delete("/subnets/{subnet_id}", status_code=204)
 async def delete_subnet(
     subnet_id: UUID,
@@ -910,6 +980,62 @@ async def update_address(
     await db.commit()
     await db.refresh(obj)
     return obj
+
+
+@router.post("/addresses/bulk", response_model=BulkResult)
+async def bulk_create_addresses(
+    payload: list[IPAddressCreate],
+    principal: Principal = Depends(require_capability(_CAP_BULK)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-create IP addresses from a CSV. Each row goes through the
+    same subnet-containment check the single-row endpoint runs; rows
+    whose (subnet, address) already exists are reported as `skipped`
+    so a re-run of the CSV is idempotent. Scope is enforced per-row
+    based on the parent subnet's fabric — a CSV that touches multiple
+    fabrics only writes into the ones the caller can reach."""
+    result = BulkResult()
+    for i, item in enumerate(payload):
+        try:
+            subnet = await db.get(Subnet, item.subnet_id)
+            if subnet is None:
+                raise ValidationError(f"subnet {item.subnet_id} not found")
+            await enforce_fabric_scope(
+                db, principal.capabilities, subnet.fabric_id, _CAP_BULK,
+            )
+            await ipam_svc.assert_address_in_subnet(
+                db, subnet_id=item.subnet_id, address=item.address,
+            )
+            existing = (
+                await db.execute(
+                    select(IPAddress).where(
+                        IPAddress.subnet_id == item.subnet_id,
+                        IPAddress.address == item.address,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                result.skipped += 1
+                continue
+            db.add(IPAddress(**item.model_dump()))
+            result.inserted += 1
+        except Exception as e:
+            result.failed += 1
+            result.errors.append({
+                "row": i,
+                "address": item.address,
+                "subnet_id": str(item.subnet_id),
+                "error": str(e),
+            })
+    await audit.record(
+        db, principal, action="ip_address.bulk_create", target_type="ip_address",
+        metadata={
+            "inserted": result.inserted, "skipped": result.skipped,
+            "failed": result.failed,
+        },
+    )
+    await db.commit()
+    return result
 
 
 @router.delete("/addresses/{ip_id}", status_code=204)
