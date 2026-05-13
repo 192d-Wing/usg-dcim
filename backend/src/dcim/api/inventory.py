@@ -11,7 +11,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
@@ -615,7 +615,81 @@ class _DecommissionPayload(BaseModel):
     reason: str | None = None
 
 
-@router.post("/assets/{asset_id}/decommission", response_model=AssetOut)
+class _DecommissionImpact(BaseModel):
+    """Pre-flight or post-action impact summary. `consumer_drops` are
+    PowerConnections where the asset is the consumer; `pdu_drops` are
+    PowerConnections served by the asset's outlets (only non-zero for
+    PDUs). `downstream_assets` lists distinct asset names that lose
+    power on the PDU side so the operator sees the blast radius
+    before they commit."""
+    consumer_drops: int = 0
+    pdu_drops: int = 0
+    downstream_assets: list[str] = []
+
+
+class _DecommissionResult(BaseModel):
+    asset: AssetOut
+    impact: _DecommissionImpact
+
+
+async def _decommission_impact(db: AsyncSession, asset_id: UUID) -> _DecommissionImpact:
+    """Compute the drop counts + downstream-asset names a decommission
+    would produce, without mutating. Pure read query — safe to call
+    from the preview endpoint AND right before the actual delete to
+    populate the result envelope."""
+    consumer_q = await db.execute(
+        select(func.count()).select_from(PowerConnection)
+        .where(PowerConnection.asset_id == asset_id)
+    )
+    consumer_drops = int(consumer_q.scalar() or 0)
+    # PDU side: PowerConnection.outlet_id → Outlet.pdu_asset_id == asset.
+    # Join to Asset on the CONSUMER side of those connections so we can
+    # report the names of downstream devices that would lose power.
+    downstream_rows = (await db.execute(
+        select(Asset.name)
+        .select_from(PowerConnection)
+        .join(Outlet, Outlet.id == PowerConnection.outlet_id)
+        .join(Asset, Asset.id == PowerConnection.asset_id)
+        .where(Outlet.pdu_asset_id == asset_id)
+        .distinct()
+    )).all()
+    downstream_assets = sorted({row[0] for row in downstream_rows if row[0]})
+    pdu_count_q = await db.execute(
+        select(func.count()).select_from(PowerConnection)
+        .join(Outlet, Outlet.id == PowerConnection.outlet_id)
+        .where(Outlet.pdu_asset_id == asset_id)
+    )
+    pdu_drops = int(pdu_count_q.scalar() or 0)
+    return _DecommissionImpact(
+        consumer_drops=consumer_drops,
+        pdu_drops=pdu_drops,
+        downstream_assets=downstream_assets,
+    )
+
+
+@router.get(
+    "/assets/{asset_id}/decommission/preview",
+    response_model=_DecommissionImpact,
+)
+async def preview_decommission(
+    asset_id: UUID,
+    _: Principal = Depends(require_capability("inventory:assets:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pre-flight summary the operator sees before committing the
+    decommission. Returns the same impact shape the POST endpoint
+    populates on success so the UI can render one consistent view.
+
+    Read-only — no mutation, no audit entry. Operators who can read
+    inventory can preview; the actual decommission still requires
+    `inventory:assets:update`."""
+    obj = await db.get(Asset, asset_id)
+    if obj is None:
+        raise NotFoundError(_ASSET_NOT_FOUND)
+    return await _decommission_impact(db, asset_id)
+
+
+@router.post("/assets/{asset_id}/decommission", response_model=_DecommissionResult)
 async def decommission_asset(
     asset_id: UUID,
     payload: _DecommissionPayload,
@@ -624,10 +698,13 @@ async def decommission_asset(
 ):
     """Mark an asset decommissioned and drop its power connections.
 
-    Drops connections both ways: where the asset is the consumer, and where
-    it's a PDU whose outlets carry connections to other devices. The asset
-    itself stays in place so historical reports keep resolving — flip to
-    `retired` later to fully archive.
+    Drops connections both ways: where the asset is the consumer, and
+    where it's a PDU whose outlets carry connections to other devices.
+    The asset itself stays in place so historical reports keep
+    resolving — flip to `retired` later to fully archive. The response
+    includes the same impact shape `/preview` returns so the UI can
+    surface "dropped N connections (and these downstream assets)" in
+    the success toast.
     """
     obj = await db.get(Asset, asset_id)
     if obj is None:
@@ -635,12 +712,17 @@ async def decommission_asset(
     if obj.lifecycle_state == LifecycleState.decommissioned:
         raise ValidationError("asset is already decommissioned")
 
-    consumer_dropped = (
+    # Compute impact BEFORE the deletes so the result envelope carries
+    # accurate counts + downstream-asset names. Calling after the
+    # deletes would return zeros.
+    impact = await _decommission_impact(db, asset_id)
+
+    (
         await db.execute(
             delete(PowerConnection).where(PowerConnection.asset_id == asset_id)
         )
-    ).rowcount or 0
-    pdu_dropped = (
+    )
+    (
         await db.execute(
             delete(PowerConnection).where(
                 PowerConnection.outlet_id.in_(
@@ -648,7 +730,7 @@ async def decommission_asset(
                 )
             )
         )
-    ).rowcount or 0
+    )
 
     prior_state = obj.lifecycle_state.value if hasattr(obj.lifecycle_state, "value") else obj.lifecycle_state
     obj.lifecycle_state = LifecycleState.decommissioned
@@ -659,12 +741,13 @@ async def decommission_asset(
         metadata={
             "sanitization_note": payload.sanitization_note,
             "reason": payload.reason,
-            "dropped_power_connections": int(consumer_dropped) + int(pdu_dropped),
+            "dropped_power_connections": impact.consumer_drops + impact.pdu_drops,
+            "downstream_assets": impact.downstream_assets,
         },
     )
     await db.commit()
     await db.refresh(obj)
-    return obj
+    return _DecommissionResult(asset=AssetOut.model_validate(obj), impact=impact)
 
 
 @router.post("/assets/bulk", response_model=BulkResult)

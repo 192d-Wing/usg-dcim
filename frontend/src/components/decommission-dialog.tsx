@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import Alert from '@cloudscape-design/components/alert';
@@ -11,6 +12,7 @@ import FormField from '@cloudscape-design/components/form-field';
 import Input from '@cloudscape-design/components/input';
 import Modal from '@cloudscape-design/components/modal';
 import SpaceBetween from '@cloudscape-design/components/space-between';
+import Spinner from '@cloudscape-design/components/spinner';
 
 import { http } from '@/lib/http';
 
@@ -21,6 +23,31 @@ type AssetMini = {
   serial: string | null;
   lifecycle_state: string;
 };
+
+type DecommissionImpact = {
+  consumer_drops: number;
+  pdu_drops: number;
+  downstream_assets: string[];
+};
+
+type DecommissionResult = {
+  asset: { id: string; lifecycle_state: string };
+  impact: DecommissionImpact;
+};
+
+function plural(n: number, singular: string, pluralForm?: string): string {
+  const word = n === 1 ? singular : (pluralForm ?? singular + 's');
+  return n + ' ' + word;
+}
+
+function formatImpactDetail(impact: DecommissionImpact): string {
+  const total = impact.consumer_drops + impact.pdu_drops;
+  if (total === 0) return 'no power connections affected';
+  const conn = plural(total, 'power connection') + ' dropped';
+  const downstream = impact.downstream_assets.length;
+  if (downstream === 0) return conn;
+  return conn + ', ' + plural(downstream, 'downstream asset') + ' unpowered';
+}
 
 export function DecommissionDialog({
   asset, open, onOpenChange, onDecommissioned,
@@ -47,6 +74,21 @@ export function DecommissionDialog({
     }
   }, [open, asset?.id]);
 
+  // Pre-flight impact preview — counts the power connections that
+  // would drop and the downstream asset names that would lose power
+  // BEFORE the operator commits. Read-only on the backend; runs only
+  // when the dialog is open + we have an asset.
+  const impactQ = useQuery({
+    enabled: open && asset !== null,
+    queryKey: ['decommission-preview', asset?.id],
+    queryFn: async () => (
+      await http.get<DecommissionImpact>(
+        `/inventory/assets/${asset!.id}/decommission/preview`,
+      )
+    ).data,
+  });
+  const impact = impactQ.data ?? null;
+
   if (!asset) return null;
 
   async function onSubmit(e: React.FormEvent) {
@@ -62,11 +104,14 @@ export function DecommissionDialog({
 
     setSubmitting(true);
     try {
-      await http.post(`/inventory/assets/${asset.id}/decommission`, {
-        sanitization_note: sanitization,
-        reason,
-      });
-      toast.success(`${asset.name} decommissioned`);
+      const resp = await http.post<DecommissionResult>(
+        `/inventory/assets/${asset.id}/decommission`,
+        { sanitization_note: sanitization, reason },
+      );
+      // Surface the actual blast radius in the toast — operators
+      // routinely don't open the audit log after every action, so
+      // burying the count there only loses information.
+      toast.success(`${asset.name} decommissioned — ${formatImpactDetail(resp.data.impact)}`);
       onDecommissioned();
       onOpenChange(false);
     } catch (err: any) {
@@ -121,6 +166,59 @@ export function DecommissionDialog({
             <span style={{ fontFamily: 'ui-monospace, monospace' }}>retired</span> later to fully archive.
           </Box>
         </Alert>
+
+        {/* Pre-flight impact preview — pulled from the backend on dialog
+            open. Surfaces the exact blast radius so operators don't
+            commit blind, and elevates to a red banner when downstream
+            devices would lose power. */}
+        {impactQ.isLoading && (
+          <Box color="text-status-inactive">
+            <Spinner /> <span style={{ marginLeft: 8 }}>Computing impact…</span>
+          </Box>
+        )}
+        {impact && (() => {
+          const total = impact.consumer_drops + impact.pdu_drops;
+          const downstream = impact.downstream_assets.length;
+          if (total === 0) {
+            return (
+              <Alert type="info" header="No power connections to drop">
+                This asset has no power connections wired. The decommission
+                only flips the lifecycle state.
+              </Alert>
+            );
+          }
+          return (
+            <Alert
+              type={downstream > 0 ? 'error' : 'warning'}
+              header={`Impact: ${formatImpactDetail(impact)}`}
+            >
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {impact.consumer_drops > 0 && (
+                  <li>
+                    {plural(impact.consumer_drops, 'incoming power connection')}{' '}
+                    (this asset as consumer)
+                  </li>
+                )}
+                {impact.pdu_drops > 0 && (
+                  <li>
+                    {plural(impact.pdu_drops, 'outgoing power connection')}{' '}
+                    served by this PDU's outlets
+                  </li>
+                )}
+              </ul>
+              {downstream > 0 && (
+                <Box padding={{ top: 'xs' }}>
+                  <Box variant="awsui-key-label">Downstream assets that will lose power:</Box>
+                  <Box>
+                    <span style={{ fontFamily: 'ui-monospace, monospace' }}>
+                      {impact.downstream_assets.join(', ')}
+                    </span>
+                  </Box>
+                </Box>
+              )}
+            </Alert>
+          );
+        })()}
 
         <form onSubmit={onSubmit}>
           <Form
