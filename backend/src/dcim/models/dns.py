@@ -152,6 +152,14 @@ class DnsZone(UUIDPrimaryKey, Timestamped, Base):
     nsec3_salt: Mapped[str | None] = mapped_column(String(64))
     nsec3_iterations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     nsec3_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Operator write lock for maintenance windows. When true every
+    # mutation against this zone or its records (record CRUD, BIND
+    # import, IPAM sync, DNSSEC operations, NSEC3 toggle, key delete,
+    # zone PATCH/DELETE) returns 422 with a "zone is frozen" message.
+    # Toggled exclusively through POST /freeze + /unfreeze so the
+    # state change always lands in audit; PATCH /dns/zones does NOT
+    # accept this field.
+    frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class DnsRecord(UUIDPrimaryKey, Timestamped, Base):

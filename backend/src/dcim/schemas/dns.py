@@ -84,6 +84,12 @@ class DnsZoneOut(DnsZoneBase):
     nsec3_salt: str | None = None
     nsec3_iterations: int = 0
     nsec3_opt_out: bool = False
+    # Operator write lock — true while a maintenance window is in
+    # effect. Mutating endpoints (record CRUD, import, sync, DNSSEC
+    # ops) refuse to run on a frozen zone with 422. Operators flip
+    # this via POST /zones/{id}/freeze + /unfreeze, not through the
+    # generic PATCH.
+    frozen: bool = False
     created_at: datetime
     updated_at: datetime
 

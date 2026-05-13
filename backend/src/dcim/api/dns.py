@@ -146,6 +146,19 @@ async def _touch_zone(db: AsyncSession, zone_id: UUID) -> None:
     )
 
 
+def _assert_zone_unfrozen(zone: DnsZone) -> None:
+    """Refuse the operation when the zone is under a maintenance-
+    window write lock. Raises 422 with a stable message the UI can
+    pattern-match on. Operators clear the freeze via
+    POST /dns/zones/{id}/unfreeze — explicit, audit-able, never
+    through the generic PATCH."""
+    if zone.frozen:
+        raise ValidationError(
+            "zone is frozen — unfreeze it before mutating records or "
+            "running DNSSEC operations",
+        )
+
+
 # ----------------------- Zones -----------------------
 @router.get("/zones", response_model=Page[DnsZoneOut])
 async def list_zones(
@@ -236,6 +249,7 @@ async def update_zone(
     if obj is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
     await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:zones:update")
+    _assert_zone_unfrozen(obj)
     diff = payload.model_dump(exclude_unset=True)
     for k, v in diff.items():
         setattr(obj, k, v)
@@ -259,6 +273,7 @@ async def delete_zone(
     if obj is None:
         raise NotFoundError(_ZONE_NOT_FOUND)
     await enforce_fabric_scope(db, principal.capabilities, obj.fabric_id, "dns:zones:delete")
+    _assert_zone_unfrozen(obj)
     has_records = (
         await db.execute(select(DnsRecord.id).where(DnsRecord.zone_id == zone_id).limit(1))
     ).scalar_one_or_none()
@@ -270,6 +285,65 @@ async def delete_zone(
         target_type="dns_zone", target_id=str(zone_id),
     )
     await db.commit()
+
+
+@router.post("/zones/{zone_id}/freeze", response_model=DnsZoneOut)
+async def freeze_zone(
+    zone_id: UUID,
+    principal: Principal = Depends(require_capability(_CAP_ZONES_UPDATE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mark a zone as frozen — every subsequent mutation (record CRUD,
+    BIND import, IPAM sync, DNSSEC operations, NSEC3 toggle, key
+    delete, zone PATCH/DELETE) returns 422 until the operator
+    unfreezes. Idempotent on an already-frozen zone."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
+    )
+    if zone.frozen:
+        return zone
+    zone.frozen = True
+    await audit.record(
+        db, principal, action="dns_zone.freeze",
+        target_type="dns_zone", target_id=str(zone_id),
+        site_id=zone.site_id,
+        metadata={"name": zone.name},
+    )
+    await db.commit()
+    await db.refresh(zone)
+    return zone
+
+
+@router.post("/zones/{zone_id}/unfreeze", response_model=DnsZoneOut)
+async def unfreeze_zone(
+    zone_id: UUID,
+    principal: Principal = Depends(require_capability(_CAP_ZONES_UPDATE)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lift the maintenance-window write lock. Idempotent on a zone
+    that was already unfrozen — useful for the UI to optimistically
+    POST without first reading the state."""
+    zone = await db.get(DnsZone, zone_id)
+    if zone is None:
+        raise NotFoundError(_ZONE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
+    )
+    if not zone.frozen:
+        return zone
+    zone.frozen = False
+    await audit.record(
+        db, principal, action="dns_zone.unfreeze",
+        target_type="dns_zone", target_id=str(zone_id),
+        site_id=zone.site_id,
+        metadata={"name": zone.name},
+    )
+    await db.commit()
+    await db.refresh(zone)
+    return zone
 
 
 @router.post("/zones/{zone_id}/sync-from-ipam")
@@ -284,6 +358,7 @@ async def sync_zone_from_ipam(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
     )
+    _assert_zone_unfrozen(zone)
     added, removed = await dns_svc.sync_ipam_records_for_zone(db, zone)
     await audit.record(
         db, principal, action="dns_zone.sync_ipam",
@@ -352,6 +427,7 @@ async def import_zone_records(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
     )
+    _assert_zone_unfrozen(zone)
     try:
         parsed = dns_svc.parse_bind_zone(payload.text, default_zone=zone.name + ".")
     except dns_svc.BindImportError as e:
@@ -442,6 +518,7 @@ async def enable_dnssec(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, _CAP_KEYS_ROTATE,
     )
+    _assert_zone_unfrozen(zone)
     existing = list((
         await db.execute(select(DnsKey).where(DnsKey.zone_id == zone_id))
     ).scalars().all())
@@ -554,6 +631,7 @@ async def set_zone_nsec3(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
     )
+    _assert_zone_unfrozen(zone)
     if not zone.signed:
         raise ValidationError("zone is not signed — enable DNSSEC first")
     zone.nsec3_salt = params.salt
@@ -591,6 +669,7 @@ async def clear_zone_nsec3(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, _CAP_ZONES_UPDATE,
     )
+    _assert_zone_unfrozen(zone)
     if zone.nsec3_salt is None and zone.nsec3_iterations == 0 and not zone.nsec3_opt_out:
         return zone
     zone.nsec3_salt = None
@@ -622,6 +701,7 @@ async def disable_dnssec(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, _CAP_KEYS_ROTATE,
     )
+    _assert_zone_unfrozen(zone)
     if not zone.signed:
         return
     keys = list((
@@ -666,6 +746,7 @@ async def rotate_zone_key(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, _CAP_KEYS_ROTATE,
     )
+    _assert_zone_unfrozen(zone)
     if not zone.signed:
         raise ValidationError("zone is not signed — enable DNSSEC first")
     new_key, retired = await dns_svc.rotate_zone_key(db, zone, role)
@@ -703,6 +784,8 @@ async def delete_dns_key(
         db, principal.capabilities,
         zone.fabric_id if zone else None, "dns:keys:delete",
     )
+    if zone is not None:
+        _assert_zone_unfrozen(zone)
     if obj.retired_at is None:
         raise ValidationError(
             "active key can't be deleted; rotate it first so the new "
@@ -765,6 +848,7 @@ async def create_record(
     await enforce_fabric_scope(
         db, principal.capabilities, zone.fabric_id, "dns:records:create",
     )
+    _assert_zone_unfrozen(zone)
     try:
         normalized_data = validate_record_data(payload.type, payload.data)
     except PydanticValidationError as e:
@@ -820,6 +904,8 @@ async def update_record(
         zone.fabric_id if zone else None,
         "dns:records:update",
     )
+    if zone is not None:
+        _assert_zone_unfrozen(zone)
     if obj.source != DnsRecordSource.manual:
         raise ValidationError(
             "projector-owned records are managed by the IPAM/DHCP sync; "
@@ -861,6 +947,8 @@ async def delete_record(
         zone.fabric_id if zone else None,
         "dns:records:delete",
     )
+    if zone is not None:
+        _assert_zone_unfrozen(zone)
     if obj.source != DnsRecordSource.manual:
         raise ValidationError(
             "projector-owned records can't be deleted directly; "

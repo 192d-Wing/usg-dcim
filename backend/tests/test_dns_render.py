@@ -350,10 +350,12 @@ def test_hickory_acl_lines_emits_both():
 
     out = _hickory_acl_lines(["1.1.1.1/32"], ["10.0.0.0/8"])
     body = [line for line in out if line]
-    assert body == [
-        'deny_networks = ["1.1.1.1/32"]',
-        'allow_networks = ["10.0.0.0/8"]',
-    ]
+    # deny must precede allow so the TOML parser orders them
+    # predictably; the strict flag (when enabled via
+    # DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT) tags onto the end and
+    # is exercised by its own dedicated test.
+    assert body[0] == 'deny_networks = ["1.1.1.1/32"]'
+    assert body[1] == 'allow_networks = ["10.0.0.0/8"]'
 
 
 def test_hickory_acl_lines_sorts_for_deterministic_etag():
