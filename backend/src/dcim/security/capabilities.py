@@ -109,6 +109,11 @@ CAPABILITY_CATALOG: dict[str, dict[str, list[str]]] = {
         "roles": ["create", "read", "update", "delete"],
         "oidc-mappings": ["create", "read", "update", "delete"],
         "api-tokens": ["create", "read", "update", "delete"],
+        # Deployment-wide config rows in the system_settings table.
+        # Today: DNS recursive upstreams override. Pattern is
+        # generic so new settings (rate limits, defaults) don't
+        # need their own catalog entry.
+        "system-settings": ["read", "update"],
     },
     "notifications": {
         "channels": ["create", "read", "update", "delete"],

@@ -85,6 +85,7 @@ from .ipam import (
 from .notifications import ChannelKind, NotificationChannel
 from .organization import Organization
 from .power import Outlet, PowerConnection
+from .system import SystemSetting
 from .telemetry_meta import TelemetrySource
 
 __all__ = [
@@ -163,6 +164,7 @@ __all__ = [
     "SiteGroupMembership",
     "Subnet",
     "Supernet",
+    "SystemSetting",
     "TcpAoAlgorithm",
     "TcpAoKey",
     "TcpAoKeyChain",

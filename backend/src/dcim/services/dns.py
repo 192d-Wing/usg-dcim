@@ -1583,6 +1583,23 @@ async def _fabric_blocklists(
     ]
 
 
+_SYSTEM_KEY_DNS_RECURSIVE_UPSTREAMS = "dns_recursive_upstreams"
+
+
+async def get_system_dns_upstreams(db: AsyncSession) -> list[str]:
+    """Deployment-wide DNS recursive upstreams. The runtime override
+    (system_settings row) beats the env-backed default; an empty/NULL
+    row falls through to settings.py.
+
+    Operators edit this via PUT /admin/system/dns-settings so they
+    don't have to redeploy the API to swap upstream resolvers."""
+    from ..models.system import SystemSetting  # noqa: PLC0415 — cycle guard
+    row = await db.get(SystemSetting, _SYSTEM_KEY_DNS_RECURSIVE_UPSTREAMS)
+    if row is not None and isinstance(row.value, list) and row.value:
+        return [str(v) for v in row.value]
+    return list(get_settings().dns_recursive_upstreams)
+
+
 async def _recursive_upstreams_for_fabric(
     db: AsyncSession, fabric_id: UUID,
 ) -> list[str]:
@@ -1592,7 +1609,7 @@ async def _recursive_upstreams_for_fabric(
     fabric = await db.get(Fabric, fabric_id)
     if fabric is not None and fabric.dns_recursive_upstreams:
         return list(fabric.dns_recursive_upstreams)
-    return list(get_settings().dns_recursive_upstreams)
+    return await get_system_dns_upstreams(db)
 
 
 async def _fabric_apex_names(db: AsyncSession, fabric_id: UUID) -> list[str]:

@@ -79,14 +79,16 @@ export function AdminPage() {
   const { data: identity } = useGetIdentity<{ capabilities: string[] }>();
   const canUsers = hasCap(identity?.capabilities, 'admin:users:read');
   const canRoles = hasCap(identity?.capabilities, 'admin:roles:read');
+  const canSystem = hasCap(identity?.capabilities, 'admin:system-settings:read');
   const myCaps = identity?.capabilities ?? [];
 
-  if (!canUsers && !canRoles) {
+  if (!canUsers && !canRoles && !canSystem) {
     return (
       <ContentLayout header={<Header variant="h1">Admin</Header>}>
         <Box color="text-status-inactive">
-          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:users:read</code> or{' '}
-          <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:roles:read</code>.
+          You don't have <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:users:read</code>,{' '}
+          <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:roles:read</code>, or{' '}
+          <code style={{ fontFamily: 'ui-monospace, monospace' }}>admin:system-settings:read</code>.
         </Box>
       </ContentLayout>
     );
@@ -96,6 +98,11 @@ export function AdminPage() {
   if (canUsers) tabs.push({ id: 'users', label: 'Users', content: <UsersTab /> });
   if (canRoles) tabs.push({ id: 'roles', label: 'Roles', content: <RolesTab myCapabilities={myCaps} /> });
   if (canRoles) tabs.push({ id: 'oidc', label: 'OIDC mappings', content: <OidcMappingsTab /> });
+  if (canSystem) tabs.push({
+    id: 'system-dns',
+    label: 'System DNS',
+    content: <SystemDnsSettingsTab canWrite={hasCap(identity?.capabilities, 'admin:system-settings:update')} />,
+  });
 
   return (
     <ContentLayout
@@ -1074,5 +1081,156 @@ function MappingForm({
         </SpaceBetween>
       </Form>
     </form>
+  );
+}
+
+// ----------------------- System DNS settings -----------------------
+
+type SystemDnsSettings = {
+  recursive_upstreams: string[];
+  override_active: boolean;
+  default_recursive_upstreams: string[];
+  updated_at: string | null;
+};
+
+function SystemDnsSettingsTab({ canWrite }: { canWrite: boolean }) {
+  const qc = useQueryClient();
+  const settingsQ = useQuery({
+    queryKey: ['system-dns-settings'],
+    queryFn: async () =>
+      (await http.get<SystemDnsSettings>('/admin/system/dns-settings')).data,
+  });
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    // Seed the textarea from whatever the operator is currently effecting.
+    // If no override is active, prefill with the default so they can edit
+    // from a known starting point instead of an empty textarea.
+    if (settingsQ.data) {
+      setDraft(settingsQ.data.recursive_upstreams.join('\n'));
+    }
+  }, [settingsQ.data]);
+
+  async function onSave() {
+    setSaving(true);
+    const list = draft.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    try {
+      await http.put('/admin/system/dns-settings', {
+        recursive_upstreams: list.length > 0 ? list : null,
+      });
+      toast.success('System DNS upstreams updated');
+      await qc.invalidateQueries({ queryKey: ['system-dns-settings'] });
+    } catch (err: any) { toast.error(err?.message ?? 'save failed'); }
+    finally { setSaving(false); }
+  }
+
+  async function onReset() {
+    if (!window.confirm(
+      'Reset to env default? The runtime override row will be deleted and ' +
+      'the renderer will fall back to settings.dns_recursive_upstreams.',
+    )) return;
+    setSaving(true);
+    try {
+      await http.put('/admin/system/dns-settings', { recursive_upstreams: null });
+      toast.success('Reset to default');
+      await qc.invalidateQueries({ queryKey: ['system-dns-settings'] });
+    } catch (err: any) { toast.error(err?.message ?? 'reset failed'); }
+    finally { setSaving(false); }
+  }
+
+  if (settingsQ.isLoading || !settingsQ.data) {
+    return <Box padding="m" color="text-status-inactive">Loading…</Box>;
+  }
+
+  const s = settingsQ.data;
+  return (
+    <Container
+      header={
+        <Header
+          variant="h2"
+          description={
+            <>
+              Catch-all upstream resolvers the recursive Corefile forwards to
+              when no conditional forwarder or apex stub matches. Operators with
+              an internal recursive (e.g. Active Directory DNS) override the
+              env-backed default here to keep DNS off the public internet. A
+              per-fabric override on the IPAM fabric form still wins.
+            </>
+          }
+        >
+          DNS recursive upstreams
+        </Header>
+      }
+    >
+      <SpaceBetween size="m">
+        <Box>
+          <Box variant="awsui-key-label">Current effective value</Box>
+          <Box>
+            {s.override_active ? (
+              <Badge color="blue">override active</Badge>
+            ) : (
+              <Badge color="grey">env default</Badge>
+            )}{' '}
+            {s.updated_at && (
+              <Box variant="span" color="text-status-inactive" fontSize="body-s">
+                · last updated {formatDate(s.updated_at)}
+              </Box>
+            )}
+          </Box>
+          <Box margin={{ top: 'xs' }}>
+            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+              {s.recursive_upstreams.join(', ')}
+            </span>
+          </Box>
+        </Box>
+        <Box>
+          <Box variant="awsui-key-label">Env-backed default</Box>
+          <Box>
+            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+              {s.default_recursive_upstreams.join(', ') || <em>(empty)</em>}
+            </span>
+          </Box>
+        </Box>
+        {canWrite && (
+          <FormField
+            label="Override upstreams"
+            description={<>One <code>ip</code> or <code>ip:port</code> per line. Empty + Save resets to the env default.</>}
+          >
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={6}
+              placeholder={'10.7.0.53\n10.7.0.54:5353'}
+              style={{
+                width: '100%', padding: 8,
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                background: 'var(--color-background-input-default, transparent)',
+                color: 'inherit',
+                border: '1px solid var(--color-border-input-default, #ccc)',
+                borderRadius: 6,
+              }}
+            />
+          </FormField>
+        )}
+        {canWrite && (
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button variant="primary" loading={saving} onClick={onSave}>
+              Save
+            </Button>
+            {s.override_active && (
+              <Button loading={saving} onClick={onReset}>
+                Reset to default
+              </Button>
+            )}
+          </SpaceBetween>
+        )}
+        {!canWrite && (
+          <Box color="text-status-inactive" fontSize="body-s">
+            You don't have <code>admin:system-settings:update</code>. View-only.
+          </Box>
+        )}
+      </SpaceBetween>
+    </Container>
   );
 }
