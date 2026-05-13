@@ -15,15 +15,24 @@
 
 services:
   collector:
-    # Build from the same local source as the central stack. Drop the
-    # `build:` block and uncomment `image:` once a registry build exists.
+    # Native Go collector. The Python implementation under
+    # ../../../collector is deprecated as of commit 59a2496; flip the
+    # build.context back to it for emergency rollback (see
+    # collector/DEPRECATED.md for the procedure).
     build:
-      context: ../../../collector
+      context: ../../../services/go-collector
       dockerfile: Dockerfile
-    # image: ghcr.io/192d-wing/usg-dcim-collector:latest
+    # image: ghcr.io/192d-wing/usg-dcim-go-collector:latest
+    command: ["-config", "/etc/dcim/collector.yaml"]
+    # Run as root so the agent can write the DNS bundle into the
+    # shared dns-state volume (CoreDNS containers run as root and
+    # currently own everything under there) and reuse the buffer
+    # volume that was populated by the previous Python image. The
+    # central compose collector runs as the nonroot UID baked into
+    # the Dockerfile; site collectors need root because they own the
+    # resolver state on disk.
+    user: "0:0"
     pid: "host"
-    environment:
-      PYTHONUNBUFFERED: "1"
     # Sit on dns-net so the metrics-scrape loop can reach both CoreDNS
     # pods by their service names (`http://coredns-auth:9153/metrics`
     # etc.). The default-bridge connection to central api still works
