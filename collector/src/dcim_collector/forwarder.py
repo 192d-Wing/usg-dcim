@@ -50,7 +50,8 @@ class Forwarder:
         reraise=True,
     )
     async def _post(self, client: httpx.AsyncClient, payload: dict) -> None:
-        url = f"{self.cfg.ingest_url.rstrip('/')}/api/v1/ingest/telemetry"
+        base = (self.cfg.telemetry_url or self.cfg.ingest_url).rstrip("/")
+        url = f"{base}/api/v1/ingest/telemetry"
         r = await client.post(url, json=payload)
         if r.status_code >= 500:
             r.raise_for_status()

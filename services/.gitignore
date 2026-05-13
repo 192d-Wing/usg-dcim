@@ -1,0 +1,4 @@
+*.exe
+go-*/go-*
+!go-*/go.*
+!go-*/go-*.go

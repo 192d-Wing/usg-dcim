@@ -143,6 +143,12 @@ class CollectorConfig(BaseModel):
     collector_id: UUID
     site_id: UUID
     ingest_url: str
+    # Optional override sending telemetry batches to a different host
+    # than the rest of the API surface — used to point telemetry at
+    # services/go-ingest while heartbeats, DNS bundle polling, etc.
+    # continue against the Python api. Falls back to ingest_url when
+    # unset, so existing deployments are unaffected.
+    telemetry_url: str | None = None
     heartbeat_interval_seconds: int = 30
     buffer_path: str = "/var/lib/dcim-collector/buffer.db"
     api_token_file: str | None = None
