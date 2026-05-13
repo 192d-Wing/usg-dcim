@@ -1160,12 +1160,14 @@ def _hickory_acl_lines(
     allow_networks: Iterable[str] | None,
 ) -> list[str]:
     """Render Hickory's top-level `deny_networks` + `allow_networks`
-    CIDR lists. Both are sorted for deterministic bundle etags. Empty
-    lists deliberately skip emission so a fat-fingered fabric edit
-    can't lock everyone out by writing `allow_networks = []` into
-    the rendered TOML — null vs empty needs an explicit operator
-    intent, which today's UI surfaces as "leave the field blank for
-    no restriction"."""
+    CIDR lists, plus `allow_networks_strict = true` when the operator
+    opted into firewall-style semantics via
+    `DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT`. Sorted CIDRs for
+    deterministic bundle etags. Empty lists deliberately skip
+    emission so a fat-fingered fabric edit can't lock everyone out
+    by writing `allow_networks = []` into the rendered TOML — null
+    vs empty needs an explicit operator intent, which today's UI
+    surfaces as "leave the field blank for no restriction"."""
     deny_list = sorted(set(deny_networks or []))
     allow_list = sorted(set(allow_networks or []))
     if not deny_list and not allow_list:
@@ -1183,6 +1185,12 @@ def _hickory_acl_lines(
             + ", ".join(f'"{c}"' for c in allow_list)
             + "]"
         )
+    # Strict-allowlist field is only meaningful when the operator
+    # actually configured allow rules. Skip emission when allow is
+    # empty so the rendered TOML doesn't carry the flag on a
+    # deny-only fabric where it has no effect anyway.
+    if allow_list and get_settings().dns_hickory_allow_networks_strict:
+        lines.append("allow_networks_strict = true")
     lines.append("")
     return lines
 

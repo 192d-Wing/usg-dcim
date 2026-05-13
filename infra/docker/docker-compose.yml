@@ -129,6 +129,15 @@ services:
       DCIM_DNS_HICKORY_DOH_ENABLED: "true"
       DCIM_DNS_HICKORY_TLS_CERT_PATH: /etc/dcim-dns/tls.crt.pem
       DCIM_DNS_HICKORY_TLS_KEY_PATH: /etc/dcim-dns/tls.key.pem
+      # Render `allow_networks_strict = true` into the recursive's
+      # TOML so `allow_networks` acts as a firewall-style strict
+      # allowlist instead of the upstream carve-out default. Default
+      # OFF because the field is rejected on parse by Hickory builds
+      # that pre-date the strict-allowlist patch (upstream PR
+      # pending). Operators on `hickory-prom:v0.26.0-strict-dev` or
+      # later can flip this on per-deployment — typically via a
+      # shell env override on the api service or a compose.override.
+      DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT: "${DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT:-false}"
     ports: ["8000:8000"]
     extra_hosts:
       # On Docker Desktop this is automatic; declared explicitly for

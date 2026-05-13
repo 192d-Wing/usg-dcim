@@ -1,0 +1,42 @@
+# Build hickory-prom from a LOCAL hickory-dns checkout instead of the
+# upstream git tag. Lets us test in-flight upstream patches (e.g. the
+# strict-allowlist mode under PR review) inside the DCIM stack without
+# waiting on an upstream release.
+#
+# Build with the hickory-dns workspace as the build context:
+#
+#   docker build \
+#     -f infra/hickory-prom/Dockerfile.local \
+#     -t ghcr.io/192d-wing/hickory-prom:v0.26.0-strict-dev \
+#     /c/Users/.../projects/hickory-dns
+#
+# Production builds keep using the regular Dockerfile (which pins
+# the upstream tag). This file is for development / pre-merge testing
+# only — don't push the resulting image as a release tag.
+
+ARG RUST_VERSION=1.88
+
+# ---------- builder stage -----------------------------------------------------
+
+FROM rust:${RUST_VERSION}-bookworm AS builder
+
+WORKDIR /src
+# Copy the entire hickory-dns workspace from the build context. The
+# `.dockerignore` next to this file trims target/ and similar so the
+# context stays small.
+COPY . /src
+
+# Same feature set as the release image: prometheus-metrics for the
+# collector scrape, dnssec-ring for upstream validation, tls-ring +
+# https-ring for DoT/DoH.
+RUN cargo build --release --bin hickory-dns \
+    --features "prometheus-metrics dnssec-ring tls-ring https-ring"
+
+# ---------- runtime stage -----------------------------------------------------
+
+FROM gcr.io/distroless/cc-debian12:nonroot
+
+COPY --from=builder /src/target/release/hickory-dns /hickory-dns
+
+EXPOSE 53 53/udp
+ENTRYPOINT ["/hickory-dns"]

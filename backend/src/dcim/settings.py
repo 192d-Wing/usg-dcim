@@ -135,6 +135,17 @@ class Settings(BaseSettings):
     dns_hickory_prom_metrics: bool = True
     dns_hickory_prom_port: int = 9090
 
+    # When true, render `allow_networks_strict = true` into the
+    # Hickory recursive's TOML alongside any `allow_networks` /
+    # `deny_networks` lists on the fabric. Hickory then enforces
+    # firewall-style strict-allowlist semantics: a non-empty allow
+    # list rejects every source IP not explicitly listed, regardless
+    # of the deny list. Requires a Hickory build that recognises the
+    # field (v0.26.0-strict-dev or later — upstream PR pending). Off
+    # by default so operators on stock upstream images aren't broken
+    # by the unknown-field rejection.
+    dns_hickory_allow_networks_strict: bool = False
+
     # DoT / DoH on the Hickory recursive. Requires the
     # `hickory-prom:v0.26.0-2`+ image (built with `tls-ring` +
     # `https-ring` Cargo features). When BOTH cert and key paths
