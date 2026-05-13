@@ -268,6 +268,12 @@ function EnrollForm({
   );
 }
 
+function formatExpiry(seconds: number): string {
+  if (seconds < 3600) return Math.round(seconds / 60) + ' minutes';
+  const hours = Math.round(seconds / 3600);
+  return hours + ' hour' + (hours === 1 ? '' : 's');
+}
+
 function Bootstrap({
   token, collectorId, expiresInSeconds, siteCode, name,
 }: Readonly<{
@@ -278,20 +284,65 @@ function Bootstrap({
     typeof window !== 'undefined' && window.location.origin
       ? window.location.origin
       : 'https://your-dcim';
-  const dockerCmd = `docker run -d --name dcim-collector-${siteCode.toLowerCase()} \\
-  -e DCIM_API_URL=${apiBase} \\
-  -e DCIM_COLLECTOR_ID=${collectorId} \\
-  -e DCIM_ENROLLMENT_TOKEN=${token} \\
-  -v /var/lib/dcim-collector:/data \\
+  // The collector container reads a YAML config at /etc/dcim/collector.yaml
+  // (see collector/Dockerfile entrypoint) and a token file referenced
+  // by `api_token_file:` in that YAML. Earlier env-var snippets here
+  // were fictional — none of those env vars are read by the collector,
+  // and pasting them got operators a container that started and
+  // immediately failed config validation.
+  //
+  // The snippets below build a real `/etc/dcim-collector/collector.yaml`
+  // + token file on the site host first, then mount both into the
+  // container.
+  const containerName = 'dcim-collector-' + siteCode.toLowerCase();
+  // We don't know the site_id from the enrollment response (the API
+  // only echoes back collector_id + token), so the operator has to
+  // paste it in. Leaving a placeholder is honest; pretending we have
+  // it would silently put the wrong value in the yaml.
+  const collectorYaml = `# /etc/dcim-collector/collector.yaml
+collector_id: ${collectorId}
+site_id: <FILL-IN-FROM-DCIM-SITE-PAGE>
+ingest_url: ${apiBase}
+api_token_file: /etc/dcim-collector/token
+heartbeat_interval_seconds: 30
+buffer_path: /var/lib/dcim-collector/buffer.db
+devices: []  # add SNMP / Redfish / Modbus / REST / IPMI entries here
+`;
+  const dockerCmd = `# Run on the site host. Writes config + token to disk, then starts
+# the collector. The token file is the credential the API recognises;
+# protect it with 0600 — anyone who reads it can heartbeat as this
+# collector until you revoke the enrollment.
+sudo mkdir -p /etc/dcim-collector /var/lib/dcim-collector
+sudo install -m 0600 /dev/stdin /etc/dcim-collector/token <<'EOF'
+${token}
+EOF
+sudo install -m 0644 /dev/stdin /etc/dcim-collector/collector.yaml <<'EOF'
+${collectorYaml}EOF
+
+docker run -d --name ${containerName} --restart unless-stopped \\
+  -v /etc/dcim-collector:/etc/dcim:ro \\
+  -v /var/lib/dcim-collector:/var/lib/dcim-collector \\
   ghcr.io/192d-wing/usg-dcim-collector:latest`;
-  const systemdEnv = `# /etc/dcim-collector.env
-DCIM_API_URL=${apiBase}
-DCIM_COLLECTOR_ID=${collectorId}
-DCIM_ENROLLMENT_TOKEN=${token}
-DCIM_DATA_DIR=/var/lib/dcim-collector`;
-  const expiresIn = expiresInSeconds < 3600
-    ? `${Math.round(expiresInSeconds / 60)} minutes`
-    : `${(expiresInSeconds / 3600).toFixed(0)} hour${expiresInSeconds === 3600 ? '' : 's'}`;
+  const systemdYaml = collectorYaml;
+  const systemdUnit = `# /etc/systemd/system/dcim-collector.service
+[Unit]
+Description=DCIM site collector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dcim-collector
+Group=dcim-collector
+ExecStart=/usr/local/bin/dcim-collector --config /etc/dcim-collector/collector.yaml
+Restart=on-failure
+RestartSec=10
+StateDirectory=dcim-collector
+StateDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target`;
+  const expiresIn = formatExpiry(expiresInSeconds);
 
   return (
     <SpaceBetween size="m">
@@ -317,12 +368,20 @@ DCIM_DATA_DIR=/var/lib/dcim-collector`;
             content: (
               <SpaceBetween size="s">
                 <Box>
-                  <Box variant="awsui-key-label">1. Drop the env file</Box>
-                  <CopyBlock value={systemdEnv} multiline />
+                  <Box variant="awsui-key-label">1. Write the config file</Box>
+                  <CopyBlock value={systemdYaml} multiline />
                 </Box>
                 <Box>
-                  <Box variant="awsui-key-label">2. Enable + start the service</Box>
-                  <CopyBlock value="systemctl enable --now dcim-collector" />
+                  <Box variant="awsui-key-label">2. Write the token file (chmod 0600)</Box>
+                  <CopyBlock value={`sudo install -m 0600 /dev/stdin /etc/dcim-collector/token <<'EOF'\n${token}\nEOF`} multiline />
+                </Box>
+                <Box>
+                  <Box variant="awsui-key-label">3. Install the unit file</Box>
+                  <CopyBlock value={systemdUnit} multiline />
+                </Box>
+                <Box>
+                  <Box variant="awsui-key-label">4. Enable + start the service</Box>
+                  <CopyBlock value="sudo systemctl daemon-reload && sudo systemctl enable --now dcim-collector" />
                 </Box>
               </SpaceBetween>
             ),
