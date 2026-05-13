@@ -121,6 +121,38 @@ records (RRSIG, NSEC, NSEC3*, DS, CDNSKEY, CDS, TLSA, SSHFP) are
 **skipped** by the importer — DCIM owns those via its own DNSSEC
 flow.
 
+### Freezing a zone for a maintenance window
+
+`Zones → <zone> → Freeze`. A frozen zone refuses every mutating
+endpoint with `422 zone is frozen` — record CRUD, BIND import, IPAM
+sync, DNSSEC enable/disable/rotate, NSEC3 toggle, key delete, and
+zone PATCH/DELETE. The freeze state itself is the only thing the
+operator can still touch.
+
+The detail page surfaces a Cloudscape warning banner whenever a
+zone is frozen and a `frozen` badge next to the zone name; the
+Create / Import / bulk-Delete buttons disable while the lock is on
+so operators see the state instead of a wall of 422 toasts. Read
+paths (preview, ds-records, listing keys) are unaffected.
+
+Workflow:
+
+1. Before starting a planned change, click **Freeze** on the
+   zone. Confirm the dialog — the IPAM projector + worker cron
+   jobs will start failing with 422 on this zone, which is
+   intentional.
+2. Do the out-of-band work the maintenance window is for (e.g.
+   coordinated DNS cutover, ad-hoc TLD migration).
+3. Click **Unfreeze**. Both transitions land in `audit_log`
+   under `dns_zone.freeze` / `dns_zone.unfreeze`.
+
+Both `POST /freeze` and `POST /unfreeze` are idempotent — a UI
+that refreshes from stale state and re-posts the same action gets
+the zone back unchanged. The `frozen` field is **not** writable
+via the generic `PATCH /dns/zones/{id}` payload; every state
+change goes through the named endpoints so the audit row always
+exists. Capability: `dns:zones:update` for both.
+
 ## DNSSEC
 
 ### Enabling DNSSEC on a zone
@@ -294,9 +326,34 @@ Per-fabric stub-zone forwards + catch-all upstreams. Lives at
   upstream): for "send queries for `corp.example.com` to
   10.0.0.53" patterns.
 - **Catch-all upstream** (fabric-wide): the `forward .` block in
-  the recursive Corefile. Override the system default
-  (`DCIM_DNS_RECURSIVE_UPSTREAMS`) per-fabric if some fabrics
-  need different upstreams.
+  the recursive Corefile. Resolved through a three-level
+  fallback chain at render time: fabric override (IPAM → Fabric
+  edit → "DNS recursive upstreams" textarea), then system-wide
+  override (see below), then the env-backed
+  `DCIM_DNS_RECURSIVE_UPSTREAMS` default. First non-empty layer
+  wins.
+
+### System-wide upstream override
+
+`Admin → System DNS`. Promotes `dns_recursive_upstreams` out of
+the env into an editable `system_settings` row so operators on an
+internal recursive estate (e.g. Active Directory DNS) can swap the
+fleet-wide default without redeploying the API. The page shows
+the current effective value, whether an override is active, and
+the env-backed default for comparison.
+
+- **Empty textarea + Save** clears the override; the renderer
+  falls back to the env default.
+- **Reset to default** is the same operation, surfaced as a
+  button when the override is active.
+- Per-fabric overrides still win; this only changes what
+  fabrics without their own override use.
+
+Capability: `admin:system-settings:read` to view,
+`admin:system-settings:update` to edit. EnterpriseAdmin's `*`
+covers both. The PUT endpoint normalizes input (strip, dedupe,
+first-occurrence-wins) so reordering on the form reflects in the
+rendered Corefile order.
 
 ## Blocklists (RPZ-lite)
 
@@ -565,6 +622,51 @@ the DCIM data path is ready for when Hickory ships a working
 enforcement (or we patch our `hickory-prom` build to do so). Until
 then, treat the ACL config as documenting intent — actual
 enforcement needs one of the options below.
+
+### Strict allowlist mode (opt-in)
+
+When `DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT=true`, the renderer
+emits one extra top-level line whenever a fabric has a non-empty
+`allow_networks` list:
+
+```toml
+deny_networks  = ["10.99.0.0/24"]
+allow_networks = ["10.0.0.0/8"]
+allow_networks_strict = true
+```
+
+This pairs with the upstream PR `access: add opt-in strict-
+allowlist mode for allow_networks`. With the patched binary, the
+four-case behavior matrix becomes:
+
+| `allow` | `deny` | strict | Outcome for client IP X |
+| --- | --- | --- | --- |
+| empty | empty | off | accept (open recursive) |
+| set | empty | off | accept (allow is informational) |
+| set | empty | **on** | reject unless X ∈ allow |
+| set | set | on | reject if X ∈ deny OR X ∉ allow |
+
+Behaviorally identical to a firewall allowlist: the recursive
+treats anything outside `allow_networks` as if it were in
+`deny_networks`. The flag is **off by default** in the tracked
+compose file — stock upstream Hickory builds reject the unknown
+field on parse, so flipping it requires the patched
+`hickory-prom:v0.26.0-strict-dev` image (or a future upstream
+release that lands the PR).
+
+To enable on a deployment running the patched image, override the
+env var in `compose.override.yml`:
+
+```yaml
+services:
+  api:
+    environment:
+      DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT: "true"
+```
+
+The flag is also a no-op on deny-only fabrics — the renderer
+suppresses emission when `allow_networks` is empty so unused
+configs don't carry it as dead weight.
 
 **Real QPS-based rate-limiting** is still not natively supported
 on either engine. The roadmap item is parked pending either an
