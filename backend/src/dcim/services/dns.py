@@ -139,6 +139,108 @@ async def _probe_tcp(target: str, port: int, deadline_s: int) -> tuple[DnsHealth
         return DnsHealthCheckStatus.unhealthy, f"tcp probe failed: {e}"[:512]
 
 
+def _icmp_checksum(data: bytes) -> int:
+    """RFC 1071 16-bit ones-complement checksum."""
+    if len(data) % 2:
+        data += b"\x00"
+    total = 0
+    for i in range(0, len(data), 2):
+        total += (data[i] << 8) | data[i + 1]
+        total = (total & 0xFFFF) + (total >> 16)
+    return (~total) & 0xFFFF
+
+
+def _icmp_probe_sync(target: str, deadline_s: int) -> tuple[bool, str | None]:
+    """Send one ICMP Echo Request to `target` and wait up to
+    `deadline_s` for the matching Echo Reply.
+
+    Returns (success, error_text). Tries unprivileged ICMP
+    (SOCK_DGRAM + IPPROTO_ICMP, Linux 4.11+ with
+    `net.ipv4.ping_group_range` permitting the caller's GID) first
+    and falls back to raw sockets (CAP_NET_RAW or root) on EACCES /
+    EPERM. Pure sync — wrap in asyncio.to_thread for the async
+    call site."""
+    import os
+    import select
+    import socket
+    import struct
+    pid = os.getpid() & 0xFFFF
+    payload = b"dcim-icmp-probe"
+    header = struct.pack("!BBHHH", 8, 0, 0, pid, 1)  # type=8, code=0, ck=0, id, seq
+    packet = header + payload
+    checksum = _icmp_checksum(packet)
+    packet = struct.pack("!BBHHH", 8, 0, checksum, pid, 1) + payload
+    # Two-step open: try DGRAM first (no privileges needed when
+    # ping_group_range covers the caller's GID), then RAW.
+    sock = None
+    last_err: str | None = None
+    for sock_type in (socket.SOCK_DGRAM, socket.SOCK_RAW):
+        try:
+            sock = socket.socket(socket.AF_INET, sock_type, socket.IPPROTO_ICMP)
+            break
+        except PermissionError as e:
+            last_err = (
+                f"icmp socket requires CAP_NET_RAW or net.ipv4.ping_group_range: {e}"
+            )
+        except OSError as e:
+            last_err = f"icmp socket open failed: {e}"
+    if sock is None:
+        return False, (last_err or "icmp socket unavailable")[:512]
+    try:
+        sock.settimeout(deadline_s)
+        sock.sendto(packet, (target, 0))
+        # Wait for an Echo Reply from `target`. select() lets us
+        # honor the deadline cleanly across multiple spurious
+        # packets (other pings on the same kernel ICMP demuxer).
+        # The Linux DGRAM-ICMP demuxer rewrites the id on send so
+        # multiple processes can share the protocol namespace —
+        # the reply id is therefore NOT our pid, so we match on
+        # (type == Echo Reply) + (source address == target) and
+        # rely on the kernel to only deliver replies to OUR socket.
+        # For RAW sockets the id IS ours but we use the same logic
+        # for parity; the IP-header strip is the only divergence.
+        is_raw = sock.type == socket.SOCK_RAW
+        deadline_left = deadline_s
+        while deadline_left > 0:
+            ready, _, _ = select.select([sock], [], [], deadline_left)
+            if not ready:
+                return False, f"icmp timeout after {deadline_s}s"
+            reply, addr = sock.recvfrom(1024)
+            if addr[0] != target:
+                deadline_left -= 1
+                continue
+            icmp = reply[20:] if is_raw else reply
+            if len(icmp) < 8:
+                deadline_left -= 1
+                continue
+            r_type = icmp[0]
+            if r_type == 0:  # Echo Reply
+                return True, None
+            deadline_left -= 1
+        return False, f"icmp timeout after {deadline_s}s"
+    except OSError as e:
+        return False, f"icmp probe failed: {e}"[:512]
+    finally:
+        sock.close()
+
+
+async def _probe_icmp(
+    target: str, deadline_s: int,
+) -> tuple[DnsHealthCheckStatus, str | None]:
+    """Async wrapper over `_icmp_probe_sync`. Off-loads the blocking
+    socket calls to a thread so the worker's event loop stays
+    responsive even on a slow probe."""
+    import asyncio
+    ok, err = await asyncio.to_thread(_icmp_probe_sync, target, deadline_s)
+    if ok:
+        return DnsHealthCheckStatus.healthy, None
+    if err and err.startswith("icmp socket requires"):
+        # Distinguishable from "unhealthy" so the UI can surface a
+        # platform-config problem rather than an unreachable target.
+        return DnsHealthCheckStatus.unknown, err
+    return DnsHealthCheckStatus.unhealthy, err
+
+
 async def _probe_http(
     proto: str, target: str, port: int, path: str, deadline_s: int,
 ) -> tuple[DnsHealthCheckStatus, str | None]:
@@ -675,8 +777,7 @@ async def probe_health_check(
     proto = check.protocol.value if hasattr(check.protocol, "value") else check.protocol
     deadline = check.timeout_seconds or 5
     if proto == "icmp":
-        # Raw sockets need root; skipped in v1.
-        return DnsHealthCheckStatus.unknown, "icmp not supported in worker"
+        return await _probe_icmp(target, deadline)
     if proto == "tcp":
         return await _probe_tcp(target, check.port or 0, deadline)
     if proto in ("http", "https"):

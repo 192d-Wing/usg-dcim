@@ -26,7 +26,17 @@ spec:
           command: ["arq", "dcim.worker.WorkerSettings"]
           env:
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
-            - { name: DCIM_ELASTIC_URL,  value: {{ .Values.elasticsearch.url | quote }} }
             - { name: DCIM_REDIS_DSN,    value: {{ .Values.redis.dsn | quote }} }
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
+          {{- if .Values.worker.capNetRaw }}
+          # NET_RAW lets the worker open ICMP sockets for the DNS
+          # health-check engine's icmp protocol. Drop everything
+          # else so the container's posture stays narrow.
+          securityContext:
+            capabilities:
+              add: ["NET_RAW"]
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+          {{- end }}

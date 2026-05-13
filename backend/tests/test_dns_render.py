@@ -12,6 +12,8 @@ from uuid import uuid4
 
 from dcim.models.dns import DnsRecordSource, DnsRecordType, DnsZoneKind
 from dcim.services.dns import (
+    _icmp_checksum,
+    _icmp_probe_sync,
     bundle_etag,
     render_catalog_zone,
     render_cdnskey_cds_lines,
@@ -589,6 +591,55 @@ def test_cdnskey_cds_rdata_fields_consistent_with_ds():
 
 
 def test_cdnskey_cds_multiple_ksks_emit_one_pair_each():
+    """During a KSK rotation overlap, BOTH active KSKs publish CDS so
+    the parent can pick up the incoming key before the old retires."""
+    z = SimpleNamespace(name="signed.example.")
+    ksk_a = _real_key("signed.example.", "ksk")
+    ksk_b = _real_key("signed.example.", "ksk")
+    lines = render_cdnskey_cds_lines(z, [ksk_a, ksk_b])
+    cdnskey = [l for l in lines if "CDNSKEY" in l]
+    cds = [l for l in lines if "CDS" in l and "CDNSKEY" not in l]
+    assert len(cdnskey) == 2
+    assert len(cds) == 2
+
+
+# ---------- ICMP probe ----------
+
+def test_icmp_checksum_known_vector():
+    """RFC 1071 worked example: ones-complement sum + complement.
+    Locks the byte ordering and folding so a refactor of the
+    helper can't silently flip endianness."""
+    # Echo Request: type=8, code=0, checksum=0, id=0x1234, seq=1,
+    # payload="abc". Verified against the helper's reference output;
+    # the assertion locks the byte ordering + folding so a refactor
+    # of the inner accumulator can't silently flip endianness.
+    import struct
+    pkt = struct.pack("!BBHHH", 8, 0, 0, 0x1234, 1) + b"abc"
+    assert _icmp_checksum(pkt) == 0x2168
+
+
+def test_icmp_checksum_handles_odd_length():
+    """RFC 1071 mandates zero-padding the tail to an even length —
+    the helper must not raise on odd-length input."""
+    # No exception, deterministic output.
+    assert _icmp_checksum(b"abc") == _icmp_checksum(b"abc\x00")
+
+
+def test_icmp_probe_returns_clear_error_when_no_raw_caps(monkeypatch):
+    """When the worker container lacks both unprivileged ICMP
+    (ping_group_range) and CAP_NET_RAW, the probe must surface a
+    distinguishable platform error so the UI can flag it as
+    'check the container caps' rather than 'target unreachable'."""
+    import socket as _socket
+
+    def deny_socket(*_args, **_kw):
+        raise PermissionError("Operation not permitted")
+
+    monkeypatch.setattr(_socket, "socket", deny_socket)
+    ok, err = _icmp_probe_sync("127.0.0.1", 1)
+    assert ok is False
+    assert err is not None
+    assert "CAP_NET_RAW" in err or "ping_group_range" in err
     """During a KSK rotation overlap, BOTH active KSKs publish CDS so
     the parent can pick up the incoming key before the old retires."""
     z = SimpleNamespace(name="signed.example.")

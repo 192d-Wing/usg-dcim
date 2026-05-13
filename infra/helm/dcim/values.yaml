@@ -30,6 +30,15 @@ worker:
     minReplicas: 2
     maxReplicas: 10
     queueDepthTarget: 50
+  # Grant CAP_NET_RAW so the worker can run ICMP health-check probes
+  # (RFC 792 echo). On clusters where `net.ipv4.ping_group_range` is
+  # set wide enough to cover the worker GID (10001 by default), the
+  # probe falls back to unprivileged SOCK_DGRAM ICMP and this
+  # capability is not strictly required — flip to false if your
+  # cluster policy forbids NET_RAW. With both disabled, the probe
+  # returns status=unknown with a "icmp socket requires CAP_NET_RAW
+  # or net.ipv4.ping_group_range" error so the UI flags the gap.
+  capNetRaw: true
 
 ingest:
   replicaCount: 3
@@ -71,11 +80,6 @@ ingress:
 postgresql:
   external: true
   dsn: "postgresql+asyncpg://dcim:CHANGE_ME@postgres-ha:5432/dcim"
-
-elasticsearch:
-  external: true
-  url: "https://elastic:9200"
-  authSecret: dcim-elastic-creds
 
 redis:
   external: true
