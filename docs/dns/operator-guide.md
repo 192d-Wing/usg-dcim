@@ -636,23 +636,43 @@ allow_networks_strict = true
 ```
 
 This pairs with the upstream PR `access: add opt-in strict-
-allowlist mode for allow_networks`. With the patched binary, the
-four-case behavior matrix becomes:
+allowlist mode for allow_networks`. The patch only changes one
+row in the access-control matrix — the **`allow` + `deny` both
+set, source outside both** case. The other rows behave as stock
+upstream:
 
 | `allow` | `deny` | strict | Outcome for client IP X |
 | --- | --- | --- | --- |
-| empty | empty | off | accept (open recursive) |
-| set | empty | off | accept (allow is informational) |
-| set | empty | **on** | reject unless X ∈ allow |
-| set | set | on | reject if X ∈ deny OR X ∉ allow |
+| empty | empty | any | accept (open recursive) |
+| set | empty | any | refuse unless X ∈ allow |
+| set | set | off | **accept if X ∉ both lists** (carve-out fall-through) |
+| set | set | on | refuse unless X ∈ allow (firewall semantics) |
+| any | X ∈ deny | any | refuse |
 
-Behaviorally identical to a firewall allowlist: the recursive
-treats anything outside `allow_networks` as if it were in
-`deny_networks`. The flag is **off by default** in the tracked
-compose file — stock upstream Hickory builds reject the unknown
-field on parse, so flipping it requires the patched
+That third row is what the PR exists to fix. The default fall-
+through "any source outside both lists is allowed as long as
+some deny entry exists" surprises operators who reach for
+`allow_networks` expecting firewall semantics — `allow=[10/8],
+deny=[10.99/24]` reads as "only allow 10/8, additionally deny
+10.99/24" but actually permits any source outside both lists.
+Strict mode opts into the firewall interpretation.
+
+The flag is **off by default** in the tracked compose file —
+stock upstream Hickory builds reject the unknown field on parse,
+so flipping it requires the patched
 `hickory-prom:v0.26.0-strict-dev` image (or a future upstream
 release that lands the PR).
+
+**Verified end-to-end** (2026-05-12, hickory-prom:v0.26.0-strict-dev,
+prod fabric on site42 dns-net 172.30.42.0/24):
+
+```text
+allow=[172.30.42.5/32], deny=[172.30.42.100/32]
+  src=172.30.42.5   → NoError  (in allow)        — strict on/off
+  src=172.30.42.99  → NoError  (carve-out)       — strict off
+  src=172.30.42.99  → Refused  (firewall)        — strict ON
+  src=172.30.42.100 → Refused  (in deny)         — strict on/off
+```
 
 To enable on a deployment running the patched image, override the
 env var in `compose.override.yml`:
