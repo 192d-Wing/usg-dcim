@@ -23,7 +23,7 @@ Shipped through commit `5478494`:
 - Capacity rollups (U %, kW %, contiguous free runs) per rack + free-space finder page.
 - Variable rack heights with orphan-protected shrinks.
 - Vendor stencil catalog (procedural SVG by manufacturer + kind, optional `image_url` for real vendor SVGs).
-- Telemetry ingest plane (per-site monthly Elastic indices, idempotent batches, freshness tracking).
+- Telemetry ingest plane (TimescaleDB hypertable with monthly chunks, columnar compression after 7 days, 24-month retention, hourly continuous aggregate, idempotent batches, freshness tracking).
 - Alert engine: threshold rules with duration, dedup, suppression, maintenance windows (model only), collector-down sweep.
 - arq worker with cron jobs (alert eval, collector sweep, freshness).
 - Site collector agent: SNMP / Redfish / Modbus TCP / REST / IPMI, store-and-forward SQLite buffer, mTLS or bearer-token auth, retry/backoff.
@@ -45,7 +45,8 @@ Shipped through commit `5478494`:
   per-fabric AXFR ACL + catalog DNSSEC + UI sub-panel + BIND 9.20
   consumer smoke test + RFC 9432 §4.2.3 `primaries` property records).
   Per-neighbor `afi-safis` in the GoBGP config so IPv6 anycast `/128`s
-  actually get advertised.
+  actually get advertised. RFC 7344 CDS/CDNSKEY auto-propagation
+  (per-zone `publish_cds` opt-out, emit at apex for active KSKs).
 
 ---
 
@@ -60,7 +61,6 @@ captured in `docs/dns/` and recent commits.
 |---|---|---|
 | **Per-second QPS rate limiting on the recursive** | Hickory 0.26 has no native QPS limiter. The 0037 CIDR ACLs only gate *who* can ask, not *how fast*. | Real options today are out-of-band: nftables hashlimit on the recursive host or a dnsdist sidecar. Revisit when upstream lands a token-bucket. |
 | **ICMP health probes** | Probe targets that don't answer DNS need ICMP as a fallback. Today health checks are DNS-only. | Needs `CAP_NET_RAW` in the worker / collector containers; today it isn't granted. Document the container-perm change before wiring. |
-| **CDNSKEY / CDS auto-propagation (RFC 7344)** | Automates DS upload to a parent that supports CDS scanning. Useful at scale; today operators upload DS manually after KSK rotation. | Defer — only matters when the parent zones we delegate from support CDS, which most DoD-internal parents don't yet. |
 | **Hickory `allow_networks_strict` upstream PR merge** | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. | PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `infra/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
 | **BIND `primaries` catalog property support** | DCIM emits RFC 9432 §4.2.3 `primaries.<member_id>.zones A/AAAA` records, but BIND 9.20.22 only honors `coo` / `ext` properties — member zones provision as stubs without primaries. Knot DNS 3.4+ and PowerDNS 4.7+ already honor the records. | Wait for BIND to add `primaries`-property support. Until then operators using BIND must declare member zones manually in named.conf; the smoke test `bind9-smoke/named.conf` documents the workaround. |
 
@@ -145,8 +145,8 @@ Goal: prove this actually scales to 184 sites and runs cleanly in a multi-tenant
 
 | Item | Notes |
 |---|---|
-| **Telemetry retention strategy** | Add Elasticsearch ILM policies for the per-site monthly indices: hot 14 days → warm 90 days → cold 1 year → delete. Add hourly + daily rollup indices for long-horizon dashboards (the index naming is already in place). |
-| **Alert evaluation at scale** | The current loop is O(rules × assets) per cycle. Move to per-rule scheduled jobs with bounded fan-out, or push to an Elastic Watcher / kapacitor-style streaming evaluator if the load demands it. |
+| **Telemetry retention tuning** | Defaults in migration 0046: monthly chunks, compression after 7d, drop after 24 months. Wire these to Helm values and per-site overrides so air-gapped sites with bigger disks can retain longer. Add a daily continuous aggregate alongside the hourly one for multi-year dashboards. |
+| **Alert evaluation at scale** | The current loop is O(rules × assets) per cycle. Move to per-rule scheduled jobs with bounded fan-out, or query the `telemetry_hourly` continuous aggregate for rules with duration_seconds >= 1h to skip the raw hypertable entirely. |
 | **Bulk operations at scale** | Pagination is already enforced. Add server-side streaming exports (NDJSON) and chunked imports for 100k+ asset enterprises. |
 | **Performance test harness** | A `loadgen` script that simulates 184 collectors × 50 assets × 4 metrics × 30s polls. Runs against the compose stack, reports p95 ingest latency, alert eval lag, dashboard response time. |
 | **Per-org tenancy** | An `Org` entity that owns Sites + Users + Tokens. Default org for single-tenant. Adds an org dimension to ABAC. |
@@ -184,7 +184,7 @@ Goal: a real site (or two) running with real collectors.
 |---|---|
 | **Air-gapped image mirror playbook** | Pull all images, push to internal Harbor / ECR mirror. Document in `DEPLOYMENT.md`. |
 | **STIG-hardened base images** | Replace the python:3.12-slim and node:20 images with hardened internal variants. |
-| **Backup + restore runbook** | Postgres logical backup + Elasticsearch snapshot strategy. Restore drill documented. |
+| **Backup + restore runbook** | Postgres logical backup (pg_dump) + a TimescaleDB-aware physical backup (pgbackrest or pg_basebackup) for the telemetry hypertable. Restore drill documented. |
 | **Operator training docs** | Quick-start guide. Common workflows with screenshots. Runbook for failed collector. |
 | **Lab site cutover** | Pick a low-stakes site. Stand up a real collector. Discover real devices. Iterate on driver gaps. |
 | **Pilot site cutover** | Second site, slightly more complex. Capture operator feedback. |
@@ -215,13 +215,13 @@ These come up but we're not chasing them:
 - **Generic ITSM workflow engine** — we integrate with ServiceNow/Jira, we don't replace them.
 - **Provisioning / orchestration** (Terraform-style "make me a server") — this is DCIM, not a CMP.
 - **Building information modeling** (BIM/CAD) — we model rack-and-roll, not floorplans-and-CAD.
-- **Generic time-series database** — Elasticsearch is good enough for telemetry at our scale; no need for InfluxDB/TimescaleDB/Prometheus-as-storage.
+- **Adding another time-series database** — telemetry already lives in the TimescaleDB hypertable shipped in migration 0046. No need for InfluxDB / Victoria Metrics / Prometheus-as-storage alongside it.
 
 ---
 
 ## Risks & open questions
 
-1. **Telemetry scale** — 184 sites × 50 racks × 20 devices × 5 metrics × 30s polls ≈ 5 million samples/min. Elasticsearch handles this with the right tier sizing, but we should run the load test in Phase 4 before committing to a deployment topology.
+1. **Telemetry scale** — 184 sites × 50 racks × 20 devices × 5 metrics × 30s polls ≈ 5 million samples/min. TimescaleDB at this rate needs careful tuning of chunk_time_interval, compression policy timing, and the continuous-aggregate refresh window; we should run the load test in Phase 4 before committing to a single-node vs multi-node topology.
 2. **OIDC variability** — DoD environments use different SSO stacks (CAC, SiteMinder, Azure AD). Wiring multiple should be straightforward via Authlib but needs lab testing per environment.
 3. **Air-gapped vs internet-connected sites** — both exist. Collector update mechanism needs to work in both. Probably means an "update bundle" tarball for air-gapped that the operator deploys via configuration management.
 4. **Vendor stencil licensing** — procedural stencils are fine, but if we adopt vendor SVGs we need to verify redistribution rights (most vendors allow it, but it's worth a check).
