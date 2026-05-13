@@ -33,7 +33,6 @@ from ..models.dns import (
     AnycastGroup,
     BgpPeer,
     DnsBlocklist,
-    DnsBlocklistAction,
     DnsBlocklistEntry,
     DnsCatalogZone,
     DnsForwarder,
@@ -53,7 +52,7 @@ from ..models.dns import (
 )
 from ..models.ipam import IPAddress, IpAddressSource, Subnet
 from ..settings import get_settings
-from .ipam import parse_address, parse_network
+from .ipam import parse_address
 
 
 class _HasDnsName(Protocol):
@@ -121,16 +120,15 @@ _INSECURE_INTERNAL_PROBE = False
 
 async def _probe_tcp(target: str, port: int, deadline_s: int) -> tuple[DnsHealthCheckStatus, str | None]:
     import asyncio
+    import contextlib
     if port <= 0:
         return DnsHealthCheckStatus.unhealthy, "tcp probe requires a port"
     try:
         async with asyncio.timeout(deadline_s):
             _, writer = await asyncio.open_connection(target, port)
         writer.close()
-        try:
+        with contextlib.suppress(OSError):
             await writer.wait_closed()
-        except OSError:
-            pass
         return DnsHealthCheckStatus.healthy, None
     except OSError as e:
         # TimeoutError is an OSError subclass in 3.11+; one branch
@@ -245,6 +243,7 @@ async def _probe_http(
     proto: str, target: str, port: int, path: str, deadline_s: int,
 ) -> tuple[DnsHealthCheckStatus, str | None]:
     import asyncio
+
     import httpx
     url = f"{proto}://{target}:{port}{path or '/'}"
     try:
@@ -351,6 +350,7 @@ def generate_dnssec_keypair(
     Lazily imports `cryptography` so the import cost only lands when
     an operator actually enables DNSSEC."""
     import base64
+
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ec, ed25519, rsa
 
@@ -436,6 +436,7 @@ def _ecdsa_private_scalar_b64(pem: str) -> str:
     ECDSAP256 key and base64-encode it. BIND's `.private` file wants
     the bare scalar, not the PKCS8 wrapping."""
     import base64
+
     from cryptography.hazmat.primitives import serialization
     priv = serialization.load_pem_private_key(pem.encode("ascii"), password=None)
     scalar = priv.private_numbers().private_value
@@ -445,6 +446,7 @@ def _ecdsa_private_scalar_b64(pem: str) -> str:
 def _ed25519_private_raw_b64(pem: str) -> str:
     """Same idea for Ed25519 — the 32-byte private seed."""
     import base64
+
     from cryptography.hazmat.primitives import serialization
     priv = serialization.load_pem_private_key(pem.encode("ascii"), password=None)
     raw = priv.private_bytes(
@@ -461,6 +463,7 @@ def _rsa_private_bind_fields(pem: str) -> str:
     (Modulus = n, PublicExponent = e, PrivateExponent = d, Prime1 = p,
     Prime2 = q, Exponent1 = dmp1, Exponent2 = dmq1, Coefficient = iqmp)."""
     import base64
+
     from cryptography.hazmat.primitives import serialization
     priv = serialization.load_pem_private_key(pem.encode("ascii"), password=None)
     nums = priv.private_numbers()
@@ -1838,7 +1841,7 @@ async def _catalog_transfer_acl_map(
     "no transfers" closes the door without help from us)."""
     if catalog_name is None:
         return {}
-    from ..models.ipam import Fabric  # noqa: PLC0415 — circular-dep guard
+    from ..models.ipam import Fabric
     fabric = await db.get(Fabric, fabric_id)
     acl = (fabric.catalog_transfer_acl if fabric else None) or []
     return {catalog_name: list(acl)}
@@ -1865,7 +1868,7 @@ async def _add_catalog_zone_files(
     `primaries.<member_id>.zones A/AAAA` property records so
     consumers (BIND 9.20+) know which server to AXFR each member
     zone from."""
-    from ..models.dns import DnsCatalogZone  # noqa: PLC0415
+    from ..models.dns import DnsCatalogZone
     catalog = (
         await db.execute(
             select(DnsCatalogZone).where(
@@ -2063,7 +2066,7 @@ async def get_system_dns_upstreams(db: AsyncSession) -> list[str]:
 
     Operators edit this via PUT /admin/system/dns-settings so they
     don't have to redeploy the API to swap upstream resolvers."""
-    from ..models.system import SystemSetting  # noqa: PLC0415 — cycle guard
+    from ..models.system import SystemSetting
     row = await db.get(SystemSetting, _SYSTEM_KEY_DNS_RECURSIVE_UPSTREAMS)
     if row is not None and isinstance(row.value, list) and row.value:
         return [str(v) for v in row.value]
@@ -2075,7 +2078,7 @@ async def _recursive_upstreams_for_fabric(
 ) -> list[str]:
     """Fabric-level override beats the system-wide setting. Local
     import keeps the models.ipam ↔ services.dns dependency one-way."""
-    from ..models.ipam import Fabric  # noqa: PLC0415 — avoid import cycle
+    from ..models.ipam import Fabric
     fabric = await db.get(Fabric, fabric_id)
     if fabric is not None and fabric.dns_recursive_upstreams:
         return list(fabric.dns_recursive_upstreams)
@@ -2138,7 +2141,7 @@ async def _engine_for_server(db: AsyncSession, server: DnsServer) -> str:
     on-disk filename + reload signal."""
     if server.role != DnsServerRole.recursive:
         return "coredns"
-    from ..models.ipam import Fabric, RecursiveDnsEngine  # noqa: PLC0415
+    from ..models.ipam import Fabric, RecursiveDnsEngine
     fabric = await db.get(Fabric, server.fabric_id)
     if fabric and fabric.recursive_engine == RecursiveDnsEngine.hickory:
         return "hickory"
@@ -2153,7 +2156,7 @@ async def _render_recursive_config(
     needs (RPZ on Hickory). Returns (config_text, rpz_zones_dict).
     Empty dict for CoreDNS — its blocklists live inline in the
     Corefile, not as separate zone files."""
-    from ..models.ipam import Fabric, RecursiveDnsEngine  # noqa: PLC0415
+    from ..models.ipam import Fabric, RecursiveDnsEngine
 
     apex_names = await _fabric_apex_names(db, server.fabric_id)
     local_auth_ip = await _local_auth_unicast_ip(db, server)

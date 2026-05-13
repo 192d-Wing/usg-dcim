@@ -82,12 +82,11 @@ from ..schemas.ipam import (
     VtepVniMembershipOut,
 )
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
 from ..services import ipam as ipam_svc
 from ..services import kea as kea_svc
-from ._pagination import paginate
+from ._pagination import empty_page, paginate
 
 router = APIRouter(prefix="/ipam", tags=["ipam"])
 
@@ -116,7 +115,7 @@ async def list_fabrics(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[FabricOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(FabricOut, params)
         stmt = stmt.where(Fabric.id.in_(in_scope))
     return await paginate(db, stmt, model=Fabric, params=params, out_model=FabricOut)
 
@@ -239,7 +238,7 @@ async def list_vrfs(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[VrfOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(VrfOut, params)
         stmt = stmt.where(Vrf.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=Vrf, params=params, out_model=VrfOut)
 
@@ -458,7 +457,11 @@ async def list_supernets(
     fabric_id: UUID | None = Query(None),
     vrf_id: UUID | None = Query(None),
     parent_supernet_id: UUID | None = Query(
-        None, description="Filter by parent. Pass the literal string 'null' to fetch top-level supernets only.",
+        None,
+        description=(
+            "Filter by parent. Pass the literal string 'null' "
+            "to fetch top-level supernets only."
+        ),
     ),
     top_level: bool = Query(False, description="Shortcut for parent_supernet_id IS NULL."),
     principal: Principal = Depends(require_capability("ipam:supernets:read")),
@@ -478,7 +481,7 @@ async def list_supernets(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[SupernetOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(SupernetOut, params)
         stmt = stmt.where(Supernet.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=Supernet, params=params, out_model=SupernetOut)
 
@@ -649,7 +652,7 @@ async def list_subnets(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[SubnetOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(SubnetOut, params)
         stmt = stmt.where(Subnet.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=Subnet, params=params, out_model=SubnetOut)
 
@@ -832,7 +835,7 @@ async def list_addresses(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[IPAddressOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(IPAddressOut, params)
         stmt = stmt.where(IPAddress.subnet_id.in_(
             select(Subnet.id).where(Subnet.fabric_id.in_(in_scope))
         ))
@@ -1138,7 +1141,7 @@ async def list_overlays(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[OverlayOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(OverlayOut, params)
         stmt = stmt.where(Overlay.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=Overlay, params=params, out_model=OverlayOut)
 
@@ -1576,7 +1579,7 @@ async def list_dhcp_servers(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DhcpServerOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DhcpServerOut, params)
         stmt = stmt.where(DhcpServer.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=DhcpServer, params=params, out_model=DhcpServerOut)
 

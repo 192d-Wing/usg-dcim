@@ -37,7 +37,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..errors import ConflictError, NotFoundError
+from ..errors import ConflictError, NotFoundError, ValidationError
 from ..models.bgp import (
     AddressFamilyV4V6,
     Asn,
@@ -85,7 +85,6 @@ from ..schemas.bgp import (
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 from ._pagination import paginate
 
@@ -113,9 +112,11 @@ async def create_asn(
     principal: Principal = Depends(require_capability("routing:asns:create")),
     db: AsyncSession = Depends(get_db),
 ):
-    if payload.organization_id is not None:
-        if await db.get(Organization, payload.organization_id) is None:
-            raise NotFoundError("organization not found")
+    if (
+        payload.organization_id is not None
+        and await db.get(Organization, payload.organization_id) is None
+    ):
+        raise NotFoundError("organization not found")
     obj = Asn(**payload.model_dump())
     db.add(obj)
     await db.flush()
@@ -321,7 +322,7 @@ class TcpAoRotationRequest(BaseModel):
     """Generate `count` keys with consecutive `days_per_key`-day windows
     starting at `start`. Each key gets a server-side 256-bit random
     secret (32 bytes / 64 hex chars). Defaults match the operator's
-    usual ask: 12 keys × 30 days = ~1 year."""
+    usual ask: 12 keys x 30 days = ~1 year."""
 
     start: datetime | None = None
     count: int = 12
@@ -796,12 +797,16 @@ async def create_route_map_entry(
         raise NotFoundError(_ROUTE_MAP_NOT_FOUND)
     # Cross-check the match-side FKs so 404 lands at the create site
     # instead of a constraint violation deep in commit.
-    if payload.match_prefix_list_id is not None:
-        if await db.get(PrefixList, payload.match_prefix_list_id) is None:
-            raise NotFoundError(_PREFIX_LIST_NOT_FOUND)
-    if payload.match_community_list_id is not None:
-        if await db.get(CommunityList, payload.match_community_list_id) is None:
-            raise NotFoundError(_COMMUNITY_LIST_NOT_FOUND)
+    if (
+        payload.match_prefix_list_id is not None
+        and await db.get(PrefixList, payload.match_prefix_list_id) is None
+    ):
+        raise NotFoundError(_PREFIX_LIST_NOT_FOUND)
+    if (
+        payload.match_community_list_id is not None
+        and await db.get(CommunityList, payload.match_community_list_id) is None
+    ):
+        raise NotFoundError(_COMMUNITY_LIST_NOT_FOUND)
     obj = RouteMapEntry(**payload.model_dump())
     db.add(obj)
     await db.flush()

@@ -47,3 +47,17 @@ async def paginate(
         total=int(total or 0),
         has_more=(params.page * params.page_size) < int(total or 0),
     )
+
+
+def empty_page(out_model: type, params: PageParams) -> Page[Any]:
+    """Shape-stable empty page. Use when a caller short-circuits the
+    SELECT entirely (e.g. unauthorized scope, no fabric selected,
+    feature off) so the route still returns a real `Page[X]` instead
+    of leaking a 200-with-null-body."""
+    return Page[out_model](  # type: ignore[valid-type]
+        items=[],
+        page=params.page,
+        page_size=params.page_size,
+        total=0,
+        has_more=False,
+    )

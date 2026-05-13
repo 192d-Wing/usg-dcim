@@ -21,7 +21,6 @@ from ..schemas.notifications import (
     NotificationChannelUpdate,
 )
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 from ..services import notifications as notif_svc
 from ._pagination import paginate

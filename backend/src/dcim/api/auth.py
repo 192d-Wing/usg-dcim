@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from uuid import UUID
 from urllib.parse import urlencode, urlparse, urlunparse
+from uuid import UUID
 
 import bcrypt
 import httpx
@@ -17,11 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..errors import AuthError, ForbiddenError
 from ..models.auth import ApiToken, User
-from ..security import audit
-from ..security.rate_limit import SlidingWindowLimiter
 from ..schemas.auth import ApiTokenOut, LoginRequest, TokenIssue, TokenOut
-
+from ..security import audit
 from ..security.deps import AuthenticatedUser, Principal, find_matching_capability, require_capability
+from ..security.rate_limit import SlidingWindowLimiter
 from ..security.tokens import (
     decrypt_refresh_token,
     encrypt_refresh_token,

@@ -26,12 +26,14 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, ValidationError as PydanticValidationError
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import ConflictError, NotFoundError, ValidationError
+from ..models.bgp import Asn, TcpAoKeyChain
 from ..models.dns import (
     AnycastBgpBinding,
     AnycastGroup,
@@ -53,7 +55,6 @@ from ..models.dns import (
     DnsZone,
     DnsZoneKind,
 )
-from ..models.bgp import Asn, TcpAoKeyChain
 from ..models.inventory import Site
 from ..models.ipam import Fabric
 from ..schemas.common import Page, PageParams
@@ -76,10 +77,10 @@ from ..schemas.dns import (
     DnsCatalogZoneCreate,
     DnsCatalogZoneOut,
     DnsCatalogZoneUpdate,
+    DnsDsRecordOut,
     DnsForwarderCreate,
     DnsForwarderOut,
     DnsForwarderUpdate,
-    DnsDsRecordOut,
     DnsHealthCheckCreate,
     DnsHealthCheckOut,
     DnsHealthCheckResult,
@@ -91,12 +92,12 @@ from ..schemas.dns import (
     DnsRecordOut,
     DnsRecordUpdate,
     DnsRenderStatus,
-    DnsViewCreate,
-    DnsViewOut,
-    DnsViewUpdate,
     DnsServerCreate,
     DnsServerOut,
     DnsServerUpdate,
+    DnsViewCreate,
+    DnsViewOut,
+    DnsViewUpdate,
     DnsZoneCreate,
     DnsZoneNsec3Params,
     DnsZoneOut,
@@ -104,7 +105,6 @@ from ..schemas.dns import (
     validate_record_data,
 )
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 from ..security.scope import (
     enforce_fabric_scope,
@@ -114,7 +114,7 @@ from ..security.scope import (
 )
 from ..services import dns as dns_svc
 from ..settings import get_settings
-from ._pagination import paginate
+from ._pagination import empty_page, paginate
 
 router = APIRouter(prefix="/dns", tags=["dns"])
 
@@ -186,7 +186,7 @@ async def list_zones(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DnsZoneOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DnsZoneOut, params)
         stmt = stmt.where(DnsZone.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=DnsZone, params=params, out_model=DnsZoneOut)
 
@@ -834,7 +834,7 @@ async def list_records(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DnsRecordOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DnsRecordOut, params)
         stmt = stmt.where(DnsRecord.zone_id.in_(
             select(DnsZone.id).where(DnsZone.fabric_id.in_(in_scope))
         ))
@@ -1001,7 +1001,7 @@ async def list_servers(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DnsServerOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DnsServerOut, params)
         stmt = stmt.where(DnsServer.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=DnsServer, params=params, out_model=DnsServerOut)
 
@@ -1666,7 +1666,7 @@ async def list_anycast_groups(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[AnycastGroupOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(AnycastGroupOut, params)
         stmt = stmt.where(AnycastGroup.fabric_id.in_(in_scope))
     return await paginate(db, stmt, model=AnycastGroup, params=params, out_model=AnycastGroupOut)
 
@@ -1762,7 +1762,7 @@ async def list_forwarders(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DnsForwarderOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DnsForwarderOut, params)
         stmt = stmt.where(DnsForwarder.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsForwarder, params=params, out_model=DnsForwarderOut,
@@ -2178,7 +2178,7 @@ async def list_blocklists(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DnsBlocklistOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DnsBlocklistOut, params)
         stmt = stmt.where(DnsBlocklist.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsBlocklist, params=params, out_model=DnsBlocklistOut,
@@ -2387,7 +2387,7 @@ async def list_views(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DnsViewOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DnsViewOut, params)
         stmt = stmt.where(DnsView.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsView, params=params, out_model=DnsViewOut,
@@ -2480,7 +2480,7 @@ async def list_health_checks(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[DnsHealthCheckOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(DnsHealthCheckOut, params)
         stmt = stmt.where(DnsHealthCheck.fabric_id.in_(in_scope))
     return await paginate(
         db, stmt, model=DnsHealthCheck, params=params, out_model=DnsHealthCheckOut,

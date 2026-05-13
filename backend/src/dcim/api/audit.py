@@ -13,10 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..models.audit import AuditLog
 from ..schemas.common import Page, PageParams
-
 from ..security.deps import Principal, require_capability
 from ..security.scope import scope_filtered_site_ids
-from ._pagination import paginate
+from ._pagination import empty_page, paginate
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 
@@ -72,7 +71,7 @@ async def list_audit_log(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[AuditLogOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(AuditLogOut, params)
         stmt = stmt.where(AuditLog.site_id.in_(in_scope))
     if actor_user_id is not None:
         stmt = stmt.where(AuditLog.actor_user_id == actor_user_id)
@@ -86,10 +85,10 @@ async def list_audit_log(
         # Trim + dedupe; empty list short-circuits to no rows so the
         # caller doesn't see "no filter" semantics by accident.
         ids = [s.strip() for s in target_ids.split(",") if s.strip()]
-        if not ids:
-            stmt = stmt.where(AuditLog.id.is_(None))
-        else:
-            stmt = stmt.where(AuditLog.target_id.in_(ids))
+        stmt = (
+            stmt.where(AuditLog.id.is_(None)) if not ids
+            else stmt.where(AuditLog.target_id.in_(ids))
+        )
     if site_id is not None:
         stmt = stmt.where(AuditLog.site_id == site_id)
     if since is not None:

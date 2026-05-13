@@ -24,10 +24,9 @@ from ..schemas.alerts import (
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_site_scope, scope_filtered_site_ids
-from ._pagination import paginate
+from ._pagination import empty_page, paginate
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -73,7 +72,7 @@ async def list_alerts(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[AlertOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(AlertOut, params)
         stmt = stmt.where(Alert.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Alert, params=params, out_model=AlertOut)
 

@@ -159,7 +159,7 @@ def find_matching_capability(caps: dict[str, Scope], code: str) -> Scope | None:
         parts = pattern.split(":")
         if len(parts) != len(target):
             continue
-        if all(p == "*" or p == t for p, t in zip(parts, target)):
+        if all(p == "*" or p == t for p, t in zip(parts, target, strict=True)):
             return scope
     return None
 

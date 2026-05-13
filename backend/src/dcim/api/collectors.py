@@ -16,11 +16,10 @@ from ..models.collectors import Collector, CollectorHeartbeat, CollectorStatus
 from ..schemas.collectors import CollectorEnroll, CollectorHeartbeatIn, CollectorOut
 from ..schemas.common import Page, PageParams
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_site_scope, scope_filtered_site_ids
 from ..security.tokens import hash_api_token
-from ._pagination import paginate
+from ._pagination import empty_page, paginate
 
 router = APIRouter(prefix="/collectors", tags=["collectors"])
 
@@ -36,7 +35,7 @@ async def list_collectors(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[CollectorOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(CollectorOut, params)
         stmt = stmt.where(Collector.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Collector, params=params, out_model=CollectorOut)
 

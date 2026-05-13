@@ -55,9 +55,9 @@ from ..schemas.inventory import (
     SiteUpdate,
 )
 from ..security import audit
-from ..security.deps import Principal, find_matching_capability, require_capability
+from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_site_scope, scope_filtered_site_ids
-from ._pagination import paginate
+from ._pagination import empty_page, paginate
 
 
 async def _enforce_site_scope(
@@ -86,7 +86,7 @@ async def list_regions(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[RegionOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(RegionOut, params)
         stmt = stmt.where(Region.id.in_(select(Site.region_id).where(Site.id.in_(in_scope))))
     return await paginate(db, stmt, model=Region, params=params, out_model=RegionOut)
 
@@ -154,7 +154,7 @@ async def list_sites(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[SiteOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(SiteOut, params)
         stmt = stmt.where(Site.id.in_(in_scope))
 
     return await paginate(db, stmt, model=Site, params=params, out_model=SiteOut)
@@ -224,7 +224,7 @@ async def list_buildings(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[BuildingOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(BuildingOut, params)
         stmt = stmt.where(Building.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Building, params=params, out_model=BuildingOut)
 
@@ -244,7 +244,7 @@ async def list_rooms(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[RoomOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(RoomOut, params)
         stmt = stmt.where(Room.building_id.in_(
             select(Building.id).where(Building.site_id.in_(in_scope))
         ))
@@ -266,7 +266,7 @@ async def list_rows(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[RowOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(RowOut, params)
         stmt = stmt.where(Row.room_id.in_(
             select(Room.id).join(Building, Room.building_id == Building.id)
             .where(Building.site_id.in_(in_scope))
@@ -339,7 +339,7 @@ async def list_racks(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[RackOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(RackOut, params)
         stmt = stmt.where(Rack.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Rack, params=params, out_model=RackOut)
 
@@ -454,7 +454,7 @@ async def list_assets(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[AssetOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(AssetOut, params)
         stmt = stmt.where(Asset.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Asset, params=params, out_model=AssetOut)
 
@@ -785,7 +785,7 @@ async def list_cables(
     )
     if in_scope is not None:
         if not in_scope:
-            return Page[CableOut](items=[], total=0, page=params.page, page_size=params.page_size, has_more=False)
+            return empty_page(CableOut, params)
         stmt = stmt.where(Cable.site_id.in_(in_scope))
     return await paginate(db, stmt, model=Cable, params=params, out_model=CableOut)
 
