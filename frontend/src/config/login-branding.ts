@@ -89,8 +89,7 @@ export const loginBranding: LoginBranding = {
   meta: 'v0.2 · Department of the Air Force Enterprise Instance',
   formTitle: 'Welcome back',
   formSubtitle:
-    'Sign in to continue. Production deployments use OIDC/SAML; ' +
-    'local dev accepts the seeded admin.',
+    'Sign in to continue.',
   footerNote: 'Trouble signing in? Contact your system administrator.',
 
   sso: {
