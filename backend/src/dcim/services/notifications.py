@@ -234,10 +234,15 @@ async def dispatch(db: AsyncSession, alert: Alert, event: str) -> list[DispatchO
                 channel_id=str(c.id), channel_name=c.name, kind=c.kind.value, delivered=True,
             ))
         except Exception as exc:
+            # `alert_event` not `event` — structlog reserves `event` for
+            # the log-message slot and a kwarg by that name collides
+            # with the positional, raising TypeError inside the failure
+            # path and turning a single bad webhook into a hard crash
+            # of dispatch (defeating the entire failure-isolation goal).
             log.warning(
                 "notification_failed",
                 channel=c.name, kind=c.kind.value, error=str(exc),
-                alert_id=str(alert.id), event=event,
+                alert_id=str(alert.id), alert_event=event,
             )
             outcomes.append(DispatchOutcome(
                 channel_id=str(c.id), channel_name=c.name, kind=c.kind.value,
