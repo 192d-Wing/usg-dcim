@@ -44,6 +44,8 @@ type Assignment = {
   role_name: string; scopes: ScopeRow[];
 };
 type Site = { id: string; code: string; name: string };
+type Region = { id: string; code: string; name: string };
+type Fabric = { id: string; slug: string; name: string };
 type OidcMapping = {
   id: string;
   idp_role: string;
@@ -66,6 +68,12 @@ const SCOPE_DIMENSION_OPTIONS: SelectProps.Option[] = [
   { value: 'fabric', label: 'fabric (target = Fabric.slug; gates DNS + IPAM)' },
 ];
 
+// Direct user-role assignment dimensions. Mirrors backend ScopeType
+// 1:1; missing one here makes that ABAC axis unreachable from the UI
+// (admins can still set it via OIDC mappings further down the page,
+// but operators looking for it on the Users tab would see nothing).
+// `fabric` was added in the same commit that added it to the OIDC
+// mapping form so the two pickers stay in lockstep.
 const SCOPE_TYPES: SelectProps.Option[] = [
   { value: 'global', label: 'global' },
   { value: 'region', label: 'region' },
@@ -73,6 +81,7 @@ const SCOPE_TYPES: SelectProps.Option[] = [
   { value: 'site_group', label: 'site_group' },
   { value: 'enclave', label: 'enclave' },
   { value: 'organization', label: 'organization' },
+  { value: 'fabric', label: 'fabric' },
 ];
 
 export function AdminPage() {
@@ -284,9 +293,19 @@ function AssignmentsManager({ user }: Readonly<{ user: User }>) {
   });
   const rolesRes = useList<Role>({ resource: 'admin/roles', pagination: { pageSize: 200 } });
   const sitesRes = useList<Site>({ resource: 'inventory/sites', pagination: { pageSize: 200 } });
+  // Region + Fabric lookups so the dimension-specific Select can show
+  // human-meaningful names. Without these, region- and fabric-scoped
+  // assignments fall through to a free-text UUID input that nobody
+  // memorizes correctly.
+  const regionsRes = useList<Region>({ resource: 'inventory/regions', pagination: { pageSize: 200 } });
+  const fabricsRes = useList<Fabric>({ resource: 'ipam/fabrics', pagination: { pageSize: 200 } });
   const roles = rolesRes.result.data ?? [];
   const sites = sitesRes.result.data ?? [];
+  const regions = regionsRes.result.data ?? [];
+  const fabrics = fabricsRes.result.data ?? [];
   const sitesById = new Map(sites.map((s) => [s.id, s]));
+  const regionsById = new Map(regions.map((r) => [r.id, r]));
+  const fabricsById = new Map(fabrics.map((f) => [f.id, f]));
 
   const roleOptions: SelectProps.Option[] = roles.map((r) => ({
     value: r.id,
@@ -294,6 +313,12 @@ function AssignmentsManager({ user }: Readonly<{ user: User }>) {
   }));
   const siteOptions: SelectProps.Option[] = sites.map((s) => ({
     value: s.id, label: `${s.code} · ${s.name}`,
+  }));
+  const regionOptions: SelectProps.Option[] = regions.map((r) => ({
+    value: r.id, label: `${r.code} · ${r.name}`,
+  }));
+  const fabricOptions: SelectProps.Option[] = fabrics.map((f) => ({
+    value: f.id, label: `${f.slug} · ${f.name}`,
   }));
 
   const [roleOpt, setRoleOpt] = useState<SelectProps.Option | null>(null);
@@ -340,9 +365,22 @@ function AssignmentsManager({ user }: Readonly<{ user: User }>) {
 
   function describeScope(s: ScopeRow): string {
     if (s.scope_type === 'global') return 'global';
+    // For dimensions whose target_id is a UUID into a known catalog,
+    // resolve to the human-readable code/slug so the badge says
+    // "site:DC1" instead of "site:9b3bf374-…". Falls through to the
+    // raw form when the lookup misses (target list still loading or
+    // the referenced row was deleted out from under us).
     if (s.scope_type === 'site' && s.target_id) {
       const site = sitesById.get(s.target_id);
       if (site) return `site:${site.code}`;
+    }
+    if (s.scope_type === 'region' && s.target_id) {
+      const region = regionsById.get(s.target_id);
+      if (region) return `region:${region.code}`;
+    }
+    if (s.scope_type === 'fabric' && s.target_id) {
+      const fabric = fabricsById.get(s.target_id);
+      if (fabric) return `fabric:${fabric.slug}`;
     }
     return `${s.scope_type}:${s.target_id ?? '*'}`;
   }
@@ -410,14 +448,38 @@ function AssignmentsManager({ user }: Readonly<{ user: User }>) {
                       expandToViewport
                     />
                   )}
-                  {row.scope_type !== 'global' && row.scope_type !== 'site' && (
+                  {row.scope_type === 'region' && (
+                    <Select
+                      placeholder="Pick a region"
+                      selectedOption={regionOptions.find((r) => r.value === row.target_id) ?? null}
+                      onChange={({ detail }) => updateScopeRow(idx, { target_id: detail.selectedOption.value ?? '' })}
+                      options={regionOptions}
+                      expandToViewport
+                    />
+                  )}
+                  {row.scope_type === 'fabric' && (
+                    <Select
+                      placeholder="Pick a fabric"
+                      selectedOption={fabricOptions.find((f) => f.value === row.target_id) ?? null}
+                      onChange={({ detail }) => updateScopeRow(idx, { target_id: detail.selectedOption.value ?? '' })}
+                      options={fabricOptions}
+                      expandToViewport
+                    />
+                  )}
+                  {/* site_group, enclave, organization fall through to
+                      free-text. site_group has no list endpoint yet;
+                      enclave + organization are literal strings (not
+                      UUIDs) by design — see security/scope.py. */}
+                  {(row.scope_type === 'site_group'
+                    || row.scope_type === 'enclave'
+                    || row.scope_type === 'organization') && (
                     <Input
                       value={row.target_id}
                       onChange={({ detail }) => updateScopeRow(idx, { target_id: detail.value })}
                       placeholder={
                         row.scope_type === 'enclave' ? 'enclave name'
                         : row.scope_type === 'organization' ? 'organization label'
-                        : 'uuid'
+                        : 'site group name'
                       }
                     />
                   )}
