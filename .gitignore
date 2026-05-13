@@ -45,3 +45,6 @@ build/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Plan docs the operator is keeping local for now
+.claude/plans/catalog-zones.md
