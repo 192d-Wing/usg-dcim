@@ -589,21 +589,20 @@ async def put_system_dns_settings(
     row = await db.get(SystemSetting, _SYSTEM_KEY_DNS_RECURSIVE_UPSTREAMS)
 
     if normalized is None:
-        # "Reset to default" — drop the override row entirely.
         if row is not None:
             await db.delete(row)
-        action = "system.dns_upstreams.reset"
+        action = "system_dns_upstreams.reset"
         metadata: dict = {}
-    elif row is None:
-        db.add(SystemSetting(
-            key=_SYSTEM_KEY_DNS_RECURSIVE_UPSTREAMS,
-            value=normalized,
-        ))
-        action = "system.dns_upstreams.update"
-        metadata = {"upstreams": normalized}
     else:
-        row.value = normalized
-        action = "system.dns_upstreams.update"
+        if row is None:
+            row = SystemSetting(
+                key=_SYSTEM_KEY_DNS_RECURSIVE_UPSTREAMS,
+                value=normalized,
+            )
+            db.add(row)
+        else:
+            row.value = normalized
+        action = "system_dns_upstreams.update"
         metadata = {"upstreams": normalized}
 
     await audit.record(
@@ -613,4 +612,13 @@ async def put_system_dns_settings(
         metadata=metadata,
     )
     await db.commit()
-    return await get_system_dns_settings(principal, db)
+    return SystemDnsSettingsOut(
+        recursive_upstreams=normalized or list(
+            get_settings().dns_recursive_upstreams,
+        ),
+        override_active=normalized is not None,
+        default_recursive_upstreams=list(
+            get_settings().dns_recursive_upstreams,
+        ),
+        updated_at=row.updated_at if normalized is not None and row is not None else None,
+    )

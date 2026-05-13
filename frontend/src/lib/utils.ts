@@ -5,6 +5,10 @@ export function formatDate(d: string | Date | null | undefined, opts?: Intl.Date
   return date.toLocaleString(undefined, opts ?? { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+export function splitTrimmedLines(text: string): string[] {
+  return text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+
 export function relativeTime(d: string | Date | null | undefined): string {
   if (!d) return '—';
   const date = typeof d === 'string' ? new Date(d) : d;

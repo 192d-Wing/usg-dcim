@@ -27,7 +27,7 @@ import Tabs from '@cloudscape-design/components/tabs';
 
 import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
-import { formatDate } from '@/lib/utils';
+import { formatDate, splitTrimmedLines } from '@/lib/utils';
 
 type User = {
   id: string; email: string; display_name: string | null;
@@ -1114,7 +1114,7 @@ function SystemDnsSettingsTab({ canWrite }: { canWrite: boolean }) {
 
   async function onSave() {
     setSaving(true);
-    const list = draft.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const list = splitTrimmedLines(draft);
     try {
       await http.put('/admin/system/dns-settings', {
         recursive_upstreams: list.length > 0 ? list : null,
@@ -1164,34 +1164,30 @@ function SystemDnsSettingsTab({ canWrite }: { canWrite: boolean }) {
       }
     >
       <SpaceBetween size="m">
-        <Box>
+        <div>
           <Box variant="awsui-key-label">Current effective value</Box>
-          <Box>
-            {s.override_active ? (
-              <Badge color="blue">override active</Badge>
-            ) : (
-              <Badge color="grey">env default</Badge>
-            )}{' '}
-            {s.updated_at && (
-              <Box variant="span" color="text-status-inactive" fontSize="body-s">
-                · last updated {formatDate(s.updated_at)}
-              </Box>
-            )}
-          </Box>
+          {s.override_active ? (
+            <Badge color="blue">override active</Badge>
+          ) : (
+            <Badge color="grey">env default</Badge>
+          )}{' '}
+          {s.updated_at && (
+            <Box variant="span" color="text-status-inactive" fontSize="body-s">
+              · last updated {formatDate(s.updated_at)}
+            </Box>
+          )}
           <Box margin={{ top: 'xs' }}>
             <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
               {s.recursive_upstreams.join(', ')}
             </span>
           </Box>
-        </Box>
-        <Box>
+        </div>
+        <div>
           <Box variant="awsui-key-label">Env-backed default</Box>
-          <Box>
-            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
-              {s.default_recursive_upstreams.join(', ') || <em>(empty)</em>}
-            </span>
-          </Box>
-        </Box>
+          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>
+            {s.default_recursive_upstreams.join(', ') || <em>(empty)</em>}
+          </span>
+        </div>
         {canWrite && (
           <FormField
             label="Override upstreams"

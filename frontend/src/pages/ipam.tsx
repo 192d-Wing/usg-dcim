@@ -20,7 +20,7 @@ import {
 
 import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
-import { formatDate } from '@/lib/utils';
+import { formatDate, splitTrimmedLines } from '@/lib/utils';
 import { CapacityBar } from '@/components/capacity-bar';
 import { toast } from 'sonner';
 import { DnsTab } from '@/components/dns-tab';
@@ -695,11 +695,9 @@ function FabricForm({
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
-    const splitLines = (s: string) =>
-      s.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    const upstreamList = splitLines(upstreams);
-    const denyList = splitLines(denyNetworks);
-    const allowList = splitLines(allowNetworks);
+    const upstreamList = splitTrimmedLines(upstreams);
+    const denyList = splitTrimmedLines(denyNetworks);
+    const allowList = splitTrimmedLines(allowNetworks);
     const body: Record<string, unknown> = {
       name,
       description: description || null,
