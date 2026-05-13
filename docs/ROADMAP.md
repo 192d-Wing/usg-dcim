@@ -47,6 +47,8 @@ Shipped through commit `5478494`:
   Per-neighbor `afi-safis` in the GoBGP config so IPv6 anycast `/128`s
   actually get advertised. RFC 7344 CDS/CDNSKEY auto-propagation
   (per-zone `publish_cds` opt-out, emit at apex for active KSKs).
+  ICMP health-check probes (RFC 792 echo, unprivileged ICMP +
+  CAP_NET_RAW fallback, helm chart wires the cap by default).
 
 ---
 
@@ -60,7 +62,6 @@ captured in `docs/dns/` and recent commits.
 | Item | Why it matters | Notes |
 |---|---|---|
 | **Per-second QPS rate limiting on the recursive** | Hickory 0.26 has no native QPS limiter. The 0037 CIDR ACLs only gate *who* can ask, not *how fast*. | Real options today are out-of-band: nftables hashlimit on the recursive host or a dnsdist sidecar. Revisit when upstream lands a token-bucket. |
-| **ICMP health probes** | Probe targets that don't answer DNS need ICMP as a fallback. Today health checks are DNS-only. | Needs `CAP_NET_RAW` in the worker / collector containers; today it isn't granted. Document the container-perm change before wiring. |
 | **Hickory `allow_networks_strict` upstream PR merge** | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. | PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `infra/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
 | **BIND `primaries` catalog property support** | DCIM emits RFC 9432 §4.2.3 `primaries.<member_id>.zones A/AAAA` records, but BIND 9.20.22 only honors `coo` / `ext` properties — member zones provision as stubs without primaries. Knot DNS 3.4+ and PowerDNS 4.7+ already honor the records. | Wait for BIND to add `primaries`-property support. Until then operators using BIND must declare member zones manually in named.conf; the smoke test `bind9-smoke/named.conf` documents the workaround. |
 
