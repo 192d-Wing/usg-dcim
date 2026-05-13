@@ -54,6 +54,10 @@ class DnsZoneBase(BaseModel):
     # 0 = manual rotation only (operator clicks Rotate ZSK). Otherwise
     # the worker rotates the active ZSK every N days.
     zsk_rotation_days: int = 0
+    # RFC 7344 CDS/CDNSKEY auto-propagation. When signed AND this is
+    # true, the renderer emits CDS + CDNSKEY records at the apex so a
+    # parent zone scanner (RFC 8078) can auto-update its DS RRs.
+    publish_cds: bool = True
 
 
 class DnsZoneCreate(DnsZoneBase):
@@ -70,6 +74,7 @@ class DnsZoneUpdate(BaseModel):
     soa_expire: int | None = None
     soa_minimum: int | None = None
     default_ttl: int | None = None
+    publish_cds: bool | None = None
 
 
 class DnsZoneOut(DnsZoneBase):

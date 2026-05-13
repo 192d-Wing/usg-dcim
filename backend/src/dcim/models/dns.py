@@ -153,6 +153,12 @@ class DnsZone(UUIDPrimaryKey, Timestamped, Base):
     nsec3_salt: Mapped[str | None] = mapped_column(String(64))
     nsec3_iterations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     nsec3_opt_out: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # RFC 7344 CDS / CDNSKEY auto-propagation. When true and `signed`
+    # is true, the renderer emits CDS + CDNSKEY records at the apex
+    # so a parent zone scanner (RFC 8078) can auto-update its DS RRs
+    # on KSK rotation. Operators handling DS handoff manually (e.g.
+    # via portal upload) can flip this to false to suppress.
+    publish_cds: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Operator write lock for maintenance windows. When true every
     # mutation against this zone or its records (record CRUD, BIND
     # import, IPAM sync, DNSSEC operations, NSEC3 toggle, key delete,

@@ -14,6 +14,7 @@ from dcim.models.dns import DnsRecordSource, DnsRecordType, DnsZoneKind
 from dcim.services.dns import (
     bundle_etag,
     render_catalog_zone,
+    render_cdnskey_cds_lines,
     render_corefile_auth,
     render_corefile_recursive,
     render_gobgp_config,
@@ -502,6 +503,102 @@ def test_catalog_zone_primaries_per_member_not_per_zone():
     assert f"primaries.{m2.id.hex}.zones" in text
     # Each member's primaries record is distinct by member_id.
     assert text.count("primaries.") == 2
+
+
+# ---------- RFC 7344 CDNSKEY / CDS ----------
+
+def _real_key(zone_name, role):
+    """Build a SimpleNamespace shaped like a DnsKey row, populated from
+    a real generated keypair. Render functions only read attributes —
+    no SQLAlchemy session needed."""
+    from dcim.models.dns import DnsKeyRole as _Role
+    from dcim.services.dns import generate_dnssec_keypair as _gen
+    mat = _gen(zone_name, _Role.ksk if role == "ksk" else _Role.zsk)
+    return SimpleNamespace(
+        role=mat["role"],
+        algorithm=mat["algorithm"],
+        key_tag=mat["key_tag"],
+        public_key_b64=mat["public_key_b64"],
+        retired_at=None,
+    )
+
+
+def test_cdnskey_cds_empty_when_no_keys():
+    z = SimpleNamespace(name="signed.example.")
+    assert render_cdnskey_cds_lines(z, []) == []
+
+
+def test_cdnskey_cds_emits_pair_per_active_ksk():
+    """Each active KSK produces both a CDNSKEY and a CDS apex record.
+    A single KSK → exactly two lines."""
+    z = SimpleNamespace(name="signed.example.")
+    ksk = _real_key("signed.example.", "ksk")
+    lines = render_cdnskey_cds_lines(z, [ksk])
+    cdnskey = [l for l in lines if "CDNSKEY" in l]
+    cds = [l for l in lines if "CDS" in l and "CDNSKEY" not in l]
+    assert len(cdnskey) == 1
+    assert len(cds) == 1
+
+
+def test_cdnskey_cds_skips_zsk():
+    """RFC 7344 only carries the KSK's key material — the ZSK doesn't
+    appear in the parent's DS, so CDS on a ZSK is meaningless."""
+    z = SimpleNamespace(name="signed.example.")
+    zsk = _real_key("signed.example.", "zsk")
+    assert render_cdnskey_cds_lines(z, [zsk]) == []
+
+
+def test_cdnskey_cds_skips_retired_ksks():
+    """A retired KSK MUST NOT appear in CDS — the parent scanner
+    would keep a dead key alive in DS."""
+    from datetime import UTC, datetime as _dt
+    z = SimpleNamespace(name="signed.example.")
+    retired = _real_key("signed.example.", "ksk")
+    retired.retired_at = _dt(2026, 1, 1, tzinfo=UTC)
+    assert render_cdnskey_cds_lines(z, [retired]) == []
+
+
+def test_cdnskey_cds_records_anchor_at_apex():
+    """Both records sit at `@` (zone apex) per RFC 7344 §4.1."""
+    z = SimpleNamespace(name="signed.example.")
+    ksk = _real_key("signed.example.", "ksk")
+    lines = render_cdnskey_cds_lines(z, [ksk])
+    for line in lines:
+        assert line.startswith("@\t"), f"not at apex: {line!r}"
+
+
+def test_cdnskey_cds_rdata_fields_consistent_with_ds():
+    """The CDS record's (key_tag, algorithm, digest_type=2, digest)
+    fields must match what render_ds_records would compute for the
+    same KSK — that's the whole point of RFC 7344."""
+    from dcim.services.dns import render_ds_records
+    z = SimpleNamespace(name="signed.example.")
+    ksk = _real_key("signed.example.", "ksk")
+    cds_line = next(
+        l for l in render_cdnskey_cds_lines(z, [ksk])
+        if "CDS" in l and "CDNSKEY" not in l
+    )
+    # CDS line shape: "@\tIN\tCDS\t<tag> <alg> 2 <digest>"
+    parts = cds_line.split("\t")[-1].split(" ")
+    cds_tag, cds_alg, cds_dt, cds_digest = parts
+    ds = render_ds_records(z, [ksk])[0]
+    assert int(cds_tag) == ds["key_tag"]
+    assert int(cds_alg) == ds["algorithm"]
+    assert int(cds_dt) == ds["digest_type"]
+    assert cds_digest == ds["digest"]
+
+
+def test_cdnskey_cds_multiple_ksks_emit_one_pair_each():
+    """During a KSK rotation overlap, BOTH active KSKs publish CDS so
+    the parent can pick up the incoming key before the old retires."""
+    z = SimpleNamespace(name="signed.example.")
+    ksk_a = _real_key("signed.example.", "ksk")
+    ksk_b = _real_key("signed.example.", "ksk")
+    lines = render_cdnskey_cds_lines(z, [ksk_a, ksk_b])
+    cdnskey = [l for l in lines if "CDNSKEY" in l]
+    cds = [l for l in lines if "CDS" in l and "CDNSKEY" not in l]
+    assert len(cdnskey) == 2
+    assert len(cds) == 2
 
 
 def test_etag_changes_when_corefile_changes():

@@ -425,6 +425,53 @@ def render_dnssec_key_files(
     return out
 
 
+def render_cdnskey_cds_lines(
+    zone: _HasDnsName, keys: Iterable[DnsKey],
+) -> list[str]:
+    """RFC 7344 CDNSKEY + CDS apex records, one pair per active KSK.
+
+    CDNSKEY mirrors the DNSKEY rdata (flags / protocol=3 / algorithm /
+    public key). CDS uses the same SHA-256 digest of the canonical
+    owner + DNSKEY rdata that `render_ds_records` already computes —
+    we duplicate just enough of that calc here to avoid an extra DB
+    walk through the dict shape.
+
+    Retired KSKs are skipped: a parent scanner SHOULD honor a
+    "delete-DS" only when both CDS and CDNSKEY are present as the
+    RFC 8078 §4 special form, which we don't emit. Emitting a stale
+    KSK's CDS would mislead the scanner into keeping a dead key.
+
+    Returns an empty list when the zone has no active KSKs."""
+    import base64
+    import hashlib
+    out: list[str] = []
+    fqdn = zone.name.rstrip(".") + "."
+    name_wire = b""
+    for label in fqdn.split(".")[:-1]:
+        name_wire += bytes([len(label)]) + label.lower().encode("ascii")
+    name_wire += b"\x00"
+    for key in keys:
+        if key.role != DnsKeyRole.ksk or key.retired_at is not None:
+            continue
+        alg = _DNSSEC_ALG_NUMBER[key.algorithm]
+        flags = _key_flags(key.role)
+        # CDNSKEY @ apex — same wire format as DNSKEY.
+        out.append(
+            f"@\tIN\tCDNSKEY\t{flags} 3 {alg} {key.public_key_b64}"
+        )
+        # CDS @ apex — SHA-256 digest of canonical name + DNSKEY rdata.
+        rdata = (
+            flags.to_bytes(2, "big")
+            + bytes([3, alg])
+            + base64.b64decode(key.public_key_b64)
+        )
+        digest = hashlib.sha256(name_wire + rdata).hexdigest().upper()
+        out.append(
+            f"@\tIN\tCDS\t{key.key_tag} {alg} 2 {digest}"
+        )
+    return out
+
+
 def render_ds_records(zone: _HasDnsName, keys: Iterable[DnsKey]) -> list[dict]:
     """Compute DS records for the zone's KSK(s). DS = digest of the
     canonical owner name (lowercased FQDN with trailing dot) plus the
@@ -678,7 +725,7 @@ def render_zone_file(
         lines.append(_format_record_line(r, zone))
     if extra_lines:
         lines.append("")
-        lines.append("; --- DS records for DCIM-owned child zones ---")
+        lines.append("; --- DS (for DCIM-owned children) + CDS/CDNSKEY (RFC 7344) ---")
         lines.extend(extra_lines)
     lines.append("")
     return "\n".join(lines)
@@ -2114,6 +2161,33 @@ def _anycast_prefixes(anycast: AnycastGroup | None) -> list[str]:
     return out
 
 
+async def _cdnskey_cds_lines_by_zone(
+    db: AsyncSession, zones: Iterable[DnsZone],
+) -> dict[UUID, list[str]]:
+    """RFC 7344 CDNSKEY + CDS lines for every signed zone with
+    `publish_cds=true`. Keyed by zone id so the caller can merge
+    these into the same `extra_lines` slot the parent-DS injection
+    already uses on the zone-file renderer."""
+    eligible = [
+        z for z in zones
+        if getattr(z, "signed", False) and getattr(z, "publish_cds", True)
+    ]
+    if not eligible:
+        return {}
+    keys = list((await db.execute(
+        select(DnsKey).where(DnsKey.zone_id.in_([z.id for z in eligible]))
+    )).scalars().all())
+    keys_by_zone: dict[UUID, list[DnsKey]] = {}
+    for k in keys:
+        keys_by_zone.setdefault(k.zone_id, []).append(k)
+    out: dict[UUID, list[str]] = {}
+    for z in eligible:
+        lines = render_cdnskey_cds_lines(z, keys_by_zone.get(z.id, []))
+        if lines:
+            out[z.id] = lines
+    return out
+
+
 async def _child_ds_lines_by_parent(
     db: AsyncSession, zones: Iterable[DnsZone],
 ) -> dict[UUID, list[str]]:
@@ -2148,6 +2222,27 @@ async def _child_ds_lines_by_parent(
         ).scalars().all()
         for ds in render_ds_records(child, keys):
             out[parent.id].append(ds["rr"])
+    return out
+
+
+async def _zone_extra_lines(
+    db: AsyncSession, zones: Iterable[DnsZone],
+) -> dict[UUID, list[str]]:
+    """Merged per-zone-id extra zone-file lines:
+    - DS records for DCIM-owned signed children (zone as parent)
+    - RFC 7344 CDNSKEY + CDS records (zone as signed child)
+
+    Either source can be empty independently; the merge keeps the
+    bundle-assembler's render_zone_file call to a single extra_lines
+    arg regardless of which mechanism contributed."""
+    zone_list = list(zones)
+    child_ds = await _child_ds_lines_by_parent(db, zone_list)
+    cds = await _cdnskey_cds_lines_by_zone(db, zone_list)
+    out: dict[UUID, list[str]] = {}
+    for z in zone_list:
+        merged = (child_ds.get(z.id) or []) + (cds.get(z.id) or [])
+        if merged:
+            out[z.id] = merged
     return out
 
 
@@ -2186,7 +2281,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         split_files, views_by_zone = await _views_and_zone_files_for_split_horizon(
             db, zones, records_by_zone, unhealthy,
         )
-        child_ds_lines = await _child_ds_lines_by_parent(db, zones)
+        extra_lines_by_zone = await _zone_extra_lines(db, zones)
         zone_files: dict[str, str] = {}
         for z in zones:
             if z.name in views_by_zone:
@@ -2199,7 +2294,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             zone_files[_filename_for_zone(z.name)] = render_zone_file(
                 z, records_by_zone.get(z.id, []),
                 unhealthy_check_ids=unhealthy,
-                extra_lines=child_ds_lines.get(z.id) or None,
+                extra_lines=extra_lines_by_zone.get(z.id) or None,
             )
         zone_files.update(split_files)
         # RFC 9432 catalog zone — one per fabric, served by every
