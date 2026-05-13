@@ -18,7 +18,7 @@
       "publicClient": false,
       "secret": "dev-secret-change-me",
       "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "redirectUris": [
         "http://dcim.prod.dev.mil/*",
         "http://dcim.prod.dev.mil/login/callback",

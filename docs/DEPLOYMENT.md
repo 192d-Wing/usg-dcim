@@ -46,8 +46,9 @@ Helm chart lives at `infra/helm/dcim/`. Provides:
 - `ingest` Deployment + Service (mTLS terminated here)
 - `frontend` Deployment + Service
 - `migrations` Job (run on upgrade)
-- `postgresql` subchart hook (or external HA cluster)
-- `elasticsearch` subchart hook (or external)
+- `postgresql` subchart hook (or external HA cluster) — requires the
+  TimescaleDB extension; the `timescale/timescaledb-ha` image is the
+  drop-in production-grade choice
 - `redis` subchart hook
 - Ingress with TLS
 - ServiceMonitor / PodMonitor for Prometheus scraping
@@ -72,14 +73,65 @@ docker compose --profile sso up -d keycloak
 
 The realm `dcim` is imported from
 [`infra/docker/keycloak-realm.json`](../infra/docker/keycloak-realm.json)
-on first start. It ships with one user (`demo` / `demo`) and the
-client `dcim-spa` already wired with secret `dev-secret-change-me` and
-the redirect URIs the API expects.
+on first start. It ships with two users (`demo` / `demo` and
+`dcim_admin` / `dcim_admin`, both with the `dcim-admin` realm role)
+and the client `dcim-spa` wired with secret `dev-secret-change-me`,
+the redirect URIs the API expects, and the realm-role mapper that
+emits `realm_access.roles` into the ID token. Direct access grants
+are enabled on `dcim-spa` so the validation script below can exercise
+the full chain without driving a browser; production swaps the
+realm seed for one with direct grants off.
 
 Verify the discovery doc is reachable:
 
 ```bash
 curl -s http://localhost:8080/realms/dcim/.well-known/openid-configuration | jq .issuer
+```
+
+End-to-end SSO → capability mapping smoke (mint a token through
+`dcim-spa`, validate audience + issuer + JWKS signature, resolve
+capabilities through `oidc_role_mappings`):
+
+```bash
+ID=$(curl -sfS -X POST \
+  -d client_id=dcim-spa \
+  -d client_secret=dev-secret-change-me \
+  -d username=dcim_admin -d password=dcim_admin \
+  -d grant_type=password -d scope=openid \
+  http://localhost:8080/realms/dcim/protocol/openid-connect/token \
+  | jq -r .id_token)
+
+docker exec -e ID_TOKEN="$ID" docker-api-1 python - <<'PY'
+import asyncio, os, httpx
+from jose import jwt
+from dcim.settings import get_settings
+from dcim.db import async_session
+from dcim.security.scope import caps_from_idp_roles
+
+async def main():
+    s = get_settings()
+    async with httpx.AsyncClient() as c:
+        meta = (await c.get(f"{s.oidc_issuer}/.well-known/openid-configuration")).json()
+        jwks = (await c.get(meta["jwks_uri"])).json()
+    claims = jwt.decode(
+        os.environ["ID_TOKEN"], jwks, algorithms=["RS256"],
+        audience=s.oidc_client_id, issuer=s.oidc_issuer,
+        options={"verify_at_hash": False},
+    )
+    roles = claims.get("realm_access", {}).get("roles", [])
+    async with async_session() as db:
+        caps = await caps_from_idp_roles(db, roles)
+        print("user:", claims["preferred_username"],
+              "roles:", [r for r in roles if r.startswith("dcim")],
+              "caps:", list(caps))
+asyncio.run(main())
+PY
+```
+
+Expected output for `dcim_admin` (EnterpriseAdmin):
+
+```text
+user: dcim_admin roles: ['dcim-admin'] caps: ['*']
 ```
 
 The API is pre-pointed at the Keycloak service in
@@ -141,10 +193,10 @@ smoke before tagging a release.
 
 Common gotchas:
 - The `migrations` Job needs the Postgres subchart healthy first;
-  Helm's wait flag (`--wait --timeout=10m`) is recommended.
-- Elasticsearch's default JVM heap is too large for k3d on a laptop;
-  override with `elasticsearch.esJavaOpts=-Xms512m -Xmx512m` in
-  values.
+  Helm's wait flag (`--wait --timeout=10m`) is recommended. The
+  Postgres image MUST have the TimescaleDB extension preinstalled
+  (`timescale/timescaledb-ha:pg16` or equivalent) — migration 0046
+  fails on stock Postgres.
 - The ServiceMonitor template assumes the Prometheus operator CRDs
   are installed in-cluster. Skip with `--set
   serviceMonitor.enabled=false` if not.
