@@ -37,6 +37,15 @@ Shipped through commit `5478494`:
   IP search. Kea DHCP lease ingest. VXLAN/GENEVE overlay tracking
   (Overlay → VNI → VTEP), subnet→L2-VNI binding. Drag-and-drop subnet
   reparenting in the supernet tree.
+- DNS: authoritative + recursive split, Hickory migration on the recursive,
+  DoT/DoH end-to-end, NSEC3, apex DNSSEC delegation, per-fabric CIDR ACLs
+  (with `allow_networks_strict` for Hickory), zone freeze/unfreeze write
+  lock, runtime-editable system upstream forwarders, top-names in query
+  metrics. RFC 9432 catalog zones fully shipped (model + renderer +
+  per-fabric AXFR ACL + catalog DNSSEC + UI sub-panel + BIND 9.20
+  consumer smoke test + RFC 9432 §4.2.3 `primaries` property records).
+  Per-neighbor `afi-safis` in the GoBGP config so IPv6 anycast `/128`s
+  actually get advertised.
 
 ---
 
@@ -50,13 +59,10 @@ captured in `docs/dns/` and recent commits.
 | Item | Why it matters | Notes |
 |---|---|---|
 | **Per-second QPS rate limiting on the recursive** | Hickory 0.26 has no native QPS limiter. The 0037 CIDR ACLs only gate *who* can ask, not *how fast*. | Real options today are out-of-band: nftables hashlimit on the recursive host or a dnsdist sidecar. Revisit when upstream lands a token-bucket. |
-| **Zone freeze / unfreeze (maintenance-window write lock)** | An operator running a planned change needs to block accidental writes to the zone. Today record mutation is unconditional. | Mirror the existing maintenance-window model; add a `frozen: bool` on `DnsZone` that 4xx's mutations while true, with audit. |
-| **Anycast IPv6 advertisement via gobgpd** | Model already carries v6 anycast addrs; the gobgpd renderer only emits v4 neighbors/prefixes. | Extend `render_gobgp_config` to emit per-AFI families. Verify against a v6 leaf. |
-| **Catalog zones (RFC 9432)** | Adding/removing zones across many servers today touches each server's bundle. Catalog zones let one zone drive that fanout. | Requires both auth + recursive support and a model for the "catalog of zones." Defer until we run at >50 servers. |
 | **ICMP health probes** | Probe targets that don't answer DNS need ICMP as a fallback. Today health checks are DNS-only. | Needs `CAP_NET_RAW` in the worker / collector containers; today it isn't granted. Document the container-perm change before wiring. |
 | **CDNSKEY / CDS auto-propagation (RFC 7344)** | Automates DS upload to a parent that supports CDS scanning. Useful at scale; today operators upload DS manually after KSK rotation. | Defer — only matters when the parent zones we delegate from support CDS, which most DoD-internal parents don't yet. |
-| **System-wide upstream forwarders editor** | Today the system-default `dns_recursive_upstreams` lives in `settings.py` and requires a config redeploy to change. The per-fabric override has a UI; the system default doesn't. | Settings page → DNS tab. Same shape as the per-fabric textarea, writes back to a `system_settings` row. |
-| **Hickory `allow_networks` upstream enforcement gap** | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but doesn't enforce it on UDP. DCIM-side wiring is correct. | Track upstream PR/release; document the gap in the operator guide (done) and revisit when a fixed Hickory release lands. |
+| **Hickory `allow_networks_strict` upstream PR merge** | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. | PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `infra/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
+| **BIND `primaries` catalog property support** | DCIM emits RFC 9432 §4.2.3 `primaries.<member_id>.zones A/AAAA` records, but BIND 9.20.22 only honors `coo` / `ext` properties — member zones provision as stubs without primaries. Knot DNS 3.4+ and PowerDNS 4.7+ already honor the records. | Wait for BIND to add `primaries`-property support. Until then operators using BIND must declare member zones manually in named.conf; the smoke test `bind9-smoke/named.conf` documents the workaround. |
 
 ---
 
@@ -223,4 +229,4 @@ These come up but we're not chasing them:
 
 ---
 
-*Last updated: 2026-05-10. Edit me as plans change.*
+*Last updated: 2026-05-12. Edit me as plans change.*
