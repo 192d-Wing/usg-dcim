@@ -4939,21 +4939,28 @@ function AnycastForm({
 // =====================================================================
 
 function snippetBind9(catalogName: string, authIp: string): string {
-  return `// named.conf — add to options {} block:
+  return `// named.conf (BIND 9.20+)
+// In 9.20 the inner default-primaries block was removed; use bare zone:
 options {
-    catalog-zones {
-        zone "${catalogName}" {
-            default-masters { ${authIp}; };
-        };
-    };
+    catalog-zones { zone "${catalogName}"; };
 };
 
-// named.conf — declare the catalog zone itself:
+// The catalog zone is declared as a secondary — BIND AXFRs it
+// and auto-provisions all member zones listed inside.
 zone "${catalogName}" {
     type secondary;
     primaries { ${authIp}; };
     allow-transfer { none; };
-};`;
+};
+
+// BIND 9.16–9.19 used the inner block form instead:
+// options {
+//     catalog-zones {
+//         zone "${catalogName}" {
+//             default-primaries { ${authIp}; };
+//         };
+//     };
+// };`;
 }
 
 function snippetKnot(catalogName: string, authIp: string): string {
