@@ -29,7 +29,6 @@ spec:
           env:
             - { name: DCIM_COLLECTOR_MTLS_REQUIRED, value: {{ .Values.ingest.mtls.enabled | quote }} }
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
-            - { name: DCIM_ELASTIC_URL,  value: {{ .Values.elasticsearch.url | quote }} }
             - { name: DCIM_REDIS_DSN,    value: {{ .Values.redis.dsn | quote }} }
           resources:
             {{- toYaml .Values.ingest.resources | nindent 12 }}

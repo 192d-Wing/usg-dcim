@@ -29,7 +29,6 @@ spec:
               containerPort: 8000
           env:
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
-            - { name: DCIM_ELASTIC_URL,  value: {{ .Values.elasticsearch.url | quote }} }
             - { name: DCIM_REDIS_DSN,    value: {{ .Values.redis.dsn | quote }} }
             - name: DCIM_JWT_SECRET
               valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_secret } }

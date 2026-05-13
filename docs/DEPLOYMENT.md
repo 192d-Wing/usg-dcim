@@ -47,8 +47,13 @@ Helm chart lives at `infra/helm/dcim/`. Provides:
 - `frontend` Deployment + Service
 - `migrations` Job (run on upgrade)
 - `postgresql` subchart hook (or external HA cluster) — requires the
-  TimescaleDB extension; the `timescale/timescaledb-ha` image is the
-  drop-in production-grade choice
+  TimescaleDB extension preloaded via
+  `shared_preload_libraries = 'timescaledb'`. The
+  `timescale/timescaledb-ha` image sets this on first init; if you are
+  upgrading an existing Postgres volume that did NOT have the extension
+  preloaded, run `ALTER SYSTEM SET shared_preload_libraries =
+  'timescaledb'` and restart the cluster BEFORE applying migration 0046,
+  or the CREATE EXTENSION call dies mid-statement
 - `redis` subchart hook
 - Ingress with TLS
 - ServiceMonitor / PodMonitor for Prometheus scraping

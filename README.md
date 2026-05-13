@@ -31,7 +31,7 @@ usg-dcim/
 ## Quick start (local dev)
 
 ```bash
-make up          # docker-compose with postgres, elastic, redis, api, worker, frontend
+make up          # docker-compose with postgres (TimescaleDB), redis, api, worker, frontend
 make migrate     # apply Alembic migrations
 make seed        # seed a small enterprise (3 regions, 6 sites, racks, devices)
 make collector   # run a sample collector against the seeded site
