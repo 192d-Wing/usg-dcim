@@ -1089,6 +1089,11 @@ function SupernetTreeTab({
   );
   // Dragged subnet for the overlay and the green/red ring on candidates.
   const [draggingSubnet, setDraggingSubnet] = useState<Subnet | null>(null);
+  // Dragged supernet — symmetric with draggingSubnet for the supernet→
+  // supernet reparent flow. Mutually exclusive with draggingSubnet; the
+  // drag handlers only set one at a time keyed off the draggable id
+  // prefix (subnet:* vs supernet:*).
+  const [draggingSupernet, setDraggingSupernet] = useState<Supernet | null>(null);
   // Most-recent valid drop target — drives the optimistic highlight in
   // SupernetNode without forcing every node to re-subscribe to onDragOver.
   const [hoverTargetId, setHoverTargetId] = useState<string | null>(null);
@@ -1104,8 +1109,9 @@ function SupernetTreeTab({
 
   function onDragStart(e: DragStartEvent) {
     const id = String(e.active.id);
-    const subnet = (e.active.data.current as { subnet?: Subnet })?.subnet;
-    if (id.startsWith('subnet:') && subnet) setDraggingSubnet(subnet);
+    const data = e.active.data.current as { subnet?: Subnet; supernet?: Supernet } | undefined;
+    if (id.startsWith('subnet:') && data?.subnet) setDraggingSubnet(data.subnet);
+    if (id.startsWith('supernet:') && data?.supernet) setDraggingSupernet(data.supernet);
   }
 
   function onDragOver(e: DragOverEvent) {
@@ -1140,22 +1146,48 @@ function SupernetTreeTab({
   async function onDragEnd(e: DragEndEvent) {
     clearHoverExpand();
     const subnet = draggingSubnet;
+    const supernet = draggingSupernet;
     setDraggingSubnet(null);
+    setDraggingSupernet(null);
     setHoverTargetId(null);
-    if (!subnet) return;
     const overId = e.over?.id ? String(e.over.id) : null;
     if (!overId || !overId.startsWith('supernet:')) return;
     const targetSupernetId = overId.slice('supernet:'.length);
-    if (targetSupernetId === subnet.supernet_id) return;
 
-    try {
-      await http.patch(`/ipam/subnets/${subnet.id}`, { supernet_id: targetSupernetId });
-      toast.success(`Moved ${subnet.prefix}`);
-      await refreshSubnets(subnet.supernet_id);
-      await refreshSubnets(targetSupernetId);
-      await qc.invalidateQueries({ queryKey: ['child-supernets'] });
-    } catch (err: any) {
-      toast.error(err?.message ?? 'move failed');
+    if (subnet) {
+      if (targetSupernetId === subnet.supernet_id) return;
+      try {
+        await http.patch(`/ipam/subnets/${subnet.id}`, { supernet_id: targetSupernetId });
+        toast.success(`Moved ${subnet.prefix}`);
+        await refreshSubnets(subnet.supernet_id);
+        await refreshSubnets(targetSupernetId);
+        await qc.invalidateQueries({ queryKey: ['child-supernets'] });
+      } catch (err: any) {
+        toast.error(err?.message ?? 'move failed');
+      }
+      return;
+    }
+
+    if (supernet) {
+      // Self-drop and same-parent are no-ops; the backend would also
+      // reject self-parent but cheap to bail out here.
+      if (targetSupernetId === supernet.id) return;
+      if (targetSupernetId === supernet.parent_supernet_id) return;
+      try {
+        await http.patch(`/ipam/supernets/${supernet.id}`, {
+          parent_supernet_id: targetSupernetId,
+        });
+        toast.success(`Moved ${supernet.prefix}`);
+        // Both the old parent and new parent need their children lists
+        // re-fetched. Plus the top-level list in case the old parent
+        // was null (re-parenting from root).
+        await qc.invalidateQueries({ queryKey: ['child-supernets'] });
+        await qc.invalidateQueries({ queryKey: ['supernets-top'] });
+      } catch (err: any) {
+        // Backend rejects parent=self and CIDR-non-containment with
+        // clear messages; surface verbatim.
+        toast.error(err?.message ?? 'reparent failed');
+      }
     }
   }
 
@@ -1176,7 +1208,12 @@ function SupernetTreeTab({
         onDragStart={onDragStart}
         onDragOver={onDragOver}
         onDragEnd={onDragEnd}
-        onDragCancel={() => { setDraggingSubnet(null); setHoverTargetId(null); clearHoverExpand(); }}
+        onDragCancel={() => {
+          setDraggingSubnet(null);
+          setDraggingSupernet(null);
+          setHoverTargetId(null);
+          clearHoverExpand();
+        }}
       >
         <Container disableContentPaddings>
           <table style={TREE_TABLE_STYLE}>
@@ -1208,6 +1245,7 @@ function SupernetTreeTab({
                   sitesById={sitesById}
                   canWrite={canWrite}
                   draggingSubnet={draggingSubnet}
+                  draggingSupernet={draggingSupernet}
                   hoverTargetId={hoverTargetId}
                   onSelectSubnet={onSelectSubnet}
                   onAddSubnet={(s) => setCreateSubnetFor(s)}
@@ -1225,7 +1263,7 @@ function SupernetTreeTab({
           )}
         </Container>
         <DragOverlay dropAnimation={{ duration: 150 }}>
-          {draggingSubnet ? (
+          {(draggingSubnet || draggingSupernet) ? (
             <div style={{
               padding: '6px 12px',
               fontSize: 14,
@@ -1235,15 +1273,17 @@ function SupernetTreeTab({
               boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
             }}>
               <span style={{ fontFamily: 'ui-monospace, monospace', fontWeight: 500 }}>
-                {draggingSubnet.prefix}
+                {(draggingSubnet ?? draggingSupernet)!.prefix}
               </span>
-              {draggingSubnet.name && (
+              {(draggingSubnet?.name ?? draggingSupernet?.name) && (
                 <span style={{ marginLeft: 8, color: colorTextStatusInactive }}>
-                  {draggingSubnet.name}
+                  {draggingSubnet?.name ?? draggingSupernet?.name}
                 </span>
               )}
               <span style={{ marginLeft: 8, fontSize: 12, color: colorTextStatusInactive }}>
-                drop on a supernet to move
+                {draggingSubnet
+                  ? 'drop on a supernet to move'
+                  : 'drop on a parent supernet to reparent'}
               </span>
             </div>
           ) : null}
@@ -1354,7 +1394,7 @@ function SupernetTreeTab({
 
 function SupernetNode({
   supernet, depth, expanded, onToggle, sitesById, canWrite,
-  draggingSubnet, hoverTargetId,
+  draggingSubnet, draggingSupernet, hoverTargetId,
   onSelectSubnet, onAddSubnet, onAddChildSupernet, onEditSupernet, onEditSubnet,
 }: Readonly<{
   supernet: Supernet;
@@ -1364,6 +1404,7 @@ function SupernetNode({
   sitesById: Map<string, Site>;
   canWrite: boolean;
   draggingSubnet: Subnet | null;
+  draggingSupernet: Supernet | null;
   hoverTargetId: string | null;
   onSelectSubnet: (subnetId: string) => void;
   onAddSubnet: (sn: Supernet) => void;
@@ -1389,16 +1430,52 @@ function SupernetNode({
     : null;
 
   const { setNodeRef: setDropRef } = useDroppable({ id: `supernet:${supernet.id}` });
+  // Make the row itself draggable for supernet→supernet reparenting.
+  // The MouseSensor's distance activation (6px in the parent's sensor
+  // config) keeps single clicks routing through onClick → onToggle.
+  // Disabled when canWrite is false so read-only operators never start
+  // a drag that would 403 on PATCH anyway.
+  const {
+    attributes: dragAttributes,
+    listeners: dragListeners,
+    setNodeRef: setDragRef,
+    isDragging: isDraggingSelf,
+  } = useDraggable({
+    id: `supernet:${supernet.id}`,
+    data: { supernet },
+    disabled: !canWrite,
+  });
+  // Compose the row's ref so it acts as BOTH a droppable target AND
+  // a draggable source. Both hooks need a node reference; setRef calls
+  // each in turn.
+  const setRowRef = (node: HTMLTableRowElement | null) => {
+    setDropRef(node);
+    setDragRef(node);
+  };
 
-  const isDragging = draggingSubnet !== null;
+  const isDragging = draggingSubnet !== null || draggingSupernet !== null;
   const isOver = hoverTargetId === supernet.id;
-  const isSelf = isDragging && draggingSubnet?.supernet_id === supernet.id;
-  const fits = isDragging && draggingSubnet
-    ? cidrContains(supernet.prefix, draggingSubnet.prefix)
-    : false;
-  const isValidTarget = isDragging && !isSelf && fits;
+  // Validity differs by dragged kind:
+  //   subnet:   target must contain the subnet's prefix AND not be its
+  //             current parent.
+  //   supernet: target must contain the supernet's own prefix, not be
+  //             the supernet itself, and not be its current parent.
+  let isValidTarget = false;
+  if (draggingSubnet) {
+    const sameParent = draggingSubnet.supernet_id === supernet.id;
+    const fits = cidrContains(supernet.prefix, draggingSubnet.prefix);
+    isValidTarget = !sameParent && fits;
+  } else if (draggingSupernet) {
+    const sameNode = draggingSupernet.id === supernet.id;
+    const sameParent = draggingSupernet.parent_supernet_id === supernet.id;
+    const fits = cidrContains(supernet.prefix, draggingSupernet.prefix);
+    isValidTarget = !sameNode && !sameParent && fits;
+  }
 
-  let rowStyle: React.CSSProperties = { cursor: 'pointer' };
+  let rowStyle: React.CSSProperties = { cursor: canWrite ? 'grab' : 'pointer' };
+  // Dim the row that's actively being dragged so the operator's eye
+  // follows the drag overlay, not the source.
+  if (isDraggingSelf) rowStyle = { ...rowStyle, opacity: 0.3 };
   if (isOver && isValidTarget) {
     rowStyle = { ...rowStyle, boxShadow: `inset 0 0 0 2px ${colorTextStatusSuccess}`, background: 'rgba(3, 127, 12, 0.05)' };
   } else if (isOver && isDragging) {
@@ -1410,7 +1487,9 @@ function SupernetNode({
   return (
     <Fragment>
       <tr
-        ref={setDropRef}
+        ref={setRowRef}
+        {...dragAttributes}
+        {...dragListeners}
         style={rowStyle}
         onClick={() => onToggle(supernet.id)}
       >
@@ -1462,6 +1541,7 @@ function SupernetNode({
               sitesById={sitesById}
               canWrite={canWrite}
               draggingSubnet={draggingSubnet}
+              draggingSupernet={draggingSupernet}
               hoverTargetId={hoverTargetId}
               onSelectSubnet={onSelectSubnet}
               onAddSubnet={onAddSubnet}
