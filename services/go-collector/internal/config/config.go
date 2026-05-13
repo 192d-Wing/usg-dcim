@@ -26,19 +26,51 @@ type Mtls struct {
 	CABundle   string `yaml:"ca_bundle,omitempty"`
 }
 
-// Driver-specific configs. Phase 1 keeps them as opaque maps so the
-// YAML round-trips through the buffer unchanged; Phase 2 promotes the
-// fields each driver actually needs into typed structs.
+// SNMPConfig mirrors the SnmpDriverConfig pydantic model. Version is a
+// string ("1", "2c", "3") because the YAML the Python collector reads
+// uses string-quoted versions and we want config-file parity. v3 is
+// accepted at parse time but rejected at poll time until the auth flow
+// lands in a later phase.
+type SNMPConfig struct {
+	Host      string            `yaml:"host"`
+	Port      int               `yaml:"port"`
+	Community string            `yaml:"community"`
+	Version   string            `yaml:"version"`
+	OIDs      map[string]string `yaml:"oids"`
+}
+
+// RedfishConfig mirrors RedfishDriverConfig. password is preferred over
+// password_ref in Phase 2 — refs (Vault / secret-store lookup) land
+// with the broader credentials story later.
+type RedfishConfig struct {
+	BaseURL     string `yaml:"base_url"`
+	Username    string `yaml:"username"`
+	PasswordRef string `yaml:"password_ref,omitempty"`
+	Password    string `yaml:"password,omitempty"`
+	VerifyTLS   *bool  `yaml:"verify_tls,omitempty"`
+}
+
 type Device struct {
-	AssetID            uuid.UUID              `yaml:"asset_id"`
-	Kind               string                 `yaml:"kind"`
-	Driver             string                 `yaml:"driver"`
-	PollIntervalSecs   int                    `yaml:"poll_interval_seconds"`
-	SNMP               map[string]any         `yaml:"snmp,omitempty"`
-	Redfish            map[string]any         `yaml:"redfish,omitempty"`
-	Modbus             map[string]any         `yaml:"modbus,omitempty"`
-	REST               map[string]any         `yaml:"rest,omitempty"`
-	IPMI               map[string]any         `yaml:"ipmi,omitempty"`
+	AssetID            uuid.UUID      `yaml:"asset_id"`
+	Kind               string         `yaml:"kind"`
+	Driver             string         `yaml:"driver"`
+	PollIntervalSecs   int            `yaml:"poll_interval_seconds"`
+	SNMP               *SNMPConfig    `yaml:"snmp,omitempty"`
+	Redfish            *RedfishConfig `yaml:"redfish,omitempty"`
+	// Modbus / REST / IPMI stay as opaque maps for Phase 2 — drivers
+	// promoted to typed structs as they're implemented.
+	Modbus  map[string]any `yaml:"modbus,omitempty"`
+	REST    map[string]any `yaml:"rest,omitempty"`
+	IPMI    map[string]any `yaml:"ipmi,omitempty"`
+}
+
+// RedfishVerifyTLS returns the effective verify-TLS flag. Defaults to
+// true when the YAML field is absent — matches the Python collector.
+func (r *RedfishConfig) RedfishVerifyTLS() bool {
+	if r.VerifyTLS == nil {
+		return true
+	}
+	return *r.VerifyTLS
 }
 
 type Config struct {

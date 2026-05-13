@@ -19,6 +19,8 @@ import (
 
 	"github.com/usg-dcim/services/go-collector/internal/buffer"
 	"github.com/usg-dcim/services/go-collector/internal/config"
+	"github.com/usg-dcim/services/go-collector/internal/drivers/redfish"
+	"github.com/usg-dcim/services/go-collector/internal/drivers/snmp"
 )
 
 // Poller is the per-device worker. One instance per Device row in
@@ -30,12 +32,22 @@ type Poller interface {
 	Kind() string
 }
 
-// Build instantiates a Poller for the given device, or returns an error
-// if the driver isn't registered yet. Phase 1 returns a stub for every
-// known driver so the main loop wiring is exercised end-to-end.
+// Build instantiates a Poller for the given device. Phase 2 ships real
+// SNMP and Redfish; modbus / rest / ipmi keep their stubs until their
+// own phase lands.
 func Build(d config.Device, log *slog.Logger) (Poller, error) {
 	switch d.Driver {
-	case "snmp", "redfish", "modbus", "rest", "ipmi":
+	case "snmp":
+		if d.SNMP == nil {
+			return nil, fmt.Errorf("snmp driver requires snmp: block")
+		}
+		return snmp.New(&d, log), nil
+	case "redfish":
+		if d.Redfish == nil {
+			return nil, fmt.Errorf("redfish driver requires redfish: block")
+		}
+		return redfish.New(&d, log), nil
+	case "modbus", "rest", "ipmi":
 		return &stub{driver: d.Driver, asset: d.AssetID.String(), log: log}, nil
 	default:
 		return nil, fmt.Errorf("unknown driver %q", d.Driver)
