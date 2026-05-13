@@ -24,13 +24,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [python, javascript-typescript]
+        language: [python, javascript-typescript, go]
     steps:
       - uses: actions/checkout@v4
+
+      # Go needs an explicit toolchain set up before init() so the
+      # CodeQL extractor can resolve module dependencies. The version
+      # tracks the go.mod's `go` directive in infra/coredns-nsec3sign.
+      - if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: infra/coredns-nsec3sign/go.mod
+
       - uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
           queries: security-extended
+
+      # The Go module lives under infra/coredns-nsec3sign; autobuild
+      # from repo root would no-op. Build explicitly so the extractor
+      # captures the call graph.
+      - if: matrix.language == 'go'
+        working-directory: infra/coredns-nsec3sign
+        run: go build ./...
+
       - uses: github/codeql-action/analyze@v3
         with:
           category: /language:${{ matrix.language }}

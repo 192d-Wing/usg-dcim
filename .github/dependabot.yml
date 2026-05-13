@@ -43,6 +43,21 @@ updates:
       tooling:
         dependency-type: "development"
 
+  # Go module — custom CoreDNS nsec3sign plugin. Group CoreDNS bumps
+  # to a single PR; miekg/dns surfaces separately because it often
+  # needs a coordinated CoreDNS update.
+  - package-ecosystem: "gomod"
+    directory: "/infra/coredns-nsec3sign"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      coredns:
+        patterns: ["github.com/coredns/*"]
+      dns:
+        patterns: ["github.com/miekg/dns"]
+
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
