@@ -43,3 +43,28 @@ Swap the `coredns-recursive` service's image in
 renderer will emit this when it knows the recursive needs it; until
 then, operators can append the line manually or just wait for the
 Phase B renderer change).
+
+## Building from a local checkout (testing upstream PRs)
+
+`Dockerfile.local` builds Hickory from a local workspace checkout
+instead of cloning the pinned upstream tag. Used today to pilot the
+upstream strict-allowlist PR ahead of its merge; remove the
+override and this Dockerfile once the PR lands and a real release
+tag is cut.
+
+```bash
+# From the repo root. Expects a hickory-dns workspace checkout at
+# the sibling path `../../../hickory-dns` (override with
+# LOCAL_HICKORY_PATH=...).
+make -C infra/hickory-prom local-build   # builds :v0.26.0-strict-dev
+make -C infra/hickory-prom local-push    # builds + pushes to ghcr
+```
+
+The strict-dev tag is intentionally distinct from the release
+tags (`v0.26.0-N`) so a stale local build can't be deployed as
+"the release image" by mistake.
+
+Operators on the patched image can then opt in by setting
+`DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT=true` in their compose env
+— see `docs/dns/operator-guide.md` → Recursive client access
+control → Strict allowlist mode for the four-case behavior table.
