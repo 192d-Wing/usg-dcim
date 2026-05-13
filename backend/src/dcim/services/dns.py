@@ -690,6 +690,7 @@ def render_catalog_zone(
     *,
     default_ttl: int = 3600,
     serial: int | None = None,
+    primaries: list[str] | None = None,
 ) -> str:
     """Emit an RFC 9432 §4 catalog zone in BIND text. Members are
     sorted by name for deterministic etag, with frozen zones already
@@ -707,6 +708,12 @@ def render_catalog_zone(
              consumers MAY use this to detect member changes when
              the catalog's SOA serial didn't bump (e.g. unrelated
              member updated).
+
+    When `primaries` is supplied, each member also gets
+    `primaries.<id>.zones A/AAAA <ip>` property records (RFC 9432
+    §4.2.3). Consumers use these to discover which server to AXFR
+    each member zone from — without them, BIND 9.20+ provisions the
+    member-zone stubs but cannot fetch zone data.
 
     `serial` defaults to the max(updated_at) across members so the
     SOA bumps whenever ANY member changes. Caller can pin it for
@@ -747,17 +754,34 @@ def render_catalog_zone(
         lines.append("")
         lines.append("; --- per-member properties (RFC 9432 §5) ---")
         for z in member_list:
-            member_id = z.id.hex
-            group = getattr(z, "_group", None) or _catalog_group_for(z)
-            epoch = int(z.updated_at.timestamp())
-            lines.append(
-                f'group.{member_id}.zones\tIN\tTXT\t"{group}"'
-            )
-            lines.append(
-                f'epoch.{member_id}.zones\tIN\tTXT\t"{epoch}"'
-            )
+            lines.extend(_catalog_member_property_lines(z, primaries))
     lines.append("")
     return "\n".join(lines)
+
+
+def _catalog_member_property_lines(
+    zone: DnsZone,
+    primaries: list[str] | None,
+) -> list[str]:
+    """RFC 9432 §5 property records for a single catalog member:
+    group TXT, epoch TXT, and (when primaries supplied) A/AAAA
+    primaries records so BIND 9.20+ can AXFR the member zone."""
+    member_id = zone.id.hex
+    group = getattr(zone, "_group", None) or _catalog_group_for(zone)
+    epoch = int(zone.updated_at.timestamp())
+    out = [
+        f'group.{member_id}.zones\tIN\tTXT\t"{group}"',
+        f'epoch.{member_id}.zones\tIN\tTXT\t"{epoch}"',
+    ]
+    for ip_str in (primaries or []):
+        bare = ip_str.split("/", 1)[0]
+        try:
+            addr = ipaddress.ip_address(bare)
+        except ValueError:
+            continue
+        rtype = "AAAA" if addr.version == 6 else "A"
+        out.append(f"primaries.{member_id}.zones\tIN\t{rtype}\t{addr}")
+    return out
 
 
 def _catalog_group_for(zone: DnsZone) -> str:
@@ -1463,15 +1487,21 @@ def render_gobgp_config(
     0 — GoBGP will reject the config, surfacing the bad reference at
     render time instead of silently advertising into nowhere."""
     peer_list = list(peers)
-    neighbors = [
-        {
+    neighbors = []
+    for p in peer_list:
+        addr = str(p.peer_ip).split("/", 1)[0]
+        # GoBGP defaults to ipv4-unicast when afi-safis is absent. IPv6
+        # peers require an explicit afi-safi declaration or gobgpd will
+        # not open the IPv6 AFI in OPEN and prefix advertisement silently
+        # fails. We always emit it so configs are uniform and auditable.
+        afi = "ipv6-unicast" if ":" in addr else "ipv4-unicast"
+        neighbors.append({
             "config": {
-                "neighbor-address": str(p.peer_ip).split("/", 1)[0],
+                "neighbor-address": addr,
                 "peer-as": peer_asns.get(p.peer_asn_id, 0),
             },
-        }
-        for p in peer_list
-    ]
+            "afi-safis": [{"config": {"afi-safi-name": afi}}],
+        })
     # gobgpd's config file schema only accepts `global`, `neighbors`,
     # `defined-sets`, and `policy-definitions`. Prefix advertisement
     # (the anycast /32 and /128) is a runtime operation against the
@@ -1681,7 +1711,12 @@ async def _add_catalog_zone_files(
     Membership rule: every DnsZone in the fabric with kind in
     {apex, site, reverse} and `frozen=false`. Frozen zones are
     elided so a mid-maintenance zone doesn't propagate to
-    consumers that would then try to AXFR an offline pod."""
+    consumers that would then try to AXFR an offline pod.
+
+    Auth server unicast IPs are injected as RFC 9432 §4.2.3
+    `primaries.<member_id>.zones A/AAAA` property records so
+    consumers (BIND 9.20+) know which server to AXFR each member
+    zone from."""
     from ..models.dns import DnsCatalogZone  # noqa: PLC0415
     catalog = (
         await db.execute(
@@ -1697,7 +1732,20 @@ async def _add_catalog_zone_files(
         z for z in zones
         if not getattr(z, "frozen", False)
     ]
-    text = render_catalog_zone(catalog.name, members)
+    # Collect auth server IPs for primaries property records.
+    auth_servers = (await db.execute(
+        select(DnsServer).where(
+            DnsServer.fabric_id == fabric_id,
+            DnsServer.role == DnsServerRole.auth,
+            DnsServer.enabled.is_(True),
+        )
+    )).scalars().all()
+    primaries = [
+        str(s.unicast_ip).split("/", 1)[0]
+        for s in auth_servers
+        if s.unicast_ip
+    ] or None
+    text = render_catalog_zone(catalog.name, members, primaries=primaries)
     zone_files[_filename_for_zone(catalog.name)] = text
     return catalog.name
 

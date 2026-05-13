@@ -13,6 +13,7 @@ from uuid import uuid4
 from dcim.models.dns import DnsRecordSource, DnsRecordType, DnsZoneKind
 from dcim.services.dns import (
     bundle_etag,
+    render_catalog_zone,
     render_corefile_auth,
     render_corefile_recursive,
     render_gobgp_config,
@@ -362,9 +363,145 @@ def test_gobgp_config_has_neighbor():
     assert cfg["global"]["config"]["router-id"] == "10.42.0.53"
     assert cfg["neighbors"][0]["config"]["neighbor-address"] == "10.42.255.1"
     assert cfg["neighbors"][0]["config"]["peer-as"] == 65001
+    # IPv4 peer must carry explicit ipv4-unicast afi-safi.
+    assert cfg["neighbors"][0]["afi-safis"] == [
+        {"config": {"afi-safi-name": "ipv4-unicast"}}
+    ]
     # MD5 password / static-route stanzas intentionally absent.
     assert "static-routes" not in cfg
     assert "auth-password" not in cfg["neighbors"][0]["config"]
+
+
+def test_gobgp_config_ipv6_peer_gets_ipv6_unicast_afi():
+    """An IPv6 neighbor address must result in `ipv6-unicast` afi-safi.
+    Without the explicit declaration GoBGP will not open the IPv6 AFI
+    in OPEN and anycast /128 advertisement silently fails."""
+    server = SimpleNamespace(unicast_ip="10.42.0.53", id=uuid4())
+    v6_peer = SimpleNamespace(
+        id=uuid4(), peer_asn_id=uuid4(), peer_ip="2001:db8::1",
+    )
+    cfg = render_gobgp_config(
+        server=server,
+        peers=[v6_peer],
+        peer_asns={v6_peer.peer_asn_id: 65002},
+        local_asn=4_200_000_000,
+    )
+    nb = cfg["neighbors"][0]
+    assert nb["config"]["neighbor-address"] == "2001:db8::1"
+    assert nb["afi-safis"] == [{"config": {"afi-safi-name": "ipv6-unicast"}}]
+
+
+def test_gobgp_config_mixed_peers_get_correct_afis():
+    """A dual-stack peer list emits per-neighbor AFI based on address
+    family — v4 peer gets ipv4-unicast, v6 peer gets ipv6-unicast."""
+    server = SimpleNamespace(unicast_ip="10.42.0.53", id=uuid4())
+    v4_asn_id = uuid4()
+    v6_asn_id = uuid4()
+    peers = [
+        SimpleNamespace(id=uuid4(), peer_asn_id=v4_asn_id, peer_ip="192.0.2.1"),
+        SimpleNamespace(id=uuid4(), peer_asn_id=v6_asn_id, peer_ip="2001:db8::2"),
+    ]
+    cfg = render_gobgp_config(
+        server=server,
+        peers=peers,
+        peer_asns={v4_asn_id: 64512, v6_asn_id: 64513},
+        local_asn=65000,
+    )
+    afis = {
+        nb["config"]["neighbor-address"]: nb["afi-safis"][0]["config"]["afi-safi-name"]
+        for nb in cfg["neighbors"]
+    }
+    assert afis["192.0.2.1"] == "ipv4-unicast"
+    assert afis["2001:db8::2"] == "ipv6-unicast"
+
+
+def _catalog_zone(name="catalog.prod.example.", **kwargs):
+    base = {"id": uuid4(), "updated_at": datetime(2026, 1, 1, tzinfo=UTC)}
+    base.update(kwargs)
+    return SimpleNamespace(name=name, **base)
+
+
+def _catalog_member(name, kind=DnsZoneKind.site, ts=1_700_000_000):
+    return SimpleNamespace(
+        id=uuid4(),
+        name=name,
+        kind=kind,
+        updated_at=datetime.fromtimestamp(ts, UTC),
+        frozen=False,
+    )
+
+
+def test_catalog_zone_no_primaries_emits_no_primaries_records():
+    """When primaries=None (default), no primaries.*.zones RRs appear."""
+    m = _catalog_member("site42.prod.example.")
+    text = render_catalog_zone("catalog.prod.example.", [m])
+    assert "primaries." not in text
+
+
+def test_catalog_zone_primaries_emits_a_record_for_ipv4():
+    m = _catalog_member("site42.prod.example.")
+    text = render_catalog_zone(
+        "catalog.prod.example.", [m],
+        primaries=["10.30.42.10"],
+    )
+    assert f"primaries.{m.id.hex}.zones\tIN\tA\t10.30.42.10" in text
+
+
+def test_catalog_zone_primaries_emits_aaaa_record_for_ipv6():
+    m = _catalog_member("site42.prod.example.")
+    text = render_catalog_zone(
+        "catalog.prod.example.", [m],
+        primaries=["2001:db8::10"],
+    )
+    assert f"primaries.{m.id.hex}.zones\tIN\tAAAA\t2001:db8::10" in text
+
+
+def test_catalog_zone_primaries_dual_stack_emits_both():
+    """A dual-stack primaries list emits both A and AAAA per member."""
+    m = _catalog_member("apex.prod.example.", kind=DnsZoneKind.apex)
+    text = render_catalog_zone(
+        "catalog.prod.example.", [m],
+        primaries=["10.30.42.10", "2001:db8::10"],
+    )
+    assert f"primaries.{m.id.hex}.zones\tIN\tA\t10.30.42.10" in text
+    assert f"primaries.{m.id.hex}.zones\tIN\tAAAA\t2001:db8::10" in text
+
+
+def test_catalog_zone_primaries_cidr_notation_stripped():
+    """Auth server IPs from the DB may carry a /prefix; it must be
+    stripped before emitting the A/AAAA record."""
+    m = _catalog_member("site99.prod.example.")
+    text = render_catalog_zone(
+        "catalog.prod.example.", [m],
+        primaries=["172.30.42.10/24"],
+    )
+    assert "172.30.42.10/24" not in text
+    assert f"primaries.{m.id.hex}.zones\tIN\tA\t172.30.42.10" in text
+
+
+def test_catalog_zone_primaries_invalid_ip_silently_skipped():
+    """A malformed IP string in primaries must not crash the renderer."""
+    m = _catalog_member("site42.prod.example.")
+    text = render_catalog_zone(
+        "catalog.prod.example.", [m],
+        primaries=["not-an-ip"],
+    )
+    assert "primaries." not in text
+
+
+def test_catalog_zone_primaries_per_member_not_per_zone():
+    """Each member gets its own primaries records; they must NOT bleed
+    across member boundaries."""
+    m1 = _catalog_member("a.prod.example.")
+    m2 = _catalog_member("b.prod.example.")
+    text = render_catalog_zone(
+        "catalog.prod.example.", [m1, m2],
+        primaries=["10.0.0.1"],
+    )
+    assert f"primaries.{m1.id.hex}.zones" in text
+    assert f"primaries.{m2.id.hex}.zones" in text
+    # Each member's primaries record is distinct by member_id.
+    assert text.count("primaries.") == 2
 
 
 def test_etag_changes_when_corefile_changes():
