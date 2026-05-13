@@ -1,6 +1,10 @@
 // Login — split-screen layout. Brand panel on the left, form on the right.
 // Layout/styles live in globals.css (.login-shell). All visible copy,
 // colors, and the Cloudscape mode come from config/login-branding.ts.
+//
+// When SSO is enabled, only the E-ICAM button is shown. Local
+// email/password form is a break-glass fallback, revealed by a
+// disclosure link and hidden again once SSO is unavailable.
 
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useLogin } from '@refinedev/core';
@@ -21,12 +25,30 @@ type Values = { email: string; password: string };
 // `--var` keys.
 type BrandVars = CSSProperties & Record<`--login-${string}`, string>;
 
+function initiateOidc() {
+  const randomB64 = (bytes = 16) => {
+    const buf = new Uint8Array(bytes);
+    globalThis.crypto.getRandomValues(buf);
+    return btoa(String.fromCodePoint(...buf))
+      .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  };
+  const state = randomB64();
+  const nonce = randomB64();
+  sessionStorage.setItem('dcim.oidc.state', state);
+  sessionStorage.setItem('dcim.oidc.nonce', nonce);
+  const sep = loginBranding.sso.loginUrl.includes('?') ? '&' : '?';
+  globalThis.location.href =
+    `${loginBranding.sso.loginUrl}${sep}state=${state}&nonce=${nonce}`;
+}
+
 export function LoginPage() {
   const { mutate: login, isPending } = useLogin<Values>();
-  const [email, setEmail] = useState('admin@dcim.local');
-  const [password, setPassword] = useState('changeme');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [emailErr, setEmailErr] = useState<string | undefined>();
   const [passwordErr, setPasswordErr] = useState<string | undefined>();
+  // Local form is always visible when SSO is off; hidden by default when SSO is on.
+  const [showLocalForm, setShowLocalForm] = useState(!loginBranding.sso.enabled);
 
   // Force the configured Cloudscape mode while the login page is
   // mounted; restore the previous mode on unmount based on <html>.
@@ -87,75 +109,77 @@ export function LoginPage() {
           <p className="login-subtitle">{loginBranding.formSubtitle}</p>
 
           {loginBranding.sso.enabled && (
-            <>
-              <Button
-                variant="primary"
-                fullWidth
-                onClick={() => {
-                  // Mint per-session state + nonce, stash in sessionStorage
-                  // (per-tab so concurrent tabs don't collide), forward as
-                  // query params on the OIDC kickoff URL. The callback page
-                  // validates both before exchanging the code.
-                  const randomB64 = (bytes = 16) => {
-                    const buf = new Uint8Array(bytes);
-                    globalThis.crypto.getRandomValues(buf);
-                    return btoa(String.fromCodePoint(...buf))
-                      .replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
-                  };
-                  const state = randomB64();
-                  const nonce = randomB64();
-                  sessionStorage.setItem('dcim.oidc.state', state);
-                  sessionStorage.setItem('dcim.oidc.nonce', nonce);
-                  const sep = loginBranding.sso.loginUrl.includes('?') ? '&' : '?';
-                  globalThis.location.href =
-                    `${loginBranding.sso.loginUrl}${sep}state=${state}&nonce=${nonce}`;
-                }}
-              >
-                {loginBranding.sso.label}
-              </Button>
-              <div className="login-or-divider" role="separator">
-                <span>or</span>
-              </div>
-            </>
+            <Button variant="primary" fullWidth onClick={initiateOidc}>
+              {loginBranding.sso.label}
+            </Button>
           )}
 
-          <form onSubmit={onSubmit}>
-            <Form
-              actions={
-                <Button
-                  variant="primary"
-                  formAction="submit"
-                  loading={isPending}
-                  fullWidth
-                >
-                  {isPending ? 'Signing in…' : 'Sign in'}
-                </Button>
-              }
-            >
-              <SpaceBetween size="l">
-                <FormField label="Email" errorText={emailErr}>
-                  <Input
-                    type="email"
-                    autoComplete="username"
-                    placeholder="you@company.com"
-                    value={email}
-                    onChange={({ detail }) => setEmail(detail.value)}
-                  />
-                </FormField>
-                <FormField label="Password" errorText={passwordErr}>
-                  <Input
-                    type="password"
-                    autoComplete="current-password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={({ detail }) => setPassword(detail.value)}
-                  />
-                </FormField>
-              </SpaceBetween>
-            </Form>
-          </form>
+          {showLocalForm && (
+            <form onSubmit={onSubmit} style={loginBranding.sso.enabled ? { marginTop: '1.5rem' } : undefined}>
+              <Form
+                actions={
+                  <Button
+                    variant="primary"
+                    formAction="submit"
+                    loading={isPending}
+                    fullWidth
+                  >
+                    {isPending ? 'Signing in…' : 'Sign in'}
+                  </Button>
+                }
+              >
+                <SpaceBetween size="l">
+                  <FormField label="Email" errorText={emailErr}>
+                    <Input
+                      type="email"
+                      autoComplete="username"
+                      placeholder="you@company.com"
+                      value={email}
+                      onChange={({ detail }) => setEmail(detail.value)}
+                    />
+                  </FormField>
+                  <FormField label="Password" errorText={passwordErr}>
+                    <Input
+                      type="password"
+                      autoComplete="current-password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={({ detail }) => setPassword(detail.value)}
+                    />
+                  </FormField>
+                </SpaceBetween>
+              </Form>
+            </form>
+          )}
 
-          <p className="login-footer-note">{loginBranding.footerNote}</p>
+          {loginBranding.sso.enabled && (
+            <p className="login-footer-note" style={{ marginTop: '1.25rem' }}>
+              {showLocalForm ? (
+                <>
+                  {loginBranding.footerNote}{' '}
+                  <button
+                    type="button"
+                    className="login-fallback-toggle"
+                    onClick={() => setShowLocalForm(false)}
+                  >
+                    Hide local login
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="login-fallback-toggle"
+                  onClick={() => setShowLocalForm(true)}
+                >
+                  E-ICAM unavailable? Use local credentials
+                </button>
+              )}
+            </p>
+          )}
+
+          {!loginBranding.sso.enabled && (
+            <p className="login-footer-note">{loginBranding.footerNote}</p>
+          )}
         </div>
       </main>
     </div>

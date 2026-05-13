@@ -58,13 +58,8 @@ services:
       # host.docker.internal resolves on both sides under Docker
       # Desktop (Windows/Mac) and via the api service's extra_hosts
       # entry on Linux.
-      KC_HOSTNAME: http://host.docker.internal:8080
-      # Back-channel admin-console URL: browsers on Windows hosts
-      # don't always resolve host.docker.internal, so the redirect
-      # from /admin → /admin/master/console/ would land on an
-      # unreachable URL. Pinning the admin console to localhost
-      # keeps the UI clickable without affecting the issuer URL.
-      KC_HOSTNAME_ADMIN: http://localhost:8080
+      KC_HOSTNAME: http://keycloak.prod.dev.mil:8080
+      KC_HOSTNAME_ADMIN: http://keycloak.prod.dev.mil:8080
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
     ports: ["8080:8080"]
@@ -99,7 +94,7 @@ services:
       DCIM_POSTGRES_DSN: postgresql+asyncpg://dcim:dcim@postgres:5432/dcim
       DCIM_REDIS_DSN: redis://redis:6379/0
       DCIM_ELASTIC_URL: http://elastic:9200
-      DCIM_CORS_ORIGINS: '["http://localhost:5173"]'
+      DCIM_CORS_ORIGINS: '["http://dcim.prod.dev.mil", "http://localhost:5173"]'
       DCIM_COLLECTOR_MTLS_REQUIRED: "false"
       # Issuer URL must match what Keycloak puts in the `iss` claim
       # (controlled by KC_HOSTNAME on the keycloak service). Using
@@ -107,10 +102,10 @@ services:
       # it sees in the discovery doc, and the api container also reaches
       # Keycloak via the host gateway — no localhost vs container-name
       # mismatch. Inactive unless the `sso` profile is up.
-      DCIM_OIDC_ISSUER: http://host.docker.internal:8080/realms/dcim
+      DCIM_OIDC_ISSUER: http://keycloak.prod.dev.mil:8080/realms/dcim
       DCIM_OIDC_CLIENT_ID: dcim-spa
       DCIM_OIDC_CLIENT_SECRET: dev-secret-change-me
-      DCIM_OIDC_REDIRECT_URI: http://localhost:5173/login/callback
+      DCIM_OIDC_REDIRECT_URI: http://dcim.prod.dev.mil/login/callback
       # DNSSEC private-key encryption secret. New DnsKey rows get
       # Fernet-encrypted at rest when this is set. Pass through from
       # the shell env so the dev .env can keep an existing key (or
@@ -144,6 +139,10 @@ services:
       # Linux Docker so the api container can reach Keycloak at the
       # same host.docker.internal:8080 URL the browser uses.
       - "host.docker.internal:host-gateway"
+      # Custom dev hostnames — lets the api container resolve
+      # keycloak.prod.dev.mil for back-channel token exchange.
+      - "keycloak.prod.dev.mil:host-gateway"
+      - "dcim.prod.dev.mil:host-gateway"
     depends_on:
       postgres: { condition: service_healthy }
       elastic:  { condition: service_healthy }
@@ -171,7 +170,7 @@ services:
     build:
       context: ../../frontend
       dockerfile: Dockerfile
-    ports: ["5173:80"]
+    ports: ["80:80"]
     depends_on: [api]
 
   collector:

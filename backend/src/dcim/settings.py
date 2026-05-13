@@ -86,6 +86,14 @@ class Settings(BaseSettings):
     # match the client config in Keycloak/AzureAD. Optional override per
     # request via the `redirect_uri` query param.
     oidc_redirect_uri: str | None = None
+    # Browser-facing base URL for the IdP (scheme + host + port only).
+    # When set, the backend rewrites the authorization_endpoint from the
+    # OIDC discovery doc to use this origin before redirecting the browser.
+    # Useful when the IdP's KC_HOSTNAME is an internal Docker hostname
+    # (e.g. host.docker.internal) that browsers on the host can't resolve,
+    # while token-exchange back-channel calls still use the internal URL.
+    # Example: http://localhost:8080
+    oidc_public_url: str | None = None
     saml_metadata_url: str | None = None
 
     # Collector ingest

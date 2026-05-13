@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from uuid import UUID
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import bcrypt
 import httpx
@@ -170,6 +170,13 @@ async def oidc_login(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, _OIDC_NOT_CONFIGURED)
     meta = await _oidc_metadata()
     auth_endpoint = meta["authorization_endpoint"]
+    # Rewrite the authorization endpoint to a browser-accessible origin when
+    # the IdP's internal hostname (e.g. host.docker.internal) can't be
+    # resolved by browsers on the host machine.
+    if settings.oidc_public_url:
+        pub = urlparse(settings.oidc_public_url)
+        parsed = urlparse(auth_endpoint)
+        auth_endpoint = urlunparse(parsed._replace(scheme=pub.scheme, netloc=pub.netloc))
     callback = redirect_uri or settings.oidc_redirect_uri
     if not callback:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "redirect_uri required")

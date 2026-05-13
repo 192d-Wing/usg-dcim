@@ -20,13 +20,31 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": [
+        "http://dcim.prod.dev.mil/*",
+        "http://dcim.prod.dev.mil/login/callback",
         "http://localhost:5173/*",
         "http://localhost:8000/api/v1/auth/oidc/callback*"
       ],
-      "webOrigins": ["http://localhost:5173", "http://localhost:8000"],
+      "webOrigins": ["http://dcim.prod.dev.mil", "http://localhost:5173", "http://localhost:8000"],
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:5173/*"
-      }
+        "post.logout.redirect.uris": "http://dcim.prod.dev.mil/*##http://localhost:5173/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
     }
   ],
 
@@ -38,6 +56,18 @@
   },
 
   "users": [
+    {
+      "username": "dcim_admin",
+      "email": "dcim_admin@prod.dev.mil",
+      "firstName": "DCIM",
+      "lastName": "Administrator",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {"type": "password", "value": "dcim_admin", "temporary": false}
+      ],
+      "realmRoles": ["dcim-admin"]
+    },
     {
       "username": "demo",
       "email": "demo@dcim.local",

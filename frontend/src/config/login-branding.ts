@@ -89,7 +89,7 @@ export const loginBranding: LoginBranding = {
   meta: 'v0.2 · Department of the Air Force Enterprise Instance',
   formTitle: 'Welcome back',
   formSubtitle:
-    'Sign in to continue.',
+    'Sign in with your DOD E-ICAM credential.',
   footerNote: 'Trouble signing in? Contact your system administrator.',
 
   sso: {
