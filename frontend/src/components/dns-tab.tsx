@@ -12,6 +12,7 @@ import { http } from '@/lib/http';
 import { useFabricScope } from '@/contexts/fabric-scope';
 import { toast } from 'sonner';
 
+import Alert from '@cloudscape-design/components/alert';
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import Button from '@cloudscape-design/components/button';
@@ -70,6 +71,10 @@ type DnsZone = {
   nsec3_salt: string | null;
   nsec3_iterations: number;
   nsec3_opt_out: boolean;
+  // Operator write lock. While true, every mutating endpoint on this
+  // zone (record CRUD, import, sync, DNSSEC operations) returns 422.
+  // Flipped via POST /dns/zones/{id}/freeze + /unfreeze.
+  frozen: boolean;
 };
 
 type DnsRecordSource = 'manual' | 'ipam' | 'ddns';
@@ -653,6 +658,21 @@ function ZoneDetailView({
     } catch (err: any) { toast.error(err?.message ?? 'failed'); }
   }
 
+  async function toggleFrozen() {
+    if (!zone) return;
+    const next = !zone.frozen;
+    const verb = next ? 'freeze' : 'unfreeze';
+    if (next && !window.confirm(
+      `Freeze ${zone.name}? Record CRUD, BIND import, IPAM sync, and ` +
+      `DNSSEC operations will return 422 until you unfreeze.`,
+    )) return;
+    try {
+      await http.post(`/dns/zones/${zone.id}/${verb}`, {});
+      toast.success(next ? `${zone.name} frozen` : `${zone.name} unfrozen`);
+      await refresh();
+    } catch (err: any) { toast.error(err?.message ?? `${verb} failed`); }
+  }
+
   async function exportZoneFile() {
     if (!zone) return;
     try {
@@ -686,19 +706,45 @@ function ZoneDetailView({
         </Link>
       </div>
 
+      {zone.frozen && (
+        <Alert type="warning" header="Zone is frozen">
+          Mutating endpoints (record CRUD, BIND import, IPAM sync, DNSSEC
+          operations) return 422 until an operator clicks <b>Unfreeze</b>.
+        </Alert>
+      )}
+
       <Container
         header={
           <Header
             variant="h2"
             actions={
-              canWrite && zone.kind === 'site' && (
-                <Button iconName="refresh" onClick={syncFromIpam}>
-                  Sync from IPAM
-                </Button>
+              canWrite && (
+                <SpaceBetween size="xs" direction="horizontal">
+                  <Button
+                    iconName={zone.frozen ? 'unlocked' : 'lock-private'}
+                    onClick={toggleFrozen}
+                  >
+                    {zone.frozen ? 'Unfreeze' : 'Freeze'}
+                  </Button>
+                  {zone.kind === 'site' && (
+                    <Button
+                      iconName="refresh"
+                      onClick={syncFromIpam}
+                      disabled={zone.frozen}
+                    >
+                      Sync from IPAM
+                    </Button>
+                  )}
+                </SpaceBetween>
               )
             }
           >
             <span style={MONO}>{zone.name}</span>
+            {zone.frozen && (
+              <span style={{ marginLeft: 8 }}>
+                <Badge color="severity-medium">frozen</Badge>
+              </span>
+            )}
           </Header>
         }
       >
@@ -770,20 +816,28 @@ function ZoneDetailView({
                   Export
                 </Button>
                 {canWrite && (
-                  <Button onClick={() => setImportOpen(true)} iconName="upload">
+                  <Button
+                    onClick={() => setImportOpen(true)}
+                    iconName="upload"
+                    disabled={zone.frozen}
+                  >
                     Import
                   </Button>
                 )}
                 {canWrite && (
                   <Button
-                    disabled={selected.length === 0}
+                    disabled={selected.length === 0 || zone.frozen}
                     onClick={removeSelected}
                   >
                     Delete
                   </Button>
                 )}
                 {canWrite && (
-                  <Button variant="primary" onClick={() => setCreateOpen(true)}>
+                  <Button
+                    variant="primary"
+                    onClick={() => setCreateOpen(true)}
+                    disabled={zone.frozen}
+                  >
                     Create record
                   </Button>
                 )}
