@@ -3,6 +3,7 @@ module github.com/usg-dcim/services/go-collector
 go 1.22
 
 require (
+	github.com/goburrow/modbus v0.1.0
 	github.com/google/uuid v1.6.0
 	github.com/gosnmp/gosnmp v1.37.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -11,6 +12,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/goburrow/serial v0.1.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/mattn/go-isatty v0.0.16 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect

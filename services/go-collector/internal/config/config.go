@@ -50,18 +50,52 @@ type RedfishConfig struct {
 	VerifyTLS   *bool  `yaml:"verify_tls,omitempty"`
 }
 
+// ModbusRegister mirrors the ModbusRegister pydantic model. `type`
+// is one of holding|input_register|coil|discrete; the driver currently
+// reads only holding and input_register (matches the Python parity
+// scope). `scale` lets the operator pre-multiply raw register values
+// into engineering units without the central having to know.
+type ModbusRegister struct {
+	Address int     `yaml:"address"`
+	Type    string  `yaml:"type"`
+	Scale   float64 `yaml:"scale"`
+}
+
+type ModbusConfig struct {
+	Host      string                    `yaml:"host"`
+	Port      int                       `yaml:"port"`
+	UnitID    int                       `yaml:"unit_id"`
+	Registers map[string]ModbusRegister `yaml:"registers"`
+}
+
+// RESTConfig mirrors the RestDriverConfig pydantic model. `paths`
+// maps metric name → dot-path inside the JSON response, e.g.
+// "power.kw": "sensors.power.kw".
+type RESTConfig struct {
+	BaseURL   string            `yaml:"base_url"`
+	Headers   map[string]string `yaml:"headers,omitempty"`
+	Paths     map[string]string `yaml:"paths"`
+	VerifyTLS *bool             `yaml:"verify_tls,omitempty"`
+}
+
+func (r *RESTConfig) VerifyTLSFlag() bool {
+	if r.VerifyTLS == nil {
+		return true
+	}
+	return *r.VerifyTLS
+}
+
 type Device struct {
-	AssetID            uuid.UUID      `yaml:"asset_id"`
-	Kind               string         `yaml:"kind"`
-	Driver             string         `yaml:"driver"`
-	PollIntervalSecs   int            `yaml:"poll_interval_seconds"`
-	SNMP               *SNMPConfig    `yaml:"snmp,omitempty"`
-	Redfish            *RedfishConfig `yaml:"redfish,omitempty"`
-	// Modbus / REST / IPMI stay as opaque maps for Phase 2 — drivers
-	// promoted to typed structs as they're implemented.
-	Modbus  map[string]any `yaml:"modbus,omitempty"`
-	REST    map[string]any `yaml:"rest,omitempty"`
-	IPMI    map[string]any `yaml:"ipmi,omitempty"`
+	AssetID          uuid.UUID      `yaml:"asset_id"`
+	Kind             string         `yaml:"kind"`
+	Driver           string         `yaml:"driver"`
+	PollIntervalSecs int            `yaml:"poll_interval_seconds"`
+	SNMP             *SNMPConfig    `yaml:"snmp,omitempty"`
+	Redfish          *RedfishConfig `yaml:"redfish,omitempty"`
+	Modbus           *ModbusConfig  `yaml:"modbus,omitempty"`
+	REST             *RESTConfig    `yaml:"rest,omitempty"`
+	// IPMI stays opaque until Phase 4 lands its driver.
+	IPMI map[string]any `yaml:"ipmi,omitempty"`
 }
 
 // RedfishVerifyTLS returns the effective verify-TLS flag. Defaults to
@@ -73,17 +107,28 @@ func (r *RedfishConfig) RedfishVerifyTLS() bool {
 	return *r.VerifyTLS
 }
 
+// DNSTapConfig opts in to the dnstap reader. When SocketPath is set,
+// main spawns a UNIX-socket fstrm server CoreDNS auth pods connect to
+// for query-stream replay. Phase 3 surfaces the (name, type) pairs
+// through OnQuery → log; the top-K reservoir + metrics POST land
+// alongside the DNS metrics scraper in Phase 4.
+type DNSTapConfig struct {
+	SocketPath string `yaml:"socket_path"`
+}
+
 type Config struct {
-	CollectorID             uuid.UUID `yaml:"collector_id"`
-	SiteID                  uuid.UUID `yaml:"site_id"`
-	IngestURL               string    `yaml:"ingest_url"`
-	TelemetryURL            string    `yaml:"telemetry_url,omitempty"`
-	HeartbeatIntervalSecs   int       `yaml:"heartbeat_interval_seconds"`
-	BufferPath              string    `yaml:"buffer_path"`
-	APITokenFile            string    `yaml:"api_token_file,omitempty"`
-	Mtls                    Mtls      `yaml:"mtls"`
-	Devices                 []Device  `yaml:"devices"`
-	// DNS, syslog, etc. — accepted but ignored in Phase 1.
+	CollectorID           uuid.UUID     `yaml:"collector_id"`
+	SiteID                uuid.UUID     `yaml:"site_id"`
+	IngestURL             string        `yaml:"ingest_url"`
+	TelemetryURL          string        `yaml:"telemetry_url,omitempty"`
+	HeartbeatIntervalSecs int           `yaml:"heartbeat_interval_seconds"`
+	BufferPath            string        `yaml:"buffer_path"`
+	APITokenFile          string        `yaml:"api_token_file,omitempty"`
+	Mtls                  Mtls          `yaml:"mtls"`
+	Devices               []Device      `yaml:"devices"`
+	DNSTap                *DNSTapConfig `yaml:"dnstap,omitempty"`
+	// DNS (CoreDNS bundle agent), syslog, etc. — accepted but
+	// ignored in Phase 3; Phase 4 picks them up.
 	DNS    map[string]any `yaml:"dns,omitempty"`
 	Syslog *int           `yaml:"syslog_listen,omitempty"`
 }

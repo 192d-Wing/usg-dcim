@@ -20,6 +20,7 @@ import (
 
 	"github.com/usg-dcim/services/go-collector/internal/buffer"
 	"github.com/usg-dcim/services/go-collector/internal/config"
+	"github.com/usg-dcim/services/go-collector/internal/dnstap"
 	"github.com/usg-dcim/services/go-collector/internal/drivers"
 	"github.com/usg-dcim/services/go-collector/internal/forwarder"
 )
@@ -95,6 +96,23 @@ func main() {
 		go func() {
 			defer wg.Done()
 			drivers.Schedule(ctx, p, buf, time.Duration(dev.PollIntervalSecs)*time.Second, log)
+		}()
+	}
+
+	// dnstap reader: optional, opt-in via dnstap.socket_path. Phase 3
+	// just logs decoded (qname, qtype) pairs; the top-K reservoir
+	// + metrics POST land in Phase 4.
+	if cfg.DNSTap != nil && cfg.DNSTap.SocketPath != "" {
+		dlog := log.With("subsys", "dnstap")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			err := dnstap.Serve(ctx, cfg.DNSTap.SocketPath, func(name, qtype string) {
+				dlog.Debug("dnstap_query", "name", name, "type", qtype)
+			}, dlog)
+			if err != nil && err != context.Canceled {
+				dlog.Error("dnstap_exited", "err", err)
+			}
 		}()
 	}
 

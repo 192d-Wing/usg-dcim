@@ -19,7 +19,9 @@ import (
 
 	"github.com/usg-dcim/services/go-collector/internal/buffer"
 	"github.com/usg-dcim/services/go-collector/internal/config"
+	"github.com/usg-dcim/services/go-collector/internal/drivers/modbus"
 	"github.com/usg-dcim/services/go-collector/internal/drivers/redfish"
+	"github.com/usg-dcim/services/go-collector/internal/drivers/rest"
 	"github.com/usg-dcim/services/go-collector/internal/drivers/snmp"
 )
 
@@ -47,7 +49,17 @@ func Build(d config.Device, log *slog.Logger) (Poller, error) {
 			return nil, fmt.Errorf("redfish driver requires redfish: block")
 		}
 		return redfish.New(&d, log), nil
-	case "modbus", "rest", "ipmi":
+	case "modbus":
+		if d.Modbus == nil {
+			return nil, fmt.Errorf("modbus driver requires modbus: block")
+		}
+		return modbus.New(&d, log), nil
+	case "rest":
+		if d.REST == nil {
+			return nil, fmt.Errorf("rest driver requires rest: block")
+		}
+		return rest.New(&d, log), nil
+	case "ipmi":
 		return &stub{driver: d.Driver, asset: d.AssetID.String(), log: log}, nil
 	default:
 		return nil, fmt.Errorf("unknown driver %q", d.Driver)
