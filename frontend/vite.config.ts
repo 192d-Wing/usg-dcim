@@ -15,18 +15,32 @@ export default defineConfig({
     },
   },
   build: {
-    // Surface > 600 KB chunks so we notice if a future feature reverses
-    // the route-split work below.
     chunkSizeWarningLimit: 600,
-    // No manualChunks. Earlier attempts to group react + react-dom + radix
-    // into a single vendor chunk hit Rollup's intra-chunk evaluation order
-    // bug where react-dom (or a Radix package importing react-dom internals)
-    // ran before react finished initializing and threw
-    //   "Cannot read properties of undefined
-    //    (reading '__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED')".
-    // Letting Vite emit per-route chunks naturally avoids it; recharts and
-    // refine-vendor end up in their own chunks via the dependency graph
-    // because they're heavy and only some routes touch them.
+    rollupOptions: {
+      output: {
+        // Conservative vendor split. The earlier failed attempt grouped
+        // react + react-dom + Radix into a single vendor chunk and tripped
+        // Rollup's intra-chunk evaluation-order bug — react-dom (or a
+        // Radix package) ran before react finished initializing and threw
+        //   "Cannot read properties of undefined
+        //    (reading '__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED')".
+        // The packages below live strictly above the public React API
+        // and do NOT reach into react-dom internals, so co-locating
+        // their files in one chunk is safe. React itself stays unsplit.
+        manualChunks(id) {
+          if (id.includes('node_modules/@cloudscape-design/')) {
+            return 'cloudscape';
+          }
+          if (id.includes('node_modules/@refinedev/')) {
+            return 'refine';
+          }
+          if (id.includes('node_modules/@tanstack/react-query')) {
+            return 'react-query';
+          }
+          return undefined;
+        },
+      },
+    },
   },
   test: {
     environment: 'node',
