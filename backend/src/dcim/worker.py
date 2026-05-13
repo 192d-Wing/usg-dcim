@@ -138,6 +138,26 @@ async def dns_health_checks(_ctx) -> dict:
 
 async def startup(ctx) -> None:
     configure_logging()
+    # Expose the worker's Prometheus registry on the configured port so
+    # Prometheus can scrape the business counters that the worker
+    # increments (alerts_fired, alert_eval_runs, telemetry batch sizes,
+    # DNS render outcomes). The api exposes its own /metrics on 8000;
+    # the worker runs as a separate process with its own in-memory
+    # registry, so without this its counters would be unreachable.
+    # The HTTP server is daemonized inside prometheus_client — no
+    # cleanup needed at shutdown.
+    from prometheus_client import start_http_server  # noqa: PLC0415
+    port = get_settings().worker_metrics_port
+    if port > 0:
+        try:
+            start_http_server(port)
+            log.info("worker_metrics_listening", port=port)
+        except OSError as e:
+            # Most common cause: another worker replica on the same
+            # host bound the port first. Log and continue — the alert
+            # eval loop is the worker's primary job, metrics are
+            # secondary.
+            log.warning("worker_metrics_listen_failed", port=port, error=str(e))
     log.info("worker_startup")
 
 

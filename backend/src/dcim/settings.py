@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
+    # Port the worker process exposes its Prometheus registry on. The
+    # api's /metrics lives on api_port; the worker is a separate
+    # process and needs its own listener for the business counters
+    # (alerts_fired, alert_eval_runs, etc.) to be scrapeable. Set to 0
+    # to disable the listener (e.g. when running multiple worker
+    # replicas on the same host without a per-pod port mapping).
+    worker_metrics_port: int = 9091
 
     # Datastores
     postgres_dsn: PostgresDsn = Field(

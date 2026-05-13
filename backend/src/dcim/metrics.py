@@ -62,13 +62,24 @@ alert_eval_runs = Counter(
 )
 
 
+_UNMATCHED_ROUTE = "<unmatched>"
+
+
 def _route_label(request: Request) -> str:
     """Use the route template (`/inventory/sites/{site_id}`) instead of the
-    rendered path so high-cardinality params don't blow up the metric series."""
+    rendered path so high-cardinality params don't blow up the metric series.
+
+    When `request.scope["route"]` is unset (404s, ASGI sub-apps not yet
+    fully routed at middleware time, etc.), the rendered URL path often
+    contains UUIDs or numeric IDs that would each create a fresh time
+    series. Returning a single placeholder caps cardinality at one extra
+    label value across all unmatched paths combined — operators still see
+    "look at the 404s" via the `status` label without paying a series
+    per offending client."""
     route = request.scope.get("route")
     if route is not None and getattr(route, "path", None):
         return route.path
-    return request.url.path
+    return _UNMATCHED_ROUTE
 
 
 class PrometheusMiddleware(BaseHTTPMiddleware):
