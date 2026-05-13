@@ -22,6 +22,7 @@ import ipaddress
 import json
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -34,6 +35,7 @@ from ..models.dns import (
     DnsBlocklist,
     DnsBlocklistAction,
     DnsBlocklistEntry,
+    DnsCatalogZone,
     DnsForwarder,
     DnsHealthCheck,
     DnsHealthCheckStatus,
@@ -52,6 +54,12 @@ from ..models.dns import (
 from ..models.ipam import IPAddress, IpAddressSource, Subnet
 from ..settings import get_settings
 from .ipam import parse_address, parse_network
+
+
+class _HasDnsName(Protocol):
+    """Structural type for anything with a `.name: str` — satisfied by
+    both DnsZone and DnsCatalogZone without an explicit base class."""
+    name: str
 
 
 # ---------- Zone serial number ----------
@@ -308,7 +316,7 @@ def _bind_key_basename(zone_name: str, alg_number: int, key_tag: int) -> str:
     return f"K{fqdn}+{alg_number:03d}+{key_tag:05d}"
 
 
-def _bind_public_key_file(zone: DnsZone, key: DnsKey) -> str:
+def _bind_public_key_file(zone: _HasDnsName, key: DnsKey) -> str:
     """Text of the BIND `.key` file — one DNSKEY RR in presentation
     form. CoreDNS reads this to know which keys belong to the zone."""
     alg = _DNSSEC_ALG_NUMBER[key.algorithm]
@@ -399,15 +407,14 @@ def _bind_private_key_file(key: DnsKey) -> str:
 
 
 def render_dnssec_key_files(
-    zone: DnsZone, keys: Iterable[DnsKey],
+    zone: _HasDnsName, keys: Iterable[DnsKey],
 ) -> dict[str, str]:
     """Map of `{filename: text}` for every active key on this zone.
     Filenames carry both .key and .private suffixes; CoreDNS infers
     the pair from the basename in the Corefile's `key file` line.
 
-    Retired keys are included so cached validators can continue to
-    verify until the operator purges them — same semantics as the
-    `keys` table in the UI."""
+    Accepts any object with a `.name: str` (DnsZone or
+    DnsCatalogZone) so the same renderer serves both zone types."""
     out: dict[str, str] = {}
     fqdn = zone.name.rstrip(".") + "."
     for key in keys:
@@ -418,7 +425,7 @@ def render_dnssec_key_files(
     return out
 
 
-def render_ds_records(zone: DnsZone, keys: Iterable[DnsKey]) -> list[dict]:
+def render_ds_records(zone: _HasDnsName, keys: Iterable[DnsKey]) -> list[dict]:
     """Compute DS records for the zone's KSK(s). DS = digest of the
     canonical owner name (lowercased FQDN with trailing dot) plus the
     DNSKEY rdata, hashed with SHA-256 (DS digest type 2). Operators
@@ -498,6 +505,48 @@ async def rotate_zone_key(
     # bundle etag flips for downstream resolvers.
     await db.execute(
         update(DnsZone).where(DnsZone.id == zone.id).values(updated_at=func.now()),
+    )
+    await db.flush()
+    return new_key, active_keys
+
+
+async def rotate_catalog_key(
+    db: AsyncSession, catalog: DnsCatalogZone, role: DnsKeyRole,
+) -> tuple[DnsKey, list[DnsKey]]:
+    """Catalog-zone equivalent of rotate_zone_key. Generates a fresh
+    key for `catalog`, retires the active key of the same role, and
+    bumps catalog.updated_at so the bundle etag changes."""
+    active_keys = list((
+        await db.execute(
+            select(DnsKey).where(
+                DnsKey.catalog_id == catalog.id,
+                DnsKey.role == role,
+                DnsKey.retired_at.is_(None),
+            )
+        )
+    ).scalars().all())
+    now = datetime.now(UTC)
+    prior_alg = active_keys[0].algorithm if active_keys else None
+    material = generate_dnssec_keypair(
+        catalog.name, role,
+        algorithm=prior_alg or DnsKeyAlgorithm.ecdsap256sha256,
+    )
+    new_key = DnsKey(
+        catalog_id=catalog.id,
+        role=material["role"],
+        algorithm=material["algorithm"],
+        private_pem=material["private_pem"],
+        public_key_b64=material["public_key_b64"],
+        key_tag=material["key_tag"],
+        active_from=now,
+    )
+    db.add(new_key)
+    for k in active_keys:
+        k.retired_at = now
+    await db.execute(
+        update(DnsCatalogZone)
+        .where(DnsCatalogZone.id == catalog.id)
+        .values(updated_at=func.now()),
     )
     await db.flush()
     return new_key, active_keys
@@ -1705,6 +1754,38 @@ async def _dnssec_artifacts_for_zones(
     return files, basenames_by_zone, nsec3_params_by_zone
 
 
+async def _dnssec_artifacts_for_catalog(
+    db: AsyncSession, catalog_name: str | None,
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Return (key_files, dnssec_keys_by_zone) for a signed catalog
+    zone. Looks up the DnsCatalogZone row by name internally so the
+    call site in render_bundle_for_server stays branch-free.
+
+    Catalog zones always use the upstream `dnssec` plugin (NSEC
+    chains) — nsec3sign is not applied because catalog zones are tiny
+    and walk-protection is not worth the custom-image dependency.
+
+    Returns two empty dicts when catalog_name is None, the catalog
+    row is disabled/absent, or the row has no keys yet."""
+    if not catalog_name:
+        return {}, {}
+    catalog = (await db.execute(
+        select(DnsCatalogZone).where(DnsCatalogZone.name == catalog_name)
+    )).scalar_one_or_none()
+    if catalog is None or not catalog.signed:
+        return {}, {}
+    keys = list((
+        await db.execute(
+            select(DnsKey).where(DnsKey.catalog_id == catalog.id)
+        )
+    ).scalars().all())
+    if not keys:
+        return {}, {}
+    key_files = render_dnssec_key_files(catalog, keys)
+    basenames = sorted(fn[:-4] for fn in key_files if fn.endswith(".key"))
+    return key_files, {catalog.name: basenames}
+
+
 async def _local_auth_unicast_ip(db: AsyncSession, server: DnsServer) -> str | None:
     """For a recursive pod, find the auth pod at the same site so we
     can stub-zone the fabric apex back to it."""
@@ -2090,6 +2171,13 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         key_files, dnssec_keys_by_zone, nsec3_params_by_zone = (
             await _dnssec_artifacts_for_zones(db, zones)
         )
+        # Catalog-zone signing keys — keyed by catalog_id, always
+        # NSEC (not NSEC3), no nsec3_params merge needed.
+        cat_key_files, cat_keys_by_zone = (
+            await _dnssec_artifacts_for_catalog(db, catalog_name)
+        )
+        key_files.update(cat_key_files)
+        dnssec_keys_by_zone.update(cat_keys_by_zone)
         # Path matches the site-dns compose layout: the dns-state
         # volume is mounted at /var/lib/dcim-dns in both the collector
         # and CoreDNS containers, and the collector writes zones to

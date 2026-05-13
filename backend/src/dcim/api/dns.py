@@ -1971,6 +1971,197 @@ async def delete_catalog_zone(
     await db.commit()
 
 
+# ---------- Catalog-zone DNSSEC ----------
+
+@router.post(
+    "/catalog-zones/{catalog_id}/enable-dnssec",
+    response_model=list[DnsKeyOut],
+)
+async def enable_catalog_dnssec(
+    catalog_id: UUID,
+    principal: Principal = Depends(require_capability("dns:keys:rotate")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Generate a KSK + ZSK for the catalog zone and flip its
+    `signed` flag. Idempotent — if keys already exist, returns the
+    current roster without touching the DB."""
+    catalog = await db.get(DnsCatalogZone, catalog_id)
+    if catalog is None:
+        raise NotFoundError(_CATALOG_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, catalog.fabric_id, _CAP_KEYS_ROTATE,
+    )
+    existing = list((
+        await db.execute(
+            select(DnsKey).where(DnsKey.catalog_id == catalog_id)
+        )
+    ).scalars().all())
+    if existing:
+        if not catalog.signed:
+            catalog.signed = True
+            await db.commit()
+        return existing
+    now = datetime.now(UTC)
+    default_alg = dns_svc.DnsKeyAlgorithm(
+        get_settings().dns_dnssec_default_algorithm,
+    )
+    keys: list[DnsKey] = []
+    for role in (DnsKeyRole.ksk, DnsKeyRole.zsk):
+        material = dns_svc.generate_dnssec_keypair(
+            catalog.name, role, algorithm=default_alg,
+        )
+        keys.append(DnsKey(
+            catalog_id=catalog_id,
+            role=material["role"],
+            algorithm=material["algorithm"],
+            private_pem=material["private_pem"],
+            public_key_b64=material["public_key_b64"],
+            key_tag=material["key_tag"],
+            active_from=now,
+        ))
+    for k in keys:
+        db.add(k)
+    catalog.signed = True
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_catalog_zone.enable_dnssec",
+        target_type="dns_catalog_zone", target_id=str(catalog_id),
+        metadata={
+            "ksk_tag": next(k.key_tag for k in keys if k.role == DnsKeyRole.ksk),
+            "zsk_tag": next(k.key_tag for k in keys if k.role == DnsKeyRole.zsk),
+        },
+    )
+    await db.commit()
+    for k in keys:
+        await db.refresh(k)
+    return keys
+
+
+@router.get(
+    "/catalog-zones/{catalog_id}/keys",
+    response_model=list[DnsKeyOut],
+)
+async def list_catalog_keys(
+    catalog_id: UUID,
+    principal: Principal = Depends(require_capability(_CAP_KEYS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    catalog = await db.get(DnsCatalogZone, catalog_id)
+    if catalog is None:
+        raise NotFoundError(_CATALOG_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, catalog.fabric_id, _CAP_KEYS_READ,
+    )
+    rows = (
+        await db.execute(
+            select(DnsKey).where(DnsKey.catalog_id == catalog_id)
+            .order_by(DnsKey.role.asc(), DnsKey.active_from.desc()),
+        )
+    ).scalars().all()
+    return rows
+
+
+@router.get(
+    "/catalog-zones/{catalog_id}/ds-records",
+    response_model=list[DnsDsRecordOut],
+)
+async def list_catalog_ds_records(
+    catalog_id: UUID,
+    principal: Principal = Depends(require_capability(_CAP_KEYS_READ)),
+    db: AsyncSession = Depends(get_db),
+):
+    """DS records for the catalog zone's active KSKs. Upload these
+    to the parent zone operator if the catalog zone is delegated and
+    consumers need to validate its RRSIG chain."""
+    catalog = await db.get(DnsCatalogZone, catalog_id)
+    if catalog is None:
+        raise NotFoundError(_CATALOG_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, catalog.fabric_id, _CAP_KEYS_READ,
+    )
+    keys = (
+        await db.execute(
+            select(DnsKey).where(DnsKey.catalog_id == catalog_id)
+        )
+    ).scalars().all()
+    return dns_svc.render_ds_records(catalog, keys)
+
+
+@router.post("/catalog-zones/{catalog_id}/disable-dnssec", status_code=204)
+async def disable_catalog_dnssec(
+    catalog_id: UUID,
+    principal: Principal = Depends(require_capability("dns:keys:rotate")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unsign the catalog zone — delete all its keys and clear the
+    signed flag. Reversible via enable-dnssec. Consumers that already
+    validated the catalog against the old trust anchor will need to
+    reconfigure; notify them before disabling."""
+    catalog = await db.get(DnsCatalogZone, catalog_id)
+    if catalog is None:
+        raise NotFoundError(_CATALOG_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, catalog.fabric_id, _CAP_KEYS_ROTATE,
+    )
+    if not catalog.signed:
+        return
+    keys = list((
+        await db.execute(
+            select(DnsKey).where(DnsKey.catalog_id == catalog_id)
+        )
+    ).scalars().all())
+    retired_tags = [k.key_tag for k in keys]
+    await db.execute(delete(DnsKey).where(DnsKey.catalog_id == catalog_id))
+    catalog.signed = False
+    await audit.record(
+        db, principal, action="dns_catalog_zone.disable_dnssec",
+        target_type="dns_catalog_zone", target_id=str(catalog_id),
+        metadata={"retired_key_tags": retired_tags},
+    )
+    await db.commit()
+
+
+@router.post(
+    "/catalog-zones/{catalog_id}/rotate-key/{role}",
+    response_model=list[DnsKeyOut],
+)
+async def rotate_catalog_key(
+    catalog_id: UUID,
+    role: DnsKeyRole,
+    principal: Principal = Depends(require_capability("dns:keys:rotate")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Rotate a KSK or ZSK for the catalog zone. Mirrors the zone
+    rotate endpoint: the new key is generated, the active key of
+    the same role is retired, and the catalog's updated_at bumps so
+    the bundle etag changes on the next collector poll."""
+    catalog = await db.get(DnsCatalogZone, catalog_id)
+    if catalog is None:
+        raise NotFoundError(_CATALOG_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, catalog.fabric_id, _CAP_KEYS_ROTATE,
+    )
+    if not catalog.signed:
+        raise ValidationError("catalog zone is not signed — enable DNSSEC first")
+    new_key, retired = await dns_svc.rotate_catalog_key(db, catalog, role)
+    await audit.record(
+        db, principal, action=f"dns_catalog_zone.rotate_{role.value}",
+        target_type="dns_catalog_zone", target_id=str(catalog_id),
+        metadata={
+            "new_key_tag": new_key.key_tag,
+            "retired_key_tags": [k.key_tag for k in retired],
+        },
+    )
+    await db.commit()
+    rows = (
+        await db.execute(
+            select(DnsKey).where(DnsKey.catalog_id == catalog_id)
+            .order_by(DnsKey.role.asc(), DnsKey.active_from.desc()),
+        )
+    ).scalars().all()
+    return rows
+
+
 # ----------------------- Blocklists -----------------------
 @router.get("/blocklists", response_model=Page[DnsBlocklistOut])
 async def list_blocklists(

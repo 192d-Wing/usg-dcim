@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, computed_field, model_validator
 
 from ..models.dns import (
     AnycastService,
@@ -322,11 +322,30 @@ class DnsBlocklistEntryOut(DnsBlocklistEntryBase):
 
 # ---------- DnsKey / DNSSEC ----------
 
+class DnsKeyCreate(BaseModel):
+    """Caller must set exactly one of zone_id / catalog_id."""
+    zone_id: UUID | None = None
+    catalog_id: UUID | None = None
+    role: DnsKeyRole
+    algorithm: DnsKeyAlgorithm
+
+    @model_validator(mode="after")
+    def _one_scope_set(self) -> "DnsKeyCreate":
+        has_zone = self.zone_id is not None
+        has_catalog = self.catalog_id is not None
+        if has_zone == has_catalog:
+            raise ValueError(
+                "Exactly one of zone_id or catalog_id must be provided."
+            )
+        return self
+
+
 class DnsKeyOut(BaseModel):
     """Public-facing key view — never returns private_pem."""
     model_config = ConfigDict(from_attributes=True)
     id: UUID
-    zone_id: UUID
+    zone_id: UUID | None
+    catalog_id: UUID | None
     role: DnsKeyRole
     algorithm: DnsKeyAlgorithm
     public_key_b64: str

@@ -32,6 +32,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Enum,
     Float,
@@ -255,20 +256,33 @@ class DnsKeyAlgorithm(str, enum.Enum):
 
 
 class DnsKey(UUIDPrimaryKey, Timestamped, Base):
-    """A DNSSEC key bound to a zone. Public + private halves live in
-    Postgres for v1 (encrypted-at-rest column hardening deferred);
-    operators export the DS via /dns/zones/{id}/ds-records and upload
-    to the parent zone's operator."""
+    """A DNSSEC key bound to exactly one scope: a DnsZone (zone_id)
+    or a DnsCatalogZone (catalog_id). Exactly one FK is non-null —
+    the CHECK constraint enforces this. Public + private halves live
+    in Postgres for v1 (encrypted-at-rest hardening deferred)."""
 
     __tablename__ = "dns_keys"
     __table_args__ = (
         Index("ix_dns_keys_zone", "zone_id"),
+        Index("ix_dns_keys_catalog", "catalog_id"),
+        # Enforce exactly one scope: zone XOR catalog.
+        CheckConstraint(
+            "(zone_id IS NOT NULL) != (catalog_id IS NOT NULL)",
+            name="ck_dns_keys_scope",
+        ),
     )
 
-    zone_id: Mapped[UUID] = mapped_column(
+    zone_id: Mapped[UUID | None] = mapped_column(
         PgUUID(as_uuid=True),
         ForeignKey("dns_zones.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    # Nullable FK for catalog-zone keys. Mutually exclusive with
+    # zone_id per ck_dns_keys_scope.
+    catalog_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dns_catalog_zones.id", ondelete="CASCADE"),
+        nullable=True,
     )
     role: Mapped[DnsKeyRole] = mapped_column(
         Enum(
