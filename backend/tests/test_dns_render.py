@@ -187,6 +187,74 @@ def test_corefile_auth_mixed_nsec_and_nsec3_zones():
     assert cf.count("    nsec3sign {") == 1
 
 
+def test_corefile_auth_axfr_acl_omitted_when_no_allowlist():
+    """No `transfer_acl_by_zone` entry → renderer emits neither an
+    `acl` nor a `transfer` directive. CoreDNS's transfer plugin
+    defaults to refusing all transfers, which is the closed posture
+    we want for catalog zones whose ACL hasn't been populated."""
+    cf = render_corefile_auth(
+        ["catalog.prod.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+    )
+    assert "acl {" not in cf
+    assert "transfer {" not in cf
+
+
+def test_corefile_auth_axfr_acl_omitted_when_allowlist_empty():
+    """Empty list is treated the same as missing — explicit closed
+    posture without us emitting anything (CoreDNS's default closes
+    the door)."""
+    cf = render_corefile_auth(
+        ["catalog.prod.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+        transfer_acl_by_zone={"catalog.prod.example.": []},
+    )
+    assert "acl {" not in cf
+    assert "transfer {" not in cf
+
+
+def test_corefile_auth_axfr_acl_uses_acl_plugin_not_transfer():
+    """Non-empty allowlist renders into an `acl { allow type AXFR
+    net <cidrs> ; block type AXFR }` rule paired with
+    `transfer { to * }`. CoreDNS's `transfer` plugin rejects CIDR
+    notation natively (`must specify an IP address`), so the
+    CIDR-aware gating lives in `acl` and `transfer` just acts as
+    the on/off switch."""
+    cf = render_corefile_auth(
+        ["catalog.prod.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+        transfer_acl_by_zone={
+            "catalog.prod.example.": ["10.0.0.0/8", "192.168.1.0/24"],
+        },
+    )
+    assert "acl {" in cf
+    assert "allow type AXFR net 10.0.0.0/8 192.168.1.0/24" in cf
+    assert "block type AXFR" in cf
+    assert "transfer {" in cf
+    assert "to *" in cf
+    # And the failure mode the new shape exists to avoid: CIDRs must
+    # NOT appear inside the `transfer` block.
+    assert "to 10.0.0.0/8" not in cf
+    assert "to 192.168.1.0/24" not in cf
+
+
+def test_corefile_auth_axfr_acl_only_targets_named_zone():
+    """ACL is keyed by zone — other zones in the bundle must not
+    accidentally inherit the catalog's transfer gate."""
+    cf = render_corefile_auth(
+        ["catalog.prod.example.", "site42.prod.example."],
+        zones_dir="/var/lib/dcim-dns/auth/zones",
+        transfer_acl_by_zone={"catalog.prod.example.": ["10.0.0.0/8"]},
+    )
+    # The catalog block has the ACL; the site block does not.
+    catalog_block = cf[cf.index("catalog.prod.example.:53"):cf.index("site42.prod.example.:53")]
+    site_block = cf[cf.index("site42.prod.example.:53"):]
+    assert "acl {" in catalog_block
+    assert "transfer {" in catalog_block
+    assert "acl {" not in site_block
+    assert "transfer {" not in site_block
+
+
 def test_corefile_recursive_includes_apex_stubs_when_set():
     # Multiple apexes per fabric → one stub-forward block each, all
     # targeting the same local auth pod.

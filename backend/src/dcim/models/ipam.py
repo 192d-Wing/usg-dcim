@@ -134,6 +134,19 @@ class Fabric(UUIDPrimaryKey, Timestamped, Base):
     # hashlimit or a dnsdist sidecar.
     dns_deny_networks: Mapped[list[str] | None] = mapped_column(JSON)
     dns_allow_networks: Mapped[list[str] | None] = mapped_column(JSON)
+    # CIDR allowlist for AXFR-ing the RFC 9432 catalog zone. NULL or
+    # empty list means no transfers permitted — the renderer omits
+    # both `acl` and `transfer` directives, so CoreDNS's default of
+    # "no transfers" keeps the catalog sealed. A non-empty list
+    # turns into `acl { allow type AXFR net <cidrs> ; block type
+    # AXFR }` plus `transfer { to * }`: the `acl` plugin gates by
+    # CIDR (the `transfer` plugin itself only accepts literal IPs or
+    # `*`, so we use it as a transport switch and let `acl` do the
+    # network filtering). Operators add the source CIDRs of their
+    # downstream BIND / Knot / PowerDNS primaries here. TSIG isn't
+    # supported by CoreDNS's `transfer` plugin; IP ACL is the
+    # security gate today.
+    catalog_transfer_acl: Mapped[list[str] | None] = mapped_column(JSON)
     # Recursive DNS engine for this fabric — CoreDNS (default) or
     # Hickory. Authoritative pods always use CoreDNS; only the
     # recursive side moves. Switch is reversible per-fabric.

@@ -51,6 +51,14 @@ class FabricBase(BaseModel):
     # is rarely what an operator wants when they fat-finger the form).
     dns_deny_networks: list[str] | None = None
     dns_allow_networks: list[str] | None = None
+    # CIDR allowlist for the RFC 9432 catalog zone's AXFR.
+    # NULL/empty → no transfers permitted (renderer omits the AXFR
+    # directives entirely, so CoreDNS's default closed posture
+    # holds). Non-empty → rendered into an `acl { allow type AXFR
+    # net <cidrs> }` gate paired with `transfer { to * }`; CoreDNS's
+    # `transfer` plugin doesn't accept CIDRs natively, so `acl` does
+    # the CIDR filtering and `transfer` is just the on/off switch.
+    catalog_transfer_acl: list[str] | None = None
     # Which engine renders this fabric's recursive pod. Authoritative
     # always uses CoreDNS — see hickory-migration plan.
     recursive_engine: RecursiveDnsEngine = RecursiveDnsEngine.coredns
@@ -69,6 +77,7 @@ class FabricUpdate(BaseModel):
     dns_recursive_upstreams: list[str] | None = None
     dns_deny_networks: list[str] | None = None
     dns_allow_networks: list[str] | None = None
+    catalog_transfer_acl: list[str] | None = None
     recursive_engine: RecursiveDnsEngine | None = None
 
 

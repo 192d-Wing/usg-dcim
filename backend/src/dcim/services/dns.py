@@ -801,6 +801,7 @@ def render_corefile_auth(
     nsec3_params_by_zone: dict[str, dict] | None = None,
     views_by_zone: dict[str, list[dict]] | None = None,
     dnstap_socket: str | None = None,
+    transfer_acl_by_zone: dict[str, list[str]] | None = None,
 ) -> str:
     """Authoritative Corefile: one `file` block per zone, plus health,
     prometheus, errors, log.
@@ -836,6 +837,7 @@ def render_corefile_auth(
     dnssec_map = dnssec_keys_by_zone or {}
     nsec3_map = nsec3_params_by_zone or {}
     views_map = views_by_zone or {}
+    transfer_map = transfer_acl_by_zone or {}
     blocks: list[str] = []
     for name in sorted(zone_names):
         dnssec_block = _render_signing_block(
@@ -845,6 +847,13 @@ def render_corefile_auth(
             key_basenames=dnssec_map.get(name) or [],
             nsec3_params=nsec3_map.get(name),
         )
+        # Catalog-zone style AXFR ACL. CoreDNS's `transfer` plugin
+        # only accepts literal IPs / `*` (no CIDRs), so we gate AXFR
+        # with the `acl` plugin (which does accept CIDRs) and open
+        # the transfer mechanism with `to *`. NULL / empty list keeps
+        # both directives off — the plugin's default of "no
+        # transfers" closes the door without us emitting anything.
+        transfer_block = _render_axfr_acl_block(transfer_map.get(name))
         zone_views = views_map.get(name) or []
         # One block per view, then a default block as the fallthrough.
         # Operators put narrower CIDRs in the higher-priority view; we
@@ -883,6 +892,7 @@ def render_corefile_auth(
             f"    file {base}/{name}.zone\n"
             f"{dnssec_block}"
             f"{dnstap_line}"
+            f"{transfer_block}"
             f"    log\n"
             f"    errors\n"
             f"    prometheus :9153\n"
@@ -890,6 +900,35 @@ def render_corefile_auth(
             f"}}"
         )
     return "\n\n".join(blocks) + "\n"
+
+
+def _render_axfr_acl_block(acl: list[str] | None) -> str:
+    """Emit an `acl { allow type AXFR net ... ; block type AXFR }` +
+    `transfer { to * }` pair gating the catalog zone's AXFR.
+
+    CoreDNS's `transfer` plugin only parses literal IPs and the `*`
+    wildcard — CIDRs raise `must specify an IP address`. The `acl`
+    plugin, by contrast, accepts CIDR notation, so the catalog-zones
+    docs route the network-level gate through `acl` and open the
+    transfer machinery itself with `to *`. The `acl` rule runs
+    first; only AXFR queries from the allowed CIDRs survive to
+    reach the transfer handler.
+
+    NULL or empty ACL emits nothing — the `transfer` plugin's
+    default of "no transfers" is already the closed posture we
+    want when an operator hasn't populated the allowlist."""
+    if not acl:
+        return ""
+    nets = " ".join(acl)
+    return (
+        "    acl {\n"
+        f"        allow type AXFR net {nets}\n"
+        "        block type AXFR\n"
+        "    }\n"
+        "    transfer {\n"
+        "        to *\n"
+        "    }\n"
+    )
 
 
 def _pattern_to_regex(pattern: str) -> str:
@@ -1560,6 +1599,24 @@ def _corefile_zone_names(
     return names
 
 
+async def _catalog_transfer_acl_map(
+    db: AsyncSession, fabric_id: UUID, catalog_name: str | None,
+) -> dict[str, list[str]]:
+    """Map of `{catalog_name: [CIDR, …]}` for the auth Corefile
+    renderer's `transfer_acl_by_zone` arg. Empty when no catalog is
+    enabled. Returns `[]` (not None) for the catalog's entry when
+    the fabric has the catalog enabled but no ACL configured — the
+    renderer treats that as "explicit closed posture" and omits
+    both the `acl` and `transfer` directives (CoreDNS's default of
+    "no transfers" closes the door without help from us)."""
+    if catalog_name is None:
+        return {}
+    from ..models.ipam import Fabric  # noqa: PLC0415 — circular-dep guard
+    fabric = await db.get(Fabric, fabric_id)
+    acl = (fabric.catalog_transfer_acl if fabric else None) or []
+    return {catalog_name: list(acl)}
+
+
 async def _add_catalog_zone_files(
     db: AsyncSession,
     fabric_id: UUID,
@@ -2024,6 +2081,12 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         catalog_name = await _add_catalog_zone_files(
             db, server.fabric_id, zones, zone_files,
         )
+        # Catalog's AXFR ACL — read from the fabric. Only emitted
+        # when a catalog exists; member zones never carry a
+        # transfer directive in this renderer.
+        transfer_acl_by_zone = await _catalog_transfer_acl_map(
+            db, server.fabric_id, catalog_name,
+        )
         key_files, dnssec_keys_by_zone, nsec3_params_by_zone = (
             await _dnssec_artifacts_for_zones(db, zones)
         )
@@ -2042,6 +2105,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
             nsec3_params_by_zone=nsec3_params_by_zone or None,
             views_by_zone=views_by_zone or None,
             dnstap_socket=dnstap_socket_path,
+            transfer_acl_by_zone=transfer_acl_by_zone,
         )
         gobgp: dict | None = None
         anycast_prefixes: list[str] = []
