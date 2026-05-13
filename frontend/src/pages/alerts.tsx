@@ -1,6 +1,6 @@
 // Alerts list — Cloudscape Table with state filter (firing /
 // acknowledged / resolved / suppressed) and per-row Ack action when
-// the operator has alerts:ack capability.
+// the operator has alerts:alerts:ack capability.
 
 import { useState } from 'react';
 import { useTable, useGetIdentity } from '@refinedev/core';

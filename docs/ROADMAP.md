@@ -40,6 +40,26 @@ Shipped through commit `5478494`:
 
 ---
 
+## DNS follow-ups
+
+Items that didn't make the current DNS work but are worth tracking. The
+shipped pieces (Hickory migration, apex DNSSEC delegation, DoH/DoT,
+NSEC3, top-names in query metrics, per-fabric CIDR ACLs) are already
+captured in `docs/dns/` and recent commits.
+
+| Item | Why it matters | Notes |
+|---|---|---|
+| **Per-second QPS rate limiting on the recursive** | Hickory 0.26 has no native QPS limiter. The 0037 CIDR ACLs only gate *who* can ask, not *how fast*. | Real options today are out-of-band: nftables hashlimit on the recursive host or a dnsdist sidecar. Revisit when upstream lands a token-bucket. |
+| **Zone freeze / unfreeze (maintenance-window write lock)** | An operator running a planned change needs to block accidental writes to the zone. Today record mutation is unconditional. | Mirror the existing maintenance-window model; add a `frozen: bool` on `DnsZone` that 4xx's mutations while true, with audit. |
+| **Anycast IPv6 advertisement via gobgpd** | Model already carries v6 anycast addrs; the gobgpd renderer only emits v4 neighbors/prefixes. | Extend `render_gobgp_config` to emit per-AFI families. Verify against a v6 leaf. |
+| **Catalog zones (RFC 9432)** | Adding/removing zones across many servers today touches each server's bundle. Catalog zones let one zone drive that fanout. | Requires both auth + recursive support and a model for the "catalog of zones." Defer until we run at >50 servers. |
+| **ICMP health probes** | Probe targets that don't answer DNS need ICMP as a fallback. Today health checks are DNS-only. | Needs `CAP_NET_RAW` in the worker / collector containers; today it isn't granted. Document the container-perm change before wiring. |
+| **CDNSKEY / CDS auto-propagation (RFC 7344)** | Automates DS upload to a parent that supports CDS scanning. Useful at scale; today operators upload DS manually after KSK rotation. | Defer — only matters when the parent zones we delegate from support CDS, which most DoD-internal parents don't yet. |
+| **System-wide upstream forwarders editor** | Today the system-default `dns_recursive_upstreams` lives in `settings.py` and requires a config redeploy to change. The per-fabric override has a UI; the system default doesn't. | Settings page → DNS tab. Same shape as the per-fabric textarea, writes back to a `system_settings` row. |
+| **Hickory `allow_networks` upstream enforcement gap** | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but doesn't enforce it on UDP. DCIM-side wiring is correct. | Track upstream PR/release; document the gap in the operator guide (done) and revisit when a fixed Hickory release lands. |
+
+---
+
 ## Near-term IPAM polish
 
 Small follow-ups to the IPAM/overlay work that's already shipped. None of
