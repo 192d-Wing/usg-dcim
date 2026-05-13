@@ -12,6 +12,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"time"
 
@@ -85,6 +86,17 @@ func (r *RESTConfig) VerifyTLSFlag() bool {
 	return *r.VerifyTLS
 }
 
+// IPMIConfig mirrors IpmiDriverConfig. Password is read directly when
+// present; password_ref (Vault lookup) lands with the credentials
+// story later. The Phase-4 driver shells out to `ipmitool`, so the
+// fields match its -H / -U / -P flags.
+type IPMIConfig struct {
+	Host        string `yaml:"host"`
+	Username    string `yaml:"username"`
+	Password    string `yaml:"password,omitempty"`
+	PasswordRef string `yaml:"password_ref,omitempty"`
+}
+
 type Device struct {
 	AssetID          uuid.UUID      `yaml:"asset_id"`
 	Kind             string         `yaml:"kind"`
@@ -94,8 +106,55 @@ type Device struct {
 	Redfish          *RedfishConfig `yaml:"redfish,omitempty"`
 	Modbus           *ModbusConfig  `yaml:"modbus,omitempty"`
 	REST             *RESTConfig    `yaml:"rest,omitempty"`
-	// IPMI stays opaque until Phase 4 lands its driver.
-	IPMI map[string]any `yaml:"ipmi,omitempty"`
+	IPMI             *IPMIConfig    `yaml:"ipmi,omitempty"`
+}
+
+// DNSServerConfig mirrors collector/dcim_collector/config.py:DnsServerConfig.
+// One entry per CoreDNS / Hickory deployment the agent renders configs
+// for. Phase 4 implements bundle apply + metrics scrape + dnstap + anycast.
+type DNSServerConfig struct {
+	ID              uuid.UUID `yaml:"id"`
+	Role            string    `yaml:"role"` // auth | recursive
+	OutputDir       string    `yaml:"output_dir"`
+	CoreDNSPIDFile  string    `yaml:"coredns_pidfile,omitempty"`
+	GoBGPPIDFile    string    `yaml:"gobgp_pidfile,omitempty"`
+	MetricsURL      string    `yaml:"metrics_url,omitempty"`
+	MetricsEnabled  *bool     `yaml:"metrics_enabled,omitempty"`
+	DnstapSocket    string    `yaml:"dnstap_socket,omitempty"`
+	GoBGPAPIHost    string    `yaml:"gobgp_api_host,omitempty"`
+}
+
+func (s *DNSServerConfig) MetricsOn() bool {
+	if s.MetricsEnabled == nil {
+		return true
+	}
+	return *s.MetricsEnabled
+}
+
+// DNSAgentConfig mirrors DnsAgentConfig. When enabled is false (or the
+// servers list is empty), the agent silently no-ops — matches the
+// Python collector's "dns_agent_disabled" log line.
+type DNSAgentConfig struct {
+	Enabled             bool              `yaml:"enabled"`
+	PollIntervalSecs    int               `yaml:"poll_interval_seconds"`
+	APIBase             string            `yaml:"api_base,omitempty"`
+	Servers             []DNSServerConfig `yaml:"servers"`
+	MetricsIntervalSecs int               `yaml:"metrics_interval_seconds"`
+	MetricsEnabled      bool              `yaml:"metrics_enabled"`
+}
+
+func (d *DNSAgentConfig) PollInterval() time.Duration {
+	if d.PollIntervalSecs <= 0 {
+		return 30 * time.Second
+	}
+	return time.Duration(d.PollIntervalSecs) * time.Second
+}
+
+func (d *DNSAgentConfig) MetricsInterval() time.Duration {
+	if d.MetricsIntervalSecs <= 0 {
+		return 60 * time.Second
+	}
+	return time.Duration(d.MetricsIntervalSecs) * time.Second
 }
 
 // RedfishVerifyTLS returns the effective verify-TLS flag. Defaults to
@@ -127,10 +186,25 @@ type Config struct {
 	Mtls                  Mtls          `yaml:"mtls"`
 	Devices               []Device      `yaml:"devices"`
 	DNSTap                *DNSTapConfig `yaml:"dnstap,omitempty"`
-	// DNS (CoreDNS bundle agent), syslog, etc. — accepted but
-	// ignored in Phase 3; Phase 4 picks them up.
-	DNS    map[string]any `yaml:"dns,omitempty"`
-	Syslog *int           `yaml:"syslog_listen,omitempty"`
+	DNS                   DNSAgentConfig `yaml:"dns"`
+	Syslog                *int           `yaml:"syslog_listen,omitempty"`
+}
+
+// APIBase resolves the root the DNS agent dials for bundle + metrics
+// POSTs. Operator override wins; otherwise we derive scheme://host:port
+// from ingest_url. Mirrors collector/dns_agent.py:_api_base.
+func (c *Config) APIBase() string {
+	if c.DNS.APIBase != "" {
+		return trimRightSlash(c.DNS.APIBase)
+	}
+	// trimRightSlash on ingest_url; strip everything after the
+	// scheme://host[:port] portion. This handles ingest_url values that
+	// embed a path (rare, but the API client doesn't want it).
+	u, err := url.Parse(c.IngestURL)
+	if err != nil || u.Scheme == "" {
+		return trimRightSlash(c.IngestURL)
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // TelemetryEndpoint resolves the URL the forwarder should POST telemetry

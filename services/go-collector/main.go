@@ -20,6 +20,7 @@ import (
 
 	"github.com/usg-dcim/services/go-collector/internal/buffer"
 	"github.com/usg-dcim/services/go-collector/internal/config"
+	"github.com/usg-dcim/services/go-collector/internal/dnsagent"
 	"github.com/usg-dcim/services/go-collector/internal/dnstap"
 	"github.com/usg-dcim/services/go-collector/internal/drivers"
 	"github.com/usg-dcim/services/go-collector/internal/forwarder"
@@ -116,7 +117,18 @@ func main() {
 		}()
 	}
 
-	log.Info("collector_running", "devices", len(cfg.Devices))
+	// DNS agent (bundle / metrics / dnstap / anycast). Self-no-ops
+	// when cfg.dns.enabled = false or no servers are configured.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		dnsagent.Run(ctx, cfg, token, log.With("subsys", "dnsagent"))
+	}()
+
+	log.Info("collector_running",
+		"devices", len(cfg.Devices),
+		"dns_servers", len(cfg.DNS.Servers),
+	)
 	<-ctx.Done()
 	log.Info("collector_shutting_down")
 	wg.Wait()

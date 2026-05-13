@@ -19,6 +19,7 @@ import (
 
 	"github.com/usg-dcim/services/go-collector/internal/buffer"
 	"github.com/usg-dcim/services/go-collector/internal/config"
+	"github.com/usg-dcim/services/go-collector/internal/drivers/ipmi"
 	"github.com/usg-dcim/services/go-collector/internal/drivers/modbus"
 	"github.com/usg-dcim/services/go-collector/internal/drivers/redfish"
 	"github.com/usg-dcim/services/go-collector/internal/drivers/rest"
@@ -60,7 +61,10 @@ func Build(d config.Device, log *slog.Logger) (Poller, error) {
 		}
 		return rest.New(&d, log), nil
 	case "ipmi":
-		return &stub{driver: d.Driver, asset: d.AssetID.String(), log: log}, nil
+		if d.IPMI == nil {
+			return nil, fmt.Errorf("ipmi driver requires ipmi: block")
+		}
+		return ipmi.New(&d, log), nil
 	default:
 		return nil, fmt.Errorf("unknown driver %q", d.Driver)
 	}
