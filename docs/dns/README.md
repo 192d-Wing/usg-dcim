@@ -26,6 +26,7 @@ and either NSEC (upstream `dnssec` plugin) or NSEC3 (custom
 | Deploying the central stack, managing secrets, bootstrapping sites | [admin-guide.md](admin-guide.md)       |
 | Creating zones, managing records, enabling DNSSEC/NSEC3 from the UI | [operator-guide.md](operator-guide.md) |
 | Modifying the code, adding a feature, debugging a regression      | [implementation.md](implementation.md) |
+| Managing CDS / CDNSKEY auto-propagation for KSK rotation          | [cds-cdnskey.md](cds-cdnskey.md)       |
 
 ## Design context
 

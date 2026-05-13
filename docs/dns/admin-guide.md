@@ -334,6 +334,7 @@ The pod logs `nsec3sign: ...` at startup. Common faults:
 
 ## Pointers
 
+- CDS / CDNSKEY auto-propagation: [cds-cdnskey.md](cds-cdnskey.md)
 - Code internals: [implementation.md](implementation.md)
 - Day-to-day workflows: [operator-guide.md](operator-guide.md)
 - Design context: [../design/dns-integration.md](../design/dns-integration.md)
