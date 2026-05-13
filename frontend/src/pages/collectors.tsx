@@ -26,10 +26,17 @@ import { http } from '@/lib/http';
 import { formatDate } from '@/lib/utils';
 
 type Site = { id: string; code: string; name: string };
+type ConfigOverrides = {
+  dns_metrics_interval_seconds: number | null;
+  device_poll_interval_seconds: number | null;
+  heartbeat_interval_seconds: number | null;
+};
 type Collector = {
   id: string; name: string; site_id: string; status: string;
   last_seen_at: string | null; buffered_samples: number; capabilities: string[];
   version: string | null;
+  enabled: boolean;
+  config_overrides: ConfigOverrides;
 };
 type Enrollment = {
   collector_id: string;
@@ -61,6 +68,53 @@ export function CollectorsPage() {
 
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [enrolled, setEnrolled] = useState<{ enrollment: Enrollment; siteCode: string; name: string } | null>(null);
+  const [editingOverrides, setEditingOverrides] = useState<Collector | null>(null);
+  const [selected, setSelected] = useState<Collector[]>([]);
+  const [actionLoading, setActionLoading] = useState(false);
+  const canEditOverrides = hasCap(identity?.capabilities, 'collectors:collectors:update');
+
+  const enabledState = selected.length > 0 ? (
+    selected.every((c) => c.enabled)
+      ? 'disable'
+      : selected.every((c) => !c.enabled)
+        ? 'enable'
+        : 'mixed'
+  ) : null;
+
+  async function handleToggleEnabled() {
+    if (selected.length === 0) return;
+    const shouldEnable = enabledState === 'enable';
+    setActionLoading(true);
+    try {
+      await Promise.all(
+        selected.map((c) =>
+          http.patch(`/collectors/${c.id}/enabled`, { enabled: shouldEnable })
+        )
+      );
+      toast.success(`${selected.length} collector${selected.length === 1 ? '' : 's'} ${shouldEnable ? 'enabled' : 'disabled'}`);
+      setSelected([]);
+      tableQuery.refetch();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed to toggle enabled state');
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleDecommission() {
+    if (selected.length === 0) return;
+    setActionLoading(true);
+    try {
+      await Promise.all(selected.map((c) => http.delete(`/collectors/${c.id}`)));
+      toast.success(`${selected.length} collector${selected.length === 1 ? '' : 's'} decommissioned`);
+      setSelected([]);
+      tableQuery.refetch();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed to decommission');
+    } finally {
+      setActionLoading(false);
+    }
+  }
 
   return (
     <ContentLayout
@@ -80,14 +134,46 @@ export function CollectorsPage() {
         loadingText="Loading collectors…"
         items={data}
         trackBy="id"
+        selectionType="multi"
+        selectedItems={selected}
+        onSelectionChange={({ detail }) => setSelected(detail.selectedItems)}
         header={
           <Header
             counter={`(${data.length})`}
-            actions={canEnroll && (
-              <Button variant="primary" iconName="add-plus" onClick={() => setEnrollOpen(true)}>
-                Enroll collector
-              </Button>
-            )}
+            actions={
+              <SpaceBetween direction="horizontal" size="xs">
+                {canEditOverrides && (
+                  <>
+                    <Button
+                      disabled={selected.length !== 1 || !canEditOverrides}
+                      iconName="settings"
+                      onClick={() => setEditingOverrides(selected[0])}
+                    >
+                      Edit overrides
+                    </Button>
+                    <Button
+                      disabled={selected.length === 0 || !canEditOverrides || actionLoading}
+                      loading={actionLoading}
+                      onClick={handleToggleEnabled}
+                    >
+                      {enabledState === 'enable' ? 'Enable' : enabledState === 'disable' ? 'Disable' : 'Enable / Disable'}
+                    </Button>
+                    <Button
+                      disabled={selected.length === 0 || !canEditOverrides || actionLoading}
+                      loading={actionLoading}
+                      onClick={handleDecommission}
+                    >
+                      Decommission
+                    </Button>
+                  </>
+                )}
+                {canEnroll && (
+                  <Button variant="primary" iconName="add-plus" onClick={() => setEnrollOpen(true)}>
+                    Enroll collector
+                  </Button>
+                )}
+              </SpaceBetween>
+            }
           >
             Collectors
           </Header>
@@ -141,6 +227,11 @@ export function CollectorsPage() {
             cell: (c) => <span style={{ fontVariantNumeric: 'tabular-nums' }}>{c.buffered_samples?.toLocaleString() ?? 0}</span>,
             width: 100,
           },
+          {
+            id: 'overrides', header: 'Overrides',
+            cell: (c) => <OverridesSummary overrides={c.config_overrides} />,
+            width: 200,
+          },
         ]}
         empty={
           <Box textAlign="center" color="inherit" padding="m">
@@ -183,7 +274,133 @@ export function CollectorsPage() {
           />
         )}
       </Modal>
+
+      <Modal
+        visible={editingOverrides !== null}
+        onDismiss={() => setEditingOverrides(null)}
+        header={editingOverrides ? `Runtime overrides — ${editingOverrides.name}` : 'Runtime overrides'}
+        size="medium"
+      >
+        {editingOverrides && (
+          <OverridesForm
+            collector={editingOverrides}
+            onSaved={() => {
+              setEditingOverrides(null);
+              tableQuery.refetch();
+            }}
+          />
+        )}
+      </Modal>
     </ContentLayout>
+  );
+}
+
+function OverridesSummary({ overrides }: Readonly<{ overrides: ConfigOverrides | undefined }>) {
+  const parts: string[] = [];
+  if (overrides?.dns_metrics_interval_seconds) parts.push(`scrape ${overrides.dns_metrics_interval_seconds}s`);
+  if (overrides?.device_poll_interval_seconds) parts.push(`poll ${overrides.device_poll_interval_seconds}s`);
+  if (overrides?.heartbeat_interval_seconds) parts.push(`hb ${overrides.heartbeat_interval_seconds}s`);
+  if (parts.length === 0) {
+    return <Box variant="span" color="text-status-inactive" fontSize="body-s">defaults</Box>;
+  }
+  return (
+    <Box variant="span" fontSize="body-s" fontWeight="normal">
+      {parts.join(' · ')}
+    </Box>
+  );
+}
+
+// parseOverrideField: empty → null (clear override); valid 5..3600 → int;
+// out-of-range → Number.NaN sentinel so the caller can refuse to PATCH.
+function parseOverrideField(s: string): number | null {
+  const t = s.trim();
+  if (t === '') return null;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 5 || n > 3600) return Number.NaN;
+  return Math.round(n);
+}
+
+function OverridesForm({
+  collector, onSaved,
+}: Readonly<{
+  collector: Collector;
+  onSaved: () => void;
+}>) {
+  const initial = collector.config_overrides ?? ({} as ConfigOverrides);
+  const [dnsScrape, setDnsScrape] = useState(initial.dns_metrics_interval_seconds?.toString() ?? '');
+  const [poll, setPoll] = useState(initial.device_poll_interval_seconds?.toString() ?? '');
+  const [hb, setHb] = useState(initial.heartbeat_interval_seconds?.toString() ?? '');
+  const [submitting, setSubmitting] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const body: ConfigOverrides = {
+      dns_metrics_interval_seconds: parseOverrideField(dnsScrape),
+      device_poll_interval_seconds: parseOverrideField(poll),
+      heartbeat_interval_seconds: parseOverrideField(hb),
+    };
+    if (Object.values(body).some((v) => Number.isNaN(v))) {
+      toast.error('Intervals must be 5–3600 seconds (or empty for default).');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await http.patch(`/collectors/${collector.id}/config`, body);
+      toast.success('Overrides saved — collector applies on next heartbeat.');
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed to save overrides');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button variant="primary" formAction="submit" loading={submitting}>
+              {submitting ? 'Saving…' : 'Save'}
+            </Button>
+          </SpaceBetween>
+        }
+      >
+        <SpaceBetween size="m">
+          <Box variant="p" color="text-body-secondary">
+            Leave a field empty to use the collector's YAML default. Each value is 5–3600 seconds.
+            Changes propagate on the collector's next heartbeat (up to one heartbeat-interval of lag).
+          </Box>
+          <FormField label="DNS metrics scrape interval (seconds)"
+            description="How often the collector hits CoreDNS/Hickory /metrics and POSTs to central.">
+            <Input
+              value={dnsScrape}
+              onChange={({ detail }) => setDnsScrape(detail.value)}
+              type="number"
+              placeholder="60 (default)"
+            />
+          </FormField>
+          <FormField label="Device poll interval (seconds)"
+            description="Override the per-device poll_interval_seconds in collector.yaml.">
+            <Input
+              value={poll}
+              onChange={({ detail }) => setPoll(detail.value)}
+              type="number"
+              placeholder="(per-device default)"
+            />
+          </FormField>
+          <FormField label="Heartbeat interval (seconds)"
+            description="How often the collector reports buffer depth + liveness to central.">
+            <Input
+              value={hb}
+              onChange={({ detail }) => setHb(detail.value)}
+              type="number"
+              placeholder="30 (default)"
+            />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 
