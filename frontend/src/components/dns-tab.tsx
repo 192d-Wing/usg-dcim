@@ -179,6 +179,42 @@ type BgpPeer = {
 };
 type Asn = { id: string; asn: number; name: string };
 
+type DnsCatalogZone = {
+  id: string;
+  fabric_id: string;
+  name: string;
+  enabled: boolean;
+  signed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type DnsKeyEntry = {
+  id: string;
+  zone_id: string | null;
+  catalog_id: string | null;
+  role: 'ksk' | 'zsk';
+  algorithm: string;
+  public_key_b64: string;
+  key_tag: number;
+  active_from: string;
+  retired_at: string | null;
+};
+
+type DnsDsRecord = {
+  key_tag: number;
+  algorithm: number;
+  digest_type: number;
+  digest: string;
+  rr: string;
+};
+
+type FabricPartial = {
+  id: string;
+  name: string;
+  catalog_transfer_acl: string[] | null;
+};
+
 const RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'SRV', 'NS', 'CAA', 'PTR'] as const;
 // SOA is rendered as a virtual row but never selected via the type
 // dropdown — keep the create-form's set narrow.
@@ -267,6 +303,11 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
             id: 'health-checks',
             label: 'Health checks',
             content: <HealthChecksPanel fabricId={fabricId} canWrite={canWrite} />,
+          },
+          {
+            id: 'catalog',
+            label: 'Catalog zone',
+            content: <CatalogZonesPanel fabricId={fabricId} canWrite={canWrite} />,
           },
         ]}
       />
@@ -4893,3 +4934,500 @@ function AnycastForm({
   );
 }
 
+// =====================================================================
+// Catalog zone panel (RFC 9432)
+// =====================================================================
+
+function snippetBind9(catalogName: string, authIp: string): string {
+  return `// named.conf — add to options {} block:
+options {
+    catalog-zones {
+        zone "${catalogName}" {
+            default-masters { ${authIp}; };
+        };
+    };
+};
+
+// named.conf — declare the catalog zone itself:
+zone "${catalogName}" {
+    type secondary;
+    primaries { ${authIp}; };
+    allow-transfer { none; };
+};`;
+}
+
+function snippetKnot(catalogName: string, authIp: string): string {
+  return `# knot.conf excerpt
+
+remote:
+  - id: dcim-auth
+    address: ${authIp}@53
+
+zone:
+  - domain: ${catalogName}
+    master: dcim-auth
+    catalog-role: interpret
+    acl: [transfer-acl]`;
+}
+
+function snippetPowerDNS(catalogName: string, authIp: string): string {
+  return `# pdns.conf excerpt (PowerDNS Authoritative >= 4.7)
+catalog-zones=${catalogName}
+catalog-zones-masters=${authIp}:53`;
+}
+
+function CatalogZonesPanel({ fabricId, canWrite }: { fabricId: string; canWrite: boolean }) {
+  const qc = useQueryClient();
+
+  const catalogQ = useQuery({
+    queryKey: ['dns-catalog', fabricId],
+    queryFn: async () => {
+      const r = await http.get<{ items: DnsCatalogZone[] }>(
+        `/dns/catalog-zones?fabric_id=${fabricId}&page_size=5`,
+      );
+      return r.data.items[0] ?? null;
+    },
+  });
+  const catalog = catalogQ.data ?? null;
+
+  const fabricQ = useQuery({
+    queryKey: ['fabric-partial', fabricId],
+    queryFn: async () => (
+      await http.get<FabricPartial>(`/ipam/fabrics/${fabricId}`)
+    ).data,
+  });
+  const fabric = fabricQ.data ?? null;
+
+  const serversQ = useQuery({
+    queryKey: ['dns-servers-auth', fabricId],
+    queryFn: async () => (
+      await http.get<{ items: DnsServer[] }>(
+        `/dns/servers?fabric_id=${fabricId}&page_size=50`,
+      )
+    ).data.items ?? [],
+  });
+  const authIps = (serversQ.data ?? [])
+    .filter((s) => s.role === 'auth' && s.enabled)
+    .map((s) => s.unicast_ip)
+    .filter(Boolean);
+  const primaryAuthIp = authIps[0] ?? '<auth-unicast-ip>';
+
+  const [aclOpen, setAclOpen] = useState(false);
+  const [snippetOpen, setSnippetOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [aclDraft, setAclDraft] = useState('');
+
+  async function refresh() {
+    await qc.invalidateQueries({ queryKey: ['dns-catalog', fabricId] });
+    await qc.invalidateQueries({ queryKey: ['fabric-partial', fabricId] });
+  }
+
+  async function toggleEnabled() {
+    if (!catalog) return;
+    try {
+      await http.patch(`/dns/catalog-zones/${catalog.id}`, { enabled: !catalog.enabled });
+      await refresh();
+      toast.success(catalog.enabled ? 'Catalog disabled' : 'Catalog enabled');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  async function enableDnssec() {
+    if (!catalog) return;
+    try {
+      await http.post(`/dns/catalog-zones/${catalog.id}/enable-dnssec`);
+      await refresh();
+      toast.success('DNSSEC enabled for catalog zone');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  async function disableDnssec() {
+    if (!catalog) return;
+    if (!window.confirm(`Remove all DNSSEC keys for ${catalog.name}? Consumers validating against this trust anchor will need to be updated.`)) return;
+    try {
+      await http.post(`/dns/catalog-zones/${catalog.id}/disable-dnssec`);
+      await refresh();
+      toast.success('DNSSEC disabled');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  async function saveAcl() {
+    const cidrs = aclDraft.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+    try {
+      await http.patch(`/ipam/fabrics/${fabricId}`, {
+        catalog_transfer_acl: cidrs.length ? cidrs : null,
+      });
+      await refresh();
+      setAclOpen(false);
+      toast.success('AXFR ACL saved');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  async function createCatalog() {
+    try {
+      await http.post('/dns/catalog-zones', { fabric_id: fabricId });
+      await refresh();
+      setCreateOpen(false);
+      toast.success('Catalog zone created');
+    } catch (err: any) { toast.error(err?.message ?? 'failed'); }
+  }
+
+  async function copy(text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Copied');
+    } catch { toast.error('Clipboard unavailable'); }
+  }
+
+  const acl = fabric?.catalog_transfer_acl ?? null;
+
+  if (catalogQ.isLoading || fabricQ.isLoading) {
+    return <Spinner />;
+  }
+
+  if (!catalog) {
+    return (
+      <Container>
+        <SpaceBetween size="m">
+          <Box color="text-status-inactive">
+            No catalog zone configured for this fabric. RFC&nbsp;9432 catalog zones
+            let DNS secondaries (BIND&nbsp;9, Knot, PowerDNS) auto-provision all zones
+            in this fabric via a single AXFR subscription — no per-zone declarations needed.
+          </Box>
+          {canWrite && (
+            <>
+              <Button onClick={() => setCreateOpen(true)} variant="primary">
+                Enable catalog zone
+              </Button>
+              <Modal
+                visible={createOpen}
+                onDismiss={() => setCreateOpen(false)}
+                header="Enable catalog zone"
+                size="small"
+                footer={
+                  <Box float="right">
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <Button variant="link" onClick={() => setCreateOpen(false)}>Cancel</Button>
+                      <Button variant="primary" onClick={createCatalog}>Enable</Button>
+                    </SpaceBetween>
+                  </Box>
+                }
+              >
+                <Box>
+                  DCIM will create a <code style={MONO}>catalog.{fabric?.name ?? fabricId}.local</code> zone
+                  served by every auth pod in this fabric. Consumers subscribe via AXFR.
+                </Box>
+              </Modal>
+            </>
+          )}
+        </SpaceBetween>
+      </Container>
+    );
+  }
+
+  const serial = Math.floor(new Date(catalog.updated_at).getTime() / 1000);
+
+  return (
+    <>
+      <SpaceBetween size="m">
+        <Container
+          header={
+            <Header
+              variant="h2"
+              description="RFC 9432 catalog zone — secondaries subscribe here to auto-provision all fabric zones"
+            >
+              Catalog zone
+            </Header>
+          }
+        >
+          <KeyValuePairs
+            columns={3}
+            items={[
+              { label: 'Zone name', value: <span style={MONO}>{catalog.name}</span> },
+              {
+                label: 'Status',
+                value: (
+                  <StatusIndicator type={catalog.enabled ? 'success' : 'stopped'}>
+                    {catalog.enabled ? 'Enabled' : 'Disabled'}
+                  </StatusIndicator>
+                ),
+              },
+              {
+                label: 'DNSSEC',
+                value: (
+                  <StatusIndicator type={catalog.signed ? 'success' : 'warning'}>
+                    {catalog.signed ? 'Signed' : 'Unsigned'}
+                  </StatusIndicator>
+                ),
+              },
+              { label: 'SOA serial', value: <span style={MONO}>{serial}</span> },
+              {
+                label: 'AXFR allowlist',
+                value: acl && acl.length > 0
+                  ? <span style={MONO}>{acl.join(', ')}</span>
+                  : <Box color="text-status-inactive">None — transfers blocked</Box>,
+              },
+              {
+                label: 'Auth server IPs',
+                value: authIps.length > 0
+                  ? <span style={MONO}>{authIps.join(', ')}</span>
+                  : <Box color="text-status-inactive">None registered</Box>,
+              },
+            ]}
+          />
+        </Container>
+
+        <SpaceBetween direction="horizontal" size="xs">
+          {canWrite && (
+            <>
+              <Button onClick={toggleEnabled}>
+                {catalog.enabled ? 'Disable catalog' : 'Enable catalog'}
+              </Button>
+              <Button onClick={() => { setAclDraft((acl ?? []).join(', ')); setAclOpen(true); }}>
+                Edit AXFR ACL
+              </Button>
+              {catalog.signed
+                ? <Button onClick={disableDnssec}>Disable DNSSEC</Button>
+                : <Button variant="primary" onClick={enableDnssec}>Enable DNSSEC</Button>
+              }
+              {catalog.signed && (
+                <Button onClick={() => setKeysOpen(true)}>Keys / DS records</Button>
+              )}
+            </>
+          )}
+          <Button iconName="external" onClick={() => setSnippetOpen(true)}>
+            Consumer snippets
+          </Button>
+        </SpaceBetween>
+      </SpaceBetween>
+
+      {/* AXFR ACL editor */}
+      <Modal
+        visible={aclOpen}
+        onDismiss={() => setAclOpen(false)}
+        header="Edit AXFR allowlist"
+        size="medium"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setAclOpen(false)}>Cancel</Button>
+              <Button variant="primary" onClick={saveAcl}>Save</Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="s">
+          <Box>
+            Comma- or space-separated CIDRs. Only these source networks may AXFR the
+            catalog zone. Leave empty to block all transfers.
+          </Box>
+          <FormField label="Allowed CIDRs" description="e.g. 10.0.0.0/8, 192.168.1.0/24">
+            <Input
+              value={aclDraft}
+              onChange={({ detail }) => setAclDraft(detail.value)}
+              placeholder="10.0.0.0/8, 192.168.1.0/24"
+            />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      {/* Keys / DS records */}
+      {catalog.signed && (
+        <CatalogKeysModal
+          catalogId={catalog.id}
+          catalogName={catalog.name}
+          open={keysOpen}
+          onClose={() => setKeysOpen(false)}
+          onCopy={copy}
+        />
+      )}
+
+      {/* Consumer snippets */}
+      <CatalogSnippetsModal
+        catalogName={catalog.name}
+        authIp={primaryAuthIp}
+        open={snippetOpen}
+        onClose={() => setSnippetOpen(false)}
+        onCopy={copy}
+      />
+    </>
+  );
+}
+
+function CatalogKeysModal({
+  catalogId, catalogName, open, onClose, onCopy,
+}: {
+  catalogId: string;
+  catalogName: string;
+  open: boolean;
+  onClose: () => void;
+  onCopy: (text: string) => void;
+}) {
+  const keysQ = useQuery({
+    queryKey: ['catalog-keys', catalogId],
+    queryFn: async () => (
+      await http.get<DnsKeyEntry[]>(`/dns/catalog-zones/${catalogId}/keys`)
+    ).data,
+    enabled: open,
+  });
+  const dsQ = useQuery({
+    queryKey: ['catalog-ds', catalogId],
+    queryFn: async () => (
+      await http.get<DnsDsRecord[]>(`/dns/catalog-zones/${catalogId}/ds-records`)
+    ).data,
+    enabled: open,
+  });
+
+  return (
+    <Modal
+      visible={open}
+      onDismiss={onClose}
+      header={`DNSSEC keys — ${catalogName}`}
+      size="large"
+    >
+      <SpaceBetween size="l">
+        <Table<DnsKeyEntry>
+          header={<Header variant="h3">Key roster</Header>}
+          loading={keysQ.isLoading}
+          items={keysQ.data ?? []}
+          trackBy="id"
+          columnDefinitions={[
+            { id: 'role', header: 'Role', cell: (k) => k.role.toUpperCase(), width: 70 },
+            { id: 'alg', header: 'Algorithm', cell: (k) => k.algorithm, width: 160 },
+            {
+              id: 'tag', header: 'Tag', width: 80,
+              cell: (k) => <span style={MONO}>{k.key_tag}</span>,
+            },
+            {
+              id: 'active', header: 'Active from',
+              cell: (k) => new Date(k.active_from).toLocaleDateString(),
+            },
+            {
+              id: 'retired', header: 'State',
+              cell: (k) => k.retired_at
+                ? <StatusIndicator type="warning">Retired {new Date(k.retired_at).toLocaleDateString()}</StatusIndicator>
+                : <StatusIndicator type="success">Active</StatusIndicator>,
+            },
+          ]}
+          empty="No keys"
+        />
+        <Table<DnsDsRecord>
+          header={
+            <Header
+              variant="h3"
+              description="Upload to your parent zone operator to chain the trust anchor"
+            >
+              DS records
+            </Header>
+          }
+          loading={dsQ.isLoading}
+          items={dsQ.data ?? []}
+          trackBy="key_tag"
+          columnDefinitions={[
+            { id: 'tag', header: 'Key tag', cell: (d) => <span style={MONO}>{d.key_tag}</span>, width: 90 },
+            { id: 'alg', header: 'Alg', cell: (d) => d.algorithm, width: 70 },
+            { id: 'dt', header: 'Digest type', cell: (d) => d.digest_type, width: 100 },
+            { id: 'rr', header: 'DS RR', cell: (d) => <span style={MONO}>{d.rr}</span> },
+            {
+              id: 'copy', header: '', width: 56,
+              cell: (d) => (
+                <Button
+                  iconName="copy"
+                  variant="inline-icon"
+                  ariaLabel={`Copy DS record tag ${d.key_tag}`}
+                  onClick={() => onCopy(d.rr)}
+                />
+              ),
+            },
+          ]}
+          empty="No active KSKs"
+        />
+      </SpaceBetween>
+    </Modal>
+  );
+}
+
+function CatalogSnippetsModal({
+  catalogName, authIp, open, onClose, onCopy,
+}: {
+  catalogName: string;
+  authIp: string;
+  open: boolean;
+  onClose: () => void;
+  onCopy: (text: string) => void;
+}) {
+  const [activeSnippet, setActiveSnippet] = useState('bind9');
+
+  const snippets: Record<string, { label: string; text: string; hint: string }> = {
+    bind9: {
+      label: 'BIND 9',
+      text: snippetBind9(catalogName, authIp),
+      hint: 'BIND 9.16+ supports RFC 9432 catalog consumer mode.',
+    },
+    knot: {
+      label: 'Knot DNS',
+      text: snippetKnot(catalogName, authIp),
+      hint: 'Knot DNS 3.1+ supports catalog zone interpretation.',
+    },
+    powerdns: {
+      label: 'PowerDNS',
+      text: snippetPowerDNS(catalogName, authIp),
+      hint: 'PowerDNS Authoritative Server 4.7+ supports catalog zones.',
+    },
+  };
+
+  return (
+    <Modal
+      visible={open}
+      onDismiss={onClose}
+      header="Consumer configuration snippets"
+      size="large"
+    >
+      <SpaceBetween size="m">
+        <Alert type="info">
+          Paste the relevant snippet into your secondary's configuration to subscribe to this
+          catalog zone. The secondary will auto-provision all member zones via AXFR without
+          per-zone declarations.
+        </Alert>
+        <Tabs
+          activeTabId={activeSnippet}
+          onChange={({ detail }) => setActiveSnippet(detail.activeTabId)}
+          tabs={Object.entries(snippets).map(([id, s]) => ({
+            id,
+            label: s.label,
+            content: (
+              <SpaceBetween size="s">
+                <Box color="text-body-secondary">{s.hint}</Box>
+                <div style={{ position: 'relative' }}>
+                  <pre
+                    style={{
+                      background: colorBackgroundContainerContent,
+                      border: `1px solid ${colorBorderDividerDefault}`,
+                      borderRadius: 4,
+                      padding: '12px 48px 12px 16px',
+                      fontFamily: 'ui-monospace, monospace',
+                      fontSize: 13,
+                      overflowX: 'auto',
+                      whiteSpace: 'pre',
+                      margin: 0,
+                    }}
+                  >
+                    {s.text}
+                  </pre>
+                  <div style={{ position: 'absolute', top: 8, right: 8 }}>
+                    <Button
+                      iconName="copy"
+                      variant="inline-icon"
+                      ariaLabel={`Copy ${s.label} snippet`}
+                      onClick={() => onCopy(s.text)}
+                    />
+                  </div>
+                </div>
+              </SpaceBetween>
+            ),
+          }))}
+        />
+      </SpaceBetween>
+    </Modal>
+  );
+}
