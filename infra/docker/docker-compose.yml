@@ -232,13 +232,18 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  # collector service uses services/go-collector. The Python collector
+  # (../../collector) is deprecated and kept in tree as reference / for
+  # emergency rollback; flip the build context back to it and re-add
+  # PYTHONUNBUFFERED if you need to revert mid-cutover. CMD argument
+  # `-config` points at the same /etc/dcim/collector.yaml the Python
+  # binary read, and the YAML surface is byte-compatible per Phase 1–4.
   collector:
     build:
-      context: ../../collector
+      context: ../../services/go-collector
       dockerfile: Dockerfile
     profiles: ["collector"]   # opt-in: `docker compose --profile collector up`
-    environment:
-      PYTHONUNBUFFERED: "1"
+    command: ["-config", "/etc/dcim/collector.yaml"]
     volumes:
       - ./collector-config.yaml:/etc/dcim/collector.yaml:ro
       - collector-buffer:/var/lib/dcim-collector

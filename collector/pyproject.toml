@@ -1,7 +1,7 @@
 [project]
 name = "dcim-collector"
 version = "0.1.0"
-description = "USG DCIM site collector — local SNMP/Redfish/Modbus/REST/IPMI poller with store-and-forward"
+description = "DEPRECATED — kept for reference and emergency rollback. Active implementation: services/go-collector. See collector/DEPRECATED.md."
 requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.27",
