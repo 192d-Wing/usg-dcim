@@ -38,6 +38,7 @@ from ..models.dns import (
     BgpPeer,
     DnsBlocklist,
     DnsBlocklistEntry,
+    DnsCatalogZone,
     DnsForwarder,
     DnsHealthCheck,
     DnsKey,
@@ -72,6 +73,9 @@ from ..schemas.dns import (
     DnsBlocklistOut,
     DnsBlocklistUpdate,
     DnsBundle,
+    DnsCatalogZoneCreate,
+    DnsCatalogZoneOut,
+    DnsCatalogZoneUpdate,
     DnsForwarderCreate,
     DnsForwarderOut,
     DnsForwarderUpdate,
@@ -130,6 +134,7 @@ _ANYCAST_NOT_FOUND = "anycast group not found"
 _BGP_NOT_FOUND = "bgp peer not found"
 _BIND_NOT_FOUND = "anycast/bgp binding not found"
 _FORWARDER_NOT_FOUND = "dns forwarder not found"
+_CATALOG_NOT_FOUND = "dns catalog zone not found"
 _BLOCKLIST_NOT_FOUND = "dns blocklist not found"
 _BLOCKLIST_ENTRY_NOT_FOUND = "dns blocklist entry not found"
 _VIEW_NOT_FOUND = "dns view not found"
@@ -1840,6 +1845,127 @@ async def delete_forwarder(
     await audit.record(
         db, principal, action="dns_forwarder.delete",
         target_type="dns_forwarder", target_id=str(forwarder_id),
+        metadata=snapshot,
+    )
+    await db.commit()
+
+
+# ----------------------- Catalog zones (RFC 9432) -----------------------
+
+
+async def _default_catalog_name(db: AsyncSession, fabric_id: UUID) -> str:
+    """Resolve the default catalog name for a fabric: pick the
+    fabric's first apex `DnsZone` and prepend `catalog.`. Falls back
+    to `catalog.<fabric-slug>.local` when the fabric has no apex
+    yet — operators usually create the apex first, but we don't
+    want the catalog endpoint to 500 if they reverse the order."""
+    apex = (
+        await db.execute(
+            select(DnsZone.name)
+            .where(
+                DnsZone.fabric_id == fabric_id,
+                DnsZone.kind == DnsZoneKind.apex,
+            )
+            .order_by(DnsZone.created_at.asc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if apex:
+        return f"catalog.{apex.rstrip('.')}"
+    fabric = await db.get(Fabric, fabric_id)
+    slug = fabric.slug if fabric else str(fabric_id)
+    return f"catalog.{slug}.local"
+
+
+@router.get("/catalog-zones", response_model=Page[DnsCatalogZoneOut])
+async def list_catalog_zones(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    _: Principal = Depends(require_capability("dns:catalog-zones:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(DnsCatalogZone)
+    if fabric_id is not None:
+        stmt = stmt.where(DnsCatalogZone.fabric_id == fabric_id)
+    return await paginate(
+        db, stmt, model=DnsCatalogZone,
+        params=params, out_model=DnsCatalogZoneOut,
+    )
+
+
+@router.post(
+    "/catalog-zones", response_model=DnsCatalogZoneOut, status_code=201,
+)
+async def create_catalog_zone(
+    payload: DnsCatalogZoneCreate,
+    principal: Principal = Depends(require_capability("dns:catalog-zones:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    # Default name resolution lives at the API boundary so the
+    # column always carries a concrete value. Operators who explicitly
+    # set `name=null` get the same default.
+    name = payload.name or await _default_catalog_name(db, payload.fabric_id)
+    obj = DnsCatalogZone(
+        fabric_id=payload.fabric_id,
+        name=name,
+        enabled=payload.enabled,
+    )
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dns_catalog_zone.create",
+        target_type="dns_catalog_zone", target_id=str(obj.id),
+        metadata={"name": name, "fabric_id": str(payload.fabric_id)},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.patch(
+    "/catalog-zones/{catalog_id}", response_model=DnsCatalogZoneOut,
+)
+async def update_catalog_zone(
+    catalog_id: UUID,
+    payload: DnsCatalogZoneUpdate,
+    principal: Principal = Depends(require_capability("dns:catalog-zones:update")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsCatalogZone, catalog_id)
+    if obj is None:
+        raise NotFoundError(_CATALOG_NOT_FOUND)
+    diff = payload.model_dump(exclude_unset=True)
+    for k, v in diff.items():
+        setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="dns_catalog_zone.update",
+        target_type="dns_catalog_zone", target_id=str(catalog_id),
+        diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return obj
+
+
+@router.delete("/catalog-zones/{catalog_id}", status_code=204)
+async def delete_catalog_zone(
+    catalog_id: UUID,
+    principal: Principal = Depends(require_capability("dns:catalog-zones:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DnsCatalogZone, catalog_id)
+    if obj is None:
+        raise NotFoundError(_CATALOG_NOT_FOUND)
+    snapshot = {"name": obj.name, "fabric_id": str(obj.fabric_id)}
+    await db.execute(
+        delete(DnsCatalogZone).where(DnsCatalogZone.id == catalog_id)
+    )
+    await audit.record(
+        db, principal, action="dns_catalog_zone.delete",
+        target_type="dns_catalog_zone", target_id=str(catalog_id),
         metadata=snapshot,
     )
     await db.commit()

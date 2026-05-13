@@ -499,6 +499,44 @@ class DnsForwarderOut(DnsForwarderBase):
     updated_at: datetime
 
 
+# ---------- DnsCatalogZone (RFC 9432) ----------
+
+
+class DnsCatalogZoneBase(BaseModel):
+    """Per-fabric catalog zone. `name` defaults at the API layer to
+    `catalog.<fabric-apex>` when the operator omits it on create —
+    the column carries the resolved value so an apex rename doesn't
+    silently rename the catalog out from under downstream
+    consumers."""
+
+    fabric_id: UUID
+    name: str | None = None  # None → API resolves the default
+    enabled: bool = True
+
+
+class DnsCatalogZoneCreate(DnsCatalogZoneBase):
+    pass
+
+
+class DnsCatalogZoneUpdate(BaseModel):
+    name: str | None = None
+    enabled: bool | None = None
+
+
+class DnsCatalogZoneOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    fabric_id: UUID
+    name: str
+    enabled: bool
+    # DNSSEC state on the catalog itself. Mirrors the per-zone
+    # `signed` field. Phase 2 wires this to the existing key
+    # generation + rotation endpoints.
+    signed: bool = False
+    created_at: datetime
+    updated_at: datetime
+
+
 # ---------- BgpPeer ----------
 
 class BgpPeerBase(BaseModel):

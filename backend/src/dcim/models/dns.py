@@ -432,6 +432,61 @@ class DnsServerMetricsSample(UUIDPrimaryKey, Timestamped, Base):
     top_names: Mapped[list[dict] | None] = mapped_column(JSONB)
 
 
+class DnsCatalogZone(UUIDPrimaryKey, Timestamped, Base):
+    """RFC 9432 catalog zone for a fabric. Lets external BIND / Knot /
+    PowerDNS primaries auto-provision the set of authoritative zones
+    DCIM owns by AXFR-ing this catalog and reading its member-zone
+    entries.
+
+    One catalog per fabric (unique constraint on `fabric_id`) —
+    matches every other DCIM scoping boundary. The catalog itself is
+    a regular DNS zone served by the existing auth CoreDNS pod
+    (see `services/dns.py::render_catalog_zone`); consumers point
+    their `also-notify` / AXFR config at the auth pod's management
+    IP, same as they'd consume any member zone.
+
+    Members are computed at render time from the fabric's
+    `DnsZone` rows — apex + site + reverse, with `frozen=true` zones
+    elided so a mid-maintenance zone doesn't propagate to consumers
+    that would then try to AXFR it from a pod that may be offline.
+    """
+
+    __tablename__ = "dns_catalog_zones"
+    __table_args__ = (
+        # One catalog per fabric. Multi-tenant deployments consume
+        # multiple catalogs (one per fabric); cross-fabric catalogs
+        # are explicitly out of v1 scope.
+        UniqueConstraint("fabric_id", name="uq_dns_catalog_fabric"),
+        # Operators with unusual conventions can override the
+        # default name; uniqueness guards against two fabrics
+        # claiming the same catalog apex.
+        UniqueConstraint("name", name="uq_dns_catalog_name"),
+        Index("ix_dns_catalog_fabric", "fabric_id"),
+    )
+
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("fabrics.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Catalog apex name. The API/UI default the column to
+    # `catalog.<fabric-apex>` when the operator first enables it;
+    # the column stores the resolved value so a later fabric-apex
+    # change doesn't silently rename the catalog out from under
+    # downstream consumers.
+    name: Mapped[str] = mapped_column(String(253), nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True,
+    )
+    # DNSSEC follows the fabric's NSEC3 default when the catalog
+    # is first created — operators can flip it later via the
+    # standard zone-signing endpoints once they've staged the DS
+    # records at the catalog's parent zone.
+    signed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False,
+    )
+
+
 class DnsBlocklistAction(str, enum.Enum):
     """What the recursive does when a query matches a blocklist entry.
 

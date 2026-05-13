@@ -635,6 +635,93 @@ def render_zone_file(
     return "\n".join(lines)
 
 
+def render_catalog_zone(
+    catalog_name: str,
+    members: Iterable[DnsZone],
+    *,
+    default_ttl: int = 3600,
+    serial: int | None = None,
+) -> str:
+    """Emit an RFC 9432 §4 catalog zone in BIND text. Members are
+    sorted by name for deterministic etag, with frozen zones already
+    elided by the caller (bundle assembly handles the filter).
+
+    Each member emits three records:
+
+      - PTR  under `<zone-id-hex>.zones.<catalog-name>` pointing at
+             the member zone's apex
+      - TXT  under `group.<zone-id-hex>.zones.<catalog-name>` with
+             the fabric slug (lets consumers organise members into
+             per-fabric ACL or view buckets without parsing names)
+      - TXT  under `epoch.<zone-id-hex>.zones.<catalog-name>` with
+             the member's `updated_at` epoch — RFC 9432 §5.2 says
+             consumers MAY use this to detect member changes when
+             the catalog's SOA serial didn't bump (e.g. unrelated
+             member updated).
+
+    `serial` defaults to the max(updated_at) across members so the
+    SOA bumps whenever ANY member changes. Caller can pin it for
+    test reproducibility."""
+    apex = catalog_name.rstrip(".") + "."
+    member_list = sorted(members, key=lambda z: z.name.lower())
+    if serial is None:
+        serial = int(max(
+            (z.updated_at.timestamp() for z in member_list),
+            default=0,
+        )) or 1
+    lines = [
+        f"$ORIGIN {apex}",
+        f"$TTL {default_ttl}",
+        f"@\tIN\tSOA\tinvalid. hostmaster.{apex} (",
+        f"\t\t\t{serial}\t; serial",
+        "\t\t\t3600\t; refresh",
+        "\t\t\t600\t; retry",
+        "\t\t\t604800\t; expire",
+        f"\t\t\t{default_ttl})\t; minimum",
+        # RFC 9432 §4.1 requires an NS RR but it's deliberately
+        # `invalid.` — catalog zones aren't reachable via the
+        # public DNS hierarchy, they're transferred point-to-point.
+        "@\tIN\tNS\tinvalid.",
+        # Schema version. RFC 9432 mandates "2"; consumers reject
+        # catalogs with any other version.
+        'version\tIN\tTXT\t"2"',
+        "",
+    ]
+    for z in member_list:
+        member_id = z.id.hex
+        member_name = z.name.rstrip(".") + "."
+        # PTR — the required member-zone record.
+        lines.append(
+            f"{member_id}.zones\tIN\tPTR\t{member_name}"
+        )
+    if member_list:
+        lines.append("")
+        lines.append("; --- per-member properties (RFC 9432 §5) ---")
+        for z in member_list:
+            member_id = z.id.hex
+            group = getattr(z, "_group", None) or _catalog_group_for(z)
+            epoch = int(z.updated_at.timestamp())
+            lines.append(
+                f'group.{member_id}.zones\tIN\tTXT\t"{group}"'
+            )
+            lines.append(
+                f'epoch.{member_id}.zones\tIN\tTXT\t"{epoch}"'
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _catalog_group_for(zone: DnsZone) -> str:
+    """Group label for a catalog member. Defaults to the zone's
+    `kind` (apex / site / reverse) so consumers can organize members
+    along the same axis DCIM does. Operators who want a different
+    grouping override per-zone later via a future model column."""
+    return (
+        zone.kind.value
+        if hasattr(zone.kind, "value") else str(zone.kind)
+    )
+
+
 # ---------- Corefile rendering ----------
 
 def _view_expr(cidrs: Iterable[str]) -> str:
@@ -1460,6 +1547,55 @@ async def _views_and_zone_files_for_split_horizon(
     return zone_files, views_by_zone
 
 
+def _corefile_zone_names(
+    zones: Iterable[DnsZone], catalog_name: str | None,
+) -> list[str]:
+    """Member zone names plus the catalog (when set), in the order
+    the auth Corefile renderer walks them. Extracted from the bundle
+    assembly so the latter stays under the cognitive-complexity cap
+    after the catalog hook landed."""
+    names = [z.name for z in zones]
+    if catalog_name:
+        names.append(catalog_name)
+    return names
+
+
+async def _add_catalog_zone_files(
+    db: AsyncSession,
+    fabric_id: UUID,
+    zones: Iterable[DnsZone],
+    zone_files: dict[str, str],
+) -> str | None:
+    """If the fabric has an enabled `DnsCatalogZone`, render it and
+    inject into `zone_files` in place. Returns the catalog's apex
+    name so the caller can append it to the Corefile zone list.
+    Returns None when the fabric has no catalog row, the row is
+    disabled, or membership is empty after frozen-filter.
+
+    Membership rule: every DnsZone in the fabric with kind in
+    {apex, site, reverse} and `frozen=false`. Frozen zones are
+    elided so a mid-maintenance zone doesn't propagate to
+    consumers that would then try to AXFR an offline pod."""
+    from ..models.dns import DnsCatalogZone  # noqa: PLC0415
+    catalog = (
+        await db.execute(
+            select(DnsCatalogZone).where(
+                DnsCatalogZone.fabric_id == fabric_id,
+                DnsCatalogZone.enabled.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if catalog is None:
+        return None
+    members = [
+        z for z in zones
+        if not getattr(z, "frozen", False)
+    ]
+    text = render_catalog_zone(catalog.name, members)
+    zone_files[_filename_for_zone(catalog.name)] = text
+    return catalog.name
+
+
 async def _dnssec_artifacts_for_zones(
     db: AsyncSession, zones: Iterable[DnsZone],
 ) -> tuple[dict[str, str], dict[str, list[str]], dict[str, dict]]:
@@ -1880,6 +2016,14 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
                 extra_lines=child_ds_lines.get(z.id) or None,
             )
         zone_files.update(split_files)
+        # RFC 9432 catalog zone — one per fabric, served by every
+        # auth pod in that fabric alongside the member zones. Helper
+        # returns the optional (filename, text, name) triple and
+        # nulls when the fabric has no catalog row or the row is
+        # disabled, so this code path stays linear.
+        catalog_name = await _add_catalog_zone_files(
+            db, server.fabric_id, zones, zone_files,
+        )
         key_files, dnssec_keys_by_zone, nsec3_params_by_zone = (
             await _dnssec_artifacts_for_zones(db, zones)
         )
@@ -1891,7 +2035,7 @@ async def render_bundle_for_server(db: AsyncSession, server: DnsServer) -> dict:
         keys_dir_path = f"/var/lib/dcim-dns/{server.role.value}/keys"
         dnstap_socket_path = _dnstap_socket_for(server)
         corefile = render_corefile_auth(
-            (z.name for z in zones),
+            _corefile_zone_names(zones, catalog_name),
             zones_dir=zones_dir_path,
             keys_dir=keys_dir_path if dnssec_keys_by_zone else None,
             dnssec_keys_by_zone=dnssec_keys_by_zone or None,
