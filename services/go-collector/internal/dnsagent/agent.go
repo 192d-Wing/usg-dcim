@@ -13,6 +13,7 @@ import (
 
 	"github.com/usg-dcim/services/go-collector/internal/config"
 	"github.com/usg-dcim/services/go-collector/internal/dnstap"
+	"github.com/usg-dcim/services/go-collector/internal/runtime"
 )
 
 // Run spawns one loop family per configured DnsServer and returns when
@@ -27,7 +28,7 @@ import (
 // All return cleanly when ctx is cancelled. metricsLoop + dnstapLoop
 // + advertiseLoop are skipped per-server when their preconditions
 // aren't met (metrics_enabled=false, no dnstap socket, no gobgp host).
-func Run(ctx context.Context, cfg *config.Config, token string, log *slog.Logger) {
+func Run(ctx context.Context, cfg *config.Config, token string, rt *runtime.Config, log *slog.Logger) {
 	if !cfg.DNS.Enabled || len(cfg.DNS.Servers) == 0 {
 		log.Info("dns_agent_disabled")
 		<-ctx.Done()
@@ -52,7 +53,7 @@ func Run(ctx context.Context, cfg *config.Config, token string, log *slog.Logger
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				metricsLoop(ctx, cfg, s, apiBase, client, token, reservoir, slog)
+				metricsLoop(ctx, cfg, s, apiBase, client, token, reservoir, rt, slog)
 			}()
 		}
 		if s.DnstapSocket != "" {
@@ -135,20 +136,27 @@ func serverCycle(
 // metricsLoop scrapes the server's Prom endpoint, computes per-interval
 // deltas + latency percentiles, snapshots the dnstap top-K, and POSTs
 // to central. First cycle establishes the baseline and posts nothing.
+// Reads dns_metrics_interval_seconds from rt each iteration so a
+// runtime override (set in the UI, pushed via heartbeat) lands on the
+// next cycle without restarting the loop.
 func metricsLoop(
 	ctx context.Context, cfg *config.Config, s *config.DNSServerConfig,
 	apiBase string, client *http.Client, token string,
-	reservoir *topK, log *slog.Logger,
+	reservoir *topK, rt *runtime.Config, log *slog.Logger,
 ) {
 	log.Info("dns_metrics_loop_start", "metrics_url", s.MetricsURL)
-	interval := cfg.DNS.MetricsInterval()
+	yamlDefault := cfg.DNS.MetricsInterval()
 	scrapeClient := &http.Client{Timeout: 10 * time.Second}
 	var prev *promSnapshot
 	for {
+		interval := yamlDefault
+		if rt != nil {
+			interval = rt.DNSMetricsInterval(yamlDefault)
+		}
 		snap, err := scrapePromSnapshot(ctx, scrapeClient, s.MetricsURL)
 		if err != nil {
 			log.Warn("dns_metrics_cycle_failed", "err", err)
-			prev = nil // drop baseline so the next delta isn't across a gap
+			prev = nil
 		} else if prev == nil {
 			prev = snap
 		} else {

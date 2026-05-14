@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-dns-probe
+  namespace: dcim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-dns-probe
+  template:
+    metadata:
+      labels:
+        app: go-dns-probe
+    spec:
+      containers:
+        - name: go-dns-probe
+          image: localhost/dcim-go-dns-probe:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DCIM_POSTGRES_DSN_RAW
+              value: postgres://dcim:dcim@postgres:5432/dcim
+            - name: DNS_PROBE_TICK
+              value: 30s
+            - name: DNS_PROBE_CONCURRENCY
+              value: "64"
+          securityContext:
+            capabilities:
+              add:
+                - NET_RAW
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m

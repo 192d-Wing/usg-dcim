@@ -23,6 +23,7 @@ import (
 
 	"github.com/usg-dcim/services/go-collector/internal/buffer"
 	"github.com/usg-dcim/services/go-collector/internal/config"
+	"github.com/usg-dcim/services/go-collector/internal/runtime"
 )
 
 const (
@@ -37,15 +38,17 @@ type Forwarder struct {
 	token   string
 	log     *slog.Logger
 	batchID string
+	rt      *runtime.Config
 }
 
-func New(cfg *config.Config, buf *buffer.Buffer, token string, log *slog.Logger) *Forwarder {
+func New(cfg *config.Config, buf *buffer.Buffer, token string, log *slog.Logger, rt *runtime.Config) *Forwarder {
 	return &Forwarder{
 		cfg:    cfg,
 		buf:    buf,
 		client: &http.Client{Timeout: 30 * time.Second},
 		token:  token,
 		log:    log,
+		rt:     rt,
 	}
 }
 
@@ -161,44 +164,97 @@ func (f *Forwarder) sendBatch(ctx context.Context, rows []buffer.Row) ([]int64, 
 	}
 }
 
-// RunHeartbeat posts heartbeat metadata every HeartbeatInterval. Mirrors
-// the Python collector's payload shape — buffer depth lets the API show
-// "collector is buffering because central is unreachable" in the UI.
+// heartbeatResponse mirrors backend CollectorHeartbeatOut. Unknown
+// fields are tolerated by json.Decode for forwards-compat.
+type heartbeatResponse struct {
+	OK              bool   `json:"ok"`
+	ReceivedAt      string `json:"received_at"`
+	ConfigOverrides struct {
+		DNSMetricsIntervalSeconds *int `json:"dns_metrics_interval_seconds"`
+		DevicePollIntervalSeconds *int `json:"device_poll_interval_seconds"`
+		HeartbeatIntervalSeconds  *int `json:"heartbeat_interval_seconds"`
+	} `json:"config_overrides"`
+}
+
+// RunHeartbeat posts heartbeat metadata, decodes the response's
+// config_overrides, and applies them to the shared runtime config so
+// every loop picks up the new intervals on its next iteration.
+//
+// The heartbeat ticker itself reads the (possibly-overridden)
+// interval each cycle, so a "slow heartbeats to 5 minutes" override
+// takes effect on the cycle immediately after central acks it.
 func (f *Forwarder) RunHeartbeat(ctx context.Context) error {
-	t := time.NewTicker(f.cfg.HeartbeatInterval())
-	defer t.Stop()
+	yamlDefault := f.cfg.HeartbeatInterval()
 	for {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.C:
-			depth, _ := f.buf.Depth(ctx)
-			body, _ := json.Marshal(map[string]any{
-				"buffer_depth": depth,
-				"version":      "go-collector/phase-1",
-			})
-			req, err := http.NewRequestWithContext(ctx, "POST", f.cfg.HeartbeatEndpoint(), bytes.NewReader(body))
-			if err != nil {
-				f.log.Warn("heartbeat_req_build_failed", "err", err)
-				continue
-			}
-			req.Header.Set("Content-Type", "application/json")
-			if f.token != "" {
-				req.Header.Set("Authorization", "Bearer "+f.token)
-			}
-			resp, err := f.client.Do(req)
-			if err != nil {
-				f.log.Warn("heartbeat_failed", "err", err)
-				continue
-			}
-			resp.Body.Close()
-			if resp.StatusCode >= 400 {
-				f.log.Warn("heartbeat_rejected", "status", resp.StatusCode)
-			}
+		interval := yamlDefault
+		if f.rt != nil {
+			interval = f.rt.HeartbeatInterval(yamlDefault)
 		}
+		if sleep(ctx, interval) {
+			return ctx.Err()
+		}
+		f.sendHeartbeat(ctx)
+	}
+}
+
+func (f *Forwarder) sendHeartbeat(ctx context.Context) {
+	depth, _ := f.buf.Depth(ctx)
+	body, _ := json.Marshal(map[string]any{
+		"buffered_samples": depth,
+		"queue_depth":      depth,
+		"version":          "go-collector/phase-4",
+	})
+	req, err := http.NewRequestWithContext(ctx, "POST", f.cfg.HeartbeatEndpoint(), bytes.NewReader(body))
+	if err != nil {
+		f.log.Warn("heartbeat_req_build_failed", "err", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if f.token != "" {
+		req.Header.Set("Authorization", "Bearer "+f.token)
+	}
+	resp, err := f.client.Do(req)
+	if err != nil {
+		f.log.Warn("heartbeat_failed", "err", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		f.log.Warn("heartbeat_rejected", "status", resp.StatusCode)
+		return
+	}
+	if f.rt == nil {
+		return
+	}
+	var hr heartbeatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&hr); err != nil {
+		// Non-fatal — Python API may not yet emit the new schema during
+		// a partial cutover. Stay on YAML defaults.
+		return
+	}
+	f.applyOverrides(&hr)
+}
+
+func (f *Forwarder) applyOverrides(hr *heartbeatResponse) {
+	dur := func(secs *int) time.Duration {
+		if secs == nil || *secs <= 0 {
+			return 0
+		}
+		return time.Duration(*secs) * time.Second
+	}
+	dns := dur(hr.ConfigOverrides.DNSMetricsIntervalSeconds)
+	pol := dur(hr.ConfigOverrides.DevicePollIntervalSeconds)
+	hb := dur(hr.ConfigOverrides.HeartbeatIntervalSeconds)
+	f.rt.Apply(dns, pol, hb)
+	if dns > 0 || pol > 0 || hb > 0 {
+		f.log.Info("config_overrides_applied",
+			"dns_metrics", dns.String(),
+			"device_poll", pol.String(),
+			"heartbeat", hb.String(),
+		)
 	}
 }
 

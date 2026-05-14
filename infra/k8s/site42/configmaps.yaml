@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: collector-config
+  namespace: dcim-site42
+data:
+  collector.yaml: |
+    # CONUS-001 site42 collector — k8s deployment.
+    # Uses existing enrollment UUIDs from infra/docker/site-dns/collector.yaml.
+    # ingest_url/api_base updated to use k8s in-cluster service DNS.
+    # All DNS metrics/gobgp URLs use localhost (all containers share the pod network).
+
+    collector_id: b88b2f07-7a18-4e8f-a780-66f24d6d11f9
+    site_id: efd7f064-e030-467e-b278-ac71af8cd369
+    # No /ingest suffix — HeartbeatEndpoint() appends /api/v1/collectors/{id}/heartbeat directly.
+    # APIBase() strips the path to scheme://host:port, so telemetry + DNS bundles still work.
+    ingest_url: http://api.dcim.svc.cluster.local:8000
+    api_token_file: /etc/dcim/token
+    heartbeat_interval_seconds: 30
+    buffer_path: /var/lib/dcim-collector/buffer.db
+
+    mtls:
+      enabled: false
+
+    devices: []
+
+    dns:
+      enabled: true
+      poll_interval_seconds: 30
+      servers:
+        - id: 02255d18-df79-4e59-bad7-f91641c6ed66
+          role: auth
+          output_dir: /var/lib/dcim-dns/auth
+          coredns_pidfile: /var/lib/dcim-dns/auth/coredns.pid
+          metrics_url: http://localhost:9153/metrics
+          dnstap_socket: /var/lib/dcim-dns/auth/dnstap.sock
+        - id: 7111d03f-3f01-4a9d-8a2c-94d98ec42e30
+          role: recursive
+          output_dir: /var/lib/dcim-dns/recursive
+          coredns_pidfile: /var/lib/dcim-dns/recursive/coredns.pid
+          metrics_url: http://localhost:9090/metrics
+          metrics_enabled: true
+          gobgp_api_host: localhost:50051

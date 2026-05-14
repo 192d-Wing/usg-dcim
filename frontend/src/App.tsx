@@ -19,6 +19,7 @@ import Spinner from '@cloudscape-design/components/spinner';
 // fallback; the dashboard is the index landing.
 import { LoginPage } from '@/pages/login';
 import { LoginCallbackPage } from '@/pages/login-callback';
+import { LogoutPage } from '@/pages/logout';
 import { DashboardPage } from '@/pages/dashboard';
 
 // Everything else is route-level split — vite emits a chunk per page so
@@ -83,6 +84,7 @@ export function App() {
               poison the cached "not authenticated" result that the
               auth-required wrapper would then read on /. */}
           <Route path="/login/callback" element={<LoginCallbackPage />} />
+          <Route path="/logout" element={<LogoutPage />} />
           <Route element={
             <Authenticated key="auth-required" fallback={<CatchAllNavigate to="/login" />}>
               <Shell />

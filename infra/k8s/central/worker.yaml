@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: dcim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: localhost/dcim-api:dev
+          imagePullPolicy: IfNotPresent
+          command:
+            - arq
+            - dcim.worker.WorkerSettings
+          env:
+            - name: DCIM_ENV
+              value: dev
+            - name: DCIM_LOG_JSON
+              value: "false"
+            - name: DCIM_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: postgres-dsn
+            - name: DCIM_REDIS_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: redis-dsn
+            - name: DCIM_DNS_DNSSEC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: dnssec-secret
+          securityContext:
+            capabilities:
+              add:
+                - NET_RAW
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m

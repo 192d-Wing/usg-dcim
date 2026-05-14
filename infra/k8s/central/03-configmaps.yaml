@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm
+  namespace: dcim
+data:
+  dcim-realm.json: |
+    {
+      "realm": "dcim",
+      "enabled": true,
+      "displayName": "USG DCIM",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "sslRequired": "none",
+      "accessTokenLifespan": 600,
+      "ssoSessionIdleTimeout": 1800,
+
+      "clients": [
+        {
+          "clientId": "dcim-spa",
+          "name": "DCIM API + SPA",
+          "enabled": true,
+          "protocol": "openid-connect",
+          "publicClient": false,
+          "secret": "dev-secret-change-me",
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": true,
+          "redirectUris": [
+            "https://dcim.prod.dev.mil/*",
+            "https://dcim.prod.dev.mil/login/callback",
+            "http://localhost:5173/*",
+            "http://localhost:8000/api/v1/auth/oidc/callback*"
+          ],
+          "webOrigins": ["https://dcim.prod.dev.mil", "http://localhost:5173", "http://localhost:8000"],
+          "attributes": {
+            "post.logout.redirect.uris": "https://dcim.prod.dev.mil/*##http://localhost:5173/*"
+          },
+          "protocolMappers": [
+            {
+              "name": "realm roles",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-realm-role-mapper",
+              "consentRequired": false,
+              "config": {
+                "multivalued": "true",
+                "userinfo.token.claim": "false",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "claim.name": "realm_access.roles",
+                "jsonType.label": "String"
+              }
+            }
+          ]
+        }
+      ],
+
+      "roles": {
+        "realm": [
+          { "name": "dcim-admin",  "description": "Maps to DCIM EnterpriseAdmin via OIDC role mappings" },
+          { "name": "dcim-viewer", "description": "Maps to DCIM Viewer via OIDC role mappings" }
+        ]
+      },
+
+      "users": [
+        {
+          "username": "dcim_admin",
+          "email": "dcim_admin@prod.dev.mil",
+          "firstName": "DCIM",
+          "lastName": "Administrator",
+          "enabled": true,
+          "emailVerified": true,
+          "credentials": [
+            {"type": "password", "value": "dcim_admin", "temporary": false}
+          ],
+          "realmRoles": ["dcim-admin"]
+        },
+        {
+          "username": "demo",
+          "email": "demo@dcim.local",
+          "firstName": "Demo",
+          "lastName": "Operator",
+          "enabled": true,
+          "emailVerified": true,
+          "credentials": [
+            {"type": "password", "value": "demo", "temporary": false}
+          ],
+          "realmRoles": ["dcim-admin"]
+        }
+      ]
+    }

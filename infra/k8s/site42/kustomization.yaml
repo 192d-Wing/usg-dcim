@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dcim-site42
+
+resources:
+  - namespace.yaml
+  - configmaps.yaml
+  - services.yaml
+  - site42.yaml

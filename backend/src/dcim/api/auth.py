@@ -33,6 +33,21 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _OIDC_NOT_CONFIGURED = "OIDC not configured"
 
+
+def _oidc_httpx_client() -> httpx.AsyncClient:
+    """httpx client for IdP back-channel calls. Honors oidc_ca_bundle
+    (PEM path for self-signed/internal IdPs like DoD EOICAM) and
+    oidc_verify_ssl (dev escape hatch)."""
+    settings = get_settings()
+    verify: str | bool
+    if not settings.oidc_verify_ssl:
+        verify = False
+    elif settings.oidc_ca_bundle:
+        verify = settings.oidc_ca_bundle
+    else:
+        verify = True
+    return httpx.AsyncClient(timeout=10.0, verify=verify)
+
 def _anon_principal(label: str, ip: str | None) -> Principal:
     """A Principal for unauthenticated audit events. Has no caps,
     no user, no token — just an actor label + ip for the trail."""
@@ -138,7 +153,7 @@ async def _oidc_metadata() -> dict:
     cached = getattr(_oidc_metadata, "_cache", None)
     if cached and cached["issuer"] == settings.oidc_issuer:
         return cached["doc"]
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with _oidc_httpx_client() as client:
         url = settings.oidc_issuer.rstrip("/") + "/.well-known/openid-configuration"
         resp = await client.get(url)
         resp.raise_for_status()
@@ -195,7 +210,7 @@ async def _exchange_oidc_code(code: str, callback: str | None) -> tuple[dict, di
     """Token-exchange + JWKS fetch. Returns (tokens, jwks)."""
     settings = get_settings()
     meta = await _oidc_metadata()
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with _oidc_httpx_client() as client:
         token_resp = await client.post(
             meta["token_endpoint"],
             data={
@@ -463,7 +478,7 @@ async def refresh_session(
         raise AuthError("refresh token unreadable") from exc
 
     meta = await _oidc_metadata()
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with _oidc_httpx_client() as client:
         resp = await client.post(
             meta["token_endpoint"],
             data={

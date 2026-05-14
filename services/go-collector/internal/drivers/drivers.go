@@ -24,6 +24,7 @@ import (
 	"github.com/usg-dcim/services/go-collector/internal/drivers/redfish"
 	"github.com/usg-dcim/services/go-collector/internal/drivers/rest"
 	"github.com/usg-dcim/services/go-collector/internal/drivers/snmp"
+	"github.com/usg-dcim/services/go-collector/internal/runtime"
 )
 
 // Poller is the per-device worker. One instance per Device row in
@@ -88,22 +89,29 @@ func (s *stub) Poll(_ context.Context, _ *buffer.Buffer) error {
 }
 
 // Schedule runs p.Poll on `interval`, returning when ctx is cancelled.
-// Lives here (not in main) so each driver implementation can override
-// scheduling later — e.g. SNMP bulkget batching, Redfish session reuse.
-func Schedule(ctx context.Context, p Poller, buf *buffer.Buffer, interval time.Duration, log *slog.Logger) {
-	if interval <= 0 {
-		interval = 60 * time.Second
+// When rt is non-nil, the device_poll_interval_seconds override (when
+// set by central) replaces the per-device interval on the next tick —
+// so a fleet-wide "slow polls to 5 min" lands in seconds across all
+// devices without restarting the collector.
+func Schedule(ctx context.Context, p Poller, buf *buffer.Buffer, interval time.Duration, rt *runtime.Config, log *slog.Logger) {
+	yamlDefault := interval
+	if yamlDefault <= 0 {
+		yamlDefault = 60 * time.Second
 	}
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	// Stagger first poll so a config with many devices doesn't fire
-	// every poller in the same millisecond at startup.
+	// First poll runs immediately so a fresh collector doesn't go
+	// poll_interval seconds before producing any sample.
 	if err := p.Poll(ctx, buf); err != nil {
 		log.Warn("poll_failed", "driver", p.Kind(), "err", err)
 	}
 	for {
+		next := yamlDefault
+		if rt != nil {
+			next = rt.DevicePollInterval(yamlDefault)
+		}
+		t := time.NewTimer(next)
 		select {
 		case <-ctx.Done():
+			t.Stop()
 			return
 		case <-t.C:
 			if err := p.Poll(ctx, buf); err != nil {

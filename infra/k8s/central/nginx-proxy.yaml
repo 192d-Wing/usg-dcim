@@ -1,0 +1,225 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-proxy-config
+  namespace: dcim
+data:
+  nginx.conf: |
+    user  nginx;
+    worker_processes  auto;
+    error_log  /var/log/nginx/error.log warn;
+    pid        /var/run/nginx.pid;
+
+    events {
+        worker_connections 1024;
+    }
+
+    http {
+        include      /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        sendfile     on;
+        keepalive_timeout 65;
+
+        ssl_protocols       TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers on;
+
+        # Resolve upstreams via kube-dns so nginx starts even if a
+        # service doesn't exist yet. Variables in proxy_pass force
+        # per-request resolution instead of caching at startup.
+        resolver 10.96.0.10 valid=10s ipv6=off;
+
+        # dcim.prod.dev.mil:80 → HTTPS
+        server {
+            listen 80;
+            server_name dcim.prod.dev.mil;
+            return 301 https://$host$request_uri;
+        }
+
+        # keycloak.prod.dev.mil:80 → HTTPS
+        server {
+            listen 80;
+            server_name keycloak.prod.dev.mil;
+            return 301 https://$host$request_uri;
+        }
+
+        # catch-all port 80
+        server {
+            listen 80 default_server;
+            return 444;
+        }
+
+        # dcim.prod.dev.mil:443 → frontend:80
+        server {
+            listen 443 ssl;
+            server_name dcim.prod.dev.mil;
+            ssl_certificate     /etc/nginx/tls/tls.crt;
+            ssl_certificate_key /etc/nginx/tls/tls.key;
+
+            location / {
+                proxy_pass http://frontend:80;
+                proxy_set_header Host              $host;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_read_timeout 60s;
+            }
+        }
+
+        # keycloak.prod.dev.mil:443 → keycloak:8080
+        server {
+            listen 443 ssl;
+            server_name keycloak.prod.dev.mil;
+            ssl_certificate     /etc/nginx/tls/tls.crt;
+            ssl_certificate_key /etc/nginx/tls/tls.key;
+
+            location / {
+                proxy_pass http://keycloak:8080;
+                proxy_set_header Host              $host;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto https;
+                # Keycloak OIDC token responses can be large
+                proxy_buffer_size       64k;
+                proxy_buffers           8 64k;
+                proxy_busy_buffers_size 128k;
+                proxy_read_timeout      120s;
+            }
+        }
+
+        # dns.prod.dev.mil:443 → Hickory DoH (dcim-site42)
+        server {
+            listen 443 ssl;
+            server_name dns.prod.dev.mil;
+            ssl_certificate     /etc/nginx/tls/tls.crt;
+            ssl_certificate_key /etc/nginx/tls/tls.key;
+
+            location / {
+                set $hickory_doh "https://hickory.dcim-site42.svc.cluster.local:443";
+                proxy_pass $hickory_doh;
+                proxy_ssl_verify   off;
+                proxy_set_header Host       $host;
+                proxy_set_header X-Real-IP  $remote_addr;
+            }
+        }
+
+        # catch-all port 443
+        server {
+            listen 443 ssl default_server;
+            ssl_certificate     /etc/nginx/tls/tls.crt;
+            ssl_certificate_key /etc/nginx/tls/tls.key;
+            return 444;
+        }
+    }
+
+    stream {
+        # kube-dns for stream-level upstream resolution
+        resolver 10.96.0.10 valid=10s ipv6=off;
+
+        # DNS TCP
+        server {
+            listen 53;
+            proxy_pass hickory.dcim-site42.svc.cluster.local:53;
+        }
+        # DNS UDP
+        server {
+            listen 53 udp;
+            proxy_pass hickory.dcim-site42.svc.cluster.local:53;
+        }
+        # UDP 443 — DNS-over-QUIC / QUIC transport to Hickory
+        server {
+            listen 443 udp;
+            proxy_pass hickory.dcim-site42.svc.cluster.local:443;
+        }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-proxy
+  namespace: dcim
+spec:
+  selector:
+    app: nginx-proxy
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP
+    - name: https-tcp
+      port: 443
+      targetPort: 443
+      protocol: TCP
+    - name: https-udp
+      port: 443
+      targetPort: 443
+      protocol: UDP
+    - name: dns-tcp
+      port: 53
+      targetPort: 53
+      protocol: TCP
+    - name: dns-udp
+      port: 53
+      targetPort: 53
+      protocol: UDP
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-proxy
+  namespace: dcim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-proxy
+  template:
+    metadata:
+      labels:
+        app: nginx-proxy
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+              hostPort: 80
+              protocol: TCP
+            - containerPort: 443
+              hostPort: 443
+              protocol: TCP
+            - containerPort: 443
+              hostPort: 443
+              protocol: UDP
+            - containerPort: 53
+              hostPort: 5353
+              protocol: TCP
+            - containerPort: 53
+              hostPort: 5353
+              protocol: UDP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: tls
+              mountPath: /etc/nginx/tls
+              readOnly: true
+          livenessProbe:
+            tcpSocket:
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+      volumes:
+        - name: config
+          configMap:
+            name: nginx-proxy-config
+        - name: tls
+          secret:
+            secretName: nginx-proxy-tls

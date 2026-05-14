@@ -24,6 +24,7 @@ import (
 	"github.com/usg-dcim/services/go-collector/internal/dnstap"
 	"github.com/usg-dcim/services/go-collector/internal/drivers"
 	"github.com/usg-dcim/services/go-collector/internal/forwarder"
+	"github.com/usg-dcim/services/go-collector/internal/runtime"
 )
 
 func main() {
@@ -64,7 +65,12 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	fwd := forwarder.New(cfg, buf, token, log)
+	// Shared atomic config the heartbeat receiver writes and every loop
+	// reads. Lets central push interval overrides via the heartbeat
+	// response without restarting the collector.
+	rt := runtime.New()
+
+	fwd := forwarder.New(cfg, buf, token, log, rt)
 
 	var wg sync.WaitGroup
 	// Forwarder
@@ -96,7 +102,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			drivers.Schedule(ctx, p, buf, time.Duration(dev.PollIntervalSecs)*time.Second, log)
+			drivers.Schedule(ctx, p, buf, time.Duration(dev.PollIntervalSecs)*time.Second, rt, log)
 		}()
 	}
 
@@ -122,7 +128,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		dnsagent.Run(ctx, cfg, token, log.With("subsys", "dnsagent"))
+		dnsagent.Run(ctx, cfg, token, rt, log.With("subsys", "dnsagent"))
 	}()
 
 	log.Info("collector_running",

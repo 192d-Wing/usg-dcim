@@ -1,0 +1,139 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: site42
+  namespace: dcim-site42
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: site42
+  template:
+    metadata:
+      labels:
+        app: site42
+    spec:
+      hostNetwork: true
+      hostPID: true
+      # ClusterFirstWithHostNet ensures k8s service DNS works even with hostNetwork.
+      # Without this the pod uses the host resolver which can't see *.svc.cluster.local.
+      dnsPolicy: ClusterFirstWithHostNet
+      # DNS containers crash-loop until the collector writes Corefiles/config
+      # on the first heartbeat (~30s). This is expected behaviour.
+      restartPolicy: Always
+
+      volumes:
+        - name: dns-state
+          emptyDir: {}
+        - name: collector-buffer
+          emptyDir: {}
+        - name: collector-config
+          configMap:
+            name: collector-config
+        - name: collector-token
+          secret:
+            secretName: collector-token
+        - name: hickory-tls
+          secret:
+            secretName: hickory-tls
+
+      containers:
+
+        # ── go-collector ────────────────────────────────────────────────────
+        - name: collector
+          image: localhost/dcim-go-collector:dev
+          imagePullPolicy: Never
+          args: ["-config", "/etc/dcim/collector.yaml"]
+          securityContext:
+            runAsUser: 0
+          volumeMounts:
+            - name: collector-config
+              mountPath: /etc/dcim/collector.yaml
+              subPath: collector.yaml
+            - name: collector-token
+              mountPath: /etc/dcim/token
+              subPath: token
+            - name: collector-buffer
+              mountPath: /var/lib/dcim-collector
+            - name: dns-state
+              mountPath: /var/lib/dcim-dns
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+
+        # ── CoreDNS auth ────────────────────────────────────────────────────
+        - name: coredns-auth
+          image: ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1
+          args:
+            - "-conf"
+            - "/var/lib/dcim-dns/auth/Corefile"
+            - "-pidfile"
+            - "/var/lib/dcim-dns/auth/coredns.pid"
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
+          volumeMounts:
+            - name: dns-state
+              mountPath: /var/lib/dcim-dns
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 500m
+
+        # ── Hickory recursive ────────────────────────────────────────────────
+        - name: hickory
+          image: ghcr.io/192d-wing/hickory-prom:v0.26.0-strict-dev
+          args:
+            - "-c"
+            - "/var/lib/dcim-dns/recursive/config.toml"
+            - "--zonedir"
+            - "/var/lib/dcim-dns/recursive/zones"
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add: ["NET_BIND_SERVICE"]
+          volumeMounts:
+            - name: dns-state
+              mountPath: /var/lib/dcim-dns
+            - name: hickory-tls
+              mountPath: /etc/dcim-dns
+              readOnly: true
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 1000m
+
+        # ── gobgp ────────────────────────────────────────────────────────────
+        - name: gobgp
+          image: jauderho/gobgp:latest
+          command:
+            - gobgpd
+            - "-f"
+            - "/var/lib/dcim-dns/recursive/gobgp.yaml"
+            - "--api-hosts"
+            - ":50051"
+          securityContext:
+            runAsUser: 0
+            capabilities:
+              add: ["NET_BIND_SERVICE", "NET_ADMIN"]
+          volumeMounts:
+            - name: dns-state
+              mountPath: /var/lib/dcim-dns
+          resources:
+            requests:
+              memory: 32Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+              cpu: 200m
