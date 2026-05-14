@@ -7,7 +7,7 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Index, String
-from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -43,6 +43,11 @@ class Collector(UUIDPrimaryKey, Timestamped, Base):
     last_ingest_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     buffered_samples: Mapped[int] = mapped_column(default=0, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Runtime overrides pushed to the collector on its next heartbeat
+    # response. Recognised keys: dns_metrics_interval_seconds,
+    # device_poll_interval_seconds, heartbeat_interval_seconds. Empty
+    # dict = the collector keeps whatever its YAML says.
+    config_overrides: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
 
 class CollectorHeartbeat(UUIDPrimaryKey, Timestamped, Base):
