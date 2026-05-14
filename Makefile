@@ -3,7 +3,7 @@
 help:
 	@echo "USG DCIM dev tasks (Python via uv)"
 	@echo "  make sync         install backend + collector deps into .venv"
-	@echo "  make up           start full stack via docker-compose"
+	@echo "  make up           start full stack via podman compose"
 	@echo "  make down         stop stack"
 	@echo "  make logs         tail all service logs"
 	@echo "  make migrate      apply Alembic migrations against running stack"
@@ -20,22 +20,22 @@ sync:
 	uv sync --all-packages --all-extras
 
 up:
-	docker compose -f infra/docker/docker-compose.yml up -d --build
+	podman compose -f infra/docker/docker-compose.yml up -d --build
 
 down:
-	docker compose -f infra/docker/docker-compose.yml down
+	podman compose -f infra/docker/docker-compose.yml down
 
 logs:
-	docker compose -f infra/docker/docker-compose.yml logs -f
+	podman compose -f infra/docker/docker-compose.yml logs -f
 
 build:
-	docker compose -f infra/docker/docker-compose.yml build
+	podman compose -f infra/docker/docker-compose.yml build
 
 migrate:
-	docker compose -f infra/docker/docker-compose.yml exec api alembic upgrade head
+	podman compose -f infra/docker/docker-compose.yml exec api alembic upgrade head
 
 seed:
-	docker compose -f infra/docker/docker-compose.yml exec api python -m dcim.scripts.seed_demo
+	podman compose -f infra/docker/docker-compose.yml exec api python -m dcim.scripts.seed_demo
 
 migrate-local:
 	uv run --project backend alembic -c backend/alembic.ini upgrade head

@@ -89,7 +89,7 @@ services:
   api:
     build:
       context: ../../backend
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     environment:
       DCIM_ENV: dev
       DCIM_LOG_JSON: "false"
@@ -151,7 +151,7 @@ services:
   worker:
     build:
       context: ../../backend
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     command: ["arq", "dcim.worker.WorkerSettings"]
     environment:
       DCIM_ENV: dev
@@ -175,7 +175,7 @@ services:
   frontend:
     build:
       context: ../../frontend
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     ports: ["80:80"]
     depends_on: [api]
 
@@ -186,7 +186,7 @@ services:
   go-ingest:
     build:
       context: ../../services/go-ingest
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     profiles: ["go-services"]
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
@@ -200,7 +200,7 @@ services:
   go-alerts:
     build:
       context: ../../services/go-alerts
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     profiles: ["go-services"]
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
@@ -218,7 +218,7 @@ services:
   go-dns-probe:
     build:
       context: ../../services/go-dns-probe
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     profiles: ["go-services"]
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
@@ -241,7 +241,7 @@ services:
   collector:
     build:
       context: ../../services/go-collector
-      dockerfile: Dockerfile
+      dockerfile: Containerfile
     profiles: ["collector"]   # opt-in: `docker compose --profile collector up`
     command: ["-config", "/etc/dcim/collector.yaml"]
     volumes:

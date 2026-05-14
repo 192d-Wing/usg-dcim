@@ -3,4 +3,4 @@
 # context. Keep the context tiny — only the Dockerfile itself ends
 # up in the build context once the matches below take effect.
 **
-!Dockerfile
+!Containerfile

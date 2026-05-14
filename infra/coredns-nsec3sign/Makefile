@@ -1,5 +1,5 @@
 # Build + test targets for the custom CoreDNS image that includes
-# the nsec3sign plugin. Everything here is plain `docker` and `go`
+# the nsec3sign plugin. Everything here is plain `podman` and `go`
 # so the same commands work in CI and on a developer laptop.
 
 IMAGE           ?= ghcr.io/192d-wing/coredns-nsec3sign
@@ -11,17 +11,17 @@ TAG             ?= $(COREDNS_VERSION)-$(REVISION)
 
 # Produce the multi-stage image. The COREDNS_VERSION arg is forwarded
 # so a single make invocation can re-pin against a newer CoreDNS
-# release without editing the Dockerfile.
+# release without editing the Containerfile.
 build:
-	docker build \
+	podman build \
 		--build-arg COREDNS_VERSION=$(COREDNS_VERSION) \
 		-t $(IMAGE):$(TAG) \
 		-t $(IMAGE):latest \
 		.
 
 push: build
-	docker push $(IMAGE):$(TAG)
-	docker push $(IMAGE):latest
+	podman push $(IMAGE):$(TAG)
+	podman push $(IMAGE):latest
 
 # Unit tests run against the Go module directly — no Docker needed.
 # Useful in the inner loop while iterating on parse() and the
@@ -36,4 +36,4 @@ vet:
 	cd nsec3sign && go vet ./...
 
 clean:
-	-docker image rm $(IMAGE):$(TAG) $(IMAGE):latest 2>/dev/null
+	-podman image rm $(IMAGE):$(TAG) $(IMAGE):latest 2>/dev/null

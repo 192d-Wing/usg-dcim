@@ -10,7 +10,7 @@ tasks:
       - |
         echo "USG DCIM dev tasks (Python via uv)"
         echo "  task sync         install backend + collector deps into .venv"
-        echo "  task up           start full stack via docker-compose"
+        echo "  task up           start full stack via podman compose"
         echo "  task down         stop stack"
         echo "  task logs         tail all service logs"
         echo "  task migrate      apply Alembic migrations against running stack"
@@ -30,32 +30,32 @@ tasks:
     cmds:
       - uv sync --all-packages --all-extras
 
-  # Docker Compose Tasks
+  # Podman Compose Tasks
   up:
     desc: Start full stack via docker-compose
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} up -d --build
+      - podman compose -f {{.COMPOSE_FILE}} up -d --build
 
   down:
     desc: Stop stack
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} down
+      - podman compose -f {{.COMPOSE_FILE}} down
 
   logs:
     desc: Tail all service logs
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} logs -f
+      - podman compose -f {{.COMPOSE_FILE}} logs -f
 
   build:
-    desc: Build docker images
+    desc: Build container images
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} build
+      - podman compose -f {{.COMPOSE_FILE}} build
 
   # Database Migrations
   migrate:
     desc: Apply Alembic migrations against running stack
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} exec api alembic upgrade head
+      - podman compose -f {{.COMPOSE_FILE}} exec api alembic upgrade head
 
   migrate-local:
     desc: Apply Alembic migrations locally
@@ -66,7 +66,7 @@ tasks:
   seed:
     desc: Load demo enterprise dataset
     cmds:
-      - docker compose -f {{.COMPOSE_FILE}} exec api python -m dcim.scripts.seed_demo
+      - podman compose -f {{.COMPOSE_FILE}} exec api python -m dcim.scripts.seed_demo
 
   seed-local:
     desc: Load demo enterprise dataset locally

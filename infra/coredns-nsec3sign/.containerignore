@@ -5,8 +5,8 @@
 
 .git
 .gitignore
-.dockerignore
-Dockerfile
+.containerignore
+Containerfile
 Makefile
 README.md
 **/*.md
