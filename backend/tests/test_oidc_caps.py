@@ -22,7 +22,6 @@ from dcim.security.scope import (
     caps_from_idp_roles,
 )
 
-
 # ---------- minimal fake AsyncSession ----------
 
 class _FakeScalars:

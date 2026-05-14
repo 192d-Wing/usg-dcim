@@ -19,7 +19,6 @@ from ..models.alerts import Alert, AlertState, Severity
 from ..models.collectors import Collector, CollectorStatus
 from ..models.inventory import Asset, Building, LifecycleState, Rack, Region, Room, Row, Site
 from ..models.telemetry_meta import FreshnessState, TelemetrySource
-
 from ..security.deps import Principal, require_capability
 from ..settings import get_settings
 

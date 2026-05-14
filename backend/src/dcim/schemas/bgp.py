@@ -24,7 +24,6 @@ from ..models.bgp import (
     TcpAoAlgorithm,
 )
 
-
 # IANA ASN range buckets — single source of truth for the "kind must
 # match number" validator. Public is "anything not in the others".
 #
@@ -72,7 +71,7 @@ class AsnBase(BaseModel):
     description: str | None = None
 
     @model_validator(mode="after")
-    def _validate_range(self) -> "AsnBase":
+    def _validate_range(self) -> AsnBase:
         if not 1 <= self.asn <= 4_294_967_295:
             raise ValueError("asn must be in 1..4294967295")
         expected = asn_kind_for(self.asn)
@@ -103,7 +102,7 @@ class AsnOut(AsnBase):
     # Override the base validator so the existing-row hydration path
     # isn't subject to the create-time range check (the DB is the truth).
     @model_validator(mode="after")
-    def _skip(self) -> "AsnOut":
+    def _skip(self) -> AsnOut:
         return self
 
 
@@ -142,7 +141,7 @@ class TcpAoKeyBase(BaseModel):
     description: str | None = None
 
     @model_validator(mode="after")
-    def _validate_window(self) -> "TcpAoKeyBase":
+    def _validate_window(self) -> TcpAoKeyBase:
         if (
             self.valid_from is not None
             and self.valid_to is not None
@@ -174,7 +173,7 @@ class TcpAoKeyOut(TcpAoKeyBase):
     created_at: datetime
     updated_at: datetime
     @model_validator(mode="after")
-    def _skip(self) -> "TcpAoKeyOut":
+    def _skip(self) -> TcpAoKeyOut:
         return self
 
 

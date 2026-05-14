@@ -19,7 +19,6 @@ from ..schemas.organization import (
     OrganizationUpdate,
 )
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 from ._pagination import paginate
 

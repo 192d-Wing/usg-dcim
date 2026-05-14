@@ -30,7 +30,7 @@ from sqlalchemy import select
 from .db import async_session
 from .logging_setup import configure_logging
 from .models.alerts import Alert
-from .models.dns import DnsHealthCheck, DnsServerMetricsSample, DnsZone, DnsZoneKind
+from .models.dns import DnsServerMetricsSample, DnsZone, DnsZoneKind
 from .models.telemetry_meta import FreshnessState, TelemetrySource
 from .services import alerts as alerts_svc
 from .services import dns as dns_svc
@@ -157,7 +157,7 @@ async def startup(ctx) -> None:
     # registry, so without this its counters would be unreachable.
     # The HTTP server is daemonized inside prometheus_client — no
     # cleanup needed at shutdown.
-    from prometheus_client import start_http_server  # noqa: PLC0415
+    from prometheus_client import start_http_server
     port = get_settings().worker_metrics_port
     if port > 0:
         try:

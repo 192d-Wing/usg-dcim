@@ -19,7 +19,6 @@ from ..models.inventory import Asset, AssetKind
 from ..models.power import Outlet, PowerConnection
 from ..schemas.power import OutletOut, PowerConnectionCreate, PowerConnectionOut
 from ..security import audit
-
 from ..security.deps import Principal, require_capability
 
 router = APIRouter(prefix="/power", tags=["power"])

@@ -23,7 +23,6 @@ from dcim.services.dns import (
     get_system_dns_upstreams,
 )
 
-
 # ---------- _normalize_upstreams ----------
 
 def test_normalize_returns_none_on_none():

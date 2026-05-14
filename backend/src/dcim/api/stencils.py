@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-
 from ..security.deps import Principal, require_capability
 
 router = APIRouter(prefix="/stencils", tags=["stencils"])

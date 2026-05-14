@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..db import get_db
 from ..models.inventory import Asset, Rack, Site
 from ..models.ipam import Fabric, IPAddress, Subnet, Vrf
-
 from ..security.deps import Principal, require_capability
 
 router = APIRouter(prefix="/search", tags=["search"])

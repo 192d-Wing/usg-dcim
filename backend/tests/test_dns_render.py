@@ -536,8 +536,8 @@ def test_cdnskey_cds_emits_pair_per_active_ksk():
     z = SimpleNamespace(name="signed.example.")
     ksk = _real_key("signed.example.", "ksk")
     lines = render_cdnskey_cds_lines(z, [ksk])
-    cdnskey = [l for l in lines if "CDNSKEY" in l]
-    cds = [l for l in lines if "CDS" in l and "CDNSKEY" not in l]
+    cdnskey = [line for line in lines if "CDNSKEY" in line]
+    cds = [line for line in lines if "CDS" in line and "CDNSKEY" not in line]
     assert len(cdnskey) == 1
     assert len(cds) == 1
 
@@ -553,7 +553,8 @@ def test_cdnskey_cds_skips_zsk():
 def test_cdnskey_cds_skips_retired_ksks():
     """A retired KSK MUST NOT appear in CDS — the parent scanner
     would keep a dead key alive in DS."""
-    from datetime import UTC, datetime as _dt
+    from datetime import UTC
+    from datetime import datetime as _dt
     z = SimpleNamespace(name="signed.example.")
     retired = _real_key("signed.example.", "ksk")
     retired.retired_at = _dt(2026, 1, 1, tzinfo=UTC)
@@ -577,8 +578,8 @@ def test_cdnskey_cds_rdata_fields_consistent_with_ds():
     z = SimpleNamespace(name="signed.example.")
     ksk = _real_key("signed.example.", "ksk")
     cds_line = next(
-        l for l in render_cdnskey_cds_lines(z, [ksk])
-        if "CDS" in l and "CDNSKEY" not in l
+        line for line in render_cdnskey_cds_lines(z, [ksk])
+        if "CDS" in line and "CDNSKEY" not in line
     )
     # CDS line shape: "@\tIN\tCDS\t<tag> <alg> 2 <digest>"
     parts = cds_line.split("\t")[-1].split(" ")
@@ -597,8 +598,8 @@ def test_cdnskey_cds_multiple_ksks_emit_one_pair_each():
     ksk_a = _real_key("signed.example.", "ksk")
     ksk_b = _real_key("signed.example.", "ksk")
     lines = render_cdnskey_cds_lines(z, [ksk_a, ksk_b])
-    cdnskey = [l for l in lines if "CDNSKEY" in l]
-    cds = [l for l in lines if "CDS" in l and "CDNSKEY" not in l]
+    cdnskey = [line for line in lines if "CDNSKEY" in line]
+    cds = [line for line in lines if "CDS" in line and "CDNSKEY" not in line]
     assert len(cdnskey) == 2
     assert len(cds) == 2
 
@@ -646,8 +647,8 @@ def test_icmp_probe_returns_clear_error_when_no_raw_caps(monkeypatch):
     ksk_a = _real_key("signed.example.", "ksk")
     ksk_b = _real_key("signed.example.", "ksk")
     lines = render_cdnskey_cds_lines(z, [ksk_a, ksk_b])
-    cdnskey = [l for l in lines if "CDNSKEY" in l]
-    cds = [l for l in lines if "CDS" in l and "CDNSKEY" not in l]
+    cdnskey = [line for line in lines if "CDNSKEY" in line]
+    cds = [line for line in lines if "CDS" in line and "CDNSKEY" not in line]
     assert len(cdnskey) == 2
     assert len(cds) == 2
 

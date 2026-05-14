@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..schemas.telemetry import TelemetryBatch
-
 from ..security.deps import Principal, require_capability
 from ..services import telemetry as telem_service
 

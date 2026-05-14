@@ -74,7 +74,7 @@ def decode_user_jwt(token: str) -> dict:
     for _kid, secret in candidates:
         try:
             return jwt.decode(token, secret, algorithms=[_settings.jwt_algorithm])
-        except Exception as exc:  # noqa: BLE001 - try next key
+        except Exception as exc:
             last_err = exc
     assert last_err is not None
     raise last_err

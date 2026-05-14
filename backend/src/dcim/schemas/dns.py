@@ -335,7 +335,7 @@ class DnsKeyCreate(BaseModel):
     algorithm: DnsKeyAlgorithm
 
     @model_validator(mode="after")
-    def _one_scope_set(self) -> "DnsKeyCreate":
+    def _one_scope_set(self) -> DnsKeyCreate:
         has_zone = self.zone_id is not None
         has_catalog = self.catalog_id is not None
         if has_zone == has_catalog:

@@ -35,7 +35,6 @@ from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -50,7 +49,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
 from ._mixins import Timestamped, UUIDPrimaryKey
-
 
 # ----------------------- enums -----------------------
 

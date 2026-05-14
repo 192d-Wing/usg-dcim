@@ -23,9 +23,8 @@ Revises: 20260512_0029
 Create Date: 2026-05-12
 """
 
-from collections.abc import Sequence
-
 import json
+from collections.abc import Sequence
 
 from alembic import op
 from sqlalchemy import text
