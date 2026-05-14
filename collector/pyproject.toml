@@ -13,7 +13,7 @@ dependencies = [
     "pymodbus>=3.6",
     "aiosqlite>=0.20",
     "cryptography>=42.0",
-    "click>=8.1",
+    "click>=8.3.3",
 ]
 
 [project.optional-dependencies]
