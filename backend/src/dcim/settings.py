@@ -120,6 +120,11 @@ class Settings(BaseSettings):
     events_index_prefix: str = "dcim-events"
     rollup_index_prefix: str = "dcim-rollup"
     telemetry_batch_max: int = 5000
+    # Step 1 of the OpenSearch → TimescaleDB migration: writes go to both
+    # stores so the hypertable accumulates parity data while OpenSearch
+    # remains the read path. Set to False to disable the secondary write
+    # (e.g. when running against a Postgres without TimescaleDB installed).
+    telemetry_dual_write_timescale: bool = True
 
     # Alerting
     alert_eval_interval_seconds: int = 30

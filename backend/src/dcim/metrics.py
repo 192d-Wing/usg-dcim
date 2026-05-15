@@ -46,6 +46,14 @@ telemetry_ingest_batches = Histogram(
     "Sample count per ingest batch.",
     buckets=(1, 10, 50, 100, 500, 1000, 2500, 5000),
 )
+# Dual-write to the TimescaleDB hypertable is fail-open during the
+# migration. This counter surfaces silent failures so the cutover plan
+# doesn't ship blind. outcome = ok | error | disabled.
+telemetry_timescale_writes = Counter(
+    "dcim_telemetry_timescale_writes_total",
+    "Telemetry batches dual-written to the TimescaleDB hypertable.",
+    ["outcome"],
+)
 alerts_fired = Counter(
     "dcim_alerts_fired_total",
     "Alerts transitioned to firing.",
