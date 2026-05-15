@@ -141,22 +141,39 @@ restated in the open roadmap proposal tinkerbell/roadmap#44 (last updated
 2026-04-27). The roadmap proposal is still in the discussion phase, not
 implementation.
 
+**Repo consolidation note (2025):** the `tinkerbell/smee`, `tinkerbell/tink`,
+`tinkerbell/hegel`, `tinkerbell/rufio`, and `tinkerbell/charts` repos were
+deprecated and merged into the single
+[`tinkerbell/tinkerbell`](https://github.com/tinkerbell/tinkerbell) monorepo
+(roadmap [#41](https://github.com/tinkerbell/roadmap/issues/41)). Anyone
+following older PRs or docs that reference the per-service repos is looking
+at stale information — the active codebase is the monorepo.
+
 To keep the architecture decision we want, we are developing DHCPv6 +
-UEFI HTTP Boot v6 support in a fork:
+UEFI HTTP Boot v6 support in a fork of the **monorepo**:
 
-- **Local working tree:** `~/projects/tinkerbell-smee/` (sibling to
+- **Local working tree:** `~/projects/tinkerbell-monorepo/` (sibling to
   `usg-dcim`, mirroring the existing `hickory-dns` pattern).
-- **GitHub fork:** `github.com/1456055067/smee` as `origin`; upstream
-  `tinkerbell/smee` is `upstream`.
+- **GitHub fork:** `github.com/1456055067/tinkerbell` as `origin`;
+  upstream `tinkerbell/tinkerbell` is `upstream`.
+- **Working branch:** `feat/dhcpv6` — one squashed port commit `fc1008a`
+  that lifts the spike's six commits onto the new layout.
+- **Container image:** `ghcr.io/1456055067/tinkerbell:dev-dhcpv6`
+  (public). Built from `Dockerfile.tinkerbell` after a
+  `GOOS=linux GOARCH=amd64 go build ./cmd/tinkerbell`.
 
-### Scope (per audit on 2026-05-15)
+The earlier spike fork at `github.com/1456055067/smee` (six commits on
+`feat/dhcpv6`) is retained as design history but is not the upstream
+contribution path — its parent repo is archived.
 
-Smee internals are layered. The DHCP server (`internal/dhcp/server/`) is
-~112 LOC; the production reservation handler (`internal/dhcp/handler/
-reservation/`) is ~411 LOC of v4-shaped logic. `insomniacslk/dhcp` (already
-vendored) ships a `dhcpv6/server6` package, so the protocol layer is done
-for us. The work is the netboot decision logic in v6 shape, parallel to
-the existing v4 code path:
+### Scope (per audit 2026-05-15)
+
+Smee internals are layered. The DHCP server (`smee/internal/dhcp/server/`) is
+~112 LOC; the production reservation handler
+(`smee/internal/dhcp/handler/reservation/`) is ~411 LOC of v4-shaped logic.
+`insomniacslk/dhcp` (already vendored) ships a `dhcpv6/server6` package, so
+the protocol layer is done for us. The work is the netboot decision logic in
+v6 shape, parallel to the existing v4 code path:
 
 | Workstream                                                                            | Effort         |
 | ------------------------------------------------------------------------------------- | -------------- |
@@ -184,11 +201,25 @@ the existing v4 code path:
   legacy path; modern hardware only. Pre-flight check already gates on
   this (see §7 `nodes.uefi_http_boot_v6_capable`).
 
+### Status snapshot (2026-05-15)
+
+| Workstream item                                                                | Status                                                            |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `dhcp_v6.go` (PacketV6 type)                                                   | ✅ in `fc1008a`                                                   |
+| `info_v6.go` (InfoV6 + BootURL)                                                | ✅ in `fc1008a`                                                   |
+| `server/dhcp6.go` (v6 listener)                                                | ✅ in `fc1008a`                                                   |
+| `handler/reservation/handler_v6.go` (Solicit/Request/Release + Option 59)      | ✅ in `fc1008a`                                                   |
+| `smee.go` Config.DHCPv6 + serving goroutine in Start()                         | ✅ in `fc1008a`                                                   |
+| `cmd/tinkerbell/flag/smee.go` — CLI flags for DHCPv6                           | ⏳ pending (~½ day) — without these the chart can't toggle DHCPv6 |
+| OTel attribute encoder for v6 (full parallel encoder)                          | ⏳ partial; inline minimal in handler                             |
+| Hook OS DHCPv6 + SLAAC initramfs (`tinkerbell/hook` repo — also consolidated?) | ⏳                                                                |
+| Real UEFI HTTP Boot v6 integration test (QEMU + EDK2 OVMF)                     | ⏳                                                                |
+
 ### Acceptance criteria (Phase 0a)
 
 - A v6-only QEMU node boots via DHCPv6 → UEFI HTTP Boot → iPXE → Hook OS
-  → Tink Worker check-in, end-to-end on a kind cluster with Smee running
-  the fork.
+  → Tink Worker check-in, end-to-end on a kind cluster with Tinkerbell
+  running the fork image.
 - All existing v4 tests still pass; no regressions in upstream behavior.
 - Helm chart cleanly toggles between v4-only, v6-only, and dual-stack
   listener modes.

@@ -1,151 +1,140 @@
-# Tinkerbell stack values — region-deploy provisioning layer.
+# Tinkerbell chart values — region-deploy provisioning layer.
 #
-# This file is consumed by the upstream Tinkerbell `stack` chart:
-#   helm repo add tinkerbell https://tinkerbell.org/charts
-#   helm install tinkerbell tinkerbell/stack \
+# Targets the consolidated monorepo Helm chart at
+#   tinkerbell/tinkerbell/helm/tinkerbell
+# (NOT the older `tinkerbell/charts/stack` umbrella, which was deprecated
+# alongside the per-service repos in mid-2025; see roadmap#41.)
+#
+# Install:
+#   helm install tinkerbell oci://ghcr.io/tinkerbell/charts/tinkerbell \
 #     -n tinkerbell --create-namespace \
-#     -f infra/helm/tinkerbell/values.yaml
-#
-# (If tinkerbell.org/charts isn't reachable, the chart also publishes as
-# an OCI image at oci://ghcr.io/tinkerbell/charts/stack — see the chart
-# repo for the current canonical install instructions.)
+#     -f infra/helm/tinkerbell/values.yaml \
+#     --set publicIP=<central LB IP>
 #
 # Pinning notes:
-#   - Chart version: 0.6.3 (Tinkerbell stack umbrella) as of 2026-05-15.
-#     Refresh against tinkerbell/charts releases when bumping.
-#   - Smee image: REQUIRES the fork at github.com/1456055067/smee
+#   - Chart targets monorepo tinkerbell/tinkerbell ≥ v0.23.0
+#     (refresh the version pin as new chart releases land).
+#   - Image: REQUIRES the fork at github.com/1456055067/tinkerbell
 #     (branch feat/dhcpv6) until upstream lands DHCPv6 support — see
 #     tinkerbell/roadmap#44 and docs/dev/region-deploy.md §3.0 Phase 0a.
-#     Upstream `quay.io/tinkerbell/smee:*` images do NOT support DHCPv6
-#     and will silently ignore the `-dhcp-v6-*` flags below.
+#     Upstream `ghcr.io/tinkerbell/tinkerbell:*` images do NOT support
+#     DHCPv6.
 #
-#   To produce a Smee image from the fork:
-#     cd ~/projects/tinkerbell-smee
-#     git checkout feat/dhcpv6
-#     docker build -t ghcr.io/1456055067/smee:dev-dhcpv6 .
-#     docker push ghcr.io/1456055067/smee:dev-dhcpv6
-#   Or run the workflow that ships in tinkerbell-smee/.github/workflows/.
+#   To produce a fresh image from the fork:
+#     cd ~/projects/tinkerbell-monorepo && git checkout feat/dhcpv6
+#     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+#       go build -ldflags="-s -w" -o out/tinkerbell-linux-amd64 ./cmd/tinkerbell
+#     podman build -t ghcr.io/1456055067/tinkerbell:dev-dhcpv6 \
+#       -f Dockerfile.tinkerbell --build-arg TARGETOS=linux \
+#       --build-arg TARGETARCH=amd64 --platform=linux/amd64 .
+#     podman push ghcr.io/1456055067/tinkerbell:dev-dhcpv6
 #
 # Address-family stance: this configuration assumes the central cluster
 # is dual-stack (see Phase 0 in region-deploy.md). Smee binds the v4
 # listener on the legacy provisioning VLAN (still required for non-UEFI
 # clients) AND the new v6 listener on `[::]:547` for UEFI HTTP Boot v6.
-# Sites whose hardware is uniformly UEFI HTTP Boot v6-capable can set
-# `smee.dhcp.enabled: false` and run v6-only.
+# Sites whose hardware is uniformly UEFI HTTP Boot v6-capable can disable
+# the v4 listener via deployment.envs.smee.dhcpEnabled: false.
 
-global:
-  # publicIP is referenced by multiple Smee URL knobs (bootfile URL,
-  # tink-server, etc) when component-level overrides are unset. Set
-  # explicitly per deploy — there is no sane default for a multi-site
-  # central cluster.
-  publicIP: "" # REQUIRED — central cluster's public IPv4
+# ─── publicIP ──────────────────────────────────────────────────────────
+# REQUIRED. Set at install time via --set publicIP=… — there is no sane
+# default for a multi-site central cluster. Cilium 1.19.3 advertises this
+# IP via BGP; the chart's Service uses `lbClass: kube-vip.io/...` by
+# default, override for Cilium below.
+publicIP: ""
 
-stack:
-  enabled: true
-  service:
-    enabled: true
-    type: LoadBalancer
-  # Cilium 1.19.3 advertises this LB IP via BGP (see docs/dev/region-deploy.md).
-  # Setting `loadBalancerIP` would conflict with Cilium's pool-driven
-  # assignment, so we leave it unset and let Cilium pick from its pool.
-  hook:
-    enabled: true
-    # Hook OS version. Bumping requires re-validation against the v6
-    # initramfs flow — Hook's DHCPv6+SLAAC support lands in a separate
-    # tinkerbell/hook PR per the Phase 0a workstream.
-    downloadURL: https://github.com/tinkerbell/hook/releases/download/v0.10.0
-    arch: x86_64
-    extension: tar.gz
-    kernelVersion: "6.6"
-
-# ─── Smee (DHCP/iPXE/HTTP) ─────────────────────────────────────────────
-# Top-level `smee:` key lands under the chart's sub-chart values via
-# `--set smee.*` style. The upstream chart maps these onto smee
-# Deployment + Service manifests; flag names mirror the cmd/smee flags.
-
-smee:
-  image: ghcr.io/1456055067/smee:dev-dhcpv6 # FORK — see notes above
+# ─── Image (FORK) ──────────────────────────────────────────────────────
+deployment:
+  image: ghcr.io/1456055067/tinkerbell
   imagePullPolicy: IfNotPresent
+  imageTag: dev-dhcpv6
 
-  # Bind on the host network so the DHCP listener can see broadcasts
-  # on the production VLAN. Matches Tinkerbell's documented production
+  # Bind on the host network so the DHCP listener can see broadcasts on
+  # the production VLAN. Matches Tinkerbell's documented production
   # pattern; non-host-net deployments require a DHCP relay.
   hostNetwork: true
 
-  # ─── DHCPv4 (legacy / non-UEFI clients) ─────────────────────────────
-  # Keep enabled until the fleet is uniformly UEFI HTTP Boot v6-capable.
-  # Region-deploy pre-flight will gate v6-only sites separately.
-  dhcp:
+  # Multicast-relay init container — needed for v4 broadcast DHCP when
+  # hostNetwork=true. Default macvlan mode works on standard Linux NICs.
+  init:
     enabled: true
-    mode: reservation
-    ip: 0.0.0.0
-    port: 67
-    httpIPXE:
-      binaryUrl:
-        scheme: "http"
-        port: 7171
-        path: "/ipxe"
-      scriptUrl:
-        scheme: "http"
-        port: 7171
-        path: "/auto.ipxe"
 
-  # ─── DHCPv6 (UEFI HTTP Boot v6) ─────────────────────────────────────
-  # These flags require the fork — upstream Smee ignores them. The
-  # listener binds [::]:547 and joins the canonical DHCPv6 multicast
-  # groups (ff02::1:2, ff05::1:3) on the named interface. The interface
-  # is required when binding the wildcard because joining a multicast
-  # group requires picking a specific NIC.
+  # ─── Service feature gates ──────────────────────────────────────────
+  # Keep only what region-deploy needs. UI/Tootles/Secondstar are
+  # disabled — region-deploy drives Tinkerbell via the API server CRDs,
+  # not the standalone Tinkerbell UI.
+  envs:
+    globals:
+      backend: "kube"
+      enableCRDMigrations: true
+      enableRufioController: true
+      enableSecondstar: false
+      enableSmee: true
+      enableTootles: false
+      enableTinkServer: true
+      enableTinkController: true
+      enableUI: false
+      logLevel: 0
+      # publicIpv4 falls back to the top-level publicIP at chart-render
+      # time when left empty; we keep it explicit so an operator
+      # overriding publicIP also has to think about this.
+      publicIpv4: ""
+
+    # ─── Smee (DHCP/iPXE/HTTP) ──────────────────────────────────────
+    smee:
+      # DHCPv4 stays enabled — legacy / non-UEFI clients still need it.
+      # Sites with uniformly UEFI HTTP Boot v6 capable hardware can flip
+      # this to false per-environment.
+      dhcpEnabled: true
+      dhcpMode: "reservation" # reservation only; only mode v6 supports today
+      dhcpBindAddr: "" # falls back to "0.0.0.0"
+      dhcpBindInterface: "" # OVERRIDE per environment (e.g. "eth0")
+      dhcpIpxeHttpScriptPrependMac: true
+
+      # TFTP / Syslog stay v4-only — UEFI HTTP Boot v6 doesn't use TFTP,
+      # and legacy syslog clients don't speak v6.
+      tftpServerEnabled: true
+      syslogEnabled: true
+
+      # iPXE HTTP — v6 clients fetch the same iPXE binary as v4 over
+      # the same HTTP listener (which binds dual-stack via the chart's
+      # default Service config).
+      ipxeHttpBinaryEnabled: true
+      ipxeHttpScriptEnabled: true
+
+  # ─── DHCPv6 wiring (FORK ONLY) ──────────────────────────────────────
+  # The monorepo fork at feat/dhcpv6 adds a `Config.DHCPv6` sub-struct
+  # to smee.Config (Enabled / BindAddr / BindInterface) and a v6 serving
+  # goroutine in smee.Start. The cmd/tinkerbell flag layer doesn't yet
+  # expose these as CLI flags — that's pending follow-up work on the
+  # fork. Until then, the chart can't toggle DHCPv6 via values alone.
   #
-  # The reservation backend is shared with the v4 listener — same
-  # Hardware CRs, same iPXE binaries served from `dhcp.httpIPXE`.
-  #
-  # Currently surfaced via the upstream chart's `additionalArgs`
-  # passthrough so we don't have to fork the chart yet. When upstream
-  # lands DHCPv6, these move to first-class `dhcpv6:` keys.
-  additionalArgs:
-    - "-dhcp-v6-enabled"
-    - "-dhcp-v6-addr=[::]:547"
-    - "-dhcp-v6-iface=eth0" # OVERRIDE per environment
+  # WORKAROUND: the helm chart's additionalArgs passthrough can pass
+  # raw flags to the binary, but the new flag definitions need to land
+  # on the fork first. Leaving an empty placeholder here so the spot is
+  # obvious when the flags arrive:
+  additionalArgs: []
+  # When CLI flags land on the fork, this list will become:
+  #   - "--smee-dhcp-v6-enabled"
+  #   - "--smee-dhcp-v6-addr=[::]:547"
+  #   - "--smee-dhcp-v6-iface=eth0"
 
-  # iPXE / HTTP — v6 clients fetch the same iPXE binary as v4, so no
-  # separate http listener is needed. We reuse the upstream chart's
-  # http config unchanged.
-  http:
-    enabled: true
-    ip: ::
-    port: 7171
-    ipxeBinaryEnabled: true
-    ipxeScriptEnabled: true
+# ─── Service ─────────────────────────────────────────────────────────
+service:
+  # Cilium 1.19.3 advertises the LB IP via BGP through its own pool
+  # mechanism — leave loadBalancerIP unset so the Cilium pool drives
+  # assignment rather than forcing a static IP at install time. Drop
+  # the kube-vip class for the same reason.
+  lbClass: ""
+  loadBalancerIP: ""
 
-  # TFTP stays v4-only — UEFI HTTP Boot v6 doesn't use TFTP, and legacy
-  # PXE/TFTP clients don't speak v6. Disable for v6-only sites.
-  tftp:
-    enabled: true
-    ip: 0.0.0.0
-    port: 69
+# ─── trustedProxies ──────────────────────────────────────────────────
+# REQUIRED for the iPXE HTTP script handler to honour X-Forwarded-For
+# from in-cluster traffic. Set at install time via
+#   --set "trustedProxies={$(kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')}"
+trustedProxies: []
 
-  # Syslog receiver — v4 only, same reasoning as TFTP.
-  syslog:
-    enabled: true
-    ip: 0.0.0.0
-    port: 514
-
-# Hegel — metadata service. v6-agnostic in this configuration; the
-# chart binds it on the LB IP and clients (including v6 ones) reach it
-# via the iPXE script's hard-coded URL.
-hegel:
-  enabled: true
-
-# Tink (server + worker) — already v6-friendly upstream; no overrides
-# needed beyond what the chart defaults provide.
-tink:
-  server:
-    enabled: true
-  controller:
-    enabled: true
-
-# Rufio — BMC controller. We use Rufio for power-cycle / boot-source
-# operations in the region-deploy state machine (PR 4). v6-agnostic.
-rufio:
-  enabled: true
+# ─── artifactsFileServer ─────────────────────────────────────────────
+# REQUIRED for HookOS image hosting. Set at install time to the LB
+# IP/port of whatever HookOS file server is reachable from sites.
+artifactsFileServer: ""
