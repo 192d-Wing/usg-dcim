@@ -132,6 +132,83 @@ This is the single source of truth. Update it as decisions evolve.
 
 ---
 
+## 3.0 Phase 0a — Smee DHCPv6 support (prerequisite)
+
+The Region Deploy plan locks in single-IPv6-VLAN provisioning. **Upstream
+Tinkerbell Smee does not support DHCPv6 today** — confirmed by maintainer
+on smee#433 (closed 2024-04-29, _"no plans to implement DHCPv6"_) and
+restated in the open roadmap proposal tinkerbell/roadmap#44 (last updated
+2026-04-27). The roadmap proposal is still in the discussion phase, not
+implementation.
+
+To keep the architecture decision we want, we are developing DHCPv6 +
+UEFI HTTP Boot v6 support in a fork:
+
+- **Local working tree:** `~/projects/tinkerbell-smee/` (sibling to
+  `usg-dcim`, mirroring the existing `hickory-dns` pattern).
+- **GitHub fork:** `github.com/1456055067/smee` as `origin`; upstream
+  `tinkerbell/smee` is `upstream`.
+
+### Scope (per audit on 2026-05-15)
+
+Smee internals are layered. The DHCP server (`internal/dhcp/server/`) is
+~112 LOC; the production reservation handler (`internal/dhcp/handler/
+reservation/`) is ~411 LOC of v4-shaped logic. `insomniacslk/dhcp` (already
+vendored) ships a `dhcpv6/server6` package, so the protocol layer is done
+for us. The work is the netboot decision logic in v6 shape, parallel to
+the existing v4 code path:
+
+| Workstream                                                                            | Effort         |
+| ------------------------------------------------------------------------------------- | -------------- |
+| `internal/dhcp/server/dhcp6.go` + UDP listener                                        | ~3 days        |
+| `data.PacketV6` / `dhcp.InfoV6` parallel types                                        | ~2 days        |
+| `reservation.HandlerV6` (Solicit→Advertise→Request→Reply + UEFI HTTP Boot v6 options) | ~2 weeks       |
+| Vendor-class parsing + arch detection for v6 (Option 16)                              | ~3 days        |
+| OTel attribute encoder for v6                                                         | ~2 days        |
+| Helm chart: v6 binds, dual-listener wiring                                            | ~2 days        |
+| Hook OS DHCPv6 + SLAAC initramfs config (`tinkerbell/hook` companion change)          | ~3 days        |
+| Tests (unit + integration with v6 client harness)                                     | ~1.5 weeks     |
+| **Subtotal — PoC**                                                                    | **~5 weeks**   |
+| Upstream-quality polish (docs, design write-up, reviewer rounds)                      | +2–4 weeks     |
+| **Total — upstream-mergeable**                                                        | **~7–9 weeks** |
+
+### Strategy
+
+- **Parallel-types refactor pattern**, not generic refactor. Mirrors how
+  `insomniacslk/dhcp` itself separates `dhcpv4` and `dhcpv6` namespaces.
+  Upstream-mergeable; minimal blast radius.
+- **Stateless DHCPv6 only.** No address assignment — clients use SLAAC.
+  Matches roadmap #44 proposal and our IPAM stance (Smee should not be an
+  address allocator).
+- **UEFI HTTP Boot v6 is the only target boot path.** No DHCPv6+TFTP+iPXE
+  legacy path; modern hardware only. Pre-flight check already gates on
+  this (see §7 `nodes.uefi_http_boot_v6_capable`).
+
+### Acceptance criteria (Phase 0a)
+
+- A v6-only QEMU node boots via DHCPv6 → UEFI HTTP Boot → iPXE → Hook OS
+  → Tink Worker check-in, end-to-end on a kind cluster with Smee running
+  the fork.
+- All existing v4 tests still pass; no regressions in upstream behavior.
+- Helm chart cleanly toggles between v4-only, v6-only, and dual-stack
+  listener modes.
+
+### Upstream coordination
+
+- Post audit + design to roadmap#44 once initial spike confirms the
+  parallel-types approach is viable.
+- Aim for upstream merge; carry the fork in the meantime so region-deploy
+  PR 3 isn't blocked on upstream review timelines.
+
+### Blocking relationship
+
+- **Blocks:** PR 3 (Tinkerbell stack install). PR 3's Helm values
+  reference fork-only features.
+- **Does not block:** Phase 0 (central v6), region-deploy PRs 1–2 and 4+
+  in terms of code that doesn't touch the provisioning network.
+
+---
+
 ## 3. Phase 0 — Central cluster v6 enablement (prerequisite)
 
 This must land before the first real region deploy. Tracked separately from
