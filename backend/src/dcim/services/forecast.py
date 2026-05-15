@@ -10,8 +10,13 @@ Math: ordinary least squares on (days_since_first_placement, cumulative_u).
 slope_u_per_day < epsilon → "no growth" (don't project a fill date).
 
 kW forecasting (compute_rack_kw_forecast) reuses the same OLS slope but feeds
-it daily-averaged kW samples from OpenSearch — summed across PDU assets in
-the rack. Same band semantics: critical/warning/healthy/unknown.
+it daily-averaged kW samples from the TimescaleDB telemetry_samples
+hypertable — summed across PDU assets in the rack, converting W → kW for
+metrics in POWER_METRIC_W. Same band semantics: critical/warning/healthy/unknown.
+
+Step 2a of the OpenSearch → TimescaleDB migration: this is the first reader
+cut over to the hypertable. OpenSearch is still written to (and still read by
+alerts + api/telemetry) until those readers cut over in their own PRs.
 """
 
 from __future__ import annotations
@@ -19,7 +24,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.inventory import Asset, AssetKind, AssetMount, Rack
@@ -204,22 +210,20 @@ def _kw_payload(
     }
 
 
-def _samples_from_es_buckets(day_buckets: list[dict]) -> list[tuple[datetime, float]]:
-    samples: list[tuple[datetime, float]] = []
-    for bucket in day_buckets:
-        total = 0.0
-        any_val = False
-        for m in bucket.get("by_metric", {}).get("buckets", []):
-            avg = m.get("avg_v", {}).get("value")
-            if avg is None:
-                continue
-            v = float(avg) / 1000.0 if m["key"] in POWER_METRIC_W else float(avg)
-            total += v
-            any_val = True
-        if any_val:
-            ts = datetime.fromtimestamp(bucket["key"] / 1000.0, tz=UTC)
-            samples.append((ts, total))
-    return samples
+def _samples_from_rows(rows: list[tuple[datetime, str, float]]) -> list[tuple[datetime, float]]:
+    """Fold per-day, per-metric averages into one (day, total_kW) pair per day.
+
+    Pure transform: SQL gives us one row per (day, metric) with `avg(value)`.
+    We convert W → kW for metrics in POWER_METRIC_W and sum across metrics
+    within each day so the regression sees one point per day.
+    """
+    totals: dict[datetime, float] = {}
+    for day, metric, avg_v in rows:
+        if avg_v is None:
+            continue
+        v = float(avg_v) / 1000.0 if metric in POWER_METRIC_W else float(avg_v)
+        totals[day] = totals.get(day, 0.0) + v
+    return sorted(totals.items(), key=lambda t: t[0])
 
 
 def _project_kw(
@@ -263,25 +267,57 @@ def _project_kw(
     )
 
 
-def _site_indices(site_id: UUID, start: datetime, end: datetime) -> list[str]:
-    from .opensearch import telemetry_index
-    indices: list[str] = []
-    cur = start.replace(day=1)
-    while cur <= end:
-        indices.append(telemetry_index(str(site_id), cur))
-        cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
-    return indices
+_KW_HISTORY_SQL = text("""
+    SELECT
+        time_bucket('1 day', ts) AS day,
+        metric,
+        AVG(value) AS avg_v
+    FROM telemetry_samples
+    WHERE asset_id = ANY(:asset_ids)
+      AND metric = ANY(:metrics)
+      AND ts >= :start
+      AND ts <= :end
+    GROUP BY day, metric
+    ORDER BY day
+""")
+
+
+async def _fetch_kw_history(
+    db: AsyncSession, pdu_ids: list[UUID], start: datetime, end: datetime,
+) -> list[tuple[datetime, str, float]]:
+    """Daily AVG(value) per (day, metric) from the telemetry_samples hypertable.
+
+    Returns the raw shape so _samples_from_rows can do the W→kW conversion
+    and the daily fold. Splitting these is what lets the pure transform
+    stay testable without a database.
+    """
+    result = await db.execute(
+        _KW_HISTORY_SQL,
+        {
+            "asset_ids": [str(p) for p in pdu_ids],
+            "metrics": list(POWER_METRIC_KW | POWER_METRIC_W),
+            "start": start,
+            "end": end,
+        },
+    )
+    return [(row.day, row.metric, row.avg_v) for row in result]
 
 
 async def compute_rack_kw_forecast(
-    rack: Rack, rack_assets: list[Asset], *, days: int = 90,
-    now: datetime | None = None,
+    db: AsyncSession, rack: Rack, rack_assets: list[Asset], *,
+    days: int = 90, now: datetime | None = None,
 ) -> dict | None:
     """Project when this rack's kW load reaches max_kw at the current growth rate.
 
     Returns None when the rack has no PDU assets — kW forecasting requires
-    PDU telemetry. When PDUs exist but ES has no samples or is unreachable,
-    returns a payload with slope=None so the UI renders "no trend yet."
+    PDU telemetry. When PDUs exist but the hypertable has no samples (or the
+    query fails), returns a payload with slope=None so the UI renders
+    "no trend yet."
+
+    Reads from the TimescaleDB telemetry_samples hypertable (step 2a of the
+    OpenSearch → TimescaleDB migration). OpenSearch is still written to by
+    the ingest path; the other two readers (alerts, api/telemetry) cut over
+    in subsequent PRs.
     """
     pdu_ids = [a.id for a in rack_assets if a.kind == AssetKind.pdu]
     if not pdu_ids:
@@ -291,48 +327,18 @@ async def compute_rack_kw_forecast(
     start = now - timedelta(days=days)
     max_kw = float(rack.max_kw) if rack.max_kw else None
 
-    from .opensearch import client
-
-    metrics = list(POWER_METRIC_KW | POWER_METRIC_W)
-    es = client()
     try:
-        resp = await es.search(
-            index=",".join(_site_indices(rack.site_id, start, now)),
-            body={
-                "size": 0,
-                "query": {
-                    "bool": {
-                        "filter": [
-                            {"terms": {"asset_id": [str(p) for p in pdu_ids]}},
-                            {"terms": {"metric": metrics}},
-                            {"range": {"ts": {"gte": start.isoformat(), "lte": now.isoformat()}}},
-                        ]
-                    }
-                },
-                "aggs": {
-                    "by_day": {
-                        "date_histogram": {"field": "ts", "fixed_interval": "1d"},
-                        "aggs": {
-                            "by_metric": {
-                                "terms": {"field": "metric", "size": 20},
-                                "aggs": {"avg_v": {"avg": {"field": "value"}}},
-                            },
-                        },
-                    },
-                },
-            },
-            ignore_unavailable=True,
-        )
-    except Exception:
-        # ES unreachable / index missing — degrade so the U-only forecast still renders.
+        rows = await _fetch_kw_history(db, pdu_ids, start, now)
+    except SQLAlchemyError:
+        # Hypertable unreachable / table missing — degrade so the U-only
+        # forecast still renders. Mirrors the previous "ES unreachable" path.
         return _kw_payload(
             max_kw=max_kw, days=days, samples=0,
             slope=None, current_kw=None,
             days_until_max=None, projected_max_date=None, band="unknown",
         )
 
-    day_buckets = resp.get("aggregations", {}).get("by_day", {}).get("buckets", [])
-    samples = _samples_from_es_buckets(day_buckets)
+    samples = _samples_from_rows(rows)
     return _project_kw(samples, max_kw=max_kw, days=days, now=now)
 
 

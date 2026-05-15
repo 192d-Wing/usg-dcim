@@ -12,7 +12,7 @@ from dcim.services.forecast import (
     _build_timeline,
     _linear_slope,
     _project_kw,
-    _samples_from_es_buckets,
+    _samples_from_rows,
     compute_rack_forecast,
     compute_what_if,
     slope_from_buckets,
@@ -174,42 +174,45 @@ def test_slope_from_buckets_recovers_slope_and_intercept():
     assert intercept is not None and abs(intercept - 1.0) < 1e-9
 
 
-# ---------- kW: _samples_from_es_buckets ----------
+# ---------- kW: _samples_from_rows ----------
 
-def test_samples_from_es_buckets_sums_metrics_and_scales_watts():
-    # Two days, mixing kw + W metrics. Watts should divide by 1000.
-    buckets = [
-        {
-            "key": 1735689600000,  # 2025-01-01 UTC ms
-            "by_metric": {
-                "buckets": [
-                    {"key": "pdu.input.kw", "avg_v": {"value": 2.0}},
-                    {"key": "pdu.input.w", "avg_v": {"value": 500.0}},
-                ],
-            },
-        },
-        {
-            "key": 1735776000000,
-            "by_metric": {
-                "buckets": [
-                    {"key": "pdu.input.kw", "avg_v": {"value": 3.0}},
-                ],
-            },
-        },
+def test_samples_from_rows_sums_metrics_and_scales_watts():
+    """Mixed kw + W metrics within a day: W values divide by 1000 before
+    summing. Same semantics as the prior OpenSearch bucket folder."""
+    day1 = datetime(2026, 1, 1, tzinfo=UTC)
+    day2 = datetime(2026, 1, 2, tzinfo=UTC)
+    rows = [
+        (day1, "pdu.input.kw", 2.0),
+        (day1, "pdu.input.w", 500.0),
+        (day2, "pdu.input.kw", 3.0),
     ]
-    samples = _samples_from_es_buckets(buckets)
+    samples = _samples_from_rows(rows)
     assert len(samples) == 2
-    # 2.0 kW + 500W/1000 = 2.5 kW; second bucket = 3.0 kW
+    # 2.0 kW + 500W/1000 = 2.5 kW; second day = 3.0 kW
     assert abs(samples[0][1] - 2.5) < 1e-9
     assert abs(samples[1][1] - 3.0) < 1e-9
 
 
-def test_samples_from_es_buckets_skips_empty_days():
-    buckets = [
-        {"key": 1735689600000, "by_metric": {"buckets": [{"key": "pdu.input.kw", "avg_v": {"value": None}}]}},
-        {"key": 1735776000000, "by_metric": {"buckets": []}},
+def test_samples_from_rows_skips_null_averages():
+    """SQL `AVG()` over an empty group is NULL; those rows are dropped so
+    we don't synthesize phantom zero-kW days."""
+    day1 = datetime(2026, 1, 1, tzinfo=UTC)
+    rows = [(day1, "pdu.input.kw", None)]
+    assert _samples_from_rows(rows) == []
+
+
+def test_samples_from_rows_sorts_by_day():
+    """SQL ORDER BY day already gives us sorted input, but the helper
+    re-sorts so a future query that doesn't order is still safe."""
+    day1 = datetime(2026, 1, 1, tzinfo=UTC)
+    day2 = datetime(2026, 1, 2, tzinfo=UTC)
+    rows = [
+        (day2, "pdu.input.kw", 3.0),
+        (day1, "pdu.input.kw", 2.0),
     ]
-    assert _samples_from_es_buckets(buckets) == []
+    samples = _samples_from_rows(rows)
+    assert samples[0][0] == day1
+    assert samples[1][0] == day2
 
 
 # ---------- kW: _project_kw ----------
