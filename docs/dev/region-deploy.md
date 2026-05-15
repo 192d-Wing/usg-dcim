@@ -73,27 +73,27 @@ This is the single source of truth. Update it as decisions evolve.
 
 ## 2. Decision log
 
-| Area                  | Decision                                                  |
-| --------------------- | --------------------------------------------------------- |
-| Node OS               | Flatcar Container Linux (LTS channel)                     |
-| Cluster bootstrap     | kubeadm + Ignition via UEFI HTTP Boot over IPv6           |
-| PXE serving           | Tinkerbell (Smee/Tink/Hegel/Rufio) on central, IPv6-only  |
-| BMC control           | Redfish via Rufio (Tinkerbell-native)                     |
-| Orchestration         | Celery worker on central, state machine, SSE event stream |
-| Progress UX           | Stage tree + live logs via SSE                            |
-| CNI / LB              | Cilium **1.19.3** with native BGP                         |
-| LB mode               | SNAT default; DSR opt-in per deployment                   |
-| Address family        | IPv6-only pods/services/internal                          |
-| Edge model            | NAT46 LB (pattern A); NAT64+DNS64 opt-in                  |
-| DHCP                  | Kea DHCP with REST control-agent                          |
-| Auth DNS              | CoreDNS (existing chart)                                  |
-| Recursive DNS         | Hickory (existing chart); DNS64 zone when pattern B on    |
-| Network               | Single IPv6 VLAN end-to-end (provisioning + production)   |
-| Central v6 enablement | **Prerequisite** workstream (Phase 0)                     |
-| IPAM v6 schema        | v6 columns alongside v4 (no overloading)                  |
-| Pre-flight            | Hard gate; all checks must pass to enable Start           |
-| Secrets               | k8s Secrets on central; DB stores secret refs             |
-| Multi-cluster mgmt    | Kubeconfig-per-region (Secret); CAPI deferred             |
+| Area                  | Decision                                                    |
+| --------------------- | ----------------------------------------------------------- |
+| Node OS               | Flatcar Container Linux (LTS channel)                       |
+| Cluster bootstrap     | kubeadm + Ignition via UEFI HTTP Boot over IPv6             |
+| PXE serving           | Tinkerbell (Smee/Tink/Hegel/Rufio) on central, IPv6-only    |
+| BMC control           | Redfish via Rufio (Tinkerbell-native)                       |
+| Orchestration         | Celery worker on central, state machine, SSE event stream   |
+| Progress UX           | Stage tree + live logs via SSE                              |
+| CNI / LB              | Cilium **1.19.3** with native BGP                           |
+| LB mode               | SNAT default; DSR opt-in per deployment                     |
+| Address family        | IPv6-only pods/services/internal                            |
+| Edge model            | NAT46 LB (pattern A); NAT64+DNS64 opt-in                    |
+| DHCP                  | Kea DHCP with REST control-agent                            |
+| Auth DNS              | CoreDNS (existing chart)                                    |
+| Recursive DNS         | Hickory (existing chart); DNS64 zone when pattern B on      |
+| Network               | Single IPv6 VLAN end-to-end (provisioning + production)     |
+| Central v6 enablement | **Prerequisite** workstream (Phase 0)                       |
+| IPAM v6 schema        | No changes — existing CIDR/INET columns are family-agnostic |
+| Pre-flight            | Hard gate; all checks must pass to enable Start             |
+| Secrets               | k8s Secrets on central; DB stores secret refs               |
+| Multi-cluster mgmt    | Kubeconfig-per-region (Secret); CAPI deferred               |
 
 ### Rationale (one-line each)
 
@@ -264,16 +264,23 @@ Indexed on `(deployment_id, id)` for efficient SSE catch-up.
 | `status`          | enum    | `pending`, `installing`, `ready`, `failed`       |
 | `last_error`      | text    |                                                  |
 
-### IPAM v6 column additions
+### IPAM schema — no changes required
 
-Add to existing prefix/network models:
+Audit finding (2026-05-15): the existing IPAM models in
+`backend/src/dcim/models/ipam.py` already use PostgreSQL `CIDR` and `INET`
+column types throughout (`Supernet.prefix`, `Subnet.prefix`, `Subnet.gateway`,
+`IPAddress.address`, `Vtep.loopback_ip`). These types store v4 and v6
+transparently in the same column; the original plan's "v6 columns alongside
+v4" recommendation was based on an incorrect assumption and is dropped.
 
-- `prefix_v6 CIDR` (alongside `prefix_v4 CIDR` if present)
-- `gateway_v6 INET`
-- `family_capabilities` enum: `v4_only`, `v6_only`, `dual_stack`
+What we **may** want later is a **tagging** layer so pre-flight can answer
+"give me a v6 prefix at this site tagged as eligible for pod CIDR." The
+existing `Supernet.purpose` / `Subnet.purpose` free-form `String` fields can
+carry this. If queries get awkward, formalize them into an enum then.
 
-Validators enforce that v6 columns only hold v6 values (and vice versa).
-Migration backfills `family_capabilities` from existing data.
+Decision deferred to **PR 6 (pre-flight)** — by then we'll know what the
+checks actually need to query, and we can add tagging with a concrete
+motivating use case rather than speculatively.
 
 ---
 
@@ -571,7 +578,7 @@ Sized so each PR is reviewable in < ~1 day and independently deployable.
 
 | PR  | Scope                                                                                                              |
 | --- | ------------------------------------------------------------------------------------------------------------------ |
-| 1   | Migrations: `region_deployment*` tables + IPAM v6 columns + `family_capabilities` backfill                         |
+| 1   | Migration: `region_deployment*` tables + enums. No IPAM changes (existing CIDR/INET columns are family-agnostic).  |
 | 2   | SQLAlchemy models + Pydantic schemas + read-only API (`GET` endpoints) + empty pages skeleton                      |
 | 3   | Tinkerbell stack Helm install on central (Smee/Tink/Hegel/Rufio) tuned for IPv6-only + DHCPv6                      |
 | 4   | Tinkerbell CRD generators in `backend/src/dcim/regiondeploy/`: Hardware/Template/Workflow + BMCMachine (Rufio)     |
