@@ -42,6 +42,7 @@ import Input from '@cloudscape-design/components/input';
 import Modal from '@cloudscape-design/components/modal';
 import SegmentedControl from '@cloudscape-design/components/segmented-control';
 import Select, { SelectProps } from '@cloudscape-design/components/select';
+import TokenGroup from '@cloudscape-design/components/token-group';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import StatusIndicator from '@cloudscape-design/components/status-indicator';
 import Table from '@cloudscape-design/components/table';
@@ -91,6 +92,11 @@ type Vtep = {
   loopback_ip: string | null;
   role: 'leaf' | 'spine' | 'border' | 'other';
   description: string | null;
+};
+type VtepVniMembership = {
+  id: string;
+  vtep_id: string;
+  vni_id: string;
 };
 type IPAddr = {
   id: string; subnet_id: string; asset_id: string | null;
@@ -3081,6 +3087,78 @@ function OverlayForm({
   );
 }
 
+// Inline VTEP-VNI-membership editor shared by the VTEPs and VNIs panels.
+// Renders a TokenGroup of currently-linked items (each X removes the
+// membership via DELETE) and a single-select dropdown of unlinked options
+// (selecting one POSTs a new membership). Async errors surface via toast;
+// loading happens by parent invalidating the shared `memberships-for-overlay`
+// query.
+function MembershipChips({
+  links,
+  options,
+  optionLabel,
+  selectPlaceholder,
+  emptyLabel,
+  onAdd,
+  onRemove,
+  canWrite,
+}: {
+  links: { id: string; otherId: string }[];
+  options: { value: string; label: string }[];
+  optionLabel: (otherId: string) => string;
+  selectPlaceholder: string;
+  emptyLabel: string;
+  onAdd: (otherId: string) => Promise<void>;
+  onRemove: (membershipId: string) => Promise<void>;
+  canWrite: boolean;
+}) {
+  const tokens = links.map((l) => ({ label: optionLabel(l.otherId), value: l.id }));
+  const usedOtherIds = new Set(links.map((l) => l.otherId));
+  const unlinkedOptions: SelectProps.Option[] = options
+    .filter((o) => !usedOtherIds.has(o.value))
+    .map((o) => ({ value: o.value, label: o.label }));
+
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+      {tokens.length === 0 && !canWrite && (
+        <Box variant="span" color="text-status-inactive" fontSize="body-s">
+          {emptyLabel}
+        </Box>
+      )}
+      {tokens.length > 0 && (
+        <TokenGroup
+          items={tokens}
+          onDismiss={canWrite ? ({ detail }) => {
+            const t = tokens[detail.itemIndex];
+            if (t) void onRemove(t.value);
+          } : undefined}
+          // Wider limit than the default 3 — overlays routinely have 5–10
+          // memberships per VTEP. Anything beyond gets folded by the
+          // component into a "+N more" pill.
+          limit={8}
+        />
+      )}
+      {canWrite && unlinkedOptions.length > 0 && (
+        <div style={{ minWidth: 160 }}>
+          <Select
+            selectedOption={null}
+            placeholder={selectPlaceholder}
+            options={unlinkedOptions}
+            onChange={({ detail }) => {
+              if (detail.selectedOption.value) {
+                void onAdd(detail.selectedOption.value);
+              }
+            }}
+            expandToViewport
+            empty="Nothing to add"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boolean }) {
   const qc = useQueryClient();
   const vnisQ = useQuery({
@@ -3089,8 +3167,48 @@ function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boole
       await http.get<{ items: Vni[] }>(`/ipam/vnis?overlay_id=${overlayId}&page_size=200`)
     ).data.items ?? [],
   });
+  const vteps = useQuery({
+    queryKey: ['vteps-for-overlay', overlayId],
+    queryFn: async () => (
+      await http.get<{ items: Vtep[] }>(`/ipam/vteps?overlay_id=${overlayId}&page_size=200`)
+    ).data.items ?? [],
+  }).data ?? [];
+  const memberships = useQuery({
+    queryKey: ['memberships-for-overlay', overlayId],
+    queryFn: async () => (
+      await http.get<{ items: VtepVniMembership[] }>(
+        `/ipam/vtep-memberships?overlay_id=${overlayId}&page_size=500`,
+      )
+    ).data.items ?? [],
+  }).data ?? [];
+  const assetsRes = useList<Asset>({ resource: 'inventory/assets', pagination: { pageSize: 500 } });
+  const assetsById = useMemo(
+    () => new Map((assetsRes.result.data ?? []).map((a) => [a.id, a])),
+    [assetsRes.result.data],
+  );
+  const vtepLabel = (vtepId: string) => {
+    const v = vteps.find((x) => x.id === vtepId);
+    if (!v) return vtepId.slice(0, 8) + '…';
+    return assetsById.get(v.asset_id)?.name ?? v.asset_id.slice(0, 8) + '…';
+  };
   const vnis = vnisQ.data ?? [];
   const [createOpen, setCreateOpen] = useState(false);
+
+  async function refreshMemberships() {
+    await qc.invalidateQueries({ queryKey: ['memberships-for-overlay', overlayId] });
+  }
+  async function addMembership(vniId: string, vtepId: string) {
+    try {
+      await http.post('/ipam/vtep-memberships', { vtep_id: vtepId, vni_id: vniId });
+      await refreshMemberships();
+    } catch (err: any) { toast.error(err?.message ?? 'add failed'); }
+  }
+  async function removeMembership(membershipId: string) {
+    try {
+      await http.delete(`/ipam/vtep-memberships/${membershipId}`);
+      await refreshMemberships();
+    } catch (err: any) { toast.error(err?.message ?? 'remove failed'); }
+  }
 
   async function remove(v: Vni) {
     if (!window.confirm(`Delete VNI ${v.vni}?`)) return;
@@ -3137,6 +3255,26 @@ function VnisPanel({ overlayId, canWrite }: { overlayId: string; canWrite: boole
                 {v.evpn_route_target ? ` · rt ${v.evpn_route_target}` : ''}
                 {v.vrf_id ? ` · vrf bound` : ''}
               </Box>
+            ),
+          },
+          {
+            id: 'advertised_by', header: 'Advertised by VTEPs',
+            cell: (v: Vni) => (
+              <MembershipChips
+                links={memberships
+                  .filter((m) => m.vni_id === v.id)
+                  .map((m) => ({ id: m.id, otherId: m.vtep_id }))}
+                options={vteps.map((vt) => ({
+                  value: vt.id,
+                  label: vtepLabel(vt.id),
+                }))}
+                optionLabel={vtepLabel}
+                selectPlaceholder="+ VTEP"
+                emptyLabel="(no VTEP advertises this VNI)"
+                onAdd={(vtepId) => addMembership(v.id, vtepId)}
+                onRemove={removeMembership}
+                canWrite={canWrite}
+              />
             ),
           },
           ...(canWrite ? [{
@@ -3275,11 +3413,45 @@ function VtepsPanel({ overlayId, canWrite }: { overlayId: string; canWrite: bool
       await http.get<{ items: Vtep[] }>(`/ipam/vteps?overlay_id=${overlayId}&page_size=200`)
     ).data.items ?? [],
   });
+  const vnis = useQuery({
+    queryKey: ['vnis-for-overlay', overlayId],
+    queryFn: async () => (
+      await http.get<{ items: Vni[] }>(`/ipam/vnis?overlay_id=${overlayId}&page_size=200`)
+    ).data.items ?? [],
+  }).data ?? [];
+  const memberships = useQuery({
+    queryKey: ['memberships-for-overlay', overlayId],
+    queryFn: async () => (
+      await http.get<{ items: VtepVniMembership[] }>(
+        `/ipam/vtep-memberships?overlay_id=${overlayId}&page_size=500`,
+      )
+    ).data.items ?? [],
+  }).data ?? [];
   const vteps = vtepsQ.data ?? [];
   const assetsRes = useList<Asset>({ resource: 'inventory/assets', pagination: { pageSize: 500 } });
   const assets = assetsRes.result.data ?? [];
   const assetsById = useMemo(() => new Map(assets.map((a) => [a.id, a])), [assets]);
+  const vniLabel = (vniId: string) => {
+    const v = vnis.find((x) => x.id === vniId);
+    return v ? String(v.vni) : vniId.slice(0, 8) + '…';
+  };
   const [createOpen, setCreateOpen] = useState(false);
+
+  async function refreshMemberships() {
+    await qc.invalidateQueries({ queryKey: ['memberships-for-overlay', overlayId] });
+  }
+  async function addMembership(vtepId: string, vniId: string) {
+    try {
+      await http.post('/ipam/vtep-memberships', { vtep_id: vtepId, vni_id: vniId });
+      await refreshMemberships();
+    } catch (err: any) { toast.error(err?.message ?? 'add failed'); }
+  }
+  async function removeMembership(membershipId: string) {
+    try {
+      await http.delete(`/ipam/vtep-memberships/${membershipId}`);
+      await refreshMemberships();
+    } catch (err: any) { toast.error(err?.message ?? 'remove failed'); }
+  }
 
   async function remove(v: Vtep) {
     if (!window.confirm('Delete this VTEP and all its VNI memberships?')) return;
@@ -3319,6 +3491,26 @@ function VtepsPanel({ overlayId, canWrite }: { overlayId: string; canWrite: bool
           {
             id: 'loopback', header: 'Loopback',
             cell: (v) => <span style={{ fontFamily: 'ui-monospace, monospace' }}>{v.loopback_ip ?? '—'}</span>,
+          },
+          {
+            id: 'advertised_vnis', header: 'Advertised VNIs',
+            cell: (v: Vtep) => (
+              <MembershipChips
+                links={memberships
+                  .filter((m) => m.vtep_id === v.id)
+                  .map((m) => ({ id: m.id, otherId: m.vni_id }))}
+                options={vnis.map((vn) => ({
+                  value: vn.id,
+                  label: String(vn.vni),
+                }))}
+                optionLabel={vniLabel}
+                selectPlaceholder="+ VNI"
+                emptyLabel="(no VNIs advertised)"
+                onAdd={(vniId) => addMembership(v.id, vniId)}
+                onRemove={removeMembership}
+                canWrite={canWrite}
+              />
+            ),
           },
           ...(canWrite ? [{
             id: 'actions', header: '',

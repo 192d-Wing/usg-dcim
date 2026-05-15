@@ -1602,6 +1602,15 @@ async def list_vtep_memberships(
     params: PageParams = Depends(PageParams.from_query),
     vtep_id: UUID | None = Query(None),
     vni_id: UUID | None = Query(None),
+    overlay_id: UUID | None = Query(
+        None,
+        description=(
+            "Filter to memberships where the VTEP (and equivalently the VNI, "
+            "since memberships are constrained to a single overlay) belongs to "
+            "this overlay. Lets the UI fetch every membership for an overlay "
+            "in one paginated query instead of N requests keyed by vtep_id."
+        ),
+    ),
     _: Principal = Depends(require_capability("ipam:vtep-memberships:read")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1610,6 +1619,10 @@ async def list_vtep_memberships(
         stmt = stmt.where(VtepVniMembership.vtep_id == vtep_id)
     if vni_id is not None:
         stmt = stmt.where(VtepVniMembership.vni_id == vni_id)
+    if overlay_id is not None:
+        stmt = stmt.join(Vtep, VtepVniMembership.vtep_id == Vtep.id).where(
+            Vtep.overlay_id == overlay_id,
+        )
     return await paginate(
         db, stmt, model=VtepVniMembership, params=params, out_model=VtepVniMembershipOut,
     )
