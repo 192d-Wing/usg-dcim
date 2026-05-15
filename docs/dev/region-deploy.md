@@ -203,17 +203,17 @@ v6 shape, parallel to the existing v4 code path:
 
 ### Status snapshot (2026-05-15)
 
-| Workstream item                                                                | Status                                                            |
-| ------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| `dhcp_v6.go` (PacketV6 type)                                                   | ✅ in `fc1008a`                                                   |
-| `info_v6.go` (InfoV6 + BootURL)                                                | ✅ in `fc1008a`                                                   |
-| `server/dhcp6.go` (v6 listener)                                                | ✅ in `fc1008a`                                                   |
-| `handler/reservation/handler_v6.go` (Solicit/Request/Release + Option 59)      | ✅ in `fc1008a`                                                   |
-| `smee.go` Config.DHCPv6 + serving goroutine in Start()                         | ✅ in `fc1008a`                                                   |
-| `cmd/tinkerbell/flag/smee.go` — CLI flags for DHCPv6                           | ✅ `--dhcp-v6-{enabled,bind-addr,bind-port,bind-interface}` wired |
-| OTel attribute encoder for v6 (full parallel encoder)                          | ⏳ partial; inline minimal in handler                             |
-| Hook OS DHCPv6 + SLAAC initramfs (`tinkerbell/hook` repo — also consolidated?) | ⏳                                                                |
-| Real UEFI HTTP Boot v6 integration test (QEMU + EDK2 OVMF)                     | ⏳                                                                |
+| Workstream item                                                                        | Status                                                                                                                      |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `dhcp_v6.go` (PacketV6 type)                                                           | ✅ in `fc1008a`                                                                                                             |
+| `info_v6.go` (InfoV6 + BootURL)                                                        | ✅ in `fc1008a`                                                                                                             |
+| `server/dhcp6.go` (v6 listener)                                                        | ✅ in `fc1008a`                                                                                                             |
+| `handler/reservation/handler_v6.go` (Solicit/Request/Release + Option 59)              | ✅ in `fc1008a`                                                                                                             |
+| `smee.go` Config.DHCPv6 + serving goroutine in Start()                                 | ✅ in `fc1008a`                                                                                                             |
+| `cmd/tinkerbell/flag/smee.go` — CLI flags for DHCPv6                                   | ✅ `--dhcp-v6-{enabled,bind-addr,bind-port,bind-interface}` wired                                                           |
+| OTel attribute encoder for v6 (full parallel encoder)                                  | ⏳ partial; inline minimal in handler                                                                                       |
+| Hook OS DHCPv6 + SLAAC initramfs (`tinkerbell/hook` — NOT consolidated, separate fork) | ✅ source in [`1456055067/hook`](https://github.com/1456055067/hook/tree/feat/dhcpv6) commit `f9f8a7b`; image build pending |
+| Real UEFI HTTP Boot v6 integration test (QEMU + EDK2 OVMF)                             | ⏳                                                                                                                          |
 
 ### Acceptance criteria (Phase 0a)
 
