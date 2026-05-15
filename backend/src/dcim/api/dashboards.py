@@ -369,7 +369,7 @@ async def rack_forecast(
         payload = compute_what_if(rack, asset_list, add_units=add_units)
     else:
         payload = compute_rack_forecast(rack, asset_list)
-    payload["kw_forecast"] = await compute_rack_kw_forecast(rack, asset_list, days=kw_days)
+    payload["kw_forecast"] = await compute_rack_kw_forecast(db, rack, asset_list, days=kw_days)
     return payload
 
 @router.get("/forecast/sites/{site_id}")
