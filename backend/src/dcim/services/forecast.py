@@ -10,7 +10,7 @@ Math: ordinary least squares on (days_since_first_placement, cumulative_u).
 slope_u_per_day < epsilon → "no growth" (don't project a fill date).
 
 kW forecasting (compute_rack_kw_forecast) reuses the same OLS slope but feeds
-it daily-averaged kW samples from Elasticsearch — summed across PDU assets in
+it daily-averaged kW samples from OpenSearch — summed across PDU assets in
 the rack. Same band semantics: critical/warning/healthy/unknown.
 """
 

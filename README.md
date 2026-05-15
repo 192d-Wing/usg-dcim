@@ -8,7 +8,7 @@ A multi-site DCIM with:
 
 - **Centralized inventory & governance** in PostgreSQL (Region → Site → Building → Room → Row → Rack → Asset).
 - **Distributed telemetry collection** via lightweight site collectors (SNMP, Redfish, Modbus TCP, REST, IPMI, syslog) with local store-and-forward over WAN outages.
-- **High-volume telemetry** in Elasticsearch with retention, rollups, and freshness tracking.
+- **High-volume telemetry** in OpenSearch with retention, rollups, and freshness tracking.
 - **RBAC + ABAC** scoping by region, site, organization, MAJCOM, mission, and enclave.
 - **Enterprise dashboards** with global rollups and per-site drill-down.
 - **Alerting at scale** with dedup, correlation, suppression, maintenance windows, and collector-down detection.
@@ -39,7 +39,7 @@ make collector   # run a sample collector against the seeded site
 
 API: <http://localhost:8000> (OpenAPI at `/docs`)
 Frontend: <http://localhost:5173>
-Elasticsearch: <http://localhost:9200>
+OpenSearch: <http://localhost:9200>
 
 ## Deployment
 

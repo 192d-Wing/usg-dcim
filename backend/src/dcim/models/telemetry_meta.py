@@ -1,7 +1,7 @@
 """Per-asset telemetry source registry — drives freshness UI and collector-down alerts.
 
-Telemetry samples themselves live in Elasticsearch; this table tracks the metadata
-the UI and alert engine need without scanning Elastic.
+Telemetry samples themselves live in OpenSearch; this table tracks the metadata
+the UI and alert engine need without scanning OpenSearch.
 """
 
 from __future__ import annotations
