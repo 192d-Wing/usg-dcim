@@ -10,8 +10,16 @@
 //     batch, not N selects + N updates.
 //   - ES bulk write uses streamed NDJSON instead of buffering a Python
 //     list of dicts.
-//   - One goroutine handles the ES write while the freshness upsert runs
-//     concurrently on a separate PG connection.
+//   - One goroutine handles the ES write while the freshness upsert and
+//     (when enabled) the TimescaleDB hypertable dual-write run
+//     concurrently on separate PG connections.
+//
+// Step 1.5 of the OpenSearch → TimescaleDB migration: when
+// DCIM_TELEMETRY_DUAL_WRITE_TIMESCALE is true (the default), every batch
+// is also inserted into the `telemetry_samples` hypertable so parity
+// data accumulates while readers continue to query OpenSearch. The
+// hypertable write is fail-open — a Timescale outage must never reject
+// a batch OpenSearch already accepted.
 package main
 
 import (
@@ -54,10 +62,11 @@ type batch struct {
 }
 
 type server struct {
-	es          *opensearch.Client
-	pg          *pgxpool.Pool
-	indexPrefix string
-	log         *slog.Logger
+	es              *opensearch.Client
+	pg              *pgxpool.Pool
+	indexPrefix     string
+	log             *slog.Logger
+	dualWriteHyper  bool
 }
 
 func main() {
@@ -89,7 +98,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	s := &server{es: es, pg: pg, indexPrefix: indexPrefix, log: log}
+	// Step 1.5 of the OpenSearch → TimescaleDB migration: parity write to
+	// the `telemetry_samples` hypertable alongside the OpenSearch bulk.
+	// Default on; flip to "false" when running against a Postgres without
+	// the TimescaleDB extension. Matches the Python settings
+	// `telemetry_dual_write_timescale` flag introduced in #42.
+	dualWriteHyper := envDefault("DCIM_TELEMETRY_DUAL_WRITE_TIMESCALE", "true") != "false"
+
+	s := &server{
+		es:             es,
+		pg:             pg,
+		indexPrefix:    indexPrefix,
+		log:            log,
+		dualWriteHyper: dualWriteHyper,
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
@@ -149,11 +171,26 @@ func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		// Continue — bulk write will fail loudly if the index truly can't be created.
 	}
 
-	// Fan out ES bulk + PG freshness upsert in parallel.
+	// Fan out ES bulk + PG freshness upsert + (optionally) hypertable
+	// dual-write in parallel. The hypertable write is fail-open: an error
+	// there is logged but never propagates to the HTTP response, matching
+	// the Python behavior. OpenSearch is the read path; rejecting the
+	// batch on a Timescale outage would just amplify load on the broken
+	// side and cause the collector to retry needlessly.
 	var wg sync.WaitGroup
 	var esErr, pgErr error
 	var esHadErrors bool
 	wg.Add(2)
+	if s.dualWriteHyper {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := s.dualWriteHypertable(r.Context(), &b, receivedAt); err != nil {
+				s.log.Warn("telemetry_timescale_dual_write_failed",
+					"batch", b.BatchID, "count", len(b.Samples), "err", err)
+			}
+		}()
+	}
 	go func() {
 		defer wg.Done()
 		esHadErrors, esErr = s.bulkWrite(r.Context(), index, &b, receivedAt)
@@ -320,6 +357,74 @@ func (s *server) bulkWrite(ctx context.Context, index string, b *batch, received
 		return false, err
 	}
 	return bres.Errors, nil
+}
+
+// dualWriteHypertable inserts every sample in the batch into the
+// `telemetry_samples` hypertable created by migration 0046. The unique
+// constraint `uq_telem_sample_dedup` on (collector_id, batch_id, seq, ts)
+// makes collector retries idempotent — ON CONFLICT DO NOTHING drops the
+// already-written row instead of erroring.
+//
+// Caller treats the returned error as fail-open: it logs but never
+// propagates to the HTTP response.
+func (s *server) dualWriteHypertable(ctx context.Context, b *batch, receivedAt time.Time) error {
+	if len(b.Samples) == 0 {
+		return nil
+	}
+	rows, err := hypertableRows(b, receivedAt)
+	if err != nil {
+		return err
+	}
+
+	// Multi-row INSERT with ON CONFLICT DO NOTHING. pgx's CopyFrom is
+	// faster but doesn't support ON CONFLICT, and idempotence matters
+	// more here than throughput.
+	var sb strings.Builder
+	sb.WriteString(`INSERT INTO telemetry_samples
+		(ts, site_id, asset_id, collector_id, batch_id, seq, metric,
+		 value, unit, received_at, tags) VALUES `)
+	args := make([]any, 0, len(rows)*11)
+	for i, row := range rows {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		base := i * 11
+		fmt.Fprintf(&sb, "($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6,
+			base+7, base+8, base+9, base+10, base+11)
+		args = append(args, row...)
+	}
+	sb.WriteString(" ON CONFLICT ON CONSTRAINT uq_telem_sample_dedup DO NOTHING")
+
+	_, err = s.pg.Exec(ctx, sb.String(), args...)
+	return err
+}
+
+// hypertableRows is the pure row-builder for dualWriteHypertable. Extracted
+// so a unit test can lock the per-row argument order, seq numbering, and
+// tags-default-to-empty-JSON behavior without touching the database.
+func hypertableRows(b *batch, receivedAt time.Time) ([][]any, error) {
+	rows := make([][]any, 0, len(b.Samples))
+	for i, sm := range b.Samples {
+		var unit any
+		if sm.Unit != "" {
+			unit = sm.Unit
+		}
+		tagsJSON := []byte("{}")
+		if len(sm.Tags) > 0 {
+			j, err := json.Marshal(sm.Tags)
+			if err != nil {
+				return nil, fmt.Errorf("marshal tags: %w", err)
+			}
+			tagsJSON = j
+		}
+		rows = append(rows, []any{
+			sm.Ts, b.SiteID, sm.AssetID, b.CollectorID,
+			b.BatchID, i, sm.Metric, sm.Value, unit,
+			receivedAt, tagsJSON,
+		})
+	}
+	return rows, nil
 }
 
 // upsertFreshness: one statement per (asset_id, metric) pair in the batch.
