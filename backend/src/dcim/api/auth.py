@@ -35,17 +35,15 @@ _OIDC_NOT_CONFIGURED = "OIDC not configured"
 
 
 def _oidc_httpx_client() -> httpx.AsyncClient:
-    """httpx client for IdP back-channel calls. Honors oidc_ca_bundle
-    (PEM path for self-signed/internal IdPs like DoD EOICAM) and
-    oidc_verify_ssl (dev escape hatch)."""
+    """httpx client for IdP back-channel calls.
+
+    Always verifies TLS. For internal/self-signed IdPs (e.g. DoD EOICAM)
+    set ``oidc_ca_bundle`` to a PEM file containing the issuing CA — that
+    bundle is used in place of the system trust store. There is no
+    ``verify=False`` escape hatch on purpose.
+    """
     settings = get_settings()
-    verify: str | bool
-    if not settings.oidc_verify_ssl:
-        verify = False
-    elif settings.oidc_ca_bundle:
-        verify = settings.oidc_ca_bundle
-    else:
-        verify = True
+    verify: str | bool = settings.oidc_ca_bundle or True
     return httpx.AsyncClient(timeout=10.0, verify=verify)
 
 def _anon_principal(label: str, ip: str | None) -> Principal:
@@ -155,7 +153,7 @@ async def _oidc_metadata() -> dict:
         return cached["doc"]
     async with _oidc_httpx_client() as client:
         url = settings.oidc_issuer.rstrip("/") + "/.well-known/openid-configuration"
-        resp = await client.get(url)  # lgtm[py/request-without-cert-validation]
+        resp = await client.get(url)
         resp.raise_for_status()
         doc = resp.json()
     _oidc_metadata._cache = {"issuer": settings.oidc_issuer, "doc": doc}  # type: ignore[attr-defined]
@@ -211,8 +209,7 @@ async def _exchange_oidc_code(code: str, callback: str | None) -> tuple[dict, di
     settings = get_settings()
     meta = await _oidc_metadata()
     async with _oidc_httpx_client() as client:
-        token_resp = await client.post(  # lgtm[py/request-without-cert-validation]
-            meta["token_endpoint"],
+        token_resp = await client.post(            meta["token_endpoint"],
             data={
                 "grant_type": "authorization_code",
                 "code": code,
@@ -226,7 +223,7 @@ async def _exchange_oidc_code(code: str, callback: str | None) -> tuple[dict, di
         tokens = token_resp.json()
         if not tokens.get("id_token"):
             raise AuthError("oidc response missing id_token")
-        jwks_resp = await client.get(meta["jwks_uri"])  # lgtm[py/request-without-cert-validation]
+        jwks_resp = await client.get(meta["jwks_uri"])
         jwks_resp.raise_for_status()
         jwks = jwks_resp.json()
     return tokens, jwks
@@ -479,8 +476,7 @@ async def refresh_session(
 
     meta = await _oidc_metadata()
     async with _oidc_httpx_client() as client:
-        resp = await client.post(  # lgtm[py/request-without-cert-validation]
-            meta["token_endpoint"],
+        resp = await client.post(            meta["token_endpoint"],
             data={
                 "grant_type": "refresh_token",
                 "refresh_token": plain_refresh,
@@ -499,7 +495,7 @@ async def refresh_session(
         new_id_token = new_tokens.get("id_token")
         if not new_id_token:
             raise AuthError("idp refresh response missing id_token")
-        jwks_resp = await client.get(meta["jwks_uri"])  # lgtm[py/request-without-cert-validation]
+        jwks_resp = await client.get(meta["jwks_uri"])
         jwks_resp.raise_for_status()
         jwks = jwks_resp.json()
 

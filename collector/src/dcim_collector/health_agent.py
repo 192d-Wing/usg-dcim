@@ -69,9 +69,7 @@ async def _probe_http(
     try:
         async with httpx.AsyncClient(
             timeout=timeout,
-            # Internal probes commonly hit self-signed certs; operator
-            # configures the target so trust is implicit.
-            verify=False,  # noqa: S501  # lgtm[py/request-without-cert-validation]
+            verify=True,
             follow_redirects=False,
         ) as client:
             r = await client.get(url)
