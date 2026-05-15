@@ -4433,7 +4433,7 @@ function ServerMetricsCell({ serverId }: { serverId: string }) {
             <YAxis hide domain={[0, 'dataMax + 1']} />
             <Tooltip
               labelFormatter={(t) => new Date(Number(t)).toISOString().replace(/\.\d{3}Z$/, 'Z')}
-              formatter={(v: number) => [`${v.toFixed(2)} qps`, 'QPS']}
+              formatter={(v) => [`${Number(v).toFixed(2)} qps`, 'QPS']}
             />
             <Line
               type="monotone" dataKey="qps"
