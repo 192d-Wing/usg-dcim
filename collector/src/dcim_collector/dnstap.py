@@ -321,7 +321,7 @@ async def serve_dnstap(socket_path: str, on_query: OnQuery) -> None:
     # setup; loosen perms so the resolver's UID can connect. The
     # shared volume is the security boundary.
     try:
-        os.chmod(socket_path, 0o660)
+        os.chmod(socket_path, 0o660)  # lgtm[py/overly-permissive-file]
     except OSError:
         pass
     log.info("dnstap_server_start", socket=socket_path)

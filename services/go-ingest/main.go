@@ -29,8 +29,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/opensearch-project/opensearch-go/v2"
+	"github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -54,7 +54,7 @@ type batch struct {
 }
 
 type server struct {
-	es          *elasticsearch.Client
+	es          *opensearch.Client
 	pg          *pgxpool.Pool
 	indexPrefix string
 	log         *slog.Logger
@@ -64,7 +64,7 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	pgDSN := envDefault("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim")
-	esURL := envDefault("DCIM_ELASTIC_URL", "http://elastic:9200")
+	esURL := envDefault("DCIM_OPENSEARCH_URL", "http://opensearch:9200")
 	addr := envDefault("INGEST_ADDR", ":8100")
 	indexPrefix := envDefault("DCIM_TELEMETRY_INDEX_PREFIX", "dcim-telemetry")
 
@@ -78,12 +78,12 @@ func main() {
 	}
 	defer pg.Close()
 
-	esCfg := elasticsearch.Config{Addresses: []string{esURL}}
-	if u := os.Getenv("DCIM_ELASTIC_USERNAME"); u != "" {
+	esCfg := opensearch.Config{Addresses: []string{esURL}}
+	if u := os.Getenv("DCIM_OPENSEARCH_USERNAME"); u != "" {
 		esCfg.Username = u
-		esCfg.Password = os.Getenv("DCIM_ELASTIC_PASSWORD")
+		esCfg.Password = os.Getenv("DCIM_OPENSEARCH_PASSWORD")
 	}
-	es, err := elasticsearch.NewClient(esCfg)
+	es, err := opensearch.NewClient(esCfg)
 	if err != nil {
 		log.Error("es_client_failed", "err", err)
 		os.Exit(1)
@@ -247,7 +247,7 @@ func capabilityMatches(held, want string) bool {
 }
 
 func (s *server) ensureIndex(ctx context.Context, index string) error {
-	exists, err := esapi.IndicesExistsRequest{Index: []string{index}}.Do(ctx, s.es)
+	exists, err := opensearchapi.IndicesExistsRequest{Index: []string{index}}.Do(ctx, s.es)
 	if err != nil {
 		return err
 	}
@@ -265,7 +265,7 @@ func (s *server) ensureIndex(ctx context.Context, index string) error {
 		}},
 		"settings":{"index":{"refresh_interval":"5s","number_of_shards":1,"number_of_replicas":1}}
 	}`)
-	create, err := esapi.IndicesCreateRequest{Index: index, Body: body}.Do(ctx, s.es)
+	create, err := opensearchapi.IndicesCreateRequest{Index: index, Body: body}.Do(ctx, s.es)
 	if err != nil {
 		return err
 	}
@@ -305,7 +305,7 @@ func (s *server) bulkWrite(ctx context.Context, index string, b *batch, received
 		buf.WriteByte('\n')
 	}
 
-	res, err := esapi.BulkRequest{Body: &buf, Refresh: "false"}.Do(ctx, s.es)
+	res, err := opensearchapi.BulkRequest{Body: &buf, Refresh: "false"}.Do(ctx, s.es)
 	if err != nil {
 		return false, err
 	}

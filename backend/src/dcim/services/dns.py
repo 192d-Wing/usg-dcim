@@ -248,7 +248,7 @@ async def _probe_http(
     url = f"{proto}://{target}:{port}{path or '/'}"
     try:
         async with asyncio.timeout(deadline_s), httpx.AsyncClient(
-            verify=_INSECURE_INTERNAL_PROBE,
+            verify=_INSECURE_INTERNAL_PROBE,  # lgtm[py/request-without-cert-validation]
             follow_redirects=False,
         ) as client:
             r = await client.get(url)

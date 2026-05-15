@@ -25,8 +25,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elastic/go-elasticsearch/v8"
-	"github.com/elastic/go-elasticsearch/v8/esapi"
+	"github.com/opensearch-project/opensearch-go/v2"
+	"github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -63,9 +63,9 @@ func main() {
 	cfg := config{
 		pgDSN:              envDefault("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim"),
 		redisURL:           envDefault("DCIM_REDIS_DSN", "redis://redis:6379/0"),
-		esURL:              envDefault("DCIM_ELASTIC_URL", "http://elastic:9200"),
-		esUser:             os.Getenv("DCIM_ELASTIC_USERNAME"),
-		esPass:             os.Getenv("DCIM_ELASTIC_PASSWORD"),
+		esURL:              envDefault("DCIM_OPENSEARCH_URL", "http://opensearch:9200"),
+		esUser:             os.Getenv("DCIM_OPENSEARCH_USERNAME"),
+		esPass:             os.Getenv("DCIM_OPENSEARCH_PASSWORD"),
 		indexPrefix:        envDefault("DCIM_TELEMETRY_INDEX_PREFIX", "dcim-telemetry"),
 		evalInterval:       envDuration("ALERTS_EVAL_INTERVAL", 30*time.Second),
 		sweepInterval:      envDuration("ALERTS_SWEEP_INTERVAL", 30*time.Second),
@@ -81,7 +81,7 @@ func main() {
 	}
 	defer pg.Close()
 
-	es, err := elasticsearch.NewClient(elasticsearch.Config{
+	es, err := opensearch.NewClient(opensearch.Config{
 		Addresses: []string{cfg.esURL},
 		Username:  cfg.esUser,
 		Password:  cfg.esPass,
@@ -123,7 +123,7 @@ func main() {
 
 type engine struct {
 	pg  *pgxpool.Pool
-	es  *elasticsearch.Client
+	es  *opensearch.Client
 	rdb *redis.Client
 	cfg config
 	log *slog.Logger
@@ -255,7 +255,7 @@ func (e *engine) evalOne(ctx context.Context, r alertRule) (int, int, []uuid.UUI
 	}
 	body, _ := json.Marshal(query)
 
-	res, err := esapi.SearchRequest{
+	res, err := opensearchapi.SearchRequest{
 		Index:             []string{index},
 		Body:              strings.NewReader(string(body)),
 		IgnoreUnavailable: boolPtr(true),

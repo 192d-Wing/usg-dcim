@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import metrics
 from ..models.telemetry_meta import FreshnessState, TelemetrySource
 from ..schemas.telemetry import TelemetryBatch, TelemetrySample
-from .elastic import client, ensure_index, telemetry_index
+from .opensearch import client, ensure_index, telemetry_index
 
 log = structlog.get_logger("dcim.telemetry")
 

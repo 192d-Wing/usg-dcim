@@ -31,9 +31,9 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://dcim:dcim@postgres:5432/dcim"  # type: ignore[arg-type]
     )
     redis_dsn: RedisDsn = Field(default="redis://redis:6379/0")  # type: ignore[arg-type]
-    elastic_url: str = "http://elastic:9200"
-    elastic_username: str | None = None
-    elastic_password: str | None = None
+    opensearch_url: str = "http://opensearch:9200"
+    opensearch_username: str | None = None
+    opensearch_password: str | None = None
 
     # Auth
     # `jwt_secret` is the active signing key. New tokens are minted with

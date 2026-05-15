@@ -26,7 +26,7 @@ from ..models.alerts import Alert, AlertRule, AlertState, MaintenanceWindow, Sev
 from ..models.collectors import Collector, CollectorStatus
 from ..settings import get_settings
 from . import notifications as notif_svc
-from .elastic import client, telemetry_index
+from .opensearch import client, telemetry_index
 
 log = structlog.get_logger("dcim.alerts")
 

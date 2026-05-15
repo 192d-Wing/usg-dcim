@@ -71,7 +71,7 @@ async def _probe_http(
             timeout=timeout,
             # Internal probes commonly hit self-signed certs; operator
             # configures the target so trust is implicit.
-            verify=False,  # noqa: S501
+            verify=False,  # noqa: S501  # lgtm[py/request-without-cert-validation]
             follow_redirects=False,
         ) as client:
             r = await client.get(url)
