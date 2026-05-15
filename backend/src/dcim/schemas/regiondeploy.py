@@ -80,6 +80,24 @@ class RegionDeploymentOut(BaseModel):
     services: list[RegionDeploymentServiceOut] = Field(default_factory=list)
 
 
+class PreflightCheckOut(BaseModel):
+    """Single pre-flight check result as the wizard renders it."""
+
+    key: str
+    label: str
+    passed: bool
+    fix_hint: str | None = None
+
+
+class PreflightResponse(BaseModel):
+    """Aggregated pre-flight outcome. `ready` is the hard-gate
+    signal — true iff every check passed. The UI's `Start` button
+    binds to this."""
+
+    ready: bool
+    checks: list[PreflightCheckOut] = Field(default_factory=list)
+
+
 class RegionDeploymentEventOut(BaseModel):
     """Event-stream row. `id` is the cursor used by `?since=` catch-up."""
 
