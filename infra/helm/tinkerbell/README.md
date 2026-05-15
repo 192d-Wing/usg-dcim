@@ -60,30 +60,22 @@ podman build -t ghcr.io/1456055067/tinkerbell:dev-dhcpv6 \
 podman push ghcr.io/1456055067/tinkerbell:dev-dhcpv6
 ```
 
-## Known incomplete: CLI flag wiring
+## CLI flag wiring
 
-The fork's `feat/dhcpv6` branch adds a `smee.Config.DHCPv6` sub-struct
-and a v6 serving goroutine in `smee.Start`, but it does NOT yet add
-CLI flags in `cmd/tinkerbell/flag/smee.go` to toggle those fields.
-That means:
+The fork's `feat/dhcpv6` branch exposes four DHCPv6 CLI flags on the
+`tinkerbell` binary, mirroring the v4 bind-flag style:
 
-- Building the fork image as documented above gets you a binary that
-  _can_ serve DHCPv6, but the chart has no way to turn it on via
-  values today.
-- The Helm `deployment.additionalArgs` passthrough is a placeholder
-  in `values.yaml` for when the flags land.
+| Flag                       | Default            | Notes                                                            |
+| -------------------------- | ------------------ | ---------------------------------------------------------------- |
+| `--dhcp-v6-enabled`        | `false`            | Master switch; off by design so upgrades are no-ops              |
+| `--dhcp-v6-bind-addr`      | `::` (unspecified) | netip.Addr; falls back to `::` when zero                         |
+| `--dhcp-v6-bind-port`      | `547`              | uint16; falls back to 547 when zero                              |
+| `--dhcp-v6-bind-interface` | `""`               | Required when binding the wildcard on port 547 (multicast joins) |
 
-**Follow-up work needed on the monorepo fork:**
-
-1. Add three flag entries in `cmd/tinkerbell/flag/smee.go`:
-   `SmeeDHCPv6Enabled`, `SmeeDHCPv6BindAddr`, `SmeeDHCPv6BindInterface`.
-2. Register them against `sc.Config.DHCPv6.{Enabled,BindAddr,BindInterface}`.
-3. Update the `flag_test.go` expected-defaults snapshot.
-4. Rebuild & repush the image.
-5. Update this README and `values.yaml` to use real flag names.
-
-Estimated effort: ~half a day. Tracked under
-`docs/dev/region-deploy.md` Phase 0a.
+The chart wires these via `deployment.additionalArgs` because the
+upstream monorepo chart's values schema doesn't yet have first-class
+`dhcpv6:` keys. When upstream lands DHCPv6, those keys will replace
+the additionalArgs passthrough.
 
 ## When upstream lands DHCPv6
 
