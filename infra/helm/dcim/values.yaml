@@ -102,6 +102,18 @@ config:
   saml:
     metadataUrl: ""
 
+# OpenTelemetry traces. Off by default; flip enabled=true and point
+# exporterEndpoint at an existing OTLP/HTTP collector (Tempo, Jaeger,
+# Honeycomb's OTLP endpoint, vendor-managed APM, ...). The chart does
+# not deploy a collector — that's the operator's choice.
+otel:
+  enabled: false
+  # Defaults to https; if your in-cluster collector terminates TLS at
+  # the service-mesh sidecar or via a separate ingress, override to
+  # http://... in your environment-specific values file.
+  exporterEndpoint: https://otel-collector.observability.svc.cluster.local:4318
+  environment: prod
+
 migrations:
   runOnInstall: true
   runOnUpgrade: true

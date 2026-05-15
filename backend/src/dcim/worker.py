@@ -149,6 +149,9 @@ async def dns_health_checks(_ctx) -> dict:
 
 async def startup(ctx) -> None:
     configure_logging()
+    # No-op when settings.otel_enabled is False (the default).
+    from .observability import install_worker_tracing
+    install_worker_tracing()
     # Expose the worker's Prometheus registry on the configured port so
     # Prometheus can scrape the business counters that the worker
     # increments (alerts_fired, alert_eval_runs, telemetry batch sizes,

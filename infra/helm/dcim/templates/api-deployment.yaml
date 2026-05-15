@@ -35,6 +35,12 @@ spec:
             - { name: DCIM_OIDC_ISSUER,    value: {{ .Values.config.oidc.issuer | quote }} }
             - { name: DCIM_OIDC_CLIENT_ID, value: {{ .Values.config.oidc.clientId | quote }} }
             - { name: DCIM_COLLECTOR_STALE_SECONDS, value: {{ .Values.config.collectorStaleSeconds | quote }} }
+            {{- if .Values.otel.enabled }}
+            - { name: DCIM_OTEL_ENABLED, value: "true" }
+            - { name: DCIM_OTEL_EXPORTER_ENDPOINT, value: {{ .Values.otel.exporterEndpoint | quote }} }
+            - { name: DCIM_OTEL_SERVICE_NAME, value: "dcim-api" }
+            - { name: DCIM_OTEL_ENVIRONMENT, value: {{ .Values.otel.environment | quote }} }
+            {{- end }}
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             initialDelaySeconds: 5

@@ -121,6 +121,22 @@ class Settings(BaseSettings):
     # persisted (so charts/forecasts/alerts will be empty).
     telemetry_write_hypertable: bool = True
 
+    # OpenTelemetry traces. Off by default — when enabled the api/worker
+    # initialize a TracerProvider with an OTLP exporter pointed at
+    # `otel_exporter_endpoint`. Production deployments point this at an
+    # existing collector; the dev compose ships one on
+    # http://otel-collector:4318. `otel_service_name` controls the
+    # `service.name` resource attribute (the api and worker each set
+    # their own when they call observability.install()).
+    otel_enabled: bool = False
+    # Default to https so production deployments are TLS-by-default; the
+    # local dev compose explicitly overrides this to http via the
+    # DCIM_OTEL_EXPORTER_ENDPOINT env var because its in-network
+    # collector doesn't terminate TLS.
+    otel_exporter_endpoint: str = "https://otel-collector:4318"
+    otel_service_name: str = "dcim-api"
+    otel_environment: str = "dev"
+
     # Alerting
     alert_eval_interval_seconds: int = 30
     alert_dedupe_window_seconds: int = 300

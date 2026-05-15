@@ -24,6 +24,23 @@ services:
       interval: 5s
       retries: 10
 
+  # OpenTelemetry collector — local-dev sink for spans emitted by the
+  # api + worker when `DCIM_OTEL_ENABLED=true`. Minimal config: accept
+  # OTLP HTTP on 4318 (gRPC on 4317), log every span to stdout via the
+  # `debug` exporter. Production points DCIM_OTEL_EXPORTER_ENDPOINT at
+  # an existing collector instead. Opt-in profile so the default `up`
+  # doesn't pull a 200 MB image for no reason.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    profiles: ["otel"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "55679:55679" # zpages
+
   # Keycloak — local OIDC issuer for end-to-end SSO testing.
   # Preseeded realm `dcim` with client `dcim-spa` is imported on first start.
   # Admin UI at http://localhost:8080 (admin / admin).
@@ -134,6 +151,12 @@ services:
       # later can flip this on per-deployment — typically via a
       # shell env override on the api service or a compose.override.
       DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT: "${DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT:-false}"
+      # OpenTelemetry traces. Off by default; enable with
+      # `DCIM_OTEL_ENABLED=true podman compose --profile otel up`.
+      DCIM_OTEL_ENABLED: "${DCIM_OTEL_ENABLED:-false}"
+      DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
+      DCIM_OTEL_SERVICE_NAME: dcim-api
+      DCIM_OTEL_ENVIRONMENT: dev
     ports: ["8000:8000"]
     extra_hosts:
       # On Docker Desktop this is automatic; declared explicitly for
@@ -162,6 +185,10 @@ services:
       # rotation cron can decrypt + re-encrypt without round-tripping
       # through central. Same shell-env passthrough as api above.
       DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
+      DCIM_OTEL_ENABLED: "${DCIM_OTEL_ENABLED:-false}"
+      DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
+      DCIM_OTEL_SERVICE_NAME: dcim-worker
+      DCIM_OTEL_ENVIRONMENT: dev
     # NET_RAW lets the worker open ICMP sockets for the DNS
     # health-check engine's `icmp` protocol probes. Without it the
     # probe falls back to unprivileged SOCK_DGRAM ICMP, which only

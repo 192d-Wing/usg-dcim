@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 
-from . import errors, metrics, middleware
+from . import errors, metrics, middleware, observability
 from .api import router as api_router
 from .logging_setup import configure_logging, get_logger
 from .settings import get_settings
@@ -45,6 +45,8 @@ def create_app() -> FastAPI:
     middleware.install(app)
     metrics.install(app)
     errors.install(app)
+    # No-op when settings.otel_enabled is False (the default).
+    observability.install_app_tracing(app)
 
     app.include_router(api_router, prefix="/api/v1")
 
