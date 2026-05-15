@@ -1,6 +1,6 @@
 // Audit log page — Cloudscape canary.
 //
-// Server-side filters: action / site / target_type / target_id.
+// Server-side filters: action / site / target_type / target_id / since / until.
 // Client-side filter:  actor_label (free-text "contains").
 // Selecting one or more rows reveals the diff/metadata/request detail
 // panel below the table — same information the prior shadcn version
@@ -54,6 +54,10 @@ export function AuditPage() {
   const [targetType, setTargetType] = useState('');
   const [targetId, setTargetId] = useState('');
   const [actorLabel, setActorLabel] = useState('');
+  // datetime-local strings (no timezone). Treated as the operator's local
+  // wall-clock time and converted to ISO on the way out.
+  const [sinceLocal, setSinceLocal] = useState('');
+  const [untilLocal, setUntilLocal] = useState('');
   const [selected, setSelected] = useState<AuditEntry[]>([]);
 
   const filters = useMemo(() => {
@@ -62,8 +66,12 @@ export function AuditPage() {
     if (siteOpt.value !== ALL_OPTION.value) f.push({ field: 'site_id', operator: 'eq', value: siteOpt.value! });
     if (targetType) f.push({ field: 'target_type', operator: 'eq', value: targetType });
     if (targetId) f.push({ field: 'target_id', operator: 'eq', value: targetId });
+    const sinceIso = localToIso(sinceLocal);
+    const untilIso = localToIso(untilLocal);
+    if (sinceIso) f.push({ field: 'since', operator: 'eq', value: sinceIso });
+    if (untilIso) f.push({ field: 'until', operator: 'eq', value: untilIso });
     return f;
-  }, [actionOpt, siteOpt, targetType, targetId]);
+  }, [actionOpt, siteOpt, targetType, targetId, sinceLocal, untilLocal]);
 
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<AuditEntry>({
     resource: 'audit/log',
@@ -115,7 +123,7 @@ export function AuditPage() {
     >
       <SpaceBetween size="l">
         <Container>
-          <ColumnLayout columns={5}>
+          <ColumnLayout columns={4}>
             <FormField label="Action">
               <Select
                 selectedOption={actionOpt}
@@ -152,6 +160,42 @@ export function AuditPage() {
                 onChange={({ detail }) => setActorLabel(detail.value)}
                 placeholder="email or label"
               />
+            </FormField>
+            <FormField
+              label="Since"
+              description="Local time; inclusive lower bound."
+            >
+              <input
+                type="datetime-local"
+                value={sinceLocal}
+                onChange={(e) => { setSinceLocal(e.target.value); setCurrentPage(1); }}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '4px 8px', fontFamily: 'inherit', fontSize: 14,
+                }}
+              />
+            </FormField>
+            <FormField
+              label="Until"
+              description="Local time; inclusive upper bound."
+            >
+              <input
+                type="datetime-local"
+                value={untilLocal}
+                onChange={(e) => { setUntilLocal(e.target.value); setCurrentPage(1); }}
+                style={{
+                  width: '100%', boxSizing: 'border-box',
+                  padding: '4px 8px', fontFamily: 'inherit', fontSize: 14,
+                }}
+              />
+            </FormField>
+            <FormField label=" ">
+              <Button
+                disabled={!sinceLocal && !untilLocal}
+                onClick={() => { setSinceLocal(''); setUntilLocal(''); setCurrentPage(1); }}
+              >
+                Clear date range
+              </Button>
             </FormField>
           </ColumnLayout>
         </Container>
@@ -254,6 +298,15 @@ export function AuditPage() {
       </SpaceBetween>
     </ContentLayout>
   );
+}
+
+// `<input type="datetime-local">` gives us "YYYY-MM-DDTHH:mm" with no zone.
+// Treat it as the user's local wall-clock time so the picker matches what
+// they see in the When column; the Date constructor parses it that way.
+function localToIso(local: string): string {
+  if (!local) return '';
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }
 
 function hasDetail(e: AuditEntry): boolean {
