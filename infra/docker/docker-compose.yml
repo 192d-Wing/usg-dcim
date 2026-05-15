@@ -78,28 +78,18 @@ services:
       retries: 12
 
   # snmpsim — synthetic SNMP agent so the collector loop has something
-  # real to poll without needing actual rack hardware.
+  # real to poll without needing actual rack hardware. lextudio is the
+  # actively maintained fork of the original snmpsim project; tandrup's
+  # image is unmaintained as of 2022.
   snmpsim:
-    image: tandrup/snmpsim:latest
+    image: lextudio/snmpsim:latest
     profiles: ["collector"]
     ports: ["1161:1161/udp"]
-    # The image has no ENTRYPOINT, so `command:` items become argv[0]+.
-    # Run via sh -c so we don't have to guess between snmpsim 0.4's
-    # snmpsimd.py and 1.x's snmpsim-command-responder.
-    entrypoint: ["/bin/sh", "-c"]
     command:
-      - >-
-        if command -v snmpsim-command-responder >/dev/null; then
-          exec snmpsim-command-responder
-            --agent-udpv4-endpoint=0.0.0.0:1161
-            --data-dir=/usr/local/snmpsim/data;
-        else
-          exec snmpsimd.py
-            --agent-udpv4-endpoint=0.0.0.0:1161
-            --data-dir=/usr/local/snmpsim/data;
-        fi
+      - "--agent-udpv4-endpoint=0.0.0.0:1161"
+      - "--data-dir=/usr/local/snmpsim/data"
     healthcheck:
-      test: ["CMD-SHELL", "ps -ef | grep -v grep | grep -E 'snmpsim|snmpsimd' || exit 1"]
+      test: ["CMD-SHELL", "ps -ef | grep -v grep | grep snmpsim-command-responder || exit 1"]
       interval: 10s
       retries: 6
 
