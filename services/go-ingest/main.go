@@ -8,22 +8,18 @@
 // Differences from the Python pipeline:
 //   - Freshness upsert is a single INSERT … ON CONFLICT statement per
 //     batch, not N selects + N updates.
-//   - ES bulk write uses streamed NDJSON instead of buffering a Python
-//     list of dicts.
-//   - One goroutine handles the ES write while the freshness upsert and
-//     (when enabled) the TimescaleDB hypertable dual-write run
-//     concurrently on separate PG connections.
+//   - Hypertable insert + freshness upsert run concurrently on separate
+//     PG connections.
 //
-// Step 1.5 of the OpenSearch → TimescaleDB migration: when
-// DCIM_TELEMETRY_DUAL_WRITE_TIMESCALE is true (the default), every batch
-// is also inserted into the `telemetry_samples` hypertable so parity
-// data accumulates while readers continue to query OpenSearch. The
-// hypertable write is fail-open — a Timescale outage must never reject
-// a batch OpenSearch already accepted.
+// Telemetry samples land in the TimescaleDB `telemetry_samples` hypertable.
+// OpenSearch was the original store but was retired after the read paths
+// moved to the hypertable; this service no longer talks to OpenSearch.
+// Set DCIM_TELEMETRY_WRITE_HYPERTABLE=false when running against a stock
+// Postgres without TimescaleDB — the ingest endpoint still 200s and the
+// freshness row still updates, but no sample is persisted.
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -37,8 +33,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/opensearch-project/opensearch-go/v2"
-	"github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -62,20 +56,16 @@ type batch struct {
 }
 
 type server struct {
-	es              *opensearch.Client
-	pg              *pgxpool.Pool
-	indexPrefix     string
-	log             *slog.Logger
-	dualWriteHyper  bool
+	pg             *pgxpool.Pool
+	log            *slog.Logger
+	writeHypertable bool
 }
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	pgDSN := envDefault("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim")
-	esURL := envDefault("DCIM_OPENSEARCH_URL", "http://opensearch:9200")
 	addr := envDefault("INGEST_ADDR", ":8100")
-	indexPrefix := envDefault("DCIM_TELEMETRY_INDEX_PREFIX", "dcim-telemetry")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -87,30 +77,14 @@ func main() {
 	}
 	defer pg.Close()
 
-	esCfg := opensearch.Config{Addresses: []string{esURL}}
-	if u := os.Getenv("DCIM_OPENSEARCH_USERNAME"); u != "" {
-		esCfg.Username = u
-		esCfg.Password = os.Getenv("DCIM_OPENSEARCH_PASSWORD")
-	}
-	es, err := opensearch.NewClient(esCfg)
-	if err != nil {
-		log.Error("es_client_failed", "err", err)
-		os.Exit(1)
-	}
-
-	// Step 1.5 of the OpenSearch → TimescaleDB migration: parity write to
-	// the `telemetry_samples` hypertable alongside the OpenSearch bulk.
-	// Default on; flip to "false" when running against a Postgres without
-	// the TimescaleDB extension. Matches the Python settings
-	// `telemetry_dual_write_timescale` flag introduced in #42.
-	dualWriteHyper := envDefault("DCIM_TELEMETRY_DUAL_WRITE_TIMESCALE", "true") != "false"
+	// Opt-out for stock-PG deployments without the TimescaleDB extension.
+	// Matches the Python settings.telemetry_write_hypertable flag.
+	writeHypertable := envDefault("DCIM_TELEMETRY_WRITE_HYPERTABLE", "true") != "false"
 
 	s := &server{
-		es:             es,
-		pg:             pg,
-		indexPrefix:    indexPrefix,
-		log:            log,
-		dualWriteHyper: dualWriteHyper,
+		pg:              pg,
+		log:             log,
+		writeHypertable: writeHypertable,
 	}
 
 	mux := http.NewServeMux()
@@ -164,60 +138,41 @@ func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	receivedAt := time.Now().UTC()
-	index := fmt.Sprintf("%s-%s-%s", s.indexPrefix, b.SiteID.String(), receivedAt.Format("2006-01"))
 
-	if err := s.ensureIndex(r.Context(), index); err != nil {
-		s.log.Warn("ensure_index_failed", "err", err, "index", index)
-		// Continue — bulk write will fail loudly if the index truly can't be created.
-	}
-
-	// Fan out ES bulk + PG freshness upsert + (optionally) hypertable
-	// dual-write in parallel. The hypertable write is fail-open: an error
-	// there is logged but never propagates to the HTTP response, matching
-	// the Python behavior. OpenSearch is the read path; rejecting the
-	// batch on a Timescale outage would just amplify load on the broken
-	// side and cause the collector to retry needlessly.
+	// Fan out hypertable insert + freshness upsert concurrently on
+	// separate PG connections. Both errors are reported to the client —
+	// the hypertable insert is no longer fail-open because it's the
+	// primary store; if it fails we want the collector to retry.
 	var wg sync.WaitGroup
-	var esErr, pgErr error
-	var esHadErrors bool
-	wg.Add(2)
-	if s.dualWriteHyper {
+	var hyperErr, freshErr error
+	if s.writeHypertable {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := s.dualWriteHypertable(r.Context(), &b, receivedAt); err != nil {
-				s.log.Warn("telemetry_timescale_dual_write_failed",
-					"batch", b.BatchID, "count", len(b.Samples), "err", err)
-			}
+			hyperErr = s.writeHypertableRows(r.Context(), &b, receivedAt)
 		}()
 	}
+	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		esHadErrors, esErr = s.bulkWrite(r.Context(), index, &b, receivedAt)
-	}()
-	go func() {
-		defer wg.Done()
-		pgErr = s.upsertFreshness(r.Context(), &b, receivedAt)
+		freshErr = s.upsertFreshness(r.Context(), &b, receivedAt)
 	}()
 	wg.Wait()
 
-	if esErr != nil {
-		s.log.Error("es_bulk_failed", "err", esErr, "batch", b.BatchID)
-		http.Error(w, "opensearch write failed", http.StatusBadGateway)
+	if hyperErr != nil {
+		s.log.Error("hypertable_write_failed", "err", hyperErr, "batch", b.BatchID)
+		http.Error(w, "hypertable write failed", http.StatusBadGateway)
 		return
 	}
-	if pgErr != nil {
-		s.log.Error("freshness_upsert_failed", "err", pgErr, "batch", b.BatchID)
+	if freshErr != nil {
+		s.log.Error("freshness_upsert_failed", "err", freshErr, "batch", b.BatchID)
 		http.Error(w, "freshness upsert failed", http.StatusBadGateway)
 		return
-	}
-	if esHadErrors {
-		s.log.Warn("telemetry_bulk_errors", "batch", b.BatchID, "count", len(b.Samples))
 	}
 
 	resp := map[string]any{
 		"accepted":    len(b.Samples),
-		"errors":      esHadErrors,
+		"errors":      false,
 		"received_at": receivedAt.Format(time.RFC3339Nano),
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -283,91 +238,12 @@ func capabilityMatches(held, want string) bool {
 	return true
 }
 
-func (s *server) ensureIndex(ctx context.Context, index string) error {
-	exists, err := opensearchapi.IndicesExistsRequest{Index: []string{index}}.Do(ctx, s.es)
-	if err != nil {
-		return err
-	}
-	defer exists.Body.Close()
-	if exists.StatusCode == 200 {
-		return nil
-	}
-	body := strings.NewReader(`{
-		"mappings": {"properties": {
-			"site_id":{"type":"keyword"},"collector_id":{"type":"keyword"},
-			"asset_id":{"type":"keyword"},"metric":{"type":"keyword"},
-			"value":{"type":"double"},"unit":{"type":"keyword"},
-			"ts":{"type":"date"},"received_at":{"type":"date"},
-			"tags":{"type":"object","dynamic":true}
-		}},
-		"settings":{"index":{"refresh_interval":"5s","number_of_shards":1,"number_of_replicas":1}}
-	}`)
-	create, err := opensearchapi.IndicesCreateRequest{Index: index, Body: body}.Do(ctx, s.es)
-	if err != nil {
-		return err
-	}
-	defer create.Body.Close()
-	if create.IsError() && create.StatusCode != 400 {
-		// 400 with resource_already_exists_exception happens under racy create — tolerate.
-		return fmt.Errorf("create index %s: %s", index, create.String())
-	}
-	return nil
-}
-
-func (s *server) bulkWrite(ctx context.Context, index string, b *batch, receivedAt time.Time) (bool, error) {
-	var buf bytes.Buffer
-	siteStr := b.SiteID.String()
-	collStr := b.CollectorID.String()
-	recvStr := receivedAt.Format(time.RFC3339Nano)
-
-	for i, sm := range b.Samples {
-		docID := fmt.Sprintf("%s:%s:%d", b.CollectorID, b.BatchID, i)
-		meta := map[string]any{"index": map[string]string{"_index": index, "_id": docID}}
-		doc := map[string]any{
-			"site_id":      siteStr,
-			"collector_id": collStr,
-			"asset_id":     sm.AssetID.String(),
-			"metric":       sm.Metric,
-			"value":        sm.Value,
-			"unit":         sm.Unit,
-			"ts":           sm.Ts.Format(time.RFC3339Nano),
-			"received_at":  recvStr,
-			"tags":         sm.Tags,
-		}
-		mb, _ := json.Marshal(meta)
-		db, _ := json.Marshal(doc)
-		buf.Write(mb)
-		buf.WriteByte('\n')
-		buf.Write(db)
-		buf.WriteByte('\n')
-	}
-
-	res, err := opensearchapi.BulkRequest{Body: &buf, Refresh: "false"}.Do(ctx, s.es)
-	if err != nil {
-		return false, err
-	}
-	defer res.Body.Close()
-	if res.IsError() {
-		return true, fmt.Errorf("bulk: %s", res.String())
-	}
-	var bres struct {
-		Errors bool `json:"errors"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&bres); err != nil {
-		return false, err
-	}
-	return bres.Errors, nil
-}
-
-// dualWriteHypertable inserts every sample in the batch into the
+// writeHypertableRows inserts every sample in the batch into the
 // `telemetry_samples` hypertable created by migration 0046. The unique
 // constraint `uq_telem_sample_dedup` on (collector_id, batch_id, seq, ts)
 // makes collector retries idempotent — ON CONFLICT DO NOTHING drops the
 // already-written row instead of erroring.
-//
-// Caller treats the returned error as fail-open: it logs but never
-// propagates to the HTTP response.
-func (s *server) dualWriteHypertable(ctx context.Context, b *batch, receivedAt time.Time) error {
+func (s *server) writeHypertableRows(ctx context.Context, b *batch, receivedAt time.Time) error {
 	if len(b.Samples) == 0 {
 		return nil
 	}
@@ -400,7 +276,7 @@ func (s *server) dualWriteHypertable(ctx context.Context, b *batch, receivedAt t
 	return err
 }
 
-// hypertableRows is the pure row-builder for dualWriteHypertable. Extracted
+// hypertableRows is the pure row-builder for writeHypertableRows. Extracted
 // so a unit test can lock the per-row argument order, seq numbering, and
 // tags-default-to-empty-JSON behavior without touching the database.
 func hypertableRows(b *batch, receivedAt time.Time) ([][]any, error) {

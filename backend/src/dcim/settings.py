@@ -31,9 +31,6 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://dcim:dcim@postgres:5432/dcim"  # type: ignore[arg-type]
     )
     redis_dsn: RedisDsn = Field(default="redis://redis:6379/0")  # type: ignore[arg-type]
-    opensearch_url: str = "http://opensearch:9200"
-    opensearch_username: str | None = None
-    opensearch_password: str | None = None
 
     # Auth
     # `jwt_secret` is the active signing key. New tokens are minted with
@@ -116,15 +113,13 @@ class Settings(BaseSettings):
     collector_stale_seconds: int = 600
 
     # Telemetry
-    telemetry_index_prefix: str = "dcim-telemetry"
-    events_index_prefix: str = "dcim-events"
-    rollup_index_prefix: str = "dcim-rollup"
     telemetry_batch_max: int = 5000
-    # Step 1 of the OpenSearch → TimescaleDB migration: writes go to both
-    # stores so the hypertable accumulates parity data while OpenSearch
-    # remains the read path. Set to False to disable the secondary write
-    # (e.g. when running against a Postgres without TimescaleDB installed).
-    telemetry_dual_write_timescale: bool = True
+    # Telemetry samples land in the TimescaleDB `telemetry_samples`
+    # hypertable. Set to False when running against a stock Postgres
+    # without the TimescaleDB extension — the ingest endpoint still
+    # accepts batches and updates freshness, but no sample rows are
+    # persisted (so charts/forecasts/alerts will be empty).
+    telemetry_write_hypertable: bool = True
 
     # Alerting
     alert_eval_interval_seconds: int = 30

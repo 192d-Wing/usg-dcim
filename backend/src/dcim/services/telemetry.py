@@ -1,16 +1,16 @@
 """Telemetry ingest pipeline.
 
-- Bulk-writes samples to OpenSearch (per-site monthly index) — primary store.
-- Dual-writes samples to the TimescaleDB `telemetry_samples` hypertable when
-  ``settings.telemetry_dual_write_timescale`` is enabled. This is step 1 of
-  the OpenSearch → TimescaleDB migration: parity data accumulates in the
-  hypertable while readers continue to query OpenSearch. The hypertable
-  write is fail-open — a Timescale outage must not reject batches that
-  OpenSearch already accepted.
-- Updates per-source freshness rows in Postgres so the UI can show stale/current.
-- Idempotent on (collector_id, batch_id) via the document _id naming scheme
-  in OpenSearch and the (collector_id, batch_id, seq, ts) unique constraint
-  in the hypertable.
+- Inserts samples into the TimescaleDB `telemetry_samples` hypertable.
+  Idempotent on (collector_id, batch_id, seq, ts) via the unique constraint
+  from migration 0046; collector retries are no-ops.
+- Updates per-source freshness rows so the UI can show stale/current.
+
+OpenSearch was the original telemetry store but was retired after the read
+paths moved to the hypertable (steps 2a/2b/2c of the migration). The
+`telemetry_write_hypertable` setting remains as an opt-out for deployments
+running on stock Postgres without the TimescaleDB extension — when False
+the freshness write still runs and the request returns 202-style success
+without any sample being persisted.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
-from opensearchpy.helpers import async_bulk
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
@@ -30,75 +29,8 @@ from ..models.telemetry_meta import FreshnessState, TelemetrySource
 from ..models.telemetry_samples import telemetry_samples
 from ..schemas.telemetry import TelemetryBatch, TelemetrySample
 from ..settings import get_settings
-from .opensearch import client, ensure_index, telemetry_index
 
 log = structlog.get_logger("dcim.telemetry")
-
-
-def _opensearch_actions(
-    index: str, batch: TelemetryBatch, received_at: datetime,
-) -> list[dict]:
-    """Build the opensearch-helpers `async_bulk` action list for a batch.
-
-    One dict per document, with `_index`, `_id`, and `_source` fields — the
-    helper handles NDJSON serialization and the action/source pairing on the
-    wire. The previous shape (alternating action and source dicts in a flat
-    list passed via `body=`) caused opensearch-py to index each element as
-    a standalone document, doubling the per-batch doc count.
-
-    Pure function so tests can lock the shape without standing up OpenSearch.
-    """
-    site_id = str(batch.site_id)
-    collector_id = str(batch.collector_id)
-    ts_iso = received_at.isoformat()
-    return [
-        {
-            "_index": index,
-            "_id": f"{batch.collector_id}:{batch.batch_id}:{i}",
-            "_source": {
-                "site_id": site_id,
-                "collector_id": collector_id,
-                "asset_id": str(s.asset_id),
-                "metric": s.metric,
-                "value": s.value,
-                "unit": s.unit,
-                "ts": s.ts.isoformat(),
-                "received_at": ts_iso,
-                "tags": s.tags,
-            },
-        }
-        for i, s in enumerate(batch.samples)
-    ]
-
-
-async def ingest(db: AsyncSession, batch: TelemetryBatch) -> dict:
-    received_at = datetime.now(UTC)
-    site_id = str(batch.site_id)
-    index = telemetry_index(site_id, received_at)
-    await ensure_index(index)
-
-    actions = _opensearch_actions(index, batch, received_at)
-    es = client()
-    # async_bulk handles NDJSON framing + action/source pairing correctly.
-    # `raise_on_error=False` mirrors the prior behavior: surface partial
-    # failures but don't reject the whole batch — the freshness + hypertable
-    # writes still run for the samples OpenSearch accepted.
-    success, errs = await async_bulk(es, actions, raise_on_error=False)
-    errors = bool(errs)
-    if errors:
-        log.warning(
-            "telemetry_bulk_errors",
-            batch=batch.batch_id, accepted=success, failed=len(errs),
-        )
-
-    await _update_freshness(db, batch.samples, batch.collector_id, batch.site_id, received_at)
-    await _dual_write_timescale(db, batch, received_at)
-    await db.commit()
-
-    metrics.telemetry_samples_ingested.labels(site_id=site_id).inc(len(batch.samples))
-    metrics.telemetry_ingest_batches.observe(len(batch.samples))
-
-    return {"accepted": len(batch.samples), "errors": errors, "received_at": received_at.isoformat()}
 
 
 def _hypertable_rows(batch: TelemetryBatch, received_at: datetime) -> list[dict]:
@@ -125,37 +57,52 @@ def _hypertable_rows(batch: TelemetryBatch, received_at: datetime) -> list[dict]
     ]
 
 
-async def _dual_write_timescale(
+async def _write_hypertable(
     db: AsyncSession, batch: TelemetryBatch, received_at: datetime,
-) -> None:
-    """Fail-open INSERT of the batch into the TimescaleDB hypertable.
+) -> bool:
+    """INSERT the batch into the TimescaleDB hypertable. Returns True iff
+    the rows landed; False on SQL error (logged + counted but not raised).
 
-    Errors here are logged + counted but never raised: OpenSearch already
-    accepted the batch and is the read path, so a Timescale outage must not
-    cause the collector to retry the batch (which would just amplify load
-    on the failing side).
+    The opt-out via `settings.telemetry_write_hypertable` is for stock-PG
+    deployments that don't have the TimescaleDB extension installed; the
+    request still succeeds, freshness still updates, just no sample rows.
     """
-    if not get_settings().telemetry_dual_write_timescale:
+    if not get_settings().telemetry_write_hypertable:
         metrics.telemetry_timescale_writes.labels(outcome="disabled").inc()
-        return
+        return False
     rows = _hypertable_rows(batch, received_at)
     stmt = pg_insert(telemetry_samples).values(rows).on_conflict_do_nothing(
         constraint="uq_telem_sample_dedup",
     )
-    # SAVEPOINT so a Timescale-side failure (table missing, hypertable not
-    # installed, transient error) doesn't poison the outer transaction and
-    # roll back the freshness updates we just made.
     try:
-        async with db.begin_nested():
-            await db.execute(stmt)
+        await db.execute(stmt)
     except SQLAlchemyError as e:
         metrics.telemetry_timescale_writes.labels(outcome="error").inc()
         log.warning(
-            "telemetry_timescale_dual_write_failed",
+            "telemetry_hypertable_write_failed",
             batch=batch.batch_id, count=len(rows), err=str(e),
         )
-        return
+        return False
     metrics.telemetry_timescale_writes.labels(outcome="ok").inc()
+    return True
+
+
+async def ingest(db: AsyncSession, batch: TelemetryBatch) -> dict:
+    received_at = datetime.now(UTC)
+    site_id = str(batch.site_id)
+
+    await _update_freshness(db, batch.samples, batch.collector_id, batch.site_id, received_at)
+    written = await _write_hypertable(db, batch, received_at)
+    await db.commit()
+
+    metrics.telemetry_samples_ingested.labels(site_id=site_id).inc(len(batch.samples))
+    metrics.telemetry_ingest_batches.observe(len(batch.samples))
+
+    return {
+        "accepted": len(batch.samples),
+        "errors": not written,
+        "received_at": received_at.isoformat(),
+    }
 
 
 async def _update_freshness(
