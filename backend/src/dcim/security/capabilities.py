@@ -118,6 +118,16 @@ CAPABILITY_CATALOG: dict[str, dict[str, list[str]]] = {
     "notifications": {
         "channels": ["create", "read", "update", "delete"],
     },
+    # Bare-metal cluster bring-up — see docs/dev/region-deploy.md.
+    # `start`/`abort` are state-changing operations distinct from
+    # plain `update`; `download-kubeconfig` is elevated because the
+    # kubeconfig grants full cluster admin at the site.
+    "infrastructure": {
+        "region-deployments": [
+            "create", "read", "update", "delete",
+            "start", "abort", "download-kubeconfig",
+        ],
+    },
 }
 
 # Specialty codes that don't fit the resource:action shape. The picker UI

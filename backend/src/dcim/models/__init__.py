@@ -85,6 +85,18 @@ from .ipam import (
 from .notifications import ChannelKind, NotificationChannel
 from .organization import Organization
 from .power import Outlet, PowerConnection
+from .regiondeploy import (
+    RegionDeployment,
+    RegionDeploymentEvent,
+    RegionDeploymentEventLevel,
+    RegionDeploymentNode,
+    RegionDeploymentNodeRole,
+    RegionDeploymentNodeStatus,
+    RegionDeploymentService,
+    RegionDeploymentServiceKind,
+    RegionDeploymentServiceStatus,
+    RegionDeploymentStatus,
+)
 from .system import SystemSetting
 from .telemetry_meta import TelemetrySource
 
@@ -153,6 +165,16 @@ __all__ = [
     "PrefixListEntry",
     "Rack",
     "Region",
+    "RegionDeployment",
+    "RegionDeploymentEvent",
+    "RegionDeploymentEventLevel",
+    "RegionDeploymentNode",
+    "RegionDeploymentNodeRole",
+    "RegionDeploymentNodeStatus",
+    "RegionDeploymentService",
+    "RegionDeploymentServiceKind",
+    "RegionDeploymentServiceStatus",
+    "RegionDeploymentStatus",
     "Role",
     "RoleScope",
     "Room",

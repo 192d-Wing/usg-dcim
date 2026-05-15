@@ -16,6 +16,7 @@ from .ipam import router as ipam_router
 from .notifications import router as notifications_router
 from .organization import router as organization_router
 from .power import router as power_router
+from .regiondeploy import router as regiondeploy_router
 from .search import router as search_router
 from .stencils import router as stencils_router
 from .telemetry import router as telemetry_router
@@ -38,3 +39,4 @@ router.include_router(organization_router)
 router.include_router(ipam_router)
 router.include_router(dns_router)
 router.include_router(bgp_router)
+router.include_router(regiondeploy_router)
