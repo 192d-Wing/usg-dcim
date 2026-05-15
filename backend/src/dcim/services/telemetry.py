@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
+from opensearchpy.helpers import async_bulk
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
@@ -34,37 +35,61 @@ from .opensearch import client, ensure_index, telemetry_index
 log = structlog.get_logger("dcim.telemetry")
 
 
+def _opensearch_actions(
+    index: str, batch: TelemetryBatch, received_at: datetime,
+) -> list[dict]:
+    """Build the opensearch-helpers `async_bulk` action list for a batch.
+
+    One dict per document, with `_index`, `_id`, and `_source` fields — the
+    helper handles NDJSON serialization and the action/source pairing on the
+    wire. The previous shape (alternating action and source dicts in a flat
+    list passed via `body=`) caused opensearch-py to index each element as
+    a standalone document, doubling the per-batch doc count.
+
+    Pure function so tests can lock the shape without standing up OpenSearch.
+    """
+    site_id = str(batch.site_id)
+    collector_id = str(batch.collector_id)
+    ts_iso = received_at.isoformat()
+    return [
+        {
+            "_index": index,
+            "_id": f"{batch.collector_id}:{batch.batch_id}:{i}",
+            "_source": {
+                "site_id": site_id,
+                "collector_id": collector_id,
+                "asset_id": str(s.asset_id),
+                "metric": s.metric,
+                "value": s.value,
+                "unit": s.unit,
+                "ts": s.ts.isoformat(),
+                "received_at": ts_iso,
+                "tags": s.tags,
+            },
+        }
+        for i, s in enumerate(batch.samples)
+    ]
+
+
 async def ingest(db: AsyncSession, batch: TelemetryBatch) -> dict:
     received_at = datetime.now(UTC)
     site_id = str(batch.site_id)
     index = telemetry_index(site_id, received_at)
     await ensure_index(index)
 
-    actions: list[dict] = []
-    for i, s in enumerate(batch.samples):
-        doc_id = f"{batch.collector_id}:{batch.batch_id}:{i}"
-        actions.append({"index": {"_index": index, "_id": doc_id}})
-        actions.append(
-            {
-                "site_id": site_id,
-                "collector_id": str(batch.collector_id),
-                "asset_id": str(s.asset_id),
-                "metric": s.metric,
-                "value": s.value,
-                "unit": s.unit,
-                "ts": s.ts.isoformat(),
-                "received_at": received_at.isoformat(),
-                "tags": s.tags,
-            }
-        )
+    actions = _opensearch_actions(index, batch, received_at)
     es = client()
-    # opensearch-py uses `body=`, not the elasticsearch-py `operations=` alias.
-    # The PR #37 migration missed this call site.
-    resp = await es.bulk(body=actions)
-    errors = resp.get("errors", False)
+    # async_bulk handles NDJSON framing + action/source pairing correctly.
+    # `raise_on_error=False` mirrors the prior behavior: surface partial
+    # failures but don't reject the whole batch — the freshness + hypertable
+    # writes still run for the samples OpenSearch accepted.
+    success, errs = await async_bulk(es, actions, raise_on_error=False)
+    errors = bool(errs)
     if errors:
-        # Surface partial failure but don't reject the batch wholesale.
-        log.warning("telemetry_bulk_errors", batch=batch.batch_id, count=len(batch.samples))
+        log.warning(
+            "telemetry_bulk_errors",
+            batch=batch.batch_id, accepted=success, failed=len(errs),
+        )
 
     await _update_freshness(db, batch.samples, batch.collector_id, batch.site_id, received_at)
     await _dual_write_timescale(db, batch, received_at)
@@ -73,7 +98,7 @@ async def ingest(db: AsyncSession, batch: TelemetryBatch) -> dict:
     metrics.telemetry_samples_ingested.labels(site_id=site_id).inc(len(batch.samples))
     metrics.telemetry_ingest_batches.observe(len(batch.samples))
 
-    return {"accepted": len(batch.samples), "errors": bool(errors), "received_at": received_at.isoformat()}
+    return {"accepted": len(batch.samples), "errors": errors, "received_at": received_at.isoformat()}
 
 
 def _hypertable_rows(batch: TelemetryBatch, received_at: datetime) -> list[dict]:
