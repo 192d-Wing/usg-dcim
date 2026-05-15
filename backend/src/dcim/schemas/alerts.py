@@ -3,9 +3,22 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..models.alerts import AlertState, Severity
+from ..services.alerts import ASSET_FILTER_KEYS
+
+
+def _validate_mw_filter(v: dict | None) -> dict | None:
+    if v is None or not v:
+        return v
+    unknown = set(v.keys()) - ASSET_FILTER_KEYS
+    if unknown:
+        raise ValueError(
+            f"asset_filter_json: unsupported keys {sorted(unknown)}. "
+            f"Allowed: {sorted(ASSET_FILTER_KEYS)}"
+        )
+    return v
 
 
 class AlertRuleBase(BaseModel):
@@ -78,6 +91,8 @@ class MaintenanceWindowBase(BaseModel):
     ends_at: datetime
     reason: str | None = None
 
+    _validate_filter = field_validator("asset_filter_json")(_validate_mw_filter)
+
 
 class MaintenanceWindowCreate(MaintenanceWindowBase):
     pass
@@ -90,6 +105,8 @@ class MaintenanceWindowUpdate(BaseModel):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     reason: str | None = None
+
+    _validate_filter = field_validator("asset_filter_json")(_validate_mw_filter)
 
 
 class MaintenanceWindowOut(MaintenanceWindowBase):
