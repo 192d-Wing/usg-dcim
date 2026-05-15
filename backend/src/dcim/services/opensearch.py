@@ -1,20 +1,20 @@
-"""Elasticsearch client + index helpers for telemetry/events/rollups."""
+"""OpenSearch client + index helpers for telemetry/events/rollups."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from functools import lru_cache
 
-from elasticsearch import AsyncElasticsearch
+from opensearchpy import AsyncOpenSearch
 
 from ..settings import get_settings
 
 
 @lru_cache
-def client() -> AsyncElasticsearch:
+def client() -> AsyncOpenSearch:
     s = get_settings()
-    auth = (s.elastic_username, s.elastic_password) if s.elastic_username else None
-    return AsyncElasticsearch(s.elastic_url, basic_auth=auth)
+    auth = (s.opensearch_username, s.opensearch_password) if s.opensearch_username else None
+    return AsyncOpenSearch(hosts=[s.opensearch_url], http_auth=auth)
 
 
 def telemetry_index(site_id: str, ts: datetime | None = None) -> str:
@@ -55,6 +55,6 @@ TELEMETRY_MAPPING: dict = {
 
 
 async def ensure_index(name: str) -> None:
-    es = client()
-    if not await es.indices.exists(index=name):
-        await es.indices.create(index=name, body=TELEMETRY_MAPPING)
+    os_client = client()
+    if not await os_client.indices.exists(index=name):
+        await os_client.indices.create(index=name, body=TELEMETRY_MAPPING)

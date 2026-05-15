@@ -317,11 +317,14 @@ async def serve_dnstap(socket_path: str, on_query: OnQuery) -> None:
         lambda r, w: _handle_client(r, w, on_query),
         path=socket_path,
     )
-    # CoreDNS may run as non-root depending on the operator's compose
-    # setup; loosen perms so the resolver's UID can connect. The
-    # shared volume is the security boundary.
+    # Lock the socket down to owner-only. Both the collector and the
+    # resolver (CoreDNS / Hickory) must run as the same UID — the
+    # site-dns compose + k8s manifests do this by running both as root
+    # in the shared dns-state volume. Operators running the resolver
+    # as a different UID need to align it with the collector's UID
+    # (or chown the socket post-bind via their orchestration).
     try:
-        os.chmod(socket_path, 0o660)
+        os.chmod(socket_path, 0o600)
     except OSError:
         pass
     log.info("dnstap_server_start", socket=socket_path)

@@ -264,7 +264,7 @@ def _project_kw(
 
 
 def _site_indices(site_id: UUID, start: datetime, end: datetime) -> list[str]:
-    from .elastic import telemetry_index
+    from .opensearch import telemetry_index
     indices: list[str] = []
     cur = start.replace(day=1)
     while cur <= end:
@@ -291,7 +291,7 @@ async def compute_rack_kw_forecast(
     start = now - timedelta(days=days)
     max_kw = float(rack.max_kw) if rack.max_kw else None
 
-    from .elastic import client
+    from .opensearch import client
 
     metrics = list(POWER_METRIC_KW | POWER_METRIC_W)
     es = client()

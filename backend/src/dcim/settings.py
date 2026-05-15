@@ -31,9 +31,9 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://dcim:dcim@postgres:5432/dcim"  # type: ignore[arg-type]
     )
     redis_dsn: RedisDsn = Field(default="redis://redis:6379/0")  # type: ignore[arg-type]
-    elastic_url: str = "http://elastic:9200"
-    elastic_username: str | None = None
-    elastic_password: str | None = None
+    opensearch_url: str = "http://opensearch:9200"
+    opensearch_username: str | None = None
+    opensearch_password: str | None = None
 
     # Auth
     # `jwt_secret` is the active signing key. New tokens are minted with
@@ -103,10 +103,10 @@ class Settings(BaseSettings):
     oidc_public_url: str | None = None
     # TLS trust for back-channel calls to the IdP (discovery, token, jwks).
     # Set oidc_ca_bundle to a PEM file (e.g. DoD root CA bundle) for IdPs
-    # that present an internal/self-signed cert. Set oidc_verify_ssl=False
-    # to disable verification entirely — dev only.
+    # that present an internal/self-signed cert. TLS verification is
+    # always on; there is no verify=False escape hatch — point this at
+    # the issuing CA's PEM instead.
     oidc_ca_bundle: str | None = None
-    oidc_verify_ssl: bool = True
     saml_metadata_url: str | None = None
 
     # Collector ingest

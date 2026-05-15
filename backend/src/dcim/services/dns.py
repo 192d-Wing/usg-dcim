@@ -112,12 +112,6 @@ def _format_rdata(rtype: str, data: dict) -> str:
     raise ValueError(f"unknown record type {rtype}")
 
 
-# Health-check probes hit operator-trusted internal targets that
-# often use self-signed certs. Constant-bound so the security note
-# lives in one place rather than scattered noqa comments.
-_INSECURE_INTERNAL_PROBE = False
-
-
 async def _probe_tcp(target: str, port: int, deadline_s: int) -> tuple[DnsHealthCheckStatus, str | None]:
     import asyncio
     import contextlib
@@ -248,7 +242,7 @@ async def _probe_http(
     url = f"{proto}://{target}:{port}{path or '/'}"
     try:
         async with asyncio.timeout(deadline_s), httpx.AsyncClient(
-            verify=_INSECURE_INTERNAL_PROBE,
+            verify=True,
             follow_redirects=False,
         ) as client:
             r = await client.get(url)

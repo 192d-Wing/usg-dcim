@@ -1,4 +1,4 @@
-"""Read-side telemetry: time-range queries against Elastic."""
+"""Read-side telemetry: time-range queries against OpenSearch."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from ..security.deps import Principal, require_capability
-from ..services.elastic import client, telemetry_index
+from ..services.opensearch import client, telemetry_index
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
