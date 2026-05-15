@@ -6,7 +6,7 @@ that are pure: dedupe key construction and the threshold operator table.
 
 import operator
 
-from dcim.services.alerts import _OPS, dedupe_key
+from dcim.services.alerts import _OPS, asset_matches_filter, dedupe_key
 
 
 def test_dedupe_key_is_stable_for_same_inputs():
@@ -46,3 +46,53 @@ def test_ops_table_maps_to_correct_python_operators():
     for op_str, expected_fn, lhs, rhs, expected_result in cases:
         assert _OPS[op_str] is expected_fn
         assert _OPS[op_str](lhs, rhs) is expected_result
+
+
+# --- asset_matches_filter (maintenance window predicate) -----------------
+
+class _FakeEnum:
+    """Stand-in for SQLAlchemy enum columns: has `.value` like real enums."""
+    def __init__(self, value: str):
+        self.value = value
+
+
+_PDU_ASSET = {
+    "kind": _FakeEnum("pdu"),
+    "manufacturer": "Vertiv",
+    "model": "PD123",
+    "rack_id": "rack-1",
+    "lifecycle_state": _FakeEnum("active"),
+}
+
+
+def test_empty_filter_matches_everything():
+    assert asset_matches_filter(_PDU_ASSET, {}) is True
+
+
+def test_scalar_equality_match():
+    assert asset_matches_filter(_PDU_ASSET, {"kind": "pdu"}) is True
+    assert asset_matches_filter(_PDU_ASSET, {"kind": "server"}) is False
+
+
+def test_list_membership_match():
+    assert asset_matches_filter(_PDU_ASSET, {"kind": ["pdu", "ups"]}) is True
+    assert asset_matches_filter(_PDU_ASSET, {"kind": ["server", "switch"]}) is False
+
+
+def test_multi_key_filter_is_and_semantics():
+    f = {"kind": "pdu", "manufacturer": "Vertiv"}
+    assert asset_matches_filter(_PDU_ASSET, f) is True
+    f["manufacturer"] = "Eaton"
+    assert asset_matches_filter(_PDU_ASSET, f) is False
+
+
+def test_unknown_key_is_fail_safe_miss():
+    # Better to fire a spurious alert than silently suppress on a typo.
+    assert asset_matches_filter(_PDU_ASSET, {"site_id": "anything"}) is False
+    assert asset_matches_filter(_PDU_ASSET, {"kind": "pdu", "bogus": "x"}) is False
+
+
+def test_missing_asset_attr_is_a_miss():
+    # If the asset doesn't carry the attr the operator filtered on, don't suppress.
+    asset = {"kind": _FakeEnum("server"), "manufacturer": None}
+    assert asset_matches_filter(asset, {"manufacturer": "Dell"}) is False

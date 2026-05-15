@@ -6,7 +6,8 @@ Periodic worker job:
   2. If the threshold is violated for the entire duration, upsert an Alert with a stable
      dedupe_key.  If a matching firing alert exists, bump last_seen_at.
   3. Resolve alerts whose latest reading no longer violates the threshold.
-  4. Suppress alerts that fall inside an active MaintenanceWindow.
+  4. Suppress alerts that fall inside an active MaintenanceWindow whose
+     asset_filter_json matches the offending asset (empty filter = whole site).
 
 Also runs a "collector-down" sweep that checks Collector.last_seen_at against
 settings.collector_stale_seconds and synthesizes alerts for stale collectors.
@@ -24,9 +25,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import metrics
 from ..models.alerts import Alert, AlertRule, AlertState, MaintenanceWindow, Severity
 from ..models.collectors import Collector, CollectorStatus
+from ..models.inventory import Asset
 from ..settings import get_settings
 from . import notifications as notif_svc
 from .opensearch import client, telemetry_index
+
+# Asset columns the maintenance-window asset_filter is allowed to scope on.
+# Limited to direct Asset columns to keep _is_suppressed a single-row lookup;
+# scoping by row_id would require a Rack join, which we can add later if
+# operators ask for it.
+ASSET_FILTER_KEYS: frozenset[str] = frozenset({
+    "kind", "manufacturer", "model", "rack_id", "lifecycle_state",
+})
 
 log = structlog.get_logger("dcim.alerts")
 
@@ -99,7 +109,7 @@ async def evaluate_rules(db: AsyncSession) -> dict:
             now = datetime.now(UTC)
             if violates:
                 if existing is None:
-                    if await _is_suppressed(db, rule.site_scope_id):
+                    if await _is_suppressed(db, rule.site_scope_id, asset_id):
                         continue
                     new_alert = Alert(
                         rule_id=rule.id,
@@ -138,18 +148,63 @@ async def evaluate_rules(db: AsyncSession) -> dict:
     return {"fired": fired, "resolved": resolved, "rules": len(rules)}
 
 
-async def _is_suppressed(db: AsyncSession, site_id) -> bool:
+def _coerce(v):
+    return v.value if hasattr(v, "value") else v
+
+
+def asset_matches_filter(asset_attrs: dict, filter_dict: dict) -> bool:
+    """Match a Pythonic asset-attrs dict against a maintenance-window filter.
+
+    Empty filter matches everything (window covers the whole site). A scalar
+    value is equality; a list value is set membership. Unknown keys cause a
+    fail-safe miss — better to fire an extra alert than to silently suppress.
+    Enum-valued attrs are compared on their `.value` so JSON callers can pass
+    plain strings.
+    """
+    if not filter_dict:
+        return True
+    if filter_dict.keys() - ASSET_FILTER_KEYS:
+        return False
+    for key, expected in filter_dict.items():
+        actual = _coerce(asset_attrs.get(key))
+        if isinstance(expected, list):
+            if actual not in [_coerce(e) for e in expected]:
+                return False
+        elif actual != _coerce(expected):
+            return False
+    return True
+
+
+async def _is_suppressed(db: AsyncSession, site_id, asset_id) -> bool:
     if site_id is None:
         return False
     now = datetime.now(UTC)
-    res = await db.execute(
+    windows = (await db.execute(
         select(MaintenanceWindow).where(
             MaintenanceWindow.site_id == site_id,
             MaintenanceWindow.starts_at <= now,
             MaintenanceWindow.ends_at >= now,
         )
-    )
-    return res.first() is not None
+    )).scalars().all()
+    if not windows:
+        return False
+    # Hot path: a window with no asset filter covers the whole site, so we
+    # can short-circuit before touching the assets table.
+    if any(not w.asset_filter_json for w in windows):
+        return True
+    asset = (await db.execute(
+        select(Asset).where(Asset.id == asset_id)
+    )).scalar_one_or_none()
+    if asset is None:
+        return False
+    asset_attrs = {
+        "kind": asset.kind,
+        "manufacturer": asset.manufacturer,
+        "model": asset.model,
+        "rack_id": str(asset.rack_id) if asset.rack_id else None,
+        "lifecycle_state": asset.lifecycle_state,
+    }
+    return any(asset_matches_filter(asset_attrs, w.asset_filter_json) for w in windows)
 
 
 async def sweep_collectors(db: AsyncSession) -> dict:
