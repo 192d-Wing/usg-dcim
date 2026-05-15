@@ -27,6 +27,12 @@ spec:
           env:
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
             - { name: DCIM_REDIS_DSN,    value: {{ .Values.redis.dsn | quote }} }
+            {{- if .Values.otel.enabled }}
+            - { name: DCIM_OTEL_ENABLED, value: "true" }
+            - { name: DCIM_OTEL_EXPORTER_ENDPOINT, value: {{ .Values.otel.exporterEndpoint | quote }} }
+            - { name: DCIM_OTEL_SERVICE_NAME, value: "dcim-worker" }
+            - { name: DCIM_OTEL_ENVIRONMENT, value: {{ .Values.otel.environment | quote }} }
+            {{- end }}
           resources:
             {{- toYaml .Values.worker.resources | nindent 12 }}
           {{- if .Values.worker.capNetRaw }}

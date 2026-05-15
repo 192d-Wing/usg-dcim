@@ -1,0 +1,33 @@
+# Minimal local-dev OTel collector config. Accepts OTLP from the api +
+# worker and prints every span to stdout via the `debug` exporter so
+# operators can confirm tracing is wired without running Jaeger or
+# another backend. Swap the exporter for `otlphttp` / `otlp` and add a
+# Jaeger or Tempo target to forward spans somewhere queryable.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 1s
+
+exporters:
+  debug:
+    verbosity: detailed
+
+extensions:
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [zpages]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
