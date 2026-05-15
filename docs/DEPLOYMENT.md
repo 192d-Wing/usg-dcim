@@ -13,7 +13,7 @@ make seed
 Access:
 - API + OpenAPI: http://localhost:8000/docs
 - Frontend: http://localhost:5173
-- Elasticsearch: http://localhost:9200
+- OpenSearch: http://localhost:9200
 - Postgres: localhost:5432 (user: dcim, db: dcim)
 
 ## Site collector (lab)

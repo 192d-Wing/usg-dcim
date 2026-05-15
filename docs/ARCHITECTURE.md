@@ -20,7 +20,7 @@
                  │               Workers (arq) ──▶ Redis             │
                  │                  │                                │
                  │                  ▼                                │
-                 │            Elasticsearch (telemetry, events)      │
+                 │            OpenSearch (telemetry, events)         │
                  │                  ▲                                │
                  │             Ingest Service (mTLS, signed tokens)  │
                  └──────────────────▲────────────────────────────────┘
@@ -53,7 +53,7 @@
 
 Indexes are designed around: `site_id`, `rack_id`, `device_id`, `collector_id`, `timestamp`, alert state, lifecycle state.
 
-### Telemetry plane (Elasticsearch)
+### Telemetry plane (OpenSearch)
 
 - `dcim-telemetry-{site_id}-{yyyy-MM}` indices, ILM-managed (rollover, warm, cold, delete)
 - `dcim-events-{yyyy-MM}` for syslog/SNMP traps
@@ -88,7 +88,7 @@ Indexes are designed around: `site_id`, `rack_id`, `device_id`, `collector_id`, 
 | Workers          | Stateless arq workers; HPA on queue depth |
 | Ingest           | Stateless; sticky-less; mTLS terminated at ingress or app |
 | PostgreSQL       | HA (Patroni / cloud-managed); read replicas for reports |
-| Elasticsearch    | 3+ master, N data, hot/warm/cold tiers |
+| OpenSearch       | 3+ master, N data, hot/warm/cold tiers |
 | Redis            | Sentinel or cluster                    |
 | Object storage   | S3-compatible for reports/exports/imports |
 

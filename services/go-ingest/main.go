@@ -166,7 +166,7 @@ func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	if esErr != nil {
 		s.log.Error("es_bulk_failed", "err", esErr, "batch", b.BatchID)
-		http.Error(w, "elasticsearch write failed", http.StatusBadGateway)
+		http.Error(w, "opensearch write failed", http.StatusBadGateway)
 		return
 	}
 	if pgErr != nil {
