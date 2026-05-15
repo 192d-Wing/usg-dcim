@@ -46,7 +46,9 @@ async def ingest(db: AsyncSession, batch: TelemetryBatch) -> dict:
             }
         )
     es = client()
-    resp = await es.bulk(operations=actions, refresh=False)
+    # opensearch-py uses `body=`, not the elasticsearch-py `operations=` alias.
+    # The PR #37 migration missed this call site.
+    resp = await es.bulk(body=actions)
     errors = resp.get("errors", False)
     if errors:
         # Surface partial failure but don't reject the batch wholesale.
