@@ -75,7 +75,8 @@ This is the single source of truth. Update it as decisions evolve.
 
 | Area                  | Decision                                                  |
 | --------------------- | --------------------------------------------------------- |
-| Cluster bootstrap     | kubeadm + cloud-init via UEFI HTTP Boot over IPv6         |
+| Node OS               | Flatcar Container Linux (LTS channel)                     |
+| Cluster bootstrap     | kubeadm + Ignition via UEFI HTTP Boot over IPv6           |
 | PXE serving           | Tinkerbell (Smee/Tink/Hegel/Rufio) on central, IPv6-only  |
 | BMC control           | Redfish via Rufio (Tinkerbell-native)                     |
 | Orchestration         | Celery worker on central, state machine, SSE event stream |
@@ -98,6 +99,12 @@ This is the single source of truth. Update it as decisions evolve.
 
 - **kubeadm over k3s/CAPI**: matches existing operator knowledge; k3s edge
   bias not needed; CAPI infra cost not justified at current site count.
+- **Flatcar Container Linux (LTS)**: immutable, Ignition-native (zero-glue
+  fit with Tinkerbell/Hegel), CNCF Incubating governance (not single-vendor),
+  ~18-month LTS channel suitable for remote bare-metal sites that should not
+  ride a biweekly update treadmill. `locksmith` coordinates reboots via etcd
+  lock for safe in-cluster updates. Chosen over Fedora CoreOS (no LTS) and
+  RHCOS (OpenShift-only, not viable with kubeadm).
 - **Tinkerbell**: actively developed (CNCF), k8s-native CRDs (Hardware,
   Template, Workflow), workflow model maps cleanly onto our state machine.
   Replaces Matchbox which is effectively in maintenance-only mode.
@@ -396,25 +403,26 @@ from Postgres before going live.
 Defined as a JSON-schema'd list. Each check is a backend function returning
 `{passed: bool, fix_hint: str | null}`.
 
-| Key                               | What it verifies                                           |
-| --------------------------------- | ---------------------------------------------------------- |
-| `site.has_v6_pod_prefix`          | Site has a v6 prefix tagged for pod CIDR                   |
-| `site.has_v6_svc_prefix`          | Site has v6 svc prefix                                     |
-| `site.has_v6_lb_pool`             | Site has v6 LB pool                                        |
-| `site.has_v6_mgmt`                | Site has v6 mgmt /64 with room for all nodes               |
-| `site.has_v6_provisioning_prefix` | v6 provisioning prefix + DHCPv6 range present              |
-| `site.has_edge_v4_pool`           | v4 pool for NAT46 LB allocated                             |
-| `nodes.uefi_http_boot_v6_capable` | Per-node dry-run: BMC reports UEFI HTTP Boot v6 capability |
-| `nodes.bmc_reachable`             | Redfish `/redfish/v1/` 200 on each node                    |
-| `nodes.bmc_credentials_valid`     | Auth succeeds on each node                                 |
-| `nodes.distinct_macs`             | No duplicate MACs in inventory                             |
-| `bgp.peers_configured`            | At least one BGP peer with v6 capability flag              |
-| `bgp.peer_reachable`              | TCP/179 over v6 reaches each peer from central (warn-only) |
-| `dns.upstream_v6_resolvable`      | Upstream DNS answers AAAA over v6                          |
-| `central.v6_ready`                | Central cluster is v6-enabled (Phase 0 done)               |
-| `tinkerbell.healthy`              | Smee, Tink, Hegel, Rufio all reporting Ready on central    |
-| `tinkerbell.ipxe_v6_artifacts`    | Smee serves v6-capable iPXE binaries for x86_64 UEFI       |
-| `images.available`                | Required container images exist in registry                |
+| Key                                 | What it verifies                                              |
+| ----------------------------------- | ------------------------------------------------------------- |
+| `site.has_v6_pod_prefix`            | Site has a v6 prefix tagged for pod CIDR                      |
+| `site.has_v6_svc_prefix`            | Site has v6 svc prefix                                        |
+| `site.has_v6_lb_pool`               | Site has v6 LB pool                                           |
+| `site.has_v6_mgmt`                  | Site has v6 mgmt /64 with room for all nodes                  |
+| `site.has_v6_provisioning_prefix`   | v6 provisioning prefix + DHCPv6 range present                 |
+| `site.has_edge_v4_pool`             | v4 pool for NAT46 LB allocated                                |
+| `nodes.uefi_http_boot_v6_capable`   | Per-node dry-run: BMC reports UEFI HTTP Boot v6 capability    |
+| `nodes.bmc_reachable`               | Redfish `/redfish/v1/` 200 on each node                       |
+| `nodes.bmc_credentials_valid`       | Auth succeeds on each node                                    |
+| `nodes.distinct_macs`               | No duplicate MACs in inventory                                |
+| `bgp.peers_configured`              | At least one BGP peer with v6 capability flag                 |
+| `bgp.peer_reachable`                | TCP/179 over v6 reaches each peer from central (warn-only)    |
+| `dns.upstream_v6_resolvable`        | Upstream DNS answers AAAA over v6                             |
+| `central.v6_ready`                  | Central cluster is v6-enabled (Phase 0 done)                  |
+| `tinkerbell.healthy`                | Smee, Tink, Hegel, Rufio all reporting Ready on central       |
+| `tinkerbell.ipxe_v6_artifacts`      | Smee serves v6-capable iPXE binaries for x86_64 UEFI          |
+| `tinkerbell.flatcar_image_mirrored` | Flatcar LTS image (matching pinned version) is cached locally |
+| `images.available`                  | Required container images exist in registry                   |
 
 UI renders these as a checklist; **Start** is disabled until `ready=true`.
 
@@ -426,6 +434,7 @@ New charts/components added under `infra/`:
 
 | Path                                       | Purpose                                                                                            |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| `infra/k8s/central/flatcar-mirror/`        | Cached Flatcar LTS PXE/HTTP-Boot images (kernel, initramfs, rootfs) served from central            |
 | `infra/helm/tinkerbell/`                   | Tinkerbell stack: Smee, Tink, Hegel, Rufio (upstream chart + values overrides for v6-only)         |
 | `infra/helm/cilium/values.yaml`            | Pinned Cilium 1.19.3 values; chart pulled from upstream                                            |
 | `infra/helm/kea/`                          | Kea DHCPv6 chart (host-network on production VLAN; v6 control-agent REST)                          |
@@ -585,18 +594,20 @@ Sized so each PR is reviewable in < ~1 day and independently deployable.
 
 ## 13. Open risks & mitigations
 
-| Risk                                                                       | Mitigation                                                                                                                                                                                            |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vendor middlebox quirks on IPv6 traffic                                    | First real-site deploy is a discovery exercise; budget time for triage. Hubble + tcpdump.                                                                                                             |
-| UEFI HTTP Boot v6 firmware bugs on some hardware                           | Pre-flight `nodes.uefi_http_boot_v6_capable` check is a hard gate; hardware that fails is ineligible. First-site rollout will surface vendor/firmware quirks — budget time. No v4 fallback by design. |
-| Operator unfamiliarity with v6 (`ping`, `kubectl get nodes -o wide`, etc.) | Ship runbook + cheat-sheet; consider `dcim` CLI subcommand that hides v6 specifics.                                                                                                                   |
-| Site router can't speak v6 MP-BGP                                          | Pre-flight check `bgp.peers_configured` flags this; site is ineligible until fixed.                                                                                                                   |
-| Redfish dialect differences across vendors                                 | `sushy` handles most; abstract per-vendor quirks behind `bmc.py` with conformance tests.                                                                                                              |
-| BMC creds in k8s Secrets leak via misconfigured RBAC                       | Dedicated namespace per deploy with tight RoleBindings; rotate creds post-deploy.                                                                                                                     |
-| Long-running Celery task blocks worker                                     | Dedicate a worker queue (`region-deploy`) with its own pool; deploys never queue behind it.                                                                                                           |
-| SSE through proxies dropping long-lived connections                        | Heartbeat events every 15s; UI auto-reconnects with `Last-Event-ID` catch-up.                                                                                                                         |
-| Cilium 1.19.3 BGP regressions                                              | Pin patch via values file (one-line bump); upstream upgrade only after central tests pass.                                                                                                            |
-| Pre-flight false-positives block legitimate deploys                        | Each check has a `fix_hint`; reviewable list; checks themselves are versioned (`check_v1`).                                                                                                           |
+| Risk                                                                       | Mitigation                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vendor middlebox quirks on IPv6 traffic                                    | First real-site deploy is a discovery exercise; budget time for triage. Hubble + tcpdump.                                                                                                                      |
+| Flatcar `update-engine` reboots node mid-workload                          | Disable per-node auto-update; drive OS upgrades from a central operator (Kured / FLUO). `locksmith` is configured for `etcd-lock` strategy as a belt-and-braces default. Documented in node ignition template. |
+| Flatcar LTS line goes EOL or vendor drops project                          | CNCF Incubating status mitigates; quarterly review of upstream cadence. Fallback plan: FCOS or Ubuntu LTS — both consume Ignition templates with modest changes.                                               |
+| UEFI HTTP Boot v6 firmware bugs on some hardware                           | Pre-flight `nodes.uefi_http_boot_v6_capable` check is a hard gate; hardware that fails is ineligible. First-site rollout will surface vendor/firmware quirks — budget time. No v4 fallback by design.          |
+| Operator unfamiliarity with v6 (`ping`, `kubectl get nodes -o wide`, etc.) | Ship runbook + cheat-sheet; consider `dcim` CLI subcommand that hides v6 specifics.                                                                                                                            |
+| Site router can't speak v6 MP-BGP                                          | Pre-flight check `bgp.peers_configured` flags this; site is ineligible until fixed.                                                                                                                            |
+| Redfish dialect differences across vendors                                 | `sushy` handles most; abstract per-vendor quirks behind `bmc.py` with conformance tests.                                                                                                                       |
+| BMC creds in k8s Secrets leak via misconfigured RBAC                       | Dedicated namespace per deploy with tight RoleBindings; rotate creds post-deploy.                                                                                                                              |
+| Long-running Celery task blocks worker                                     | Dedicate a worker queue (`region-deploy`) with its own pool; deploys never queue behind it.                                                                                                                    |
+| SSE through proxies dropping long-lived connections                        | Heartbeat events every 15s; UI auto-reconnects with `Last-Event-ID` catch-up.                                                                                                                                  |
+| Cilium 1.19.3 BGP regressions                                              | Pin patch via values file (one-line bump); upstream upgrade only after central tests pass.                                                                                                                     |
+| Pre-flight false-positives block legitimate deploys                        | Each check has a `fix_hint`; reviewable list; checks themselves are versioned (`check_v1`).                                                                                                                    |
 
 ---
 
@@ -612,6 +623,13 @@ Sized so each PR is reviewable in < ~1 day and independently deployable.
 - **SNAT** — load balancer mode where the LB node rewrites the client IP to
   its own before forwarding to the pod. Safe everywhere; pod loses real
   client IP.
+- **Flatcar Container Linux** — CNCF Incubating immutable, Ignition-driven
+  Linux distribution; successor to CoreOS Container Linux. We pin the **LTS
+  channel** for predictable ~18-month support windows at remote sites.
+- **Ignition** — first-boot provisioning system (config format + binary)
+  used by Flatcar / FCOS / RHCOS. Tinkerbell's Hegel serves the rendered
+  Ignition JSON; the node's initramfs applies it before pivoting to the
+  real root.
 - **Tinkerbell** — CNCF bare-metal provisioning stack. Components used:
   - **Smee** — DHCP/DHCPv6 + iPXE + TFTP/HTTP boot server.
   - **Tink** — workflow engine; `Hardware`, `Template`, `Workflow` CRDs.
