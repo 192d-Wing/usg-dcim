@@ -30,9 +30,7 @@ What's shipped on `main`:
 
 ### Telemetry & alerting
 
-- Telemetry ingest plane with two storage backends in parallel:
-  - **OpenSearch 2** — current primary for telemetry, events, and rollups (migrated from Elasticsearch 8 in PR #37).
-  - **TimescaleDB hypertable** — added in migration `0046` (monthly chunks, columnar compression after 7 days, 24-month retention, hourly continuous aggregate, freshness tracking). Schema is live; full read-path cutover is still outstanding (see "Open follow-ups" below).
+- Telemetry samples live in a **TimescaleDB `telemetry_samples` hypertable** in the same Postgres database as inventory: monthly chunks, columnar compression after 7 days, 24-month retention, hourly continuous aggregate, freshness tracking. Migration 0046 set this up; the full OpenSearch → Timescale cutover (writes and all three reader paths) completed in PRs #42, #45, #46, #47, #48 and OpenSearch was removed in the follow-up PR.
 - Idempotent batch ingest, freshness tracking per device.
 - Alert engine: threshold rules with duration, dedup, suppression, maintenance windows, collector-down sweep.
 - arq Python worker with cron jobs (alert eval, collector sweep, freshness).
@@ -95,8 +93,6 @@ Items that fall out of recently shipped work. None of these gate the next phase.
 
 | Area | Item | Notes |
 |---|---|---|
-| Telemetry storage | Finish the OpenSearch → TimescaleDB cutover | Migration `0046` ships the hypertable; `services/forecast.py`, `api/telemetry.py`, and `services/alerts.py` still read from OpenSearch. Decide single-store vs dual-write per index, then either retire the OpenSearch reads or formalize the dual-write contract in `services/`. |
-| Telemetry storage | `go-ingest` doesn't write the hypertable | Documented in [services/README.md](../services/README.md). Add a second write once the read-path direction above is settled so we don't write data the readers ignore. |
 | Observability | OpenTelemetry traces | Prometheus metrics shipped; OTel instrumentation on the API and worker is still missing. Add `opentelemetry-instrumentation-fastapi` + a collector exporter in compose/Helm. |
 | Hickory DNS | `allow_networks_strict` upstream PR merge | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `infra/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
 | BIND interop | `primaries` catalog property support | DCIM emits RFC 9432 §4.2.3 `primaries.<member_id>.zones A/AAAA` records, but BIND 9.20.22 only honors `coo` / `ext` properties — member zones provision as stubs without primaries. Knot DNS 3.4+ and PowerDNS 4.7+ already honor the records. Wait for BIND; until then operators using BIND must declare member zones manually in named.conf. |
@@ -201,18 +197,17 @@ These come up but we're not chasing them:
 - **Generic ITSM workflow engine** — we integrate with ServiceNow/Jira, we don't replace them.
 - **Provisioning / orchestration** (Terraform-style "make me a server") — this is DCIM, not a CMP.
 - **Building information modeling** (BIM/CAD) — we model rack-and-roll, not floorplans-and-CAD.
-- **Adding a third time-series backend** — telemetry already lives in OpenSearch with a TimescaleDB hypertable shipped alongside; pick one as the primary read path before adding anything else.
+- **Adding a second time-series backend** — telemetry lives in a TimescaleDB hypertable in the same Postgres database as inventory. Don't add OpenSearch / InfluxDB / Prometheus-as-storage alongside it without a concrete need that the hypertable can't satisfy.
 
 ---
 
 ## Risks & open questions
 
-1. **Telemetry storage direction** — we currently have both OpenSearch (read-path) and TimescaleDB (hypertable shipped, not yet read from). Carrying both indefinitely is wasteful; the choice of single-store-Timescale vs single-store-OpenSearch vs deliberate dual-write should be made before Phase 4's retention tuning, since per-site overrides are very different shapes in each.
-2. **Telemetry scale** — 184 sites × 50 racks × 20 devices × 5 metrics × 30s polls ≈ 5 million samples/min. Either backend at this rate needs careful tuning; we should run the load test in Phase 4 before committing to a single-node vs multi-node topology.
-3. **OIDC variability** — DoD environments use different SSO stacks (CAC, SiteMinder, Azure AD). Keycloak is wired and tested; per-environment lab testing is still required.
-4. **Air-gapped vs internet-connected sites** — both exist. Collector update mechanism needs to work in both. Probably means an "update bundle" tarball for air-gapped that the operator deploys via configuration management.
-5. **Vendor stencil licensing** — procedural stencils are fine, but if we adopt vendor SVGs we need to verify redistribution rights (most vendors allow it, but it's worth a check).
-6. **Classification boundaries** — running unclassified, IL5, and IL6 in the same instance is a non-starter. Multi-instance with optional cross-instance read-only federation is the realistic path; needs design.
+1. **Telemetry scale** — 184 sites × 50 racks × 20 devices × 5 metrics × 30s polls ≈ 5 million samples/min. The hypertable at this rate needs careful chunk-interval and compression tuning; we should run the load test in Phase 4 before committing to a single-node vs multi-node Postgres topology.
+2. **OIDC variability** — DoD environments use different SSO stacks (CAC, SiteMinder, Azure AD). Keycloak is wired and tested; per-environment lab testing is still required.
+3. **Air-gapped vs internet-connected sites** — both exist. Collector update mechanism needs to work in both. Probably means an "update bundle" tarball for air-gapped that the operator deploys via configuration management.
+4. **Vendor stencil licensing** — procedural stencils are fine, but if we adopt vendor SVGs we need to verify redistribution rights (most vendors allow it, but it's worth a check).
+5. **Classification boundaries** — running unclassified, IL5, and IL6 in the same instance is a non-starter. Multi-instance with optional cross-instance read-only federation is the realistic path; needs design.
 
 ---
 

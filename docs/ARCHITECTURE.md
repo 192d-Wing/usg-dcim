@@ -20,7 +20,8 @@
                  │               Workers (arq) ──▶ Redis             │
                  │                  │                                │
                  │                  ▼                                │
-                 │            OpenSearch (telemetry, events)         │
+                 │     PostgreSQL also holds telemetry_samples       │
+                 │     hypertable (TimescaleDB extension)            │
                  │                  ▲                                │
                  │             Ingest Service (mTLS, signed tokens)  │
                  └──────────────────▲────────────────────────────────┘
@@ -53,12 +54,13 @@
 
 Indexes are designed around: `site_id`, `rack_id`, `device_id`, `collector_id`, `timestamp`, alert state, lifecycle state.
 
-### Telemetry plane (OpenSearch)
+### Telemetry plane (TimescaleDB hypertable)
 
-- `dcim-telemetry-{site_id}-{yyyy-MM}` indices, ILM-managed (rollover, warm, cold, delete)
-- `dcim-events-{yyyy-MM}` for syslog/SNMP traps
-- Rollups (hourly, daily) written to `dcim-rollup-*` for long-horizon dashboards
-- Each document carries `site_id`, `collector_id`, `device_id`, `metric`, `value`, `unit`, `ts`, `received_at`
+- Single `telemetry_samples` hypertable in the same PostgreSQL database as inventory. Monthly chunks; columnar compression policy kicks in after 7 days; rows drop after 24 months.
+- Unique constraint on `(collector_id, batch_id, seq, ts)` makes collector retries idempotent.
+- Indexes on `(asset_id, metric, ts DESC)` and `(site_id, metric, ts DESC)` cover the dashboard, forecast, and alert read paths.
+- `telemetry_hourly` continuous aggregate refreshes hourly for long-horizon queries (Phase 4 will route rules with `duration_seconds >= 1h` through it directly).
+- Each row carries `site_id`, `collector_id`, `asset_id`, `metric`, `value`, `unit`, `ts`, `received_at`, `tags` (JSONB).
 
 ### Cache / queue
 
@@ -88,7 +90,6 @@ Indexes are designed around: `site_id`, `rack_id`, `device_id`, `collector_id`, 
 | Workers          | Stateless arq workers; HPA on queue depth |
 | Ingest           | Stateless; sticky-less; mTLS terminated at ingress or app |
 | PostgreSQL       | HA (Patroni / cloud-managed); read replicas for reports |
-| OpenSearch       | 3+ master, N data, hot/warm/cold tiers |
 | Redis            | Sentinel or cluster                    |
 | Object storage   | S3-compatible for reports/exports/imports |
 

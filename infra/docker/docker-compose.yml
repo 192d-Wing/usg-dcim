@@ -24,23 +24,6 @@ services:
       interval: 5s
       retries: 10
 
-  # OpenSearch — replaces the previous Elasticsearch container for
-  # telemetry, events, and rollup indices. Single-node, security
-  # plugin disabled for dev. Production deploys plug their own
-  # cluster URL into DCIM_OPENSEARCH_URL.
-  opensearch:
-    image: opensearchproject/opensearch:2
-    environment:
-      discovery.type: single-node
-      DISABLE_SECURITY_PLUGIN: "true"
-      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
-    ports: ["9200:9200"]
-    volumes: [opensearchdata:/usr/share/opensearch/data]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
-      interval: 10s
-      retries: 12
-
   # Keycloak — local OIDC issuer for end-to-end SSO testing.
   # Preseeded realm `dcim` with client `dcim-spa` is imported on first start.
   # Admin UI at http://localhost:8080 (admin / admin).
@@ -207,8 +190,6 @@ services:
     profiles: ["go-services"]
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
-      DCIM_OPENSEARCH_URL: http://opensearch:9200
-      DCIM_TELEMETRY_INDEX_PREFIX: dcim-telemetry
       INGEST_ADDR: ":8100"
     ports: ["8100:8100"]
     depends_on:
@@ -222,8 +203,6 @@ services:
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
       DCIM_REDIS_DSN: redis://redis:6379/0
-      DCIM_OPENSEARCH_URL: http://opensearch:9200
-      DCIM_TELEMETRY_INDEX_PREFIX: dcim-telemetry
       DCIM_COLLECTOR_STALE_SECONDS: "600"
       ALERTS_EVAL_INTERVAL: "30s"
       ALERTS_SWEEP_INTERVAL: "30s"
@@ -277,4 +256,3 @@ services:
 volumes:
   pgdata:
   collector-buffer:
-  opensearchdata:

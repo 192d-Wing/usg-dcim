@@ -3,7 +3,8 @@
 //
 // Two cron loops:
 //
-//	evaluate_rules   every 30s   — fans an ES query out per enabled rule,
+//	evaluate_rules   every 30s   — runs one SQL query per enabled rule
+//	                              against the telemetry_samples hypertable,
 //	                              fires/resolves alerts, enqueues notify jobs.
 //	sweep_collectors every 30s   — checks collectors.last_seen_at and
 //	                              synthesizes collector-down alerts.
@@ -25,8 +26,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/opensearch-project/opensearch-go/v2"
-	"github.com/opensearch-project/opensearch-go/v2/opensearchapi"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -45,16 +44,13 @@ type alertRule struct {
 }
 
 type config struct {
-	pgDSN                string
-	redisURL             string
-	esURL                string
-	esUser, esPass       string
-	indexPrefix          string
-	evalInterval         time.Duration
-	sweepInterval        time.Duration
-	collectorStaleSecs   int
-	notifyQueueName      string
-	maxConcurrentRules   int
+	pgDSN              string
+	redisURL           string
+	evalInterval       time.Duration
+	sweepInterval      time.Duration
+	collectorStaleSecs int
+	notifyQueueName    string
+	maxConcurrentRules int
 }
 
 func main() {
@@ -63,10 +59,6 @@ func main() {
 	cfg := config{
 		pgDSN:              envDefault("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim"),
 		redisURL:           envDefault("DCIM_REDIS_DSN", "redis://redis:6379/0"),
-		esURL:              envDefault("DCIM_OPENSEARCH_URL", "http://opensearch:9200"),
-		esUser:             os.Getenv("DCIM_OPENSEARCH_USERNAME"),
-		esPass:             os.Getenv("DCIM_OPENSEARCH_PASSWORD"),
-		indexPrefix:        envDefault("DCIM_TELEMETRY_INDEX_PREFIX", "dcim-telemetry"),
 		evalInterval:       envDuration("ALERTS_EVAL_INTERVAL", 30*time.Second),
 		sweepInterval:      envDuration("ALERTS_SWEEP_INTERVAL", 30*time.Second),
 		collectorStaleSecs: envInt("DCIM_COLLECTOR_STALE_SECONDS", 600),
@@ -81,16 +73,6 @@ func main() {
 	}
 	defer pg.Close()
 
-	es, err := opensearch.NewClient(opensearch.Config{
-		Addresses: []string{cfg.esURL},
-		Username:  cfg.esUser,
-		Password:  cfg.esPass,
-	})
-	if err != nil {
-		log.Error("es_client_failed", "err", err)
-		os.Exit(1)
-	}
-
 	rOpts, err := redis.ParseURL(cfg.redisURL)
 	if err != nil {
 		log.Error("redis_parse_failed", "err", err)
@@ -99,7 +81,7 @@ func main() {
 	rdb := redis.NewClient(rOpts)
 	defer rdb.Close()
 
-	e := &engine{pg: pg, es: es, rdb: rdb, cfg: cfg, log: log}
+	e := &engine{pg: pg, rdb: rdb, cfg: cfg, log: log}
 
 	// Healthz on a side port so kubelet probes work.
 	go func() {
@@ -123,7 +105,6 @@ func main() {
 
 type engine struct {
 	pg  *pgxpool.Pool
-	es  *opensearch.Client
 	rdb *redis.Client
 	cfg config
 	log *slog.Logger
@@ -227,57 +208,38 @@ func (e *engine) loadRules(ctx context.Context) ([]alertRule, error) {
 }
 
 func (e *engine) evalOne(ctx context.Context, r alertRule) (int, int, []uuid.UUID, []uuid.UUID, error) {
-	siteArg := "*"
-	if r.SiteScopeID != nil {
-		siteArg = r.SiteScopeID.String()
-	}
-	index := fmt.Sprintf("%s-%s-*", e.cfg.indexPrefix, siteArg)
 	since := time.Now().UTC().Add(-time.Duration(r.DurationSeconds) * time.Second)
 
-	query := map[string]any{
-		"size": 0,
-		"query": map[string]any{
-			"bool": map[string]any{
-				"filter": []map[string]any{
-					{"term": map[string]any{"metric": r.Metric}},
-					{"range": map[string]any{"ts": map[string]any{"gte": since.Format(time.RFC3339)}}},
-				},
-			},
-		},
-		"aggs": map[string]any{
-			"by_asset": map[string]any{
-				"terms": map[string]any{"field": "asset_id", "size": 10000},
-				"aggs": map[string]any{
-					"latest": map[string]any{"max": map[string]any{"field": "value"}},
-				},
-			},
-		},
-	}
-	body, _ := json.Marshal(query)
-
-	res, err := opensearchapi.SearchRequest{
-		Index:             []string{index},
-		Body:              strings.NewReader(string(body)),
-		IgnoreUnavailable: boolPtr(true),
-	}.Do(ctx, e.es)
+	// MAX(value) per asset over the rule's metric+window. Mirrors the
+	// SQL the Python evaluator runs after step 2b; pgx maps *uuid.UUID
+	// to a nullable UUID parameter, so site_scope_id NULL means
+	// enterprise-wide.
+	hyperRows, err := e.pg.Query(ctx, `
+		SELECT asset_id, MAX(value) AS value
+		FROM telemetry_samples
+		WHERE metric = $1
+		  AND ts >= $2
+		  AND ($3::uuid IS NULL OR site_id = $3::uuid)
+		GROUP BY asset_id
+	`, r.Metric, since, r.SiteScopeID)
 	if err != nil {
 		return 0, 0, nil, nil, err
 	}
-	defer res.Body.Close()
-
-	var parsed struct {
-		Aggregations struct {
-			ByAsset struct {
-				Buckets []struct {
-					Key    string `json:"key"`
-					Latest struct {
-						Value *float64 `json:"value"`
-					} `json:"latest"`
-				} `json:"buckets"`
-			} `json:"by_asset"`
-		} `json:"aggregations"`
+	type assetReading struct {
+		assetID string
+		value   float64
 	}
-	if err := json.NewDecoder(res.Body).Decode(&parsed); err != nil {
+	var readings []assetReading
+	for hyperRows.Next() {
+		var ar assetReading
+		if err := hyperRows.Scan(&ar.assetID, &ar.value); err != nil {
+			hyperRows.Close()
+			return 0, 0, nil, nil, err
+		}
+		readings = append(readings, ar)
+	}
+	hyperRows.Close()
+	if err := hyperRows.Err(); err != nil {
 		return 0, 0, nil, nil, err
 	}
 
@@ -292,13 +254,10 @@ func (e *engine) evalOne(ctx context.Context, r alertRule) (int, int, []uuid.UUI
 	}
 	defer tx.Rollback(ctx)
 
-	for _, b := range parsed.Aggregations.ByAsset.Buckets {
-		if b.Latest.Value == nil {
-			continue
-		}
-		v := *b.Latest.Value
+	for _, b := range readings {
+		v := b.value
 		violates := cmp(v, r.Threshold)
-		dedupe := fmt.Sprintf("%s|%s|%s", r.ID, b.Key, r.Metric)
+		dedupe := fmt.Sprintf("%s|%s|%s", r.ID, b.assetID, r.Metric)
 
 		var existingID uuid.UUID
 		err := tx.QueryRow(ctx,
@@ -331,7 +290,7 @@ func (e *engine) evalOne(ctx context.Context, r alertRule) (int, int, []uuid.UUI
 					dedupe_key, summary, detail, first_seen_at, last_seen_at, labels_json,
 					created_at, updated_at)
 				VALUES ($1,$2,$3,$4,$5::alert_severity,'firing',$6,$7,$8,$9,$9,$10,NOW(),NOW())
-			`, id, r.ID, r.SiteScopeID, b.Key, r.Severity, dedupe, summary, detail, now, labels)
+			`, id, r.ID, r.SiteScopeID, b.assetID, r.Severity, dedupe, summary, detail, now, labels)
 			if err != nil {
 				return 0, 0, nil, nil, err
 			}
@@ -458,8 +417,6 @@ func (e *engine) enqueueNotify(ctx context.Context, kind string, alertID uuid.UU
 		e.log.Warn("notify_enqueue_failed", "err", err, "kind", kind, "alert", alertID)
 	}
 }
-
-func boolPtr(b bool) *bool { return &b }
 
 func envDefault(k, d string) string {
 	if v := os.Getenv(k); v != "" {

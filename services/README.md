@@ -2,7 +2,8 @@
 
 Three Go services that replace the highest-throughput / highest-fan-out
 loops from the FastAPI backend. Each runs against the **same Postgres
-schema, same Redis, same OpenSearch** — no migrations required.
+schema (TimescaleDB hypertable for telemetry) and the same Redis** — no
+migrations required.
 
 | service        | replaces                                               | port  |
 |----------------|--------------------------------------------------------|-------|

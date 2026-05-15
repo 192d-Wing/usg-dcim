@@ -1,7 +1,8 @@
 """Per-asset telemetry source registry — drives freshness UI and collector-down alerts.
 
-Telemetry samples themselves live in OpenSearch; this table tracks the metadata
-the UI and alert engine need without scanning OpenSearch.
+Telemetry samples live in the TimescaleDB `telemetry_samples` hypertable;
+this table tracks per-(asset, metric) freshness metadata the UI and alert
+engine need without scanning the hypertable.
 """
 
 from __future__ import annotations

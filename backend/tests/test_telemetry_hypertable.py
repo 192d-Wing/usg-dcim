@@ -1,8 +1,8 @@
-"""Unit tests for the OpenSearch → TimescaleDB dual-write row builder.
+"""Unit tests for the telemetry hypertable row builder.
 
-The full ingest path hits OpenSearch + Postgres; this module covers the
-pure row-shape helper so we can lock the hypertable contract (column set,
-seq numbering, dedup-key fields) without standing up either backend.
+The full ingest path hits Postgres; this module covers the pure row-shape
+helper so we can lock the hypertable contract (column set, seq numbering,
+dedup-key fields) without standing up the database.
 """
 
 from datetime import UTC, datetime
@@ -11,7 +11,7 @@ from uuid import uuid4
 from pytest import approx
 
 from dcim.schemas.telemetry import TelemetryBatch, TelemetrySample
-from dcim.services.telemetry import _hypertable_rows, _opensearch_actions
+from dcim.services.telemetry import _hypertable_rows
 
 
 def _sample(metric: str = "pdu.input.kw", value: float = 1.0, ts: datetime | None = None):
@@ -90,34 +90,3 @@ def test_tags_default_to_empty_dict_not_none():
     )
     rows = _hypertable_rows(_batch([s]), datetime.now(UTC))
     assert rows[0]["tags"] == {}
-
-
-# --- _opensearch_actions (NDJSON action builder) -------------------------
-
-def test_opensearch_action_count_equals_sample_count():
-    """One dict per document — not the alternating action/source pairs of
-    the elasticsearch-py bulk format. The 2x-doc bug came from feeding
-    those pairs to async_bulk as if each pair element were its own doc."""
-    b = _batch([_sample(), _sample(), _sample()])
-    actions = _opensearch_actions("idx", b, datetime.now(UTC))
-    assert len(actions) == 3
-
-
-def test_opensearch_action_carries_index_id_and_source():
-    """async_bulk expects `_index`, `_id`, `_source` on each action dict."""
-    b = _batch([_sample()])
-    a = _opensearch_actions("dcim-telemetry-x-2026-05", b, datetime.now(UTC))[0]
-    assert a["_index"] == "dcim-telemetry-x-2026-05"
-    assert a.get("_id")
-    assert isinstance(a.get("_source"), dict)
-
-
-def test_opensearch_action_id_is_stable_across_calls():
-    """Idempotency on collector retries depends on the doc id being a
-    deterministic function of (collector_id, batch_id, seq)."""
-    b = _batch([_sample(), _sample()])
-    now = datetime.now(UTC)
-    ids_first = [a["_id"] for a in _opensearch_actions("idx", b, now)]
-    ids_second = [a["_id"] for a in _opensearch_actions("idx", b, now)]
-    assert ids_first == ids_second
-    assert ids_first[0] != ids_first[1]  # seq differentiates them
