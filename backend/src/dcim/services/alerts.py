@@ -1,13 +1,17 @@
 """Alert evaluation engine.
 
 Periodic worker job:
-  1. For each enabled rule, query Elastic for the latest values matching its asset_filter
-     within `duration_seconds`.
+  1. For each enabled rule, scan the telemetry_samples hypertable for the
+     max `value` per asset_id matching `metric` within `duration_seconds`.
   2. If the threshold is violated for the entire duration, upsert an Alert with a stable
      dedupe_key.  If a matching firing alert exists, bump last_seen_at.
   3. Resolve alerts whose latest reading no longer violates the threshold.
   4. Suppress alerts that fall inside an active MaintenanceWindow whose
      asset_filter_json matches the offending asset (empty filter = whole site).
+
+Step 2b of the OpenSearch → TimescaleDB migration: this reader now queries
+the hypertable instead of OpenSearch. The (asset_id, metric, ts) index
+covers the per-rule scan directly.
 
 Also runs a "collector-down" sweep that checks Collector.last_seen_at against
 settings.collector_stale_seconds and synthesizes alerts for stale collectors.
@@ -19,7 +23,7 @@ import operator
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import metrics
@@ -28,7 +32,6 @@ from ..models.collectors import Collector, CollectorStatus
 from ..models.inventory import Asset
 from ..settings import get_settings
 from . import notifications as notif_svc
-from .opensearch import client, telemetry_index
 
 # Asset columns the maintenance-window asset_filter is allowed to scope on.
 # Limited to direct Asset columns to keep _is_suppressed a single-row lookup;
@@ -51,92 +54,116 @@ def dedupe_key(rule_id: str, asset_id: str, metric: str) -> str:
     return f"{rule_id}|{asset_id}|{metric}"
 
 
+# Per-asset MAX(value) over a rule's metric within the duration window.
+# Reproduces the existing OpenSearch aggregation exactly (the prior code
+# named this bucket "latest" but it was always MAX, not value-at-latest-ts —
+# a pre-existing quirk worth a follow-up after the cutover settles).
+_LATEST_PER_ASSET_SQL = text("""
+    SELECT asset_id, MAX(value) AS value
+    FROM telemetry_samples
+    WHERE metric = :metric
+      AND ts >= :since
+      AND (CAST(:site_id AS uuid) IS NULL
+           OR site_id = CAST(:site_id AS uuid))
+    GROUP BY asset_id
+""")
+
+
+async def _fetch_latest_per_asset(
+    db: AsyncSession, rule: AlertRule, now: datetime,
+) -> list[tuple[str, float]]:
+    """One (asset_id, value) tuple per asset for the rule's metric+window.
+
+    NULL site_scope_id means the rule applies enterprise-wide; we let
+    Postgres skip the site predicate by comparing the parameter against NULL.
+    """
+    since = now - timedelta(seconds=rule.duration_seconds)
+    site_id = str(rule.site_scope_id) if rule.site_scope_id else None
+    result = await db.execute(
+        _LATEST_PER_ASSET_SQL,
+        {"metric": rule.metric, "since": since, "site_id": site_id},
+    )
+    return [(str(row.asset_id), float(row.value)) for row in result]
+
+
+async def _apply_rule_to_asset(
+    db: AsyncSession, rule: AlertRule, asset_id: str, value: float,
+    *, violates: bool, now: datetime,
+) -> tuple[Alert | None, Alert | None]:
+    """Decide what (if anything) to do for one (rule, asset) reading.
+
+    Returns (fired_alert, resolved_alert) — at most one of each is non-None.
+    Splits evaluate_rules' inner branch out so the outer loop stays simple.
+    """
+    key = dedupe_key(str(rule.id), asset_id, rule.metric)
+    existing = (await db.execute(
+        select(Alert).where(Alert.dedupe_key == key, Alert.state == AlertState.firing)
+    )).scalar_one_or_none()
+
+    if violates and existing is None:
+        if await _is_suppressed(db, rule.site_scope_id, asset_id):
+            return None, None
+        new_alert = Alert(
+            rule_id=rule.id,
+            site_id=rule.site_scope_id,  # type: ignore[arg-type]
+            asset_id=asset_id,
+            severity=rule.severity,
+            state=AlertState.firing,
+            dedupe_key=key,
+            summary=f"{rule.metric} {rule.operator} {rule.threshold} (got {value:.2f})",
+            detail=rule.description,
+            first_seen_at=now,
+            last_seen_at=now,
+            labels_json={"metric": rule.metric, "rule": rule.name},
+        )
+        db.add(new_alert)
+        metrics.alerts_fired.labels(severity=rule.severity.value).inc()
+        return new_alert, None
+    if violates:
+        existing.last_seen_at = now
+        return None, None
+    if existing is not None:
+        existing.state = AlertState.resolved
+        existing.resolved_at = now
+        metrics.alerts_resolved.inc()
+        return None, existing
+    return None, None
+
+
+async def _evaluate_one_rule(
+    db: AsyncSession, rule: AlertRule, eval_now: datetime,
+) -> tuple[list[Alert], list[Alert]]:
+    cmp = _OPS[rule.operator]
+    rows = await _fetch_latest_per_asset(db, rule, eval_now)
+    fired: list[Alert] = []
+    resolved: list[Alert] = []
+    for asset_id, value in rows:
+        violates = cmp(value, rule.threshold) if value is not None else False
+        f, r = await _apply_rule_to_asset(
+            db, rule, asset_id, value,
+            violates=violates, now=datetime.now(UTC),
+        )
+        if f is not None:
+            fired.append(f)
+        if r is not None:
+            resolved.append(r)
+    return fired, resolved
+
+
 async def evaluate_rules(db: AsyncSession) -> dict:
     rules = (await db.execute(select(AlertRule).where(AlertRule.enabled.is_(True)))).scalars().all()
-    fired = 0
-    resolved = 0
     fired_alerts: list[Alert] = []
     resolved_alerts: list[Alert] = []
+    eval_now = datetime.now(UTC)
     for rule in rules:
         if rule.operator not in _OPS:
             continue
-        cmp = _OPS[rule.operator]
-        site_filter = rule.site_scope_id
-        site_arg = str(site_filter) if site_filter else "*"
-        index = telemetry_index(site_arg)
-        es = client()
-        resp = await es.search(
-            index=index,
-            body={
-                "size": 0,
-                "query": {
-                    "bool": {
-                        "filter": [
-                            {"term": {"metric": rule.metric}},
-                            {
-                                "range": {
-                                    "ts": {
-                                        "gte": (
-                                            datetime.now(UTC)
-                                            - timedelta(seconds=rule.duration_seconds)
-                                        ).isoformat()
-                                    }
-                                }
-                            },
-                        ]
-                    }
-                },
-                "aggs": {
-                    "by_asset": {
-                        "terms": {"field": "asset_id", "size": 10000},
-                        "aggs": {"latest": {"max": {"field": "value"}}},
-                    }
-                },
-            },
-            ignore_unavailable=True,
-        )
-        buckets = resp.get("aggregations", {}).get("by_asset", {}).get("buckets", [])
-        for b in buckets:
-            asset_id = b["key"]
-            value = b["latest"]["value"]
-            violates = cmp(value, rule.threshold) if value is not None else False
-            key = dedupe_key(str(rule.id), asset_id, rule.metric)
-            existing = (
-                await db.execute(
-                    select(Alert).where(Alert.dedupe_key == key, Alert.state == AlertState.firing)
-                )
-            ).scalar_one_or_none()
-            now = datetime.now(UTC)
-            if violates:
-                if existing is None:
-                    if await _is_suppressed(db, rule.site_scope_id, asset_id):
-                        continue
-                    new_alert = Alert(
-                        rule_id=rule.id,
-                        site_id=rule.site_scope_id,  # type: ignore[arg-type]
-                        asset_id=asset_id,
-                        severity=rule.severity,
-                        state=AlertState.firing,
-                        dedupe_key=key,
-                        summary=f"{rule.metric} {rule.operator} {rule.threshold} (got {value:.2f})",
-                        detail=rule.description,
-                        first_seen_at=now,
-                        last_seen_at=now,
-                        labels_json={"metric": rule.metric, "rule": rule.name},
-                    )
-                    db.add(new_alert)
-                    fired += 1
-                    metrics.alerts_fired.labels(severity=rule.severity.value).inc()
-                    fired_alerts.append(new_alert)
-                else:
-                    existing.last_seen_at = now
-            elif existing is not None:
-                existing.state = AlertState.resolved
-                existing.resolved_at = now
-                resolved += 1
-                metrics.alerts_resolved.inc()
-                resolved_alerts.append(existing)
+        f, r = await _evaluate_one_rule(db, rule, eval_now)
+        fired_alerts.extend(f)
+        resolved_alerts.extend(r)
     await db.commit()
+    fired = len(fired_alerts)
+    resolved = len(resolved_alerts)
     metrics.alert_eval_runs.labels(outcome="ok").inc()
     # Notifications fire after the commit so we never ship a webhook for an
     # alert that didn't actually persist.
