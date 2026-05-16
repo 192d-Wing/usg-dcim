@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -96,10 +97,33 @@ func main() {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
-	// Auth is the stub middleware — refuses to start unless
-	// OTTER_GO_INSECURE_AUTH_STUB is truthy. Replace with the real
-	// OIDC+capability middleware before promoting otter-go past Phase 1.
-	authMW := auth.MustStub(log)
+	// Auth: prefer the real JWT-verifying middleware when DCIM_JWT_SECRET
+	// is set. Operators who haven't wired Keycloak yet can fall back to
+	// the loud-panicking stub by setting OTTER_GO_INSECURE_AUTH_STUB=true
+	// (sealed dev environments only).
+	authHandler := &auth.Handler{Q: q}
+	jwtSecret := env.String("DCIM_JWT_SECRET", "")
+	var authMW func(http.Handler) http.Handler
+	if jwtSecret != "" {
+		// jwt_old_secrets is a CSV of base64-or-plain old keys, matching
+		// the Python settings.jwt_old_secrets dict (values only — kid
+		// matching ships with PR 36 alongside OIDC).
+		var oldSecrets [][]byte
+		if csv := env.String("DCIM_JWT_OLD_SECRETS", ""); csv != "" {
+			for _, s := range strings.Split(csv, ",") {
+				if s = strings.TrimSpace(s); s != "" {
+					oldSecrets = append(oldSecrets, []byte(s))
+				}
+			}
+		}
+		authMW = auth.Verifying(log, q, auth.VerifierConfig{
+			PrimarySecret: []byte(jwtSecret),
+			OldSecrets:    oldSecrets,
+		})
+		log.Info("auth_jwt_enabled", "old_secrets", len(oldSecrets))
+	} else {
+		authMW = auth.MustStub(log)
+	}
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Use(authMW)
 		sh.Mount(r)
@@ -119,6 +143,7 @@ func main() {
 		oh.Mount(r)
 		sth.Mount(r)
 		th.Mount(r)
+		authHandler.Mount(r)
 	})
 
 	srv := &http.Server{

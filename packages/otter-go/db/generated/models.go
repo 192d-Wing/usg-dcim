@@ -520,6 +520,30 @@ type DnsCatalogZone struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type User struct {
+	ID                 uuid.UUID  `json:"id"`
+	Email              string     `json:"email"`
+	DisplayName        *string    `json:"display_name"`
+	IsActive           bool       `json:"is_active"`
+	SsoSubject         *string    `json:"sso_subject"`
+	PasswordHash       *string    `json:"-"`
+	LastLoginAt        *time.Time `json:"last_login_at"`
+	IdpRefreshToken    *string    `json:"-"`
+	IdpRefreshTokenIat *time.Time `json:"-"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+type Role struct {
+	ID              uuid.UUID       `json:"id"`
+	Name            string          `json:"name"`
+	Description     *string         `json:"description"`
+	PermissionCodes json.RawMessage `json:"permission_codes"`
+	IsSystem        bool            `json:"is_system"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
 type DnsBlocklist struct {
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`
