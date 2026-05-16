@@ -36,6 +36,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/regions"
 	"github.com/usg-dcim/packages/otter-go/internal/sites"
 	"github.com/usg-dcim/packages/otter-go/internal/stencils"
+	"github.com/usg-dcim/packages/otter-go/internal/telemetry"
 	"github.com/usg-dcim/packages/shared-go/env"
 )
 
@@ -74,6 +75,7 @@ func main() {
 	coh := &collectors.Handler{Q: q}
 	oh := &organization.Handler{Q: q}
 	sth := &stencils.Handler{}
+	th := &telemetry.Handler{Q: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -116,6 +118,7 @@ func main() {
 		coh.Mount(r)
 		oh.Mount(r)
 		sth.Mount(r)
+		th.Mount(r)
 	})
 
 	srv := &http.Server{
