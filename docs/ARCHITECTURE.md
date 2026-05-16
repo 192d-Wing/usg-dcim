@@ -30,73 +30,73 @@ Animal names link to package paths. See
 
 ```mermaid
 flowchart LR
-    classDef central fill:#dde7f7,stroke:#2c5ca0,color:#000;
-    classDef site fill:#e7f3e0,stroke:#4a7c3a,color:#000;
-    classDef store fill:#f7eedd,stroke:#a08a2c,color:#000;
-    classDef ext fill:#f3dde7,stroke:#a02c5c,color:#000;
-    classDef dep fill:#eee,stroke:#888,color:#666,stroke-dasharray: 4 2;
+    classDef central fill:#dde7f7,stroke:#2c5ca0,color:#000
+    classDef site fill:#e7f3e0,stroke:#4a7c3a,color:#000
+    classDef store fill:#f7eedd,stroke:#a08a2c,color:#000
+    classDef ext fill:#f3dde7,stroke:#a02c5c,color:#000
+    classDef dep fill:#eeeeee,stroke:#888888,color:#666666
 
-    operator((Operator))
-    idp[Keycloak / OIDC IdP]
-    smtp[SMTP / Webhook]
-    s3[(Object Storage<br/>S3-compatible)]
+    operator(("Operator"))
+    idp["Keycloak<br/>OIDC IdP"]
+    smtp["SMTP / Webhook"]
+    s3[("Object Storage<br/>S3-compatible")]
+    devices["Device protocols<br/>SNMP · Redfish · Modbus<br/>REST · IPMI · syslog"]
+    dns_t["DNS targets"]
 
-    subgraph central[Central Cluster]
+    subgraph central["Central Cluster"]
         direction LR
-        finch[finch<br/><i>React UI</i>]
-        otter[otter<br/><i>FastAPI</i>]
-        worker[otter-worker<br/><i>arq</i>]
-        heron[heron<br/><i>Go ingest, mTLS :8443</i>]
-        magpie[magpie<br/><i>Go alerts</i>]
-        beagle[beagle<br/><i>Go DNS probe</i>]
-        pg[(PostgreSQL +<br/>TimescaleDB)]
-        redis[(Redis)]
+        finch["finch<br/>React UI"]
+        otter["otter<br/>FastAPI API"]
+        worker["otter-worker<br/>arq"]
+        heron["heron<br/>Go ingest · mTLS 8443"]
+        magpie["magpie<br/>Go alerts"]
+        beagle["beagle<br/>Go DNS probe"]
+        pg[("PostgreSQL +<br/>TimescaleDB")]
+        redis[("Redis")]
     end
 
-    subgraph site[Site N — outbound-only]
+    subgraph site["Site N — outbound only"]
         direction TB
-        badger[badger<br/><i>collector</i>]
-        buf[(SQLite buffer)]
-        mole[mole<br/><i>deprecated</i>]
-        coredns[wolf/coredns-nsec3sign<br/><i>auth zone signer</i>]
-        hickory[wolf/hickory-prom<br/><i>exporter</i>]
-        devices[/SNMP · Redfish · Modbus<br/>REST · IPMI · syslog/]
-        dns_t[/DNS targets/]
+        badger["badger<br/>collector"]
+        buf[("SQLite buffer")]
+        mole["mole<br/>deprecated"]
+        coredns["wolf/coredns-nsec3sign<br/>auth zone signer"]
+        hickory["wolf/hickory-prom<br/>metrics exporter"]
     end
 
     operator -- "HTTPS /" --> finch
-    operator -. OIDC redirect .-> idp
+    operator -. "OIDC redirect" .-> idp
     finch -- "HTTPS /api" --> otter
-    finch -. OIDC token .-> idp
+    finch -. "OIDC token" .-> idp
     otter <--> pg
     otter <--> redis
     worker <--> redis
     worker --> pg
-    worker -- email / webhook --> smtp
-    otter -- reports/exports --> s3
+    worker -- "email / webhook" --> smtp
+    otter -- "reports / exports" --> s3
 
     magpie <--> pg
     magpie -- "LPUSH dcim:notify:bridge" --> redis
-    redis -- bridge queue --> worker
+    redis -- "bridge queue" --> worker
 
     beagle <--> pg
-    beagle -. ICMP / DNS / HTTPS .-> dns_t
+    beagle -. "ICMP · DNS · HTTPS" .-> dns_t
 
     heron --> pg
-    badger -- "POST telemetry<br/>mTLS" --> heron
-    badger -- "bundle poll<br/>heartbeats" --> otter
+    badger -- "POST telemetry mTLS" --> heron
+    badger -- "bundle poll · heartbeats" --> otter
     badger <--> buf
-    badger -. SNMP/Redfish/Modbus<br/>REST/IPMI .-> devices
+    badger -. "device protocols" .-> devices
 
-    mole -. legacy path .-> heron
-    otter -- zone bundle --> coredns
-    hickory -. metrics scrape .-> dns_t
+    mole -. "legacy path" .-> heron
+    otter -- "zone bundle" --> coredns
+    hickory -. "metrics scrape" .-> dns_t
 
-    class finch,otter,worker,heron,magpie,beagle central;
-    class pg,redis store;
-    class badger,buf,coredns,hickory site;
-    class mole dep;
-    class operator,idp,smtp,s3,devices,dns_t ext;
+    class finch,otter,worker,heron,magpie,beagle central
+    class pg,redis store
+    class badger,buf,coredns,hickory site
+    class mole dep
+    class operator,idp,smtp,s3,devices,dns_t ext
 ```
 
 ### Connections at a glance
