@@ -126,6 +126,87 @@ func (f *fakeQ) CountAnycastBindings(_ context.Context, _ dbq.CountAnycastBindin
 	return 0, nil
 }
 
+// ---- Mutation stubs (PR 43) ----
+
+func (f *fakeQ) CreateDnsZone(_ context.Context, a dbq.CreateDnsZoneParams) (dbq.DnsZone, error) {
+	return dbq.DnsZone{ID: uuid.New(), Name: a.Name, Kind: a.Kind, FabricID: a.FabricID}, nil
+}
+func (f *fakeQ) UpdateDnsZone(_ context.Context, a dbq.UpdateDnsZoneParams) (dbq.DnsZone, error) {
+	return dbq.DnsZone{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsZone(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
+	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
+}
+func (f *fakeQ) UpdateDnsRecord(_ context.Context, a dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error) {
+	return dbq.DnsRecord{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsRecord(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsServerRow(_ context.Context, a dbq.CreateDnsServerRowParams) (dbq.DnsServer, error) {
+	return dbq.DnsServer{ID: uuid.New(), Name: a.Name, SiteID: a.SiteID, FabricID: a.FabricID, Role: a.Role}, nil
+}
+func (f *fakeQ) UpdateDnsServerRow(_ context.Context, a dbq.UpdateDnsServerRowParams) (dbq.DnsServer, error) {
+	return dbq.DnsServer{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsServerRow(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateAnycastGroup(_ context.Context, a dbq.CreateAnycastGroupParams) (dbq.AnycastGroup, error) {
+	return dbq.AnycastGroup{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, Service: a.Service}, nil
+}
+func (f *fakeQ) UpdateAnycastGroup(_ context.Context, a dbq.UpdateAnycastGroupParams) (dbq.AnycastGroup, error) {
+	return dbq.AnycastGroup{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteAnycastGroup(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsForwarder(_ context.Context, a dbq.CreateDnsForwarderParams) (dbq.DnsForwarder, error) {
+	return dbq.DnsForwarder{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, ZonePattern: a.ZonePattern, Upstreams: a.Upstreams}, nil
+}
+func (f *fakeQ) UpdateDnsForwarder(_ context.Context, a dbq.UpdateDnsForwarderParams) (dbq.DnsForwarder, error) {
+	return dbq.DnsForwarder{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsForwarder(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsCatalogZone(_ context.Context, a dbq.CreateDnsCatalogZoneParams) (dbq.DnsCatalogZone, error) {
+	return dbq.DnsCatalogZone{ID: uuid.New(), FabricID: a.FabricID, Name: a.Name, Enabled: a.Enabled}, nil
+}
+func (f *fakeQ) UpdateDnsCatalogZone(_ context.Context, a dbq.UpdateDnsCatalogZoneParams) (dbq.DnsCatalogZone, error) {
+	return dbq.DnsCatalogZone{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsCatalogZone(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsBlocklist(_ context.Context, a dbq.CreateDnsBlocklistParams) (dbq.DnsBlocklist, error) {
+	return dbq.DnsBlocklist{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, Action: a.Action}, nil
+}
+func (f *fakeQ) UpdateDnsBlocklist(_ context.Context, a dbq.UpdateDnsBlocklistParams) (dbq.DnsBlocklist, error) {
+	return dbq.DnsBlocklist{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsBlocklist(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsBlocklistEntry(_ context.Context, a dbq.CreateDnsBlocklistEntryParams) (dbq.DnsBlocklistEntry, error) {
+	return dbq.DnsBlocklistEntry{ID: uuid.New(), BlocklistID: a.BlocklistID, Pattern: a.Pattern}, nil
+}
+func (f *fakeQ) DeleteDnsBlocklistEntry(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsView(_ context.Context, a dbq.CreateDnsViewParams) (dbq.DnsView, error) {
+	return dbq.DnsView{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, MatchCidrs: a.MatchCidrs, Priority: a.Priority}, nil
+}
+func (f *fakeQ) UpdateDnsView(_ context.Context, a dbq.UpdateDnsViewParams) (dbq.DnsView, error) {
+	return dbq.DnsView{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsView(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDnsHealthCheck(_ context.Context, a dbq.CreateDnsHealthCheckParams) (dbq.DnsHealthCheck, error) {
+	return dbq.DnsHealthCheck{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, TargetIP: a.TargetIP, Protocol: a.Protocol}, nil
+}
+func (f *fakeQ) UpdateDnsHealthCheck(_ context.Context, a dbq.UpdateDnsHealthCheckParams) (dbq.DnsHealthCheck, error) {
+	return dbq.DnsHealthCheck{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDnsHealthCheck(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateBgpPeer(_ context.Context, a dbq.CreateBgpPeerParams) (dbq.BgpPeer, error) {
+	return dbq.BgpPeer{ID: uuid.New(), Name: a.Name, SiteID: a.SiteID}, nil
+}
+func (f *fakeQ) UpdateBgpPeer(_ context.Context, a dbq.UpdateBgpPeerParams) (dbq.BgpPeer, error) {
+	return dbq.BgpPeer{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteBgpPeer(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateAnycastBinding(_ context.Context, a dbq.CreateAnycastBindingParams) (dbq.AnycastBgpBinding, error) {
+	return dbq.AnycastBgpBinding{ID: uuid.New(), DnsServerID: a.DnsServerID, BgpPeerID: a.BgpPeerID}, nil
+}
+func (f *fakeQ) DeleteAnycastBinding(_ context.Context, _ uuid.UUID) error { return nil }
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)

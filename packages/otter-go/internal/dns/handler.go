@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -49,6 +50,45 @@ type Querier interface {
 	CountBgpPeers(ctx context.Context, arg dbq.CountBgpPeersParams) (int64, error)
 	ListAnycastBindings(ctx context.Context, arg dbq.ListAnycastBindingsParams) ([]dbq.AnycastBgpBinding, error)
 	CountAnycastBindings(ctx context.Context, arg dbq.CountAnycastBindingsParams) (int64, error)
+
+	// Mutations (PR 43). Action endpoints (freeze/unfreeze, import,
+	// sync-from-ipam, enable/disable-dnssec, nsec3, render-status,
+	// health-checks/result, blocklists/entries/bulk) are deferred to a
+	// follow-up.
+	CreateDnsZone(ctx context.Context, arg dbq.CreateDnsZoneParams) (dbq.DnsZone, error)
+	UpdateDnsZone(ctx context.Context, arg dbq.UpdateDnsZoneParams) (dbq.DnsZone, error)
+	DeleteDnsZone(ctx context.Context, id uuid.UUID) error
+	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
+	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
+	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
+	CreateDnsServerRow(ctx context.Context, arg dbq.CreateDnsServerRowParams) (dbq.DnsServer, error)
+	UpdateDnsServerRow(ctx context.Context, arg dbq.UpdateDnsServerRowParams) (dbq.DnsServer, error)
+	DeleteDnsServerRow(ctx context.Context, id uuid.UUID) error
+	CreateAnycastGroup(ctx context.Context, arg dbq.CreateAnycastGroupParams) (dbq.AnycastGroup, error)
+	UpdateAnycastGroup(ctx context.Context, arg dbq.UpdateAnycastGroupParams) (dbq.AnycastGroup, error)
+	DeleteAnycastGroup(ctx context.Context, id uuid.UUID) error
+	CreateDnsForwarder(ctx context.Context, arg dbq.CreateDnsForwarderParams) (dbq.DnsForwarder, error)
+	UpdateDnsForwarder(ctx context.Context, arg dbq.UpdateDnsForwarderParams) (dbq.DnsForwarder, error)
+	DeleteDnsForwarder(ctx context.Context, id uuid.UUID) error
+	CreateDnsCatalogZone(ctx context.Context, arg dbq.CreateDnsCatalogZoneParams) (dbq.DnsCatalogZone, error)
+	UpdateDnsCatalogZone(ctx context.Context, arg dbq.UpdateDnsCatalogZoneParams) (dbq.DnsCatalogZone, error)
+	DeleteDnsCatalogZone(ctx context.Context, id uuid.UUID) error
+	CreateDnsBlocklist(ctx context.Context, arg dbq.CreateDnsBlocklistParams) (dbq.DnsBlocklist, error)
+	UpdateDnsBlocklist(ctx context.Context, arg dbq.UpdateDnsBlocklistParams) (dbq.DnsBlocklist, error)
+	DeleteDnsBlocklist(ctx context.Context, id uuid.UUID) error
+	CreateDnsBlocklistEntry(ctx context.Context, arg dbq.CreateDnsBlocklistEntryParams) (dbq.DnsBlocklistEntry, error)
+	DeleteDnsBlocklistEntry(ctx context.Context, id uuid.UUID) error
+	CreateDnsView(ctx context.Context, arg dbq.CreateDnsViewParams) (dbq.DnsView, error)
+	UpdateDnsView(ctx context.Context, arg dbq.UpdateDnsViewParams) (dbq.DnsView, error)
+	DeleteDnsView(ctx context.Context, id uuid.UUID) error
+	CreateDnsHealthCheck(ctx context.Context, arg dbq.CreateDnsHealthCheckParams) (dbq.DnsHealthCheck, error)
+	UpdateDnsHealthCheck(ctx context.Context, arg dbq.UpdateDnsHealthCheckParams) (dbq.DnsHealthCheck, error)
+	DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error
+	CreateBgpPeer(ctx context.Context, arg dbq.CreateBgpPeerParams) (dbq.BgpPeer, error)
+	UpdateBgpPeer(ctx context.Context, arg dbq.UpdateBgpPeerParams) (dbq.BgpPeer, error)
+	DeleteBgpPeer(ctx context.Context, id uuid.UUID) error
+	CreateAnycastBinding(ctx context.Context, arg dbq.CreateAnycastBindingParams) (dbq.AnycastBgpBinding, error)
+	DeleteAnycastBinding(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -72,6 +112,52 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/health-checks", h.listHealthChecks)
 		r.Get("/bgp-peers", h.listBgpPeers)
 		r.Get("/anycast-bindings", h.listAnycastBindings)
+
+		// ---- Mutations (PR 43) ----
+		r.With(auth.RequireCapability("dns:zones:create")).Post("/zones", h.createZone)
+		r.With(auth.RequireCapability("dns:zones:update")).Patch("/zones/{id}", h.updateZone)
+		r.With(auth.RequireCapability("dns:zones:delete")).Delete("/zones/{id}", h.deleteZone)
+
+		r.With(auth.RequireCapability("dns:records:create")).Post("/records", h.createRecord)
+		r.With(auth.RequireCapability("dns:records:update")).Patch("/records/{id}", h.updateRecord)
+		r.With(auth.RequireCapability("dns:records:delete")).Delete("/records/{id}", h.deleteRecord)
+
+		r.With(auth.RequireCapability("dns:servers:create")).Post("/servers", h.createServer)
+		r.With(auth.RequireCapability("dns:servers:update")).Patch("/servers/{id}", h.updateServer)
+		r.With(auth.RequireCapability("dns:servers:delete")).Delete("/servers/{id}", h.deleteServer)
+
+		r.With(auth.RequireCapability("dns:anycast-groups:create")).Post("/anycast-groups", h.createAnycastGroup)
+		r.With(auth.RequireCapability("dns:anycast-groups:update")).Patch("/anycast-groups/{id}", h.updateAnycastGroup)
+		r.With(auth.RequireCapability("dns:anycast-groups:delete")).Delete("/anycast-groups/{id}", h.deleteAnycastGroup)
+
+		r.With(auth.RequireCapability("dns:forwarders:create")).Post("/forwarders", h.createForwarder)
+		r.With(auth.RequireCapability("dns:forwarders:update")).Patch("/forwarders/{id}", h.updateForwarder)
+		r.With(auth.RequireCapability("dns:forwarders:delete")).Delete("/forwarders/{id}", h.deleteForwarder)
+
+		r.With(auth.RequireCapability("dns:catalog-zones:create")).Post("/catalog-zones", h.createCatalogZone)
+		r.With(auth.RequireCapability("dns:catalog-zones:update")).Patch("/catalog-zones/{id}", h.updateCatalogZone)
+		r.With(auth.RequireCapability("dns:catalog-zones:delete")).Delete("/catalog-zones/{id}", h.deleteCatalogZone)
+
+		r.With(auth.RequireCapability("dns:blocklists:create")).Post("/blocklists", h.createBlocklist)
+		r.With(auth.RequireCapability("dns:blocklists:update")).Patch("/blocklists/{id}", h.updateBlocklist)
+		r.With(auth.RequireCapability("dns:blocklists:delete")).Delete("/blocklists/{id}", h.deleteBlocklist)
+		r.With(auth.RequireCapability("dns:blocklists:update")).Post("/blocklists/{id}/entries", h.createBlocklistEntry)
+		r.With(auth.RequireCapability("dns:blocklists:update")).Delete("/blocklists/{id}/entries/{entry_id}", h.deleteBlocklistEntry)
+
+		r.With(auth.RequireCapability("dns:views:create")).Post("/views", h.createView)
+		r.With(auth.RequireCapability("dns:views:update")).Patch("/views/{id}", h.updateView)
+		r.With(auth.RequireCapability("dns:views:delete")).Delete("/views/{id}", h.deleteView)
+
+		r.With(auth.RequireCapability("dns:health-checks:create")).Post("/health-checks", h.createHealthCheck)
+		r.With(auth.RequireCapability("dns:health-checks:update")).Patch("/health-checks/{id}", h.updateHealthCheck)
+		r.With(auth.RequireCapability("dns:health-checks:delete")).Delete("/health-checks/{id}", h.deleteHealthCheck)
+
+		r.With(auth.RequireCapability("dns:bgp-peers:create")).Post("/bgp-peers", h.createBgpPeer)
+		r.With(auth.RequireCapability("dns:bgp-peers:update")).Patch("/bgp-peers/{id}", h.updateBgpPeer)
+		r.With(auth.RequireCapability("dns:bgp-peers:delete")).Delete("/bgp-peers/{id}", h.deleteBgpPeer)
+
+		r.With(auth.RequireCapability("dns:anycast-bindings:create")).Post("/anycast-bindings", h.createAnycastBinding)
+		r.With(auth.RequireCapability("dns:anycast-bindings:delete")).Delete("/anycast-bindings/{id}", h.deleteAnycastBinding)
 	})
 }
 
