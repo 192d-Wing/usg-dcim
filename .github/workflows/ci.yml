@@ -177,6 +177,12 @@ jobs:
     defaults:
       run:
         working-directory: packages/wolf/coredns-nsec3sign
+        # wolf/coredns-nsec3sign isn't listed in the repo-root go.work
+        # because its coredns transitive deps are large and slow the
+        # other Go shards. Build it as a standalone module instead.
+        shell: bash
+    env:
+      GOWORK: "off"
     steps:
       - uses: actions/checkout@v6
 
@@ -254,8 +260,13 @@ jobs:
           curl -sSLo /usr/local/bin/kubectl \
             "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
           chmod +x /usr/local/bin/kubectl
-          kubectl apply --dry-run=client -f /tmp/dcim-default.yaml > /dev/null
-          kubectl apply --dry-run=client -f /tmp/dcim-k3d.yaml > /dev/null
+          # --validate=false because CI has no apiserver to fetch the
+          # OpenAPI schema from. We're checking that the rendered YAML
+          # is at least parseable as Kubernetes objects; full schema
+          # validation needs a live cluster (see docs/DEPLOYMENT.md
+          # for the k3d-based smoke flow).
+          kubectl apply --dry-run=client --validate=false -f /tmp/dcim-default.yaml > /dev/null
+          kubectl apply --dry-run=client --validate=false -f /tmp/dcim-k3d.yaml > /dev/null
 
   migrations:
     name: Alembic up / down / up

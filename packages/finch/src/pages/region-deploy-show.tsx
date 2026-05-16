@@ -195,11 +195,13 @@ function useDeploymentEvents(deploymentId: string | undefined) {
 
 export function RegionDeployShowPage() {
   const { id } = useParams<{ id: string }>();
-  const { result, refetch } = useOne<Deployment>({
+  // Refine v5: useOne returns { query, result }; result is the
+  // unwrapped record (not { data: ... }) and refetch lives on query.
+  const { query, result: dep } = useOne<Deployment>({
     resource: 'region-deployments',
     id: id ?? '',
   });
-  const dep = result?.data;
+  const refetch = query.refetch;
   const { events, connected } = useDeploymentEvents(id);
 
   // Per-stage rollup for the stage tree.
