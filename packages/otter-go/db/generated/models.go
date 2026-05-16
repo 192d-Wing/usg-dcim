@@ -9,6 +9,39 @@ import (
 	"github.com/google/uuid"
 )
 
+type Asn struct {
+	ID             uuid.UUID  `json:"id"`
+	Asn            int64      `json:"asn"`
+	Name           string     `json:"name"`
+	Kind           string     `json:"kind"`
+	OrganizationID *uuid.UUID `json:"organization_id"`
+	Description    *string    `json:"description"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+}
+
+type PrefixList struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Family      string    `json:"family"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type PrefixListEntry struct {
+	ID           uuid.UUID `json:"id"`
+	PrefixListID uuid.UUID `json:"prefix_list_id"`
+	Seq          int32     `json:"seq"`
+	Action       string    `json:"action"`
+	Prefix       string    `json:"prefix"`
+	Ge           *int32    `json:"ge"`
+	Le           *int32    `json:"le"`
+	Description  *string   `json:"description"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 type Outlet struct {
 	ID         uuid.UUID `json:"id"`
 	PduAssetID uuid.UUID `json:"pdu_asset_id"`
