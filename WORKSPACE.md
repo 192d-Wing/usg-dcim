@@ -36,9 +36,36 @@ named after an animal that hints at its role. Deployment wiring lives under
 
 ## Migration phases
 
-1. Skeleton + this doc (no moves). **← current**
-2. Go services → `packages/{badger,heron,magpie,beagle}/`.
-3. `backend → otter`, `frontend → finch`.
-4. `collector → mole`.
-5. `infra/ → deploy/`; split charts per animal.
-6. Docs, root Makefile/Taskfile, CI workflows.
+1. ✅ Skeleton + this doc.
+2. ✅ Go services → `packages/{badger,heron,magpie,beagle}/`.
+3. ✅ `backend → otter`, `frontend → finch`.
+4. ✅ `collector → mole`.
+5. ✅ `infra/{docker,k8s,helm} → deploy/`; `infra/{coredns-nsec3sign,hickory-prom} → packages/wolf/`.
+6. ✅ Doc cross-links + root Makefile/Taskfile targets.
+
+## Deferred follow-ups
+
+- **Per-animal Helm charts.** The single `deploy/helm/dcim/` chart still
+  groups all services. Splitting per-animal would invalidate every
+  existing Helm release and ingress contract; defer until there is an
+  operator-facing reason to break the contract.
+- **Rename runtime contracts.** Kubernetes Service names (`go-ingest`,
+  `frontend`, `api`), image names (`dcim-go-ingest:dev`,
+  `dcim-frontend:dev`), Helm value keys (`frontend:`, `api:`), and
+  in-cluster hostnames are intentionally still pre-rename. Any switch to
+  the animal names is a runtime-breaking change requiring coordinated
+  deploys.
+- **Comment refs to old paths.** Historical "this Go file is a port of
+  `collector/src/dcim_collector/...`" comments in `packages/badger/`
+  describe the original location of the Python source at port time and
+  were intentionally not rewritten.
+
+## Dev commands
+
+```sh
+task otter       # API on :8000 (alias: task backend)
+task finch       # Vite dev server on :5173 (alias: task frontend)
+task worker      # arq worker
+task collector   # legacy Python collector (mole, deprecated)
+task test        # otter pytest + finch vitest
+```
