@@ -1,6 +1,31 @@
-# Kubernetes Deployment (Podman Desktop)
+# Kubernetes Deployment (raw manifests + kustomize)
 
-This directory contains Kubernetes manifests for deploying USG DCIM on Podman Desktop's built-in k8s cluster.
+This directory contains raw Kubernetes manifests for two scenarios where
+the Helm chart at [`../helm/dcim`](../helm/dcim) isn't the right tool:
+
+1. **Local Podman Desktop / kind** — quick `kubectl apply -k` cycle
+   without a Helm install. See [Quick Start](#quick-start) below.
+2. **Per-site air-gapped deploys** — sites where Helm isn't available
+   (no chart-museum mirror, no Tiller, etc.). Each site overlays
+   [`site-base/`](./site-base/) — `site42/` is the worked example.
+
+For **the central cluster in any environment with Helm**, use the
+chart, not the manifests here:
+
+```sh
+helm upgrade --install dcim deploy/helm/dcim \
+  -f deploy/helm/dcim/values.yaml \
+  -f my-site-overrides.yaml
+```
+
+> [!IMPORTANT]
+> The raw manifests in [`central/`](./central/) and the Helm chart in
+> `../helm/dcim/` deploy **the same workloads** but are maintained
+> independently. If you change one, walk the other to keep them in
+> sync — there is no CI gate that diffs them, and drift will silently
+> ship one stack with the new behavior and one without. The long-term
+> intent is to retire the central raw manifests once every operator
+> has Helm available; until that's confirmed, treat both as canonical.
 
 ## Prerequisites
 
