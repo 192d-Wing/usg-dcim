@@ -29,10 +29,10 @@ kubectl create secret tls nginx-proxy-tls -n dcim --cert=$tmpCrt --key=$tmpKey
 if (-not $?) { throw "Failed to create nginx-proxy-tls secret" }
 
 # ── 2. Collector API token secret for dcim-site42 ────────────────────────────
-$tokenPath = Join-Path $ProjectRoot 'infra/docker/site-dns/token'
+$tokenPath = Join-Path $ProjectRoot 'deploy/docker/site-dns/token'
 if (-not (Test-Path $tokenPath)) {
     Write-Warning "Token file not found at $tokenPath — skipping collector-token secret."
-    Write-Warning "Run enroll-site.ps1 and copy the token to infra/docker/site-dns/token first."
+    Write-Warning "Run enroll-site.ps1 and copy the token to deploy/docker/site-dns/token first."
 } else {
     Write-Host "Creating collector-token secret in namespace dcim-site42..."
     kubectl create namespace dcim-site42 --dry-run=client -o yaml | kubectl apply -f - 2>&1 | Out-Null
@@ -42,11 +42,11 @@ if (-not (Test-Path $tokenPath)) {
 }
 
 # ── 3. Hickory TLS cert secret for dcim-site42 ───────────────────────────────
-$site42Crt = Join-Path $ProjectRoot 'infra/docker/site-dns/tls/tls.crt.pem'
-$site42Key = Join-Path $ProjectRoot 'infra/docker/site-dns/tls/tls.key.pem'
+$site42Crt = Join-Path $ProjectRoot 'deploy/docker/site-dns/tls/tls.crt.pem'
+$site42Key = Join-Path $ProjectRoot 'deploy/docker/site-dns/tls/tls.key.pem'
 if (-not (Test-Path $site42Crt) -or -not (Test-Path $site42Key)) {
     Write-Warning "Site42 TLS certs not found — skipping hickory-tls secret."
-    Write-Warning "Expected: infra/docker/site-dns/tls/tls.crt.pem + tls.key.pem"
+    Write-Warning "Expected: deploy/docker/site-dns/tls/tls.crt.pem + tls.key.pem"
 } else {
     Write-Host "Creating hickory-tls secret in namespace dcim-site42..."
     kubectl delete secret hickory-tls -n dcim-site42 --ignore-not-found 2>&1 | Out-Null
@@ -67,7 +67,7 @@ Write-Host "The cert file is at: $tmpCrt"
 Write-Host "(Import it before rebooting — TEMP files may be cleaned up)"
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. kubectl apply -k infra/k8s/central/"
+Write-Host "  1. kubectl apply -k deploy/k8s/central/"
 Write-Host "  2. Stop Docker Compose site42 (docker compose ... down)"
-Write-Host "  3. kubectl apply -k infra/k8s/site42/"
+Write-Host "  3. kubectl apply -k deploy/k8s/site42/"
 Write-Host "  4. .\infra\k8s\scripts\port-forward.ps1"

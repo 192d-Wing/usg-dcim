@@ -75,7 +75,7 @@ What's shipped on `main`:
 - GitHub Actions CI: ruff + pytest (backend), vitest (frontend), container builds, Helm lint, alembic up→down→up reversibility gate.
 - Real OIDC against Keycloak (with pre-seeded realm in compose): code exchange, JWKS validation, nonce + at_hash, refresh-token rotation, RFC 8176 `amr` MFA.
 - Notifications service with webhook / Slack / email adapters and per-channel routing.
-- Helm chart at `infra/helm/dcim/` (api, worker, ingest, frontend, migrations job, NetworkPolicy templates, `values-k3d.yaml`).
+- Helm chart at `deploy/helm/dcim/` (api, worker, ingest, frontend, migrations job, NetworkPolicy templates, `values-k3d.yaml`).
 - Prometheus middleware in `backend/src/dcim/metrics.py` (HTTP histograms + business counters: telemetry samples, alerts fired, eval runs).
 - OpenTelemetry traces for api + worker (off by default; enable via `DCIM_OTEL_ENABLED=true`). FastAPI / asyncpg / httpx auto-instrumented, OTLP/HTTP exporter, local-dev collector behind the `otel` compose profile.
 - Frontend bundle split: `React.lazy` per route + `manualChunks` for Refine/RQ/Cloudscape in `vite.config.ts`.
@@ -97,7 +97,7 @@ All three remaining items are blocked on upstream releases. They each have a doc
 
 | Area | Item | Notes |
 |---|---|---|
-| Hickory DNS | `allow_networks_strict` upstream PR merge | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `infra/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
+| Hickory DNS | `allow_networks_strict` upstream PR merge | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `packages/wolf/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
 | BIND interop | `primaries` catalog property support | DCIM emits RFC 9432 §4.2.3 `primaries.<member_id>.zones A/AAAA` records, but BIND 9.20.22 only honors `coo` / `ext` properties — member zones provision as stubs without primaries. Knot DNS 3.4+ and PowerDNS 4.7+ already honor the records. Wait for BIND; until then operators using BIND must declare member zones manually in named.conf. |
 | DNS QPS | Per-second rate limiting on the recursive | Hickory 0.26 has no native QPS limiter. The 0037 CIDR ACLs only gate *who* can ask, not *how fast*. Real options today are out-of-band: nftables hashlimit on the recursive host or a dnsdist sidecar. Revisit when upstream lands a token-bucket. |
 | Alerting | "Every reading violates" vs MAX(value) semantics | The threshold check uses MAX(value) per asset within `duration_seconds` — fires if *any* reading in the window violates. The file's top comment says "violated for the entire duration", which would imply MIN for `>` and MAX for `<`. Pick one interpretation, document it, and align the SQL. Pre-existing from before the OpenSearch migration; noted in #47. |

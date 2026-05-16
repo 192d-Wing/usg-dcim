@@ -8,7 +8,7 @@
 # Install:
 #   helm install tinkerbell oci://ghcr.io/tinkerbell/charts/tinkerbell \
 #     -n tinkerbell --create-namespace \
-#     -f infra/helm/tinkerbell/values.yaml \
+#     -f deploy/helm/tinkerbell/values.yaml \
 #     --set publicIP=<central LB IP>
 #
 # Pinning notes:

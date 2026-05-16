@@ -43,7 +43,7 @@ try {
     Write-Host ""
     Write-Host "All images built and loaded into Kind cluster."
     Write-Host ""
-    Write-Host "Next: kubectl apply -k infra/k8s/central/"
+    Write-Host "Next: kubectl apply -k deploy/k8s/central/"
 } finally {
     Pop-Location
 }

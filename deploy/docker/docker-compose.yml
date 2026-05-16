@@ -1,4 +1,4 @@
-# Local-dev stack for USG DCIM. Production runs on Kubernetes via the Helm chart in infra/helm.
+# Local-dev stack for USG DCIM. Production runs on Kubernetes via the Helm chart in deploy/helm.
 services:
   postgres:
     # TimescaleDB image (PG16 + timescaledb extension preinstalled). Telemetry

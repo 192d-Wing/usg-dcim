@@ -2,8 +2,8 @@
 #
 # Run alongside the base compose:
 #   docker compose -p site42 \
-#     -f infra/docker/site-dns/docker-compose.yml \
-#     -f infra/docker/site-dns/docker-compose.hickory.yml \
+#     -f deploy/docker/site-dns/docker-compose.yml \
+#     -f deploy/docker/site-dns/docker-compose.hickory.yml \
 #     up -d
 #
 # Phase 2 of the Hickory migration (.claude/plans/hickory-migration.md).
@@ -24,7 +24,7 @@ services:
     # (verified: nmap shows only port 53 open). The custom image is a
     # drop-in replacement otherwise; switch via the `HICKORY_IMAGE`
     # env var if you want to test against upstream temporarily.
-    # See infra/hickory-prom/ for the Dockerfile + build instructions.
+    # See packages/wolf/hickory-prom/ for the Dockerfile + build instructions.
     image: ${HICKORY_IMAGE:-ghcr.io/192d-wing/hickory-prom:v0.26.0-2}
     pid: "host"
     user: "0:0"

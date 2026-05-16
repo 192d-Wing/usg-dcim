@@ -1,5 +1,5 @@
 # Default values for dcim Helm chart.
-# Override with `helm install dcim infra/helm/dcim -f my-values.yaml`.
+# Override with `helm install dcim deploy/helm/dcim -f my-values.yaml`.
 
 image:
   registry: ghcr.io/usg-dcim

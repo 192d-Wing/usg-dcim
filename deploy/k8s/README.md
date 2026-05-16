@@ -35,7 +35,7 @@ Builds and tags all images `:dev`:
 ### 2. Deploy Central Stack
 
 ```powershell
-kubectl apply -k infra/k8s/central/
+kubectl apply -k deploy/k8s/central/
 ```
 
 Deploys: postgres (TimescaleDB), redis, keycloak, api, worker, frontend, go-ingest, go-alerts, go-dns-probe into the `dcim` namespace.
@@ -144,15 +144,15 @@ Sites use `hostNetwork: true` and `hostPID: true`:
 
    ```powershell
    kubectl create secret generic hickory-tls -n dcim-site1 `
-     --from-file=tls.crt=infra/docker/site-dns/tls/tls.crt.pem `
-     --from-file=tls.key=infra/docker/site-dns/tls/tls.key.pem
+     --from-file=tls.crt=deploy/docker/site-dns/tls/tls.crt.pem `
+     --from-file=tls.key=deploy/docker/site-dns/tls/tls.key.pem
    ```
 
 4. Apply site manifests:
 
    ```powershell
-   kubectl apply -k infra/k8s/site1/
-   kubectl apply -k infra/k8s/site2/
+   kubectl apply -k deploy/k8s/site1/
+   kubectl apply -k deploy/k8s/site2/
    ```
 
 After ~30s the collectors appear as `healthy` in the UI Collectors page.

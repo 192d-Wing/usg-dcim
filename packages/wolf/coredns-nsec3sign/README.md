@@ -52,7 +52,7 @@ only see this duplication in the rendered Corefile.
 
 The key file format matches BIND's `Kname+alg+tag.{key,private}` pair
 — the same format DCIM already renders via
-[`render_dnssec_key_files`](../../packages/otter/src/dcim/services/dns.py).
+[`render_dnssec_key_files`](../../../packages/otter/src/dcim/services/dns.py).
 Switching a zone from NSEC to NSEC3 is a one-line Corefile change
 (`dnssec` → `nsec3sign`) plus a salt/iterations decision.
 
@@ -83,7 +83,7 @@ The resulting binary is distroless-packaged and ships in under 50 MB.
 
 ## Site stack wiring
 
-[`infra/docker/site-dns/docker-compose.yml`](../docker/site-dns/docker-compose.yml)
+[`deploy/docker/site-dns/docker-compose.yml`](../docker/site-dns/docker-compose.yml)
 points the `coredns-auth` service at `coredns/coredns:1.14.2` today.
 Once an image is published, that line flips to
 `ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1` and the plugin is
@@ -122,7 +122,7 @@ renderer change, end-to-end smoke against the site stack).
 ## Layout
 
 ```text
-infra/coredns-nsec3sign/
+packages/wolf/coredns-nsec3sign/
 ├── README.md          (this file)
 ├── go.mod             github.com/192d-wing/coredns-nsec3sign
 ├── Dockerfile         multi-stage custom CoreDNS build

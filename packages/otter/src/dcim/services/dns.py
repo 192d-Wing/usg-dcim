@@ -1376,7 +1376,7 @@ def render_hickory_recursive_config(
     # `hickorydns/hickory-dns` image is built without the
     # `prometheus-metrics` Cargo feature, so the field is unknown to
     # its TOML parser and would crash the resolver on load. Our
-    # custom `hickory-prom` build (infra/hickory-prom) compiles it in
+    # custom `hickory-prom` build (packages/wolf/hickory-prom) compiles it in
     # and honors the line. Operators flip the env var on after
     # swapping the compose image; the collector still needs
     # `metrics_enabled: true` on its server entry to actually scrape.

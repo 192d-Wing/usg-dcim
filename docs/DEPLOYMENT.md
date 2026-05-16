@@ -38,7 +38,7 @@ Each collector has:
 
 ## Production (Kubernetes)
 
-Helm chart lives at `infra/helm/dcim/`. Provides:
+Helm chart lives at `deploy/helm/dcim/`. Provides:
 
 - `api` Deployment + HPA + Service
 - `worker` Deployment + HPA
@@ -59,12 +59,12 @@ Helm chart lives at `infra/helm/dcim/`. Provides:
 - NetworkPolicy templates restricting east-west traffic
 
 ```bash
-helm upgrade --install dcim infra/helm/dcim \
+helm upgrade --install dcim deploy/helm/dcim \
   --namespace dcim --create-namespace \
   -f my-values.yaml
 ```
 
-See `infra/helm/dcim/values.yaml` for the full surface.
+See `deploy/helm/dcim/values.yaml` for the full surface.
 
 ## SSO smoke (Keycloak)
 
@@ -76,7 +76,7 @@ docker compose --profile sso up -d keycloak
 ```
 
 The realm `dcim` is imported from
-[`infra/docker/keycloak-realm.json`](../infra/docker/keycloak-realm.json)
+[`deploy/docker/keycloak-realm.json`](../deploy/docker/keycloak-realm.json)
 on first start. It ships with two users (`demo` / `demo` and
 `dcim_admin` / `dcim_admin`, both with the `dcim-admin` realm role)
 and the client `dcim-spa` wired with secret `dev-secret-change-me`,
@@ -139,7 +139,7 @@ user: dcim_admin roles: ['dcim-admin'] caps: ['*']
 ```
 
 The API is pre-pointed at the Keycloak service in
-[`docker-compose.yml`](../infra/docker/docker-compose.yml). Hitting
+[`docker-compose.yml`](../deploy/docker/docker-compose.yml). Hitting
 `GET /api/v1/auth/oidc/login` redirects to the realm authorization
 endpoint; after authenticating, Keycloak posts the code to
 `/api/v1/auth/oidc/callback`, the API validates the ID token via JWKS,
@@ -161,7 +161,7 @@ docker compose --profile collector up -d snmpsim collector
 docker compose logs -f collector
 ```
 
-[`collector-config.yaml`](../infra/docker/collector-config.yaml) ships
+[`collector-config.yaml`](../deploy/docker/collector-config.yaml) ships
 with a sample SNMP device pointed at `snmpsim:1161` (community
 `public`) polling `sysUpTime` every 30s. After running `make seed`,
 replace the placeholder `asset_id` with a real `Asset.id` from the
@@ -181,11 +181,11 @@ For local end-to-end validation of the chart, use a k3d cluster:
 
 ```bash
 k3d cluster create dcim --port "8080:80@loadbalancer"
-helm dependency update infra/helm/dcim
-helm template dcim infra/helm/dcim | kubectl apply --dry-run=client -f -
-helm install dcim infra/helm/dcim \
+helm dependency update deploy/helm/dcim
+helm template dcim deploy/helm/dcim | kubectl apply --dry-run=client -f -
+helm install dcim deploy/helm/dcim \
   --namespace dcim --create-namespace \
-  -f infra/helm/dcim/values-k3d.yaml
+  -f deploy/helm/dcim/values-k3d.yaml
 kubectl -n dcim wait --for=condition=available --timeout=300s deploy --all
 ```
 

@@ -36,7 +36,7 @@ toolchain, no git checkout).
 ## Wiring into the site stack
 
 Swap the `coredns-recursive` service's image in
-`infra/docker/site-dns/docker-compose.hickory.yml` from
+`deploy/docker/site-dns/docker-compose.hickory.yml` from
 `hickorydns/hickory-dns:latest` to
 `ghcr.io/192d-wing/hickory-prom:v0.26.0-1`. Then add a
 `prometheus_listen_addr` to the rendered Hickory config (the DCIM
@@ -56,8 +56,8 @@ tag is cut.
 # From the repo root. Expects a hickory-dns workspace checkout at
 # the sibling path `../../../hickory-dns` (override with
 # LOCAL_HICKORY_PATH=...).
-make -C infra/hickory-prom local-build   # builds :v0.26.0-strict-dev
-make -C infra/hickory-prom local-push    # builds + pushes to ghcr
+make -C packages/wolf/hickory-prom local-build   # builds :v0.26.0-strict-dev
+make -C packages/wolf/hickory-prom local-push    # builds + pushes to ghcr
 ```
 
 The strict-dev tag is intentionally distinct from the release

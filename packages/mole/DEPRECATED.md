@@ -27,7 +27,7 @@ single set on the central dashboards.
 
 ## Rolling back
 
-Edit `infra/docker/docker-compose.yml`, flip the `collector` service's
+Edit `deploy/docker/docker-compose.yml`, flip the `collector` service's
 `build.context` back to `../../collector` and re-add the
 `environment: { PYTHONUNBUFFERED: "1" }` block. Rebuild:
 
@@ -62,5 +62,5 @@ This package will stay in tree at least until:
 2. SNMPv3 and native GoBGP gRPC have landed in the Go collector.
 
 After that, this directory can be removed in a single commit. Until
-then, **do not** delete it — `infra/docker/docker-compose.yml`'s
+then, **do not** delete it — `deploy/docker/docker-compose.yml`'s
 rollback comment depends on the source being here.

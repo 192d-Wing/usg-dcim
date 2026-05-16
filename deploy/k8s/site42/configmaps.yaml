@@ -6,7 +6,7 @@ metadata:
 data:
   collector.yaml: |
     # CONUS-001 site42 collector — k8s deployment.
-    # Uses existing enrollment UUIDs from infra/docker/site-dns/collector.yaml.
+    # Uses existing enrollment UUIDs from deploy/docker/site-dns/collector.yaml.
     # ingest_url/api_base updated to use k8s in-cluster service DNS.
     # All DNS metrics/gobgp URLs use localhost (all containers share the pod network).
 

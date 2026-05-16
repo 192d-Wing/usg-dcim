@@ -2,8 +2,8 @@
 #
 # Usage:
 #   docker compose -p site42 \
-#     -f infra/docker/site-dns/docker-compose.yml \
-#     -f infra/docker/site-dns/docker-compose.bind9.yml \
+#     -f deploy/docker/site-dns/docker-compose.yml \
+#     -f deploy/docker/site-dns/docker-compose.bind9.yml \
 #     up -d bind9-smoke
 #
 # The container joins dns-net so it can reach coredns-auth at 172.30.42.10.

@@ -51,7 +51,7 @@ chmod 0600 token
 
 ```bash
 docker compose -p site42 \
-  -f infra/docker/site-dns/docker-compose.yml \
+  -f deploy/docker/site-dns/docker-compose.yml \
   up -d --build
 ```
 
@@ -62,7 +62,7 @@ stacks can coexist on one Docker host.
 
 ```bash
 # Collector log should show dns_bundle_applied within ~30s
-docker compose -p site42 -f infra/docker/site-dns/docker-compose.yml \
+docker compose -p site42 -f deploy/docker/site-dns/docker-compose.yml \
   logs -f collector | grep -iE "bundle|render"
 
 # CoreDNS auth answers a record from a site zone
@@ -143,8 +143,8 @@ configs from pre-0.26 drafts are not compatible.
 
    ```bash
    docker compose -p site42 \
-     -f infra/docker/site-dns/docker-compose.yml \
-     -f infra/docker/site-dns/docker-compose.hickory.yml \
+     -f deploy/docker/site-dns/docker-compose.yml \
+     -f deploy/docker/site-dns/docker-compose.hickory.yml \
      up -d
    ```
 
@@ -195,7 +195,7 @@ curl -X PATCH /api/v1/ipam/fabrics/$FABRIC_ID \
   -d '{"recursive_engine":"coredns"}'
 
 docker compose -p site42 \
-  -f infra/docker/site-dns/docker-compose.yml \
+  -f deploy/docker/site-dns/docker-compose.yml \
   up -d --force-recreate coredns-recursive
 ```
 
@@ -206,5 +206,5 @@ re-writes `Corefile` in place.
 
 The compose stack is the local development surface. Production
 deployments use the per-site collector + CoreDNS pods deployed via
-the Helm chart pattern in `infra/helm/`. The same `dns:` block in
+the Helm chart pattern in `deploy/helm/`. The same `dns:` block in
 the collector config drives both.

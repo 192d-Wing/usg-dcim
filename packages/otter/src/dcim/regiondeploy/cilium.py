@@ -34,7 +34,7 @@ from typing import Any
 import yaml
 
 # Default Cilium version. Pinned in lockstep with the docs/decision
-# log; bump in usg-dcim/docs/dev/region-deploy.md and infra/helm/
+# log; bump in usg-dcim/docs/dev/region-deploy.md and deploy/helm/
 # tinkerbell/values.yaml together.
 DEFAULT_CILIUM_VERSION = "1.19.3"
 

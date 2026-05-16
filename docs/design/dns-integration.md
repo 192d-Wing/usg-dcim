@@ -135,7 +135,7 @@ Same patterns as `api/ipam.py` (`Page`/`PageParams`, audit on every write, capab
 
 Auth model unchanged — reuses the existing `MtlsConfig` from [`packages/mole/src/dcim_collector/config.py`](../../packages/mole/src/dcim_collector/config.py).
 
-### Site bundle — [`infra/docker/site-dns/docker-compose.yml`](../../infra/docker/site-dns/docker-compose.yml)
+### Site bundle — [`deploy/docker/site-dns/docker-compose.yml`](../../deploy/docker/site-dns/docker-compose.yml)
 
 The operator brings this up at each site. Services:
 
@@ -170,7 +170,7 @@ End-to-end smoke against the existing compose stack:
 6. `pytest backend/tests/services/test_dns_render.py` for the pure render functions.
 7. UI: open IPAM → DNS tab → add a zone → add a manual CNAME → verify the zone preview reflects it.
 
-Local site-bundle smoke (deferred follow-up): bring up `infra/docker/site-dns/docker-compose.yml` against the local stack with a fake leaf peer (another GoBGP container as the BGP peer); `dig @<anycast-ip> leaf-01.site42.prod.dcim.mil` should return the expected A record.
+Local site-bundle smoke (deferred follow-up): bring up `deploy/docker/site-dns/docker-compose.yml` against the local stack with a fake leaf peer (another GoBGP container as the BGP peer); `dig @<anycast-ip> leaf-01.site42.prod.dcim.mil` should return the expected A record.
 
 ## Out of scope (defer)
 

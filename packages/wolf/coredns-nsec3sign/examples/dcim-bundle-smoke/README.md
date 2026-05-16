@@ -33,7 +33,7 @@ README's "Build" section):
 
 ```powershell
 # 1. Generate the bundle via the DCIM renderer.
-uv run --project ../../../../packages/otter --with cryptography `
+uv run --project ../../../../../packages/otter --with cryptography `
   python render_bundle.py
 
 # 2. Boot the custom CoreDNS against the bundle. The keytag in the

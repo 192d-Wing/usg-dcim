@@ -32,7 +32,7 @@ $trusted    = (kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}') -replac
 
 helm install tinkerbell oci://ghcr.io/tinkerbell/charts/tinkerbell `
   -n tinkerbell --create-namespace `
-  -f infra/helm/tinkerbell/values.yaml `
+  -f deploy/helm/tinkerbell/values.yaml `
   --set publicIP=$publicIP `
   --set artifactsFileServer=$artifacts `
   --set "trustedProxies={$trusted}"

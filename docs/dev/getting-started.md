@@ -62,7 +62,7 @@ This builds seven images locally using `podman build`:
 ### 2. Deploy to Kubernetes
 
 ```powershell
-kubectl apply -k infra/k8s/central/
+kubectl apply -k deploy/k8s/central/
 ```
 
 Watch pods come up (takes ~2 minutes on first run — Keycloak is slow):
@@ -158,8 +158,8 @@ kubectl create secret generic collector-enrollment -n dcim-site1 `
   --from-literal=site_id=<SITE_ID>
 
 kubectl create secret generic hickory-tls -n dcim-site1 `
-  --from-file=tls.crt=infra/docker/site-dns/tls/tls.crt.pem `
-  --from-file=tls.key=infra/docker/site-dns/tls/tls.key.pem
+  --from-file=tls.crt=deploy/docker/site-dns/tls/tls.crt.pem `
+  --from-file=tls.key=deploy/docker/site-dns/tls/tls.key.pem
 ```
 
 Repeat with `dcim-site2` for CONUS-002.
@@ -167,8 +167,8 @@ Repeat with `dcim-site2` for CONUS-002.
 ### 3. Deploy the site stacks
 
 ```powershell
-kubectl apply -k infra/k8s/site1/
-kubectl apply -k infra/k8s/site2/
+kubectl apply -k deploy/k8s/site1/
+kubectl apply -k deploy/k8s/site2/
 ```
 
 After ~30 seconds both collectors appear as **healthy** in the UI under **Site collectors**.

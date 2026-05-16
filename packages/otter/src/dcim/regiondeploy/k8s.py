@@ -11,7 +11,7 @@ Why not `kubernetes-asyncio` or `kr8s`?
 Auth model:
   In-pod service-account token (`/var/run/secrets/kubernetes.io/
   serviceaccount/token`) + the matching CA. The RBAC the SA needs
-  is shipped in `infra/k8s/central/region-deploy-rbac.yaml` — a
+  is shipped in `deploy/k8s/central/region-deploy-rbac.yaml` — a
   ClusterRole granting Secret + Tinkerbell + Rufio CR access, bound
   to the `dcim/default` SA in the `tinkerbell` namespace via a
   RoleBinding.

@@ -1,7 +1,7 @@
 # Site DNS bundle: collector + two CoreDNS pods (auth + recursive) + GoBGP sidecar.
 #
 # Operators bring this up at each site with:
-#   docker compose -p site42 -f infra/docker/site-dns/docker-compose.yml up -d
+#   docker compose -p site42 -f deploy/docker/site-dns/docker-compose.yml up -d
 #
 # `-p site42` keeps the volume + container names from clashing with the
 # central stack so you can run both compose projects side-by-side on
@@ -56,7 +56,7 @@ services:
 
   coredns-auth:
     # Custom build of CoreDNS 1.14.2 with the `nsec3sign` plugin
-    # compiled in (infra/coredns-nsec3sign). Drop-in for
+    # compiled in (packages/wolf/coredns-nsec3sign). Drop-in for
     # `coredns/coredns:1.14.2` — same entrypoint, same `-conf` flag,
     # same ports. The plugin only kicks in for zones with NSEC3
     # params set in the rendered Corefile; pre-NSEC3 zones stay on

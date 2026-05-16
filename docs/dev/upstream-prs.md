@@ -289,7 +289,7 @@ For each PR:
 
 ## After upstream merges
 
-- Bump `infra/helm/tinkerbell/values.yaml` to upstream's
+- Bump `deploy/helm/tinkerbell/values.yaml` to upstream's
   `ghcr.io/tinkerbell/tinkerbell` image + version.
 - Replace `deployment.additionalArgs` with first-class chart keys
   if upstream lands them.

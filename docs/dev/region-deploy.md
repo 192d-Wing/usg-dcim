@@ -614,16 +614,16 @@ UI renders these as a checklist; **Start** is disabled until `ready=true`.
 
 ## 8. Helm chart inventory
 
-New charts/components added under `infra/`:
+New charts/components added under `deploy/`:
 
 | Path                                       | Purpose                                                                                            |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `infra/k8s/central/flatcar-mirror/`        | Cached Flatcar LTS PXE/HTTP-Boot images (kernel, initramfs, rootfs) served from central            |
-| `infra/helm/tinkerbell/`                   | Tinkerbell stack: Smee, Tink, Hegel, Rufio (upstream chart + values overrides for v6-only)         |
-| `infra/helm/cilium/values.yaml`            | Pinned Cilium 1.19.3 values; chart pulled from upstream                                            |
-| `infra/helm/kea/`                          | Kea DHCPv6 chart (host-network on production VLAN; v6 control-agent REST)                          |
-| `infra/helm/region-edge/`                  | NAT46 LB config (CiliumLoadBalancerIPPool + Service template)                                      |
-| `infra/helm/nat64/`                        | Jool/tayga gateway + CoreDNS DNS64 (opt-in)                                                        |
+| `deploy/k8s/central/flatcar-mirror/`        | Cached Flatcar LTS PXE/HTTP-Boot images (kernel, initramfs, rootfs) served from central            |
+| `deploy/helm/tinkerbell/`                   | Tinkerbell stack: Smee, Tink, Hegel, Rufio (upstream chart + values overrides for v6-only)         |
+| `deploy/helm/cilium/values.yaml`            | Pinned Cilium 1.19.3 values; chart pulled from upstream                                            |
+| `deploy/helm/kea/`                          | Kea DHCPv6 chart (host-network on production VLAN; v6 control-agent REST)                          |
+| `deploy/helm/region-edge/`                  | NAT46 LB config (CiliumLoadBalancerIPPool + Service template)                                      |
+| `deploy/helm/nat64/`                        | Jool/tayga gateway + CoreDNS DNS64 (opt-in)                                                        |
 | `backend/src/dcim/regiondeploy/templates/` | Jinja templates that render Tinkerbell `Hardware`, `Template`, `Workflow` CRDs + ignition payloads |
 
 Existing charts (`coredns-auth`, `hickory-recursive`, `go-collector`) are

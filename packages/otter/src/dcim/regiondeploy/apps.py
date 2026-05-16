@@ -97,7 +97,7 @@ def render_dns_recursive_values(deployment: Any) -> dict:
     """Hickory recursive.
 
     Uses the existing usg-dcim Hickory chart shape (matches
-    `infra/coredns-nsec3sign/` Hickory image build). Optional DNS64
+    `packages/wolf/coredns-nsec3sign/` Hickory image build). Optional DNS64
     zone enabled when `config.nat64_enabled` is true.
     """
     cfg = (getattr(deployment, "config", None) or {})
@@ -162,7 +162,7 @@ def render_collector_values(deployment: Any) -> dict:
     Reuses the existing collector image; the orchestrator's `seed`
     stage (PR 11) will enroll the collector against the central
     backend using the existing enrollment-token flow (cf.
-    infra/k8s/scripts/enroll-site.ps1). The Helm values here only
+    deploy/k8s/scripts/enroll-site.ps1). The Helm values here only
     cover the deploy + the per-site identifier.
     """
     return {

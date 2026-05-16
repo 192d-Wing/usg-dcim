@@ -20,22 +20,22 @@ sync:
 	uv sync --all-packages --all-extras
 
 up:
-	podman compose -f infra/docker/docker-compose.yml up -d --build
+	podman compose -f deploy/docker/docker-compose.yml up -d --build
 
 down:
-	podman compose -f infra/docker/docker-compose.yml down
+	podman compose -f deploy/docker/docker-compose.yml down
 
 logs:
-	podman compose -f infra/docker/docker-compose.yml logs -f
+	podman compose -f deploy/docker/docker-compose.yml logs -f
 
 build:
-	podman compose -f infra/docker/docker-compose.yml build
+	podman compose -f deploy/docker/docker-compose.yml build
 
 migrate:
-	podman compose -f infra/docker/docker-compose.yml exec api alembic upgrade head
+	podman compose -f deploy/docker/docker-compose.yml exec api alembic upgrade head
 
 seed:
-	podman compose -f infra/docker/docker-compose.yml exec api python -m dcim.scripts.seed_demo
+	podman compose -f deploy/docker/docker-compose.yml exec api python -m dcim.scripts.seed_demo
 
 migrate-local:
 	uv run --project packages/otter alembic -c packages/otter/alembic.ini upgrade head

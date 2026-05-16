@@ -1,7 +1,7 @@
 version: '3'
 
 env:
-  COMPOSE_FILE: infra/docker/docker-compose.yml
+  COMPOSE_FILE: deploy/docker/docker-compose.yml
 
 tasks:
   help:

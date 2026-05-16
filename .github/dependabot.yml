@@ -47,7 +47,7 @@ updates:
   # to a single PR; miekg/dns surfaces separately because it often
   # needs a coordinated CoreDNS update.
   - package-ecosystem: "gomod"
-    directory: "/infra/coredns-nsec3sign"
+    directory: "/packages/wolf/coredns-nsec3sign"
     schedule:
       interval: "weekly"
       day: "monday"

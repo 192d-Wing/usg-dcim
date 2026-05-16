@@ -9,7 +9,7 @@
 #
 # The output image is a drop-in for `coredns/coredns:<version>` — same
 # entrypoint, same `-conf` flag, same listening ports. The
-# `coredns-auth` service in infra/docker/site-dns/docker-compose.yml
+# `coredns-auth` service in deploy/docker/site-dns/docker-compose.yml
 # can swap to this image without other config changes.
 
 ARG COREDNS_VERSION=v1.14.2

@@ -30,7 +30,7 @@ named after an animal that hints at its role. Deployment wiring lives under
 ## Deployment
 
 - `deploy/charts/<animal>/` — per-package Helm charts (split from
-  `infra/helm/`).
+  `deploy/helm/`).
 - `deploy/k8s/` — raw manifests / kustomize bases.
 - `deploy/docker/` — compose files and shared base images.
 

@@ -118,13 +118,13 @@ docker tag ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1 \
 docker push internal.registry.example/dns/coredns-nsec3sign:v1.14.2-1
 ```
 
-Then edit [infra/docker/site-dns/docker-compose.yml](../../infra/docker/site-dns/docker-compose.yml)
+Then edit [deploy/docker/site-dns/docker-compose.yml](../../deploy/docker/site-dns/docker-compose.yml)
 to point `coredns-auth.image` at the internal copy.
 
 ## Site bootstrap
 
 The site-dns stack (collector + 2 CoreDNS pods + GoBGP) bring-up
-is documented in [infra/docker/site-dns/README.md](../../infra/docker/site-dns/README.md).
+is documented in [deploy/docker/site-dns/README.md](../../deploy/docker/site-dns/README.md).
 Admin's job is to make the rows in central DCIM that the site
 needs before the operator can light it up:
 
@@ -186,7 +186,7 @@ something different.
 The `coredns-nsec3sign` plugin emits five Prometheus metrics under
 `coredns_nsec3sign_*` — names mirror the upstream `dnssec` plugin
 where they overlap. Full table in
-[infra/coredns-nsec3sign/README.md#metrics](../../infra/coredns-nsec3sign/README.md#metrics):
+[packages/wolf/coredns-nsec3sign/README.md#metrics](../../packages/wolf/coredns-nsec3sign/README.md#metrics):
 
 - `coredns_nsec3sign_cache_hits_total{server}`
 - `coredns_nsec3sign_cache_misses_total{server}`
@@ -233,7 +233,7 @@ release).
 
 When a new `coredns-nsec3sign` tag ships:
 
-1. Bump the tag in [infra/docker/site-dns/docker-compose.yml](../../infra/docker/site-dns/docker-compose.yml).
+1. Bump the tag in [deploy/docker/site-dns/docker-compose.yml](../../deploy/docker/site-dns/docker-compose.yml).
 2. Roll one site at a time: `docker compose -p siteN pull coredns-auth && docker compose -p siteN up -d coredns-auth`.
 3. Watch `coredns_nsec3sign_chain_entries` for that zone — should
    recover to its previous value within 30 s of the restart (the
@@ -338,6 +338,6 @@ The pod logs `nsec3sign: ...` at startup. Common faults:
 - Code internals: [implementation.md](implementation.md)
 - Day-to-day workflows: [operator-guide.md](operator-guide.md)
 - Design context: [../design/dns-integration.md](../design/dns-integration.md)
-- Site bring-up: [infra/docker/site-dns/README.md](../../infra/docker/site-dns/README.md)
-- Plugin internals: [infra/coredns-nsec3sign/README.md](../../infra/coredns-nsec3sign/README.md)
-- Security review: [infra/coredns-nsec3sign/SECURITY-REVIEW.md](../../infra/coredns-nsec3sign/SECURITY-REVIEW.md)
+- Site bring-up: [deploy/docker/site-dns/README.md](../../deploy/docker/site-dns/README.md)
+- Plugin internals: [packages/wolf/coredns-nsec3sign/README.md](../../packages/wolf/coredns-nsec3sign/README.md)
+- Security review: [packages/wolf/coredns-nsec3sign/SECURITY-REVIEW.md](../../packages/wolf/coredns-nsec3sign/SECURITY-REVIEW.md)

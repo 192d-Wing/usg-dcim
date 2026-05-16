@@ -292,7 +292,7 @@ async def post_kubeconfig_callback(
         )
     # Persist the kubeconfig as a Secret in the central cluster's
     # `tinkerbell` namespace. RBAC for the SA is shipped in
-    # infra/k8s/central/region-deploy-rbac.yaml. On a kubeconfig
+    # deploy/k8s/central/region-deploy-rbac.yaml. On a kubeconfig
     # retry (operator re-ran kubeadm-init, the action posts again)
     # create_or_replace_secret idempotently overwrites the prior
     # value rather than failing.
@@ -357,7 +357,7 @@ async def post_kubeconfig_callback(
                     f"kubeconfig callback received from node {payload.node_id} "
                     f"but Secret write failed: {write_error}. "
                     "Check the central-cluster RBAC (see "
-                    "infra/k8s/central/region-deploy-rbac.yaml)."
+                    "deploy/k8s/central/region-deploy-rbac.yaml)."
                 ),
             )
         await db.commit()

@@ -38,7 +38,7 @@ DNSSEC initially and add it in v2 — live in
 ## Custom CoreDNS plugin
 
 The `coredns-nsec3sign` plugin lives under
-[infra/coredns-nsec3sign/](../../infra/coredns-nsec3sign/) with
+[packages/wolf/coredns-nsec3sign/](../../packages/wolf/coredns-nsec3sign/) with
 its own README and SECURITY-REVIEW.md. Upstream CoreDNS's
 `dnssec` plugin only emits NSEC chains; the custom plugin fills
 the NSEC3 gap (RFC 5155) and ships as a drop-in image at
@@ -46,6 +46,6 @@ the NSEC3 gap (RFC 5155) and ships as a drop-in image at
 
 ## Other entry points
 
-- Site-stack bring-up: [../../infra/docker/site-dns/README.md](../../infra/docker/site-dns/README.md)
+- Site-stack bring-up: [../../deploy/docker/site-dns/README.md](../../deploy/docker/site-dns/README.md)
 - Live API reference (OpenAPI): <http://localhost:8000/docs#tag/dns>
 - Roadmap: [../../ROADMAP.MD](../../ROADMAP.MD)

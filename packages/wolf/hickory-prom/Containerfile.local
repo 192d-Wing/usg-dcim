@@ -6,7 +6,7 @@
 # Build with the hickory-dns workspace as the build context:
 #
 #   docker build \
-#     -f infra/hickory-prom/Dockerfile.local \
+#     -f packages/wolf/hickory-prom/Dockerfile.local \
 #     -t ghcr.io/192d-wing/hickory-prom:v0.26.0-strict-dev \
 #     /c/Users/.../projects/hickory-dns
 #
