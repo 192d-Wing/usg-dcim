@@ -3,6 +3,7 @@
 package dbq
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,7 +51,7 @@ type Asset struct {
 	LifecycleState     string     `json:"lifecycle_state"`
 	InstallDate        *string    `json:"install_date"`
 	WarrantyExpires    *string    `json:"warranty_expires"`
-	MetadataJson       []byte     `json:"metadata_json"`
+	MetadataJson       json.RawMessage `json:"metadata_json"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
@@ -121,7 +122,7 @@ type Site struct {
 	Enclave         *string   `json:"enclave"`
 	Classification  *string   `json:"classification"`
 	LifecycleState  string    `json:"lifecycle_state"`
-	MetadataJson    []byte    `json:"metadata_json"`
+	MetadataJson    json.RawMessage `json:"metadata_json"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
