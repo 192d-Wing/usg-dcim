@@ -3,6 +3,10 @@ replicaCount: 1
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
   limits:   { cpu: 200m, memory: 256Mi }
+service:
+  # Beagle has no traffic-bearing port — this Service only exists so a
+  # ServiceMonitor can scrape /metrics off the admin port.
+  adminPort: 8102
 config:
   tick: 30s
   concurrency: 64

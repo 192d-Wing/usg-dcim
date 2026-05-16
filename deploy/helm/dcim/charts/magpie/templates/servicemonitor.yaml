@@ -1,0 +1,23 @@
+{{- if and .Values.enabled .Values.global.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "magpie.fullname" . }}
+  namespace: {{ .Values.global.monitoring.serviceMonitor.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "magpie.labels" . | nindent 4 }}
+    {{- with .Values.global.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels: {{- include "magpie.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: admin
+      path: /metrics
+      interval: {{ .Values.global.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.global.monitoring.serviceMonitor.scrapeTimeout }}
+{{- end }}

@@ -16,7 +16,10 @@ spec:
         - name: beagle
           image: {{ include "beagle.image" . }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - { name: admin, containerPort: {{ .Values.service.adminPort }} }
           env:
+            - { name: DNS_PROBE_HEALTH_ADDR, value: ":{{ .Values.service.adminPort }}" }
             - { name: DCIM_POSTGRES_DSN_RAW, value: {{ .Values.global.postgresql.dsn | quote }} }
             - { name: DNS_PROBE_TICK,        value: {{ .Values.config.tick | quote }} }
             - { name: DNS_PROBE_CONCURRENCY, value: {{ .Values.config.concurrency | quote }} }
@@ -28,6 +31,24 @@ spec:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
           {{- end }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: admin }
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "beagle.fullname" . }}
+  labels: {{- include "beagle.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  # Headless: nothing should send live traffic to beagle — Service
+  # exists for ServiceMonitor discovery and /healthz only.
+  clusterIP: None
+  ports:
+    - { name: admin, port: {{ .Values.service.adminPort }}, targetPort: admin }
+  selector: {{- include "beagle.selectorLabels" . | nindent 4 }}
 {{- end }}

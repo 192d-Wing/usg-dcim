@@ -45,6 +45,22 @@ global:
     fsGroup: 10001
     seccompProfile: { type: RuntimeDefault }
 
+  # Prometheus ServiceMonitor scraping. Subcharts emit a ServiceMonitor
+  # for their admin port when enabled is true. Requires the
+  # prometheus-operator CRDs to be installed in the cluster.
+  monitoring:
+    serviceMonitor:
+      enabled: false
+      # Namespace where the Prometheus instance lives — set to the
+      # operator's release namespace so it can discover the SMs.
+      namespace: monitoring
+      interval: 30s
+      scrapeTimeout: 10s
+      # Extra labels merged onto every ServiceMonitor; commonly used to
+      # match a Prometheus instance's serviceMonitorSelector. Example:
+      #   release: kube-prometheus-stack
+      labels: {}
+
 # Per-animal subchart values (passed through to charts/<animal>/).
 
 otter:
@@ -157,7 +173,5 @@ migrations:
 networkPolicy:
   enabled: true
 
-monitoring:
-  serviceMonitor:
-    enabled: true
-    namespace: monitoring
+# (Per-instance monitoring settings live under `global.monitoring` above
+# so subcharts can read them via Helm's global-merge.)
