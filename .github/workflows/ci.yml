@@ -254,19 +254,18 @@ jobs:
           helm template dcim deploy/helm/dcim \
             -f deploy/helm/dcim/values-k3d.yaml > /tmp/dcim-k3d.yaml
 
-      - name: kubectl client-side dry-run
+      - name: Validate rendered manifests with kubeconform
         run: |
-          # Install kubectl just for the validation step.
-          curl -sSLo /usr/local/bin/kubectl \
-            "https://dl.k8s.io/release/$(curl -sL https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-          chmod +x /usr/local/bin/kubectl
-          # --validate=false because CI has no apiserver to fetch the
-          # OpenAPI schema from. We're checking that the rendered YAML
-          # is at least parseable as Kubernetes objects; full schema
-          # validation needs a live cluster (see docs/DEPLOYMENT.md
-          # for the k3d-based smoke flow).
-          kubectl apply --dry-run=client --validate=false -f /tmp/dcim-default.yaml > /dev/null
-          kubectl apply --dry-run=client --validate=false -f /tmp/dcim-k3d.yaml > /dev/null
+          # kubeconform is offline: it ships its own copy of the
+          # upstream OpenAPI schemas, so it works without an apiserver.
+          # Replaces the old `kubectl apply --dry-run=client` step,
+          # which still tries to hit the API server for discovery in
+          # modern kubectl versions even with --validate=false.
+          curl -sSL -o /tmp/kc.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kc.tar.gz -C /usr/local/bin kubeconform
+          kubeconform -summary -strict -kubernetes-version 1.30.0 /tmp/dcim-default.yaml
+          kubeconform -summary -strict -kubernetes-version 1.30.0 /tmp/dcim-k3d.yaml
 
   migrations:
     name: Alembic up / down / up
