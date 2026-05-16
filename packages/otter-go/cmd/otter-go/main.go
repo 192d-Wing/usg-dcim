@@ -22,6 +22,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
 	"github.com/usg-dcim/packages/otter-go/internal/cables"
+	"github.com/usg-dcim/packages/otter-go/internal/dns"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/ipam"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
@@ -60,6 +61,7 @@ func main() {
 	ih := &ipam.Handler{Q: q}
 	ph := &power.Handler{Q: q}
 	bh := &bgp.Handler{Q: q}
+	dh := &dns.Handler{Q: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -95,6 +97,7 @@ func main() {
 		ih.Mount(r)
 		ph.Mount(r)
 		bh.Mount(r)
+		dh.Mount(r)
 	})
 
 	srv := &http.Server{

@@ -9,6 +9,44 @@ import (
 	"github.com/google/uuid"
 )
 
+type DnsZone struct {
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
+	Kind            string     `json:"kind"`
+	FabricID        uuid.UUID  `json:"fabric_id"`
+	SiteID          *uuid.UUID `json:"site_id"`
+	Description     *string    `json:"description"`
+	SoaMname        string     `json:"soa_mname"`
+	SoaRname        string     `json:"soa_rname"`
+	SoaRefresh      int32      `json:"soa_refresh"`
+	SoaRetry        int32      `json:"soa_retry"`
+	SoaExpire       int32      `json:"soa_expire"`
+	SoaMinimum      int32      `json:"soa_minimum"`
+	DefaultTTL      int32      `json:"default_ttl"`
+	Signed          bool       `json:"signed"`
+	ZskRotationDays int32      `json:"zsk_rotation_days"`
+	Nsec3Salt       *string    `json:"nsec3_salt"`
+	Nsec3Iterations int32      `json:"nsec3_iterations"`
+	Nsec3OptOut     bool       `json:"nsec3_opt_out"`
+	PublishCds      bool       `json:"publish_cds"`
+	Frozen          bool       `json:"frozen"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type DnsRecord struct {
+	ID            uuid.UUID       `json:"id"`
+	ZoneID        uuid.UUID       `json:"zone_id"`
+	Name          string          `json:"name"`
+	Type          string          `json:"type"`
+	TTL           *int32          `json:"ttl"`
+	Data          json.RawMessage `json:"data"`
+	Source        string          `json:"source"`
+	IpamAddressID *uuid.UUID      `json:"ipam_address_id"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+}
+
 type Asn struct {
 	ID             uuid.UUID  `json:"id"`
 	Asn            int64      `json:"asn"`
