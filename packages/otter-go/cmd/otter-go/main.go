@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/assets"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
@@ -50,6 +51,7 @@ func main() {
 	rh := &regions.Handler{Q: q}
 	lh := &locations.Handler{Q: q}
 	rkh := &racks.Handler{Q: q}
+	ah := &assets.Handler{Q: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -80,6 +82,7 @@ func main() {
 		rh.Mount(r)
 		lh.Mount(r)
 		rkh.Mount(r)
+		ah.Mount(r)
 	})
 
 	srv := &http.Server{

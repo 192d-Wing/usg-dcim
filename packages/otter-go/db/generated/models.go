@@ -8,6 +8,37 @@ import (
 	"github.com/google/uuid"
 )
 
+type Asset struct {
+	ID                 uuid.UUID  `json:"id"`
+	SiteID             uuid.UUID  `json:"site_id"`
+	RackID             *uuid.UUID `json:"rack_id"`
+	ParentAssetID      *uuid.UUID `json:"parent_asset_id"`
+	Name               string     `json:"name"`
+	Hostname           *string    `json:"hostname"`
+	Kind               string     `json:"kind"`
+	Manufacturer       *string    `json:"manufacturer"`
+	Model              *string    `json:"model"`
+	Serial             *string    `json:"serial"`
+	Firmware           *string    `json:"firmware"`
+	RackPositionU      *int32     `json:"rack_position_u"`
+	RackUnits          *int32     `json:"rack_units"`
+	Face               string     `json:"face"`
+	Mount              string     `json:"mount"`
+	PduSide            *string    `json:"pdu_side"`
+	PsuCount           *int32     `json:"psu_count"`
+	PortCount          *int32     `json:"port_count"`
+	MgmtIP             *string    `json:"mgmt_ip"`
+	MgmtProtocol       *string    `json:"mgmt_protocol"`
+	MgmtPort           *int32     `json:"mgmt_port"`
+	MgmtCredentialsRef *string    `json:"mgmt_credentials_ref"`
+	LifecycleState     string     `json:"lifecycle_state"`
+	InstallDate        *string    `json:"install_date"`
+	WarrantyExpires    *string    `json:"warranty_expires"`
+	MetadataJson       []byte     `json:"metadata_json"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
 type Building struct {
 	ID        uuid.UUID `json:"id"`
 	SiteID    uuid.UUID `json:"site_id"`
