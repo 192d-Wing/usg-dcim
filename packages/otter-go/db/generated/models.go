@@ -8,6 +8,22 @@ import (
 	"github.com/google/uuid"
 )
 
+type Cable struct {
+	ID        uuid.UUID `json:"id"`
+	SiteID    uuid.UUID `json:"site_id"`
+	AAssetID  uuid.UUID `json:"a_asset_id"`
+	APort     *string   `json:"a_port"`
+	BAssetID  uuid.UUID `json:"b_asset_id"`
+	BPort     *string   `json:"b_port"`
+	Medium    *string   `json:"medium"`
+	Color     *string   `json:"color"`
+	LengthM   *string   `json:"length_m"`
+	Label     *string   `json:"label"`
+	Face      *string   `json:"face"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Asset struct {
 	ID                 uuid.UUID  `json:"id"`
 	SiteID             uuid.UUID  `json:"site_id"`
