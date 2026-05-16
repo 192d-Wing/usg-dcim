@@ -22,6 +22,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/cables"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
+	"github.com/usg-dcim/packages/otter-go/internal/ipam"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
 	"github.com/usg-dcim/packages/otter-go/internal/racks"
 	"github.com/usg-dcim/packages/otter-go/internal/regions"
@@ -54,6 +55,7 @@ func main() {
 	rkh := &racks.Handler{Q: q}
 	ah := &assets.Handler{Q: q}
 	ch := &cables.Handler{Q: q}
+	ih := &ipam.Handler{Q: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -86,6 +88,7 @@ func main() {
 		rkh.Mount(r)
 		ah.Mount(r)
 		ch.Mount(r)
+		ih.Mount(r)
 	})
 
 	srv := &http.Server{

@@ -9,6 +9,50 @@ import (
 	"github.com/google/uuid"
 )
 
+type Vrf struct {
+	ID          uuid.UUID `json:"id"`
+	FabricID    uuid.UUID `json:"fabric_id"`
+	Name        string    `json:"name"`
+	RouteTarget *string   `json:"route_target"`
+	Description *string   `json:"description"`
+	IsDefault   bool      `json:"is_default"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type Subnet struct {
+	ID          uuid.UUID  `json:"id"`
+	SupernetID  uuid.UUID  `json:"supernet_id"`
+	FabricID    uuid.UUID  `json:"fabric_id"`
+	VrfID       uuid.UUID  `json:"vrf_id"`
+	SiteID      *uuid.UUID `json:"site_id"`
+	Prefix      string     `json:"prefix"`
+	Name        *string    `json:"name"`
+	Description *string    `json:"description"`
+	Purpose     *string    `json:"purpose"`
+	VlanID      *int32     `json:"vlan_id"`
+	Gateway     *string    `json:"gateway"`
+	VniID       *uuid.UUID `json:"vni_id"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+type IPAddress struct {
+	ID                 uuid.UUID  `json:"id"`
+	SubnetID           uuid.UUID  `json:"subnet_id"`
+	AssetID            *uuid.UUID `json:"asset_id"`
+	Address            string     `json:"address"`
+	Role               string     `json:"role"`
+	Status             string     `json:"status"`
+	Source             string     `json:"source"`
+	DnsName            *string    `json:"dns_name"`
+	Description        *string    `json:"description"`
+	DhcpLeaseExpiresAt *time.Time `json:"dhcp_lease_expires_at"`
+	DhcpMac            *string    `json:"dhcp_mac"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
 type Cable struct {
 	ID        uuid.UUID `json:"id"`
 	SiteID    uuid.UUID `json:"site_id"`
