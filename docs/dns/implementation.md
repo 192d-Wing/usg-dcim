@@ -31,7 +31,7 @@ backend/src/dcim/
 │                          dns_drop_old_metric_samples
 └── migrations/versions/2026*_dns*.py + nsec3_params.py
 
-collector/src/dcim_collector/
+packages/mole/src/dcim_collector/
 ├── dns_agent.py           Polls /dns/servers/{id}/bundle, writes
 │                          Corefile + zone files + GoBGP yaml,
 │                          signals reload
@@ -167,7 +167,7 @@ Four DNS-related arq jobs in [`worker.py`](../../backend/src/dcim/worker.py):
 
 ## Collector
 
-[`collector/src/dcim_collector/dns_agent.py`](../../collector/src/dcim_collector/dns_agent.py)
+[`packages/mole/src/dcim_collector/dns_agent.py`](../../packages/mole/src/dcim_collector/dns_agent.py)
 adds a third concurrent loop to the collector (alongside
 `_device_loop` and `_drain_loop`):
 

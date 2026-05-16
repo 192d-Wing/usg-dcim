@@ -109,7 +109,7 @@ tasks:
   collector:
     desc: Run sample collector (mole, deprecated) locally
     cmds:
-      - uv run --project collector dcim-collector --config collector/sample-config.yaml
+      - uv run --project packages/mole dcim-collector --config packages/mole/sample-config.yaml
 
   finch:
     desc: Start finch (frontend) vite dev server on :5173

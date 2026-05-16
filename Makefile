@@ -64,7 +64,7 @@ worker:
 	uv run --project packages/otter arq dcim.worker.WorkerSettings
 
 collector:
-	uv run --project collector dcim-collector --config collector/sample-config.yaml
+	uv run --project packages/mole dcim-collector --config packages/mole/sample-config.yaml
 
 finch:
 	cd packages/finch && npm install && npm run dev

@@ -18,7 +18,7 @@ services:
     # Native Go collector. The Python implementation under
     # ../../../collector is deprecated as of commit 59a2496; flip the
     # build.context back to it for emergency rollback (see
-    # collector/DEPRECATED.md for the procedure).
+    # packages/mole/DEPRECATED.md for the procedure).
     build:
       context: ../../../packages/badger
       dockerfile: Containerfile
