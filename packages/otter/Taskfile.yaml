@@ -1,0 +1,50 @@
+version: '3'
+
+# Tasks for the otter package (FastAPI API + workers). Invoke from repo
+# root via `task otter:<name>` thanks to the include in ../../Taskfile.yaml.
+
+vars:
+  PROJ: packages/otter
+
+tasks:
+  dev:
+    desc: Run the API locally on :8000 with reload
+    dir: ../..
+    cmds:
+      - uv run --project {{.PROJ}} uvicorn dcim.main:app --reload --port 8000 --host 0.0.0.0
+
+  worker:
+    desc: Run the arq worker locally
+    dir: ../..
+    cmds:
+      - uv run --project {{.PROJ}} arq dcim.worker.WorkerSettings
+
+  test:
+    desc: Run pytest
+    dir: ../..
+    cmds:
+      - uv run --project {{.PROJ}} pytest {{.PROJ}}/tests -q
+
+  lint:
+    desc: Run ruff check
+    dir: ../..
+    cmds:
+      - uv run --project {{.PROJ}} ruff check {{.PROJ}}
+
+  fmt:
+    desc: Run ruff format
+    dir: ../..
+    cmds:
+      - uv run --project {{.PROJ}} ruff format {{.PROJ}}
+
+  migrate:
+    desc: Apply Alembic migrations against the local Postgres
+    dir: ../..
+    cmds:
+      - uv run --project {{.PROJ}} alembic -c {{.PROJ}}/alembic.ini upgrade head
+
+  seed:
+    desc: Load the demo enterprise dataset
+    dir: ../..
+    cmds:
+      - uv run --project {{.PROJ}} python -m dcim.scripts.seed_demo

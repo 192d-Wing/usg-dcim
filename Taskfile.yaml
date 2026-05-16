@@ -1,38 +1,72 @@
 version: '3'
 
+# Root Taskfile. Per-animal tasks live in packages/<animal>/Taskfile.yaml
+# and are invoked as `task <animal>:<task>` (e.g. `task otter:dev`).
+
 env:
   COMPOSE_FILE: deploy/docker/docker-compose.yml
+
+includes:
+  otter:     { taskfile: packages/otter/Taskfile.yaml,     dir: packages/otter }
+  finch:     { taskfile: packages/finch/Taskfile.yaml,     dir: packages/finch }
+  mole:      { taskfile: packages/mole/Taskfile.yaml,      dir: packages/mole }
+  badger:    { taskfile: packages/badger/Taskfile.yaml,    dir: packages/badger }
+  heron:     { taskfile: packages/heron/Taskfile.yaml,     dir: packages/heron }
+  magpie:    { taskfile: packages/magpie/Taskfile.yaml,    dir: packages/magpie }
+  beagle:    { taskfile: packages/beagle/Taskfile.yaml,    dir: packages/beagle }
+  shared-go: { taskfile: packages/shared-go/Taskfile.yaml, dir: packages/shared-go }
 
 tasks:
   help:
     desc: Display available tasks
     cmds:
       - |
-        echo "USG DCIM dev tasks (Python via uv)"
-        echo "  task sync         install backend + collector deps into .venv"
-        echo "  task up           start full stack via podman compose"
-        echo "  task down         stop stack"
+        echo "USG DCIM dev tasks"
+        echo ""
+        echo "Cross-cutting:"
+        echo "  task sync         install Python deps into .venv"
+        echo "  task up / down    start / stop full stack via podman compose"
         echo "  task logs         tail all service logs"
+        echo "  task build        build container images via compose"
+        echo "  task test         run all package test suites"
+        echo "  task lint         run all package linters"
+        echo "  task fmt          run all package formatters"
         echo "  task migrate      apply Alembic migrations against running stack"
-        echo "  task seed         load demo enterprise dataset"
-        echo "  task test         backend pytest + frontend vitest"
-        echo "  task lint         ruff + eslint"
-        echo "  task fmt          ruff format + prettier"
-        echo "  task otter        run API (otter) locally on :8000  [alias: backend]"
-        echo "  task worker       run arq worker locally"
-        echo "  task collector    run sample collector (mole, deprecated) locally"
-        echo "  task finch        vite dev server (finch) on :5173   [alias: frontend]"
+        echo "  task seed         load demo dataset against running stack"
+        echo "  task clean        purge caches + node_modules + .venv"
+        echo ""
+        echo "Per-animal (task <animal>:<task>; run 'task --list' for the full set):"
+        echo "  otter:    dev, worker, test, lint, fmt, migrate, seed"
+        echo "  finch:    dev, build, test, lint, fmt, typecheck"
+        echo "  mole:     run, lint                               (deprecated)"
+        echo "  badger:   build, vet, test"
+        echo "  heron:    build, vet, test"
+        echo "  magpie:   build, vet, test"
+        echo "  beagle:   build, vet, test"
+        echo "  shared-go: vet, test"
+        echo ""
+        echo "Aliases for muscle memory:"
+        echo "  task backend  -> task otter:dev"
+        echo "  task frontend -> task finch:dev"
+        echo "  task worker   -> task otter:worker"
+        echo "  task collector-> task mole:run"
     silent: true
 
-  # Dependency Management
+  # ---- Aliases for the most common single-package commands ----
+  backend:    { desc: "Alias for `task otter:dev`",    deps: [otter:dev] }
+  frontend:   { desc: "Alias for `task finch:dev`",    deps: [finch:dev] }
+  worker:     { desc: "Alias for `task otter:worker`", deps: [otter:worker] }
+  collector:  { desc: "Alias for `task mole:run`",     deps: [mole:run] }
+
+  # ---- Dependency management ----
   sync:
-    desc: Install backend + collector deps into .venv
+    desc: Install Python deps into .venv (uv workspace)
     cmds:
       - uv sync --all-packages --all-extras
 
-  # Podman Compose Tasks
+  # ---- Compose orchestration ----
   up:
-    desc: Start full stack via docker-compose
+    desc: Start full stack via podman compose
     cmds:
       - podman compose -f {{.COMPOSE_FILE}} up -d --build
 
@@ -51,75 +85,48 @@ tasks:
     cmds:
       - podman compose -f {{.COMPOSE_FILE}} build
 
-  # Database Migrations
+  # ---- Operations against the running stack ----
   migrate:
-    desc: Apply Alembic migrations against running stack
+    desc: Apply Alembic migrations against the running stack
     cmds:
-      - podman compose -f {{.COMPOSE_FILE}} exec api alembic upgrade head
+      - podman compose -f {{.COMPOSE_FILE}} exec otter alembic upgrade head
 
-  migrate-local:
-    desc: Apply Alembic migrations locally
-    cmds:
-      - uv run --project packages/otter alembic -c packages/otter/alembic.ini upgrade head
-
-  # Seeding
   seed:
-    desc: Load demo enterprise dataset
+    desc: Load the demo dataset against the running stack
     cmds:
-      - podman compose -f {{.COMPOSE_FILE}} exec api python -m dcim.scripts.seed_demo
+      - podman compose -f {{.COMPOSE_FILE}} exec otter python -m dcim.scripts.seed_demo
 
-  seed-local:
-    desc: Load demo enterprise dataset locally
-    cmds:
-      - uv run --project packages/otter python -m dcim.scripts.seed_demo
-
-  # Testing & Code Quality
+  # ---- Fan-out across all packages ----
   test:
-    desc: Run backend pytest + frontend vitest
-    cmds:
-      - uv run --project packages/otter pytest packages/otter/tests -q
-      - cd packages/finch && npm test --silent
+    desc: Run every package's test suite
+    deps:
+      - otter:test
+      - finch:test
+      - badger:test
+      - heron:test
+      - magpie:test
+      - beagle:test
+      - shared-go:test
 
   lint:
-    desc: Run ruff + eslint
-    cmds:
-      - uv run --project packages/otter ruff check packages/otter
-      - cd packages/finch && npm run lint
+    desc: Run every package's linter
+    deps:
+      - otter:lint
+      - finch:lint
+      - mole:lint
+      - badger:vet
+      - heron:vet
+      - magpie:vet
+      - beagle:vet
+      - shared-go:vet
 
   fmt:
-    desc: Run ruff format + prettier
-    cmds:
-      - uv run --project packages/otter ruff format packages/otter
-      - cd packages/finch && npm run fmt
+    desc: Run every package's formatter (Python + JS only)
+    deps:
+      - otter:fmt
+      - finch:fmt
 
-  # Local Development (animal-named per WORKSPACE.md)
-  otter:
-    desc: Run API (otter) locally on :8000
-    cmds:
-      - uv run --project packages/otter uvicorn dcim.main:app --reload --port 8000 --host 0.0.0.0
-  backend:
-    desc: Alias for `task otter`
-    deps: [otter]
-
-  worker:
-    desc: Run arq worker locally
-    cmds:
-      - uv run --project packages/otter arq dcim.worker.WorkerSettings
-
-  collector:
-    desc: Run sample collector (mole, deprecated) locally
-    cmds:
-      - uv run --project packages/mole dcim-collector --config packages/mole/sample-config.yaml
-
-  finch:
-    desc: Start finch (frontend) vite dev server on :5173
-    cmds:
-      - cd packages/finch && npm install && npm run dev
-  frontend:
-    desc: Alias for `task finch`
-    deps: [finch]
-
-  # Cleanup
+  # ---- Cleanup ----
   clean:
     desc: Clean up generated files and caches
     cmds:
