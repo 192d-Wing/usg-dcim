@@ -14,11 +14,16 @@ import (
 )
 
 type fakeQ struct {
-	lastVrf      dbq.ListVrfsParams
-	lastSubnet   dbq.ListSubnetsParams
-	lastAddr     dbq.ListIPAddressesParams
-	lastFabric   dbq.ListFabricsParams
-	lastSupernet dbq.ListSupernetsParams
+	lastVrf        dbq.ListVrfsParams
+	lastSubnet     dbq.ListSubnetsParams
+	lastAddr       dbq.ListIPAddressesParams
+	lastFabric     dbq.ListFabricsParams
+	lastSupernet   dbq.ListSupernetsParams
+	lastOverlay    dbq.ListOverlaysParams
+	lastVni        dbq.ListVnisParams
+	lastVtep       dbq.ListVtepsParams
+	lastMembership dbq.ListVtepMembershipsParams
+	lastDhcp       dbq.ListDhcpServersParams
 }
 
 func (f *fakeQ) ListVrfs(_ context.Context, a dbq.ListVrfsParams) ([]dbq.Vrf, error) {
@@ -266,5 +271,120 @@ func TestListSupernets_FabricVrfFilters(t *testing.T) {
 	}
 	if f.lastSupernet.VrfID == nil || *f.lastSupernet.VrfID != vid {
 		t.Errorf("vrf_id not threaded")
+	}
+}
+
+// ---- Overlays/VNIs/VTEPs/Memberships/DHCP fakeQ stubs ----
+
+func (f *fakeQ) ListOverlays(_ context.Context, a dbq.ListOverlaysParams) ([]dbq.Overlay, error) {
+	f.lastOverlay = a
+	return nil, nil
+}
+func (f *fakeQ) CountOverlays(_ context.Context, _ dbq.CountOverlaysParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListVnis(_ context.Context, a dbq.ListVnisParams) ([]dbq.Vni, error) {
+	f.lastVni = a
+	return nil, nil
+}
+func (f *fakeQ) CountVnis(_ context.Context, _ dbq.CountVnisParams) (int64, error) { return 0, nil }
+func (f *fakeQ) ListVteps(_ context.Context, a dbq.ListVtepsParams) ([]dbq.Vtep, error) {
+	f.lastVtep = a
+	return nil, nil
+}
+func (f *fakeQ) CountVteps(_ context.Context, _ dbq.CountVtepsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListVtepMemberships(_ context.Context, a dbq.ListVtepMembershipsParams) ([]dbq.VtepVniMembership, error) {
+	f.lastMembership = a
+	return nil, nil
+}
+func (f *fakeQ) CountVtepMemberships(_ context.Context, _ dbq.CountVtepMembershipsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListDhcpServers(_ context.Context, a dbq.ListDhcpServersParams) ([]dbq.DhcpServer, error) {
+	f.lastDhcp = a
+	return nil, nil
+}
+func (f *fakeQ) CountDhcpServers(_ context.Context, _ dbq.CountDhcpServersParams) (int64, error) {
+	return 0, nil
+}
+
+func TestListOverlays_FabricFilter(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/overlays?fabric_id="+fid.String())
+	if f.lastOverlay.FabricID == nil || *f.lastOverlay.FabricID != fid {
+		t.Error("fabric_id not threaded")
+	}
+}
+
+func TestListVnis_AllFilters(t *testing.T) {
+	oid, fid := uuid.New(), uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/vnis?overlay_id="+oid.String()+"&fabric_id="+fid.String()+"&kind=l3")
+	if f.lastVni.OverlayID == nil || *f.lastVni.OverlayID != oid {
+		t.Error("overlay_id")
+	}
+	if f.lastVni.FabricID == nil || *f.lastVni.FabricID != fid {
+		t.Error("fabric_id")
+	}
+	if f.lastVni.Kind == nil || *f.lastVni.Kind != "l3" {
+		t.Error("kind")
+	}
+}
+
+func TestListVteps_BothFilters(t *testing.T) {
+	oid, aid := uuid.New(), uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/vteps?overlay_id="+oid.String()+"&asset_id="+aid.String())
+	if f.lastVtep.OverlayID == nil || *f.lastVtep.OverlayID != oid {
+		t.Error("overlay_id")
+	}
+	if f.lastVtep.AssetID == nil || *f.lastVtep.AssetID != aid {
+		t.Error("asset_id")
+	}
+}
+
+func TestListVtepMemberships_AllThree(t *testing.T) {
+	v, n, o := uuid.New(), uuid.New(), uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/vtep-memberships?vtep_id="+v.String()+"&vni_id="+n.String()+"&overlay_id="+o.String())
+	if f.lastMembership.VtepID == nil || *f.lastMembership.VtepID != v {
+		t.Error("vtep_id")
+	}
+	if f.lastMembership.VniID == nil || *f.lastMembership.VniID != n {
+		t.Error("vni_id")
+	}
+	if f.lastMembership.OverlayID == nil || *f.lastMembership.OverlayID != o {
+		t.Error("overlay_id")
+	}
+}
+
+func TestListDhcpServers_FabricFilter(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/dhcp/servers?fabric_id="+fid.String())
+	if f.lastDhcp.FabricID == nil || *f.lastDhcp.FabricID != fid {
+		t.Error("fabric_id not threaded")
+	}
+}
+
+func TestBadUUIDs_OverlayDhcp(t *testing.T) {
+	for _, p := range []string{
+		"/ipam/overlays?fabric_id=x",
+		"/ipam/vnis?overlay_id=x",
+		"/ipam/vnis?fabric_id=x",
+		"/ipam/vteps?overlay_id=x",
+		"/ipam/vteps?asset_id=x",
+		"/ipam/vtep-memberships?vtep_id=x",
+		"/ipam/vtep-memberships?vni_id=x",
+		"/ipam/vtep-memberships?overlay_id=x",
+		"/ipam/dhcp/servers?fabric_id=x",
+	} {
+		rec := do(t, mount(&fakeQ{}), p)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d", p, rec.Code)
+		}
 	}
 }

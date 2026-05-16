@@ -422,3 +422,65 @@ type Site struct {
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }
+
+type Overlay struct {
+	ID            uuid.UUID  `json:"id"`
+	FabricID      uuid.UUID  `json:"fabric_id"`
+	Name          string     `json:"name"`
+	Kind          string     `json:"kind"`
+	UDPPort       int32      `json:"udp_port"`
+	MTU           *int32     `json:"mtu"`
+	UnderlayVrfID *uuid.UUID `json:"underlay_vrf_id"`
+	Description   *string    `json:"description"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+type Vni struct {
+	ID              uuid.UUID  `json:"id"`
+	OverlayID       uuid.UUID  `json:"overlay_id"`
+	VNI             int32      `json:"vni"`
+	Kind            string     `json:"kind"`
+	Name            *string    `json:"name"`
+	Description     *string    `json:"description"`
+	VlanID          *int32     `json:"vlan_id"`
+	EvpnRouteTarget *string    `json:"evpn_route_target"`
+	VrfID           *uuid.UUID `json:"vrf_id"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type Vtep struct {
+	ID          uuid.UUID `json:"id"`
+	OverlayID   uuid.UUID `json:"overlay_id"`
+	AssetID     uuid.UUID `json:"asset_id"`
+	LoopbackIP  *string   `json:"loopback_ip"`
+	Role        string    `json:"role"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type VtepVniMembership struct {
+	ID        uuid.UUID `json:"id"`
+	VtepID    uuid.UUID `json:"vtep_id"`
+	VniID     uuid.UUID `json:"vni_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type DhcpServer struct {
+	ID                 uuid.UUID  `json:"id"`
+	Name               string     `json:"name"`
+	FabricID           uuid.UUID  `json:"fabric_id"`
+	KeaURL             string     `json:"kea_url"`
+	AuthUsername       *string    `json:"auth_username"`
+	// auth_password intentionally not exposed in API responses.
+	Enabled            bool       `json:"enabled"`
+	LastSyncAt         *time.Time `json:"last_sync_at"`
+	LastSyncStatus     *string    `json:"last_sync_status"`
+	LastSyncError      *string    `json:"last_sync_error"`
+	LastSyncLeaseCount *int32     `json:"last_sync_lease_count"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+}
