@@ -9,6 +9,29 @@ import (
 	"github.com/google/uuid"
 )
 
+type Outlet struct {
+	ID         uuid.UUID `json:"id"`
+	PduAssetID uuid.UUID `json:"pdu_asset_id"`
+	Position   int32     `json:"position"`
+	Label      *string   `json:"label"`
+	Phase      *string   `json:"phase"`
+	MaxAmps    *string   `json:"max_amps"`
+	Receptacle *string   `json:"receptacle"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type PowerConnection struct {
+	ID          uuid.UUID `json:"id"`
+	OutletID    uuid.UUID `json:"outlet_id"`
+	AssetID     uuid.UUID `json:"asset_id"`
+	PsuIndex    int32     `json:"psu_index"`
+	CordColor   *string   `json:"cord_color"`
+	CordLengthM *string   `json:"cord_length_m"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type Vrf struct {
 	ID          uuid.UUID `json:"id"`
 	FabricID    uuid.UUID `json:"fabric_id"`
