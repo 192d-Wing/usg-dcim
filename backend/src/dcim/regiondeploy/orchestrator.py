@@ -51,6 +51,7 @@ from ..models.regiondeploy import (
     RegionDeploymentEventLevel,
     RegionDeploymentStatus,
 )
+from . import cilium as cilium_gen
 from . import crd as crd_gen
 from . import events, preflight
 from . import ignition as ignition_gen
@@ -196,6 +197,12 @@ async def _run_stage(
     if stage_key == "render":
         await _stage_render(db, redis, row)
         return
+    if stage_key == "cni":
+        await _stage_cni(db, redis, row)
+        return
+    if stage_key == "cni.bgp":
+        await _stage_cni_bgp(db, redis, row)
+        return
     # Remaining stages are stubs for now: emit an info event and
     # advance. The UI shows the stage tree progressing without any
     # real cluster mutations happening.
@@ -283,6 +290,81 @@ async def _stage_render(
             "note": (
                 "apply path lands once central-cluster RBAC allows the "
                 "api/worker SA to write tinkerbell.org CRDs"
+            ),
+        },
+    )
+    await db.commit()
+
+
+async def _stage_cni(
+    db: AsyncSession, redis: Any, row: RegionDeployment,
+) -> None:
+    """Render Cilium Helm values for the deployment.
+
+    Same render-but-don't-apply pattern as `_stage_render`: the
+    operator sees the full Helm values blob in the event payload
+    and can copy-paste it into `helm install cilium cilium/cilium
+    --version <ver> -f -` against the regional cluster, while the
+    apply path waits on the regional-cluster kubeconfig retrieval
+    workstream (`joining` stage TODO).
+    """
+    values = cilium_gen.render_cilium_values(row)
+    version = (row.config or {}).get(
+        "cilium_version", cilium_gen.DEFAULT_CILIUM_VERSION,
+    )
+    await events.emit(
+        db, redis,
+        deployment_id=row.id,
+        stage="cni",
+        message=f"rendered Cilium {version} values ({len(values)} top-level keys)",
+        payload={
+            "cilium_version": version,
+            "values_yaml": cilium_gen.dump_values(values),
+            "values": values,
+            "note": (
+                "apply path waits on regional-cluster kubeconfig retrieval"
+            ),
+        },
+    )
+    await db.commit()
+
+
+async def _stage_cni_bgp(
+    db: AsyncSession, redis: Any, row: RegionDeployment,
+) -> None:
+    """Render Cilium BGP CRDs (CiliumBGPClusterConfig / PeerConfig /
+    Advertisement / LoadBalancerIPPool) from the deployment's BGP
+    config.
+
+    Skipping is *not* an error condition: a deployment that hasn't
+    filled in bgp_local_asn / bgp_peers yet emits an empty render
+    plus a warn event so the UI flags the gap without breaking the
+    chain.
+    """
+    cfg = row.config or {}
+    if not cfg.get("bgp_local_asn") or not cfg.get("bgp_peers"):
+        await events.emit(
+            db, redis,
+            deployment_id=row.id,
+            stage="cni.bgp",
+            level=RegionDeploymentEventLevel.warn,
+            message="skipping BGP render: bgp_local_asn or bgp_peers unset",
+        )
+        await db.commit()
+        return
+
+    crds = cilium_gen.render_bgp_crds(row)
+    await events.emit(
+        db, redis,
+        deployment_id=row.id,
+        stage="cni.bgp",
+        message=f"rendered {len(crds)} Cilium BGP CRDs",
+        payload={
+            "crd_count": len(crds),
+            "crds_yaml": cilium_gen.dump_yaml(crds),
+            "crds": crds,
+            "note": (
+                "apply path waits on regional-cluster kubeconfig retrieval"
             ),
         },
     )
