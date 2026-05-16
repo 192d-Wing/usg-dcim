@@ -20,11 +20,13 @@ from ..errors import NotFoundError, ValidationError
 from ..models.regiondeploy import (
     RegionDeployment,
     RegionDeploymentEvent,
+    RegionDeploymentEventLevel,
     RegionDeploymentNode,
     RegionDeploymentStatus,
 )
 from ..regiondeploy import events as rd_events
 from ..regiondeploy import preflight
+from ..regiondeploy.k8s import K8sClient
 from ..schemas.common import Page, PageParams
 from ..schemas.regiondeploy import (
     PreflightCheckOut,
@@ -288,27 +290,76 @@ async def post_kubeconfig_callback(
             f"deployment is {row.status.value}; kubeconfig callback only "
             f"accepted during provisioning/joining",
         )
-    # Placeholder ref name — the orchestrator looks for this Secret
-    # in the joining stage. Real Secret creation lands with the
-    # central-cluster k8s-client workstream.
-    row.kubeconfig_secret_ref = f"tinkerbell/kubeconfig-{deployment_id}"
+    # Persist the kubeconfig as a Secret in the central cluster's
+    # `tinkerbell` namespace. RBAC for the SA is shipped in
+    # infra/k8s/central/region-deploy-rbac.yaml. On a kubeconfig
+    # retry (operator re-ran kubeadm-init, the action posts again)
+    # create_or_replace_secret idempotently overwrites the prior
+    # value rather than failing.
+    secret_name = f"kubeconfig-{deployment_id}"
+    secret_namespace = "tinkerbell"
+    k8s = None
+    write_succeeded = False
+    write_error: str | None = None
+    try:
+        k8s = K8sClient.from_in_pod()
+        await k8s.create_or_replace_secret(
+            namespace=secret_namespace,
+            name=secret_name,
+            data={"kubeconfig": payload.kubeconfig},
+            labels={
+                "dcim.region-deployment": str(deployment_id),
+                "app.kubernetes.io/component": "region-deploy",
+            },
+        )
+        write_succeeded = True
+    except (OSError, RuntimeError) as exc:
+        # OSError covers "SA token file missing" (local dev / tests).
+        # RuntimeError covers "KUBERNETES_SERVICE_HOST unset" and
+        # K8sError (which subclasses RuntimeError) for API failures.
+        # In all of these we still record the ref so the orchestrator
+        # can decide what to do — but we surface the write failure in
+        # the event log so an operator sees the problem.
+        write_error = f"{type(exc).__name__}: {exc}"
+    finally:
+        if k8s is not None:
+            await k8s.aclose()
+
+    row.kubeconfig_secret_ref = f"{secret_namespace}/{secret_name}"
     await db.commit()
-    # Best-effort event for the SSE stream — gives operators visible
-    # confirmation that the callback fired without exposing the
-    # kubeconfig content in the event log.
+    # Best-effort event for the SSE stream — confirms the callback
+    # fired and whether the Secret-write succeeded, without exposing
+    # the kubeconfig content in the event log itself.
     settings = get_settings()
     redis = redis_from_url(str(settings.redis_dsn), decode_responses=True)
     try:
-        await rd_events.emit(
-            db, redis,
-            deployment_id=deployment_id,
-            stage="joining",
-            message=(
+        if write_succeeded:
+            msg = (
                 f"kubeconfig callback received from node {payload.node_id} "
                 f"({len(payload.kubeconfig)} bytes); "
-                "Secret creation pending kubeconfig workstream"
-            ),
-        )
+                f"Secret {secret_namespace}/{secret_name} created"
+            )
+            payload_extra = {"secret_ref": row.kubeconfig_secret_ref}
+            await rd_events.emit(
+                db, redis,
+                deployment_id=deployment_id,
+                stage="joining",
+                message=msg,
+                payload=payload_extra,
+            )
+        else:
+            await rd_events.emit(
+                db, redis,
+                deployment_id=deployment_id,
+                stage="joining",
+                level=RegionDeploymentEventLevel.error,
+                message=(
+                    f"kubeconfig callback received from node {payload.node_id} "
+                    f"but Secret write failed: {write_error}. "
+                    "Check the central-cluster RBAC (see "
+                    "infra/k8s/central/region-deploy-rbac.yaml)."
+                ),
+            )
         await db.commit()
     finally:
         await redis.close()
