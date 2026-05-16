@@ -28,9 +28,43 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/usg-dcim/packages/shared-go/env"
+	"github.com/usg-dcim/packages/shared-go/promx"
+)
+
+// Metrics — service-namespaced under `dcim_magpie_` to avoid colliding
+// with the Python otter's `dcim_alerts_*` series during cutover. Drop
+// the Python emission in packages/otter/src/dcim/services/alerts.py once
+// magpie is the sole producer.
+var (
+	alertEvalRunsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dcim_magpie_alert_eval_runs_total",
+		Help: "Rule-evaluation runs by outcome (ok, load_error).",
+	}, []string{"outcome"})
+
+	ruleEvalsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dcim_magpie_rule_evals_total",
+		Help: "Per-rule evaluations by outcome (ok, error, skipped).",
+	}, []string{"outcome"})
+
+	alertsFiredTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dcim_magpie_alerts_fired_total",
+		Help: "Alerts transitioned to firing, by severity.",
+	}, []string{"severity"})
+
+	alertsResolvedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dcim_magpie_alerts_resolved_total",
+		Help: "Alerts transitioned to resolved.",
+	})
+
+	sweepRunsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dcim_magpie_sweep_runs_total",
+		Help: "Collector-sweep runs by outcome (ok, error).",
+	}, []string{"outcome"})
 )
 
 type alertRule struct {
@@ -89,6 +123,7 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+		promx.Mount(mux)
 		_ = http.ListenAndServe(env.String("ALERTS_HEALTH_ADDR", ":8101"), mux)
 	}()
 
@@ -139,8 +174,10 @@ func (e *engine) evaluateRules(ctx context.Context) {
 	rules, err := e.loadRules(ctx)
 	if err != nil {
 		e.log.Error("rules_load_failed", "err", err)
+		alertEvalRunsTotal.WithLabelValues("load_error").Inc()
 		return
 	}
+	alertEvalRunsTotal.WithLabelValues("ok").Inc()
 
 	sem := make(chan struct{}, e.cfg.maxConcurrentRules)
 	var wg sync.WaitGroup
@@ -162,7 +199,15 @@ func (e *engine) evaluateRules(ctx context.Context) {
 			fired, resolved, fIDs, rIDs, err := e.evalOne(ctx, r)
 			if err != nil {
 				e.log.Warn("rule_eval_failed", "rule", r.Name, "err", err)
+				ruleEvalsTotal.WithLabelValues("error").Inc()
 				return
+			}
+			ruleEvalsTotal.WithLabelValues("ok").Inc()
+			if fired > 0 {
+				alertsFiredTotal.WithLabelValues(r.Severity).Add(float64(fired))
+			}
+			if resolved > 0 {
+				alertsResolvedTotal.Add(float64(resolved))
 			}
 			mu.Lock()
 			totalFired += fired
@@ -348,9 +393,11 @@ func (e *engine) sweepCollectors(ctx context.Context) {
 	`, threshold)
 	if err != nil {
 		e.log.Error("collector_sweep_failed", "err", err)
+		sweepRunsTotal.WithLabelValues("error").Inc()
 		return
 	}
 	defer rows.Close()
+	sweepRunsTotal.WithLabelValues("ok").Inc()
 
 	type stale struct {
 		id, siteID uuid.UUID

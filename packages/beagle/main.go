@@ -23,8 +23,31 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	probing "github.com/prometheus-community/pro-bing"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/usg-dcim/packages/shared-go/env"
+	"github.com/usg-dcim/packages/shared-go/promx"
+)
+
+// Metrics — service-namespaced under `dcim_beagle_`. No Python
+// counterpart in otter to collide with; these are new.
+var (
+	probesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dcim_beagle_probes_total",
+		Help: "DNS health-check probes performed, labeled by protocol and result.",
+	}, []string{"protocol", "result"})
+
+	probeDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "dcim_beagle_probe_duration_seconds",
+		Help:    "Probe duration in seconds, labeled by protocol.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0},
+	}, []string{"protocol"})
+
+	probeCyclesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dcim_beagle_probe_cycles_total",
+		Help: "Outer probe-loop cycles by outcome (ok, load_error).",
+	}, []string{"outcome"})
 )
 
 type check struct {
@@ -56,6 +79,7 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+		promx.Mount(mux)
 		_ = http.ListenAndServe(env.String("DNS_PROBE_HEALTH_ADDR", ":8102"), mux)
 	}()
 
@@ -88,8 +112,10 @@ func (p *prober) runOnce(ctx context.Context) {
 	due, err := p.loadDue(ctx)
 	if err != nil {
 		p.log.Error("load_due_failed", "err", err)
+		probeCyclesTotal.WithLabelValues("load_error").Inc()
 		return
 	}
+	probeCyclesTotal.WithLabelValues("ok").Inc()
 	if len(due) == 0 {
 		return
 	}
@@ -105,7 +131,10 @@ func (p *prober) runOnce(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			defer func() { <-p.sem }()
+			started := time.Now()
 			status, errMsg := p.probe(ctx, c)
+			probeDuration.WithLabelValues(c.protocol).Observe(time.Since(started).Seconds())
+			probesTotal.WithLabelValues(c.protocol, status).Inc()
 			if status != c.currentStatus {
 				mu.Lock()
 				changed++

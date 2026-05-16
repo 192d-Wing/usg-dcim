@@ -37,8 +37,34 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/usg-dcim/packages/shared-go/env"
+	"github.com/usg-dcim/packages/shared-go/promx"
+)
+
+// Counters/histograms exposed at /metrics. Service-namespaced under
+// `dcim_heron_` so they don't collide with the Python otter's
+// `dcim_telemetry_*` series during the cutover. Once heron is the sole
+// ingest producer, the Python otter telemetry counters in
+// packages/otter/src/dcim/metrics.py can be retired in favor of these.
+var (
+	ingestBatchesTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "dcim_heron_ingest_batches_total",
+		Help: "Ingest batches processed by outcome (ok, hyper_error, fresh_error, auth_error, parse_error).",
+	}, []string{"outcome"})
+
+	ingestSamplesTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "dcim_heron_ingest_samples_total",
+		Help: "Total samples accepted by the ingest endpoint.",
+	})
+
+	ingestDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "dcim_heron_ingest_duration_seconds",
+		Help:    "End-to-end duration of /v1/ingest/telemetry.",
+		Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0},
+	})
 )
 
 const requiredCap = "collectors:ingest:write"
@@ -93,6 +119,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+	promx.Mount(mux)
 	// Path matches the Python API surface (FastAPI mounts at /api/v1).
 	// /v1/ingest/telemetry is also accepted for clients that talk
 	// directly to this service without going through the api proxy.
@@ -154,6 +181,9 @@ func buildTLSConfig(clientCAFile string, requireClientCert bool) (*tls.Config, e
 }
 
 func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	defer func() { ingestDuration.Observe(time.Since(started).Seconds()) }()
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -161,6 +191,7 @@ func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	if err := s.authorize(r); err != nil {
 		s.log.Warn("auth_rejected", "err", err)
+		ingestBatchesTotal.WithLabelValues("auth_error").Inc()
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
@@ -169,14 +200,17 @@ func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&b); err != nil {
+		ingestBatchesTotal.WithLabelValues("parse_error").Inc()
 		http.Error(w, "invalid body: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if len(b.Samples) == 0 || len(b.Samples) > 5000 {
+		ingestBatchesTotal.WithLabelValues("parse_error").Inc()
 		http.Error(w, "samples must be 1..5000", http.StatusBadRequest)
 		return
 	}
 	if len(b.BatchID) < 8 || len(b.BatchID) > 64 {
+		ingestBatchesTotal.WithLabelValues("parse_error").Inc()
 		http.Error(w, "batch_id must be 8..64 chars", http.StatusBadRequest)
 		return
 	}
@@ -205,14 +239,19 @@ func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	if hyperErr != nil {
 		s.log.Error("hypertable_write_failed", "err", hyperErr, "batch", b.BatchID)
+		ingestBatchesTotal.WithLabelValues("hyper_error").Inc()
 		http.Error(w, "hypertable write failed", http.StatusBadGateway)
 		return
 	}
 	if freshErr != nil {
 		s.log.Error("freshness_upsert_failed", "err", freshErr, "batch", b.BatchID)
+		ingestBatchesTotal.WithLabelValues("fresh_error").Inc()
 		http.Error(w, "freshness upsert failed", http.StatusBadGateway)
 		return
 	}
+
+	ingestBatchesTotal.WithLabelValues("ok").Inc()
+	ingestSamplesTotal.Add(float64(len(b.Samples)))
 
 	resp := map[string]any{
 		"accepted":    len(b.Samples),
