@@ -48,6 +48,7 @@ from sqlalchemy.orm import selectinload
 from ..db import async_session
 from ..models.regiondeploy import (
     RegionDeployment,
+    RegionDeploymentEvent,
     RegionDeploymentEventLevel,
     RegionDeploymentStatus,
 )
@@ -56,6 +57,7 @@ from . import cilium as cilium_gen
 from . import crd as crd_gen
 from . import events, preflight
 from . import ignition as ignition_gen
+from . import verify as verify_mod
 
 log = structlog.get_logger("dcim.regiondeploy.orchestrator")
 
@@ -206,6 +208,9 @@ async def _run_stage(
         return
     if stage_key in _APPS_STAGES:
         await _stage_app(db, redis, row, stage_key)
+        return
+    if stage_key == "verify":
+        await _stage_verify(db, redis, row)
         return
     # Remaining stages are stubs for now: emit an info event and
     # advance. The UI shows the stage tree progressing without any
@@ -415,6 +420,70 @@ async def _stage_cni_bgp(
         },
     )
     await db.commit()
+
+
+async def _stage_verify(
+    db: AsyncSession, redis: Any, row: RegionDeployment,
+) -> None:
+    """Run the verify checklist and emit a summary event.
+
+    Pulls the full event log for the deployment so the render-chain
+    checks can confirm each render-emitting stage produced output.
+    Fails the stage when any non-pending check failed — preserves
+    the "verify is a hard gate before finalize" contract from the
+    plan doc.
+
+    Pending (deferred-external) checks don't block: those need the
+    regional-cluster kubeconfig path that hasn't landed yet, and
+    the orchestrator can't wait indefinitely on a workstream
+    outside its scope. The UI surfaces them as "pending external"
+    so an operator knows the verify pass was partial.
+    """
+    # Load every event for this deployment. The render-chain check
+    # filters by stage name; the no-error check scans all levels.
+    # Bigserial PKs keep this query a single ordered scan.
+    stmt = (
+        select(RegionDeploymentEvent)
+        .where(RegionDeploymentEvent.deployment_id == row.id)
+        .order_by(RegionDeploymentEvent.id.asc())
+    )
+    log = list((await db.execute(stmt)).scalars().all())
+
+    ctx = verify_mod.Context(
+        deployment=row, nodes=list(row.nodes),
+        config=row.config, events=log,
+    )
+    outcomes = verify_mod.run_all(ctx)
+    failed = [o for o in outcomes if not o.passed and not o.pending]
+    pending = [o for o in outcomes if o.pending]
+
+    await events.emit(
+        db, redis,
+        deployment_id=row.id,
+        stage="verify",
+        message=(
+            f"verify: {len(outcomes) - len(failed) - len(pending)} ok, "
+            f"{len(failed)} failed, {len(pending)} deferred-external"
+        ),
+        payload={
+            "checks": [
+                {
+                    "key": o.key,
+                    "label": o.label,
+                    "passed": o.passed,
+                    "pending": o.pending,
+                    "fix_hint": o.fix_hint,
+                }
+                for o in outcomes
+            ],
+            "failed_count": len(failed),
+            "pending_count": len(pending),
+        },
+    )
+    await db.commit()
+    if failed:
+        keys = ", ".join(o.key for o in failed)
+        raise RuntimeError(f"verify failed: {keys}")
 
 
 async def _stage_preflight(
