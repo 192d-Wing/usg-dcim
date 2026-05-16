@@ -18,15 +18,40 @@ spec:
         - name: heron
           image: {{ include "heron.image" . }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
-          command: ["uvicorn", "dcim.main:app", "--host", "0.0.0.0", "--port", "8443"]
           ports:
             - { name: https, containerPort: 8443 }
           env:
-            - { name: DCIM_COLLECTOR_MTLS_REQUIRED, value: {{ .Values.mtls.enabled | quote }} }
-            - { name: DCIM_POSTGRES_DSN, value: {{ .Values.global.postgresql.dsn | quote }} }
-            - { name: DCIM_REDIS_DSN,    value: {{ .Values.global.redis.dsn | quote }} }
+            - { name: INGEST_ADDR, value: ":8443" }
+            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ .Values.global.postgresql.dsn | quote }} }
+            {{- if .Values.mtls.enabled }}
+            - { name: INGEST_TLS_CERT, value: "/etc/heron/tls/tls.crt" }
+            - { name: INGEST_TLS_KEY,  value: "/etc/heron/tls/tls.key" }
+            - { name: INGEST_TLS_CLIENT_CA, value: "/etc/heron/client-ca/ca.crt" }
+            - { name: INGEST_TLS_REQUIRE_CLIENT_CERT, value: {{ .Values.mtls.requireClientCert | quote }} }
+            {{- end }}
+          {{- if .Values.mtls.enabled }}
+          volumeMounts:
+            - { name: server-tls,    mountPath: /etc/heron/tls,        readOnly: true }
+            - { name: client-ca,     mountPath: /etc/heron/client-ca,  readOnly: true }
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.mtls.enabled }}
+      volumes:
+        - name: server-tls
+          secret:
+            secretName: {{ .Values.mtls.serverCertSecret }}
+        - name: client-ca
+          secret:
+            secretName: {{ .Values.mtls.clientCABundleSecret }}
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

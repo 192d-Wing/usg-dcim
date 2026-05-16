@@ -22,6 +22,8 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -95,11 +97,58 @@ func main() {
 	mux.HandleFunc("/api/v1/ingest/telemetry", s.handleIngest)
 	mux.HandleFunc("/v1/ingest/telemetry", s.handleIngest)
 
+	srv := &http.Server{Addr: addr, Handler: mux}
+
+	certFile := os.Getenv("INGEST_TLS_CERT")
+	keyFile := os.Getenv("INGEST_TLS_KEY")
+	if certFile != "" && keyFile != "" {
+		tlsCfg, err := buildTLSConfig(
+			os.Getenv("INGEST_TLS_CLIENT_CA"),
+			envDefault("INGEST_TLS_REQUIRE_CLIENT_CERT", "false") != "false",
+		)
+		if err != nil {
+			log.Error("tls_config_failed", "err", err)
+			os.Exit(1)
+		}
+		srv.TLSConfig = tlsCfg
+		log.Info("ingest_listen_tls", "addr", addr, "mtls", tlsCfg.ClientAuth != tls.NoClientCert)
+		if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil {
+			log.Error("listen_failed", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	log.Info("ingest_listen", "addr", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := srv.ListenAndServe(); err != nil {
 		log.Error("listen_failed", "err", err)
 		os.Exit(1)
 	}
+}
+
+// buildTLSConfig returns a TLS config suitable for ListenAndServeTLS.
+// If clientCAFile is set, client certs are accepted; if requireClientCert
+// is true, a valid client cert is required and verified against the CA.
+func buildTLSConfig(clientCAFile string, requireClientCert bool) (*tls.Config, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if clientCAFile == "" {
+		return cfg, nil
+	}
+	pem, err := os.ReadFile(clientCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read client CA: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("no PEM certs found in %s", clientCAFile)
+	}
+	cfg.ClientCAs = pool
+	if requireClientCert {
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+	} else {
+		cfg.ClientAuth = tls.VerifyClientCertIfGiven
+	}
+	return cfg, nil
 }
 
 func envDefault(k, d string) string {
