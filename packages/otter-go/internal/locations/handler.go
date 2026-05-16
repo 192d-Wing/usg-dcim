@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -26,6 +27,9 @@ type Querier interface {
 	CountRooms(ctx context.Context, arg dbq.CountRoomsParams) (int64, error)
 	ListRows(ctx context.Context, arg dbq.ListRowsParams) ([]dbq.Row, error)
 	CountRows(ctx context.Context, arg dbq.CountRowsParams) (int64, error)
+	CreateBuilding(ctx context.Context, arg dbq.CreateBuildingParams) (dbq.Building, error)
+	CreateRoom(ctx context.Context, arg dbq.CreateRoomParams) (dbq.Room, error)
+	CreateRow(ctx context.Context, arg dbq.CreateRowParams) (dbq.Row, error)
 }
 
 type Handler struct {
@@ -36,6 +40,9 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/buildings", h.listBuildings)
 	r.Get("/rooms", h.listRooms)
 	r.Get("/rows", h.listRows)
+	r.With(auth.RequireCapability("inventory:buildings:create")).Post("/buildings", h.createBuilding)
+	r.With(auth.RequireCapability("inventory:rooms:create")).Post("/rooms", h.createRoom)
+	r.With(auth.RequireCapability("inventory:rows:create")).Post("/rows", h.createRow)
 }
 
 type buildingsPage struct {

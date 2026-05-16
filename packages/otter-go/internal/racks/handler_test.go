@@ -33,6 +33,15 @@ func (f *fakeQ) GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error) {
 	}
 	return dbq.Rack{}, pgx.ErrNoRows
 }
+func (f *fakeQ) CreateRack(_ context.Context, a dbq.CreateRackParams) (dbq.Rack, error) {
+	return dbq.Rack{ID: uuid.New(), SiteID: a.SiteID, RowID: a.RowID, Name: a.Name, Code: a.Code, UHeight: a.UHeight}, nil
+}
+func (f *fakeQ) UpdateRack(_ context.Context, a dbq.UpdateRackParams) (dbq.Rack, error) {
+	return dbq.Rack{ID: a.ID}, nil
+}
+func (f *fakeQ) GetRackAssetsForShrinkCheck(_ context.Context, _ uuid.UUID) ([]dbq.RackPlacedAsset, error) {
+	return nil, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

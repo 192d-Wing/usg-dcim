@@ -43,6 +43,15 @@ func (f *fakeQ) ListRows(_ context.Context, a dbq.ListRowsParams) ([]dbq.Row, er
 func (f *fakeQ) CountRows(_ context.Context, _ dbq.CountRowsParams) (int64, error) {
 	return int64(len(f.rows)), nil
 }
+func (f *fakeQ) CreateBuilding(_ context.Context, a dbq.CreateBuildingParams) (dbq.Building, error) {
+	return dbq.Building{ID: uuid.New(), SiteID: a.SiteID, Name: a.Name, Code: a.Code}, nil
+}
+func (f *fakeQ) CreateRoom(_ context.Context, a dbq.CreateRoomParams) (dbq.Room, error) {
+	return dbq.Room{ID: uuid.New(), BuildingID: a.BuildingID, Name: a.Name, Code: a.Code, FloorAreaSqft: a.FloorAreaSqft}, nil
+}
+func (f *fakeQ) CreateRow(_ context.Context, a dbq.CreateRowParams) (dbq.Row, error) {
+	return dbq.Row{ID: uuid.New(), RoomID: a.RoomID, Name: a.Name, Code: a.Code}, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

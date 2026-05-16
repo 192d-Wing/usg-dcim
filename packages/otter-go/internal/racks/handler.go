@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -20,6 +21,9 @@ type Querier interface {
 	ListRacks(ctx context.Context, arg dbq.ListRacksParams) ([]dbq.Rack, error)
 	CountRacks(ctx context.Context, arg dbq.CountRacksParams) (int64, error)
 	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
+	CreateRack(ctx context.Context, arg dbq.CreateRackParams) (dbq.Rack, error)
+	UpdateRack(ctx context.Context, arg dbq.UpdateRackParams) (dbq.Rack, error)
+	GetRackAssetsForShrinkCheck(ctx context.Context, rackID uuid.UUID) ([]dbq.RackPlacedAsset, error)
 }
 
 type Handler struct {
@@ -29,6 +33,8 @@ type Handler struct {
 func (h *Handler) Mount(r chi.Router) {
 	r.Get("/racks", h.list)
 	r.Get("/racks/{id}", h.get)
+	r.With(auth.RequireCapability("inventory:racks:create")).Post("/racks", h.create)
+	r.With(auth.RequireCapability("inventory:racks:update")).Patch("/racks/{id}", h.update)
 }
 
 type listResponse struct {
