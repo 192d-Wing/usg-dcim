@@ -20,6 +20,13 @@ type fakeQ struct {
 	lastAnycast dbq.ListAnycastGroupsParams
 	lastFwd     dbq.ListDnsForwardersParams
 	lastCatalog dbq.ListDnsCatalogZonesParams
+	lastBL      dbq.ListDnsBlocklistsParams
+	lastBLE     dbq.ListDnsBlocklistEntriesParams
+	lastView    dbq.ListDnsViewsParams
+	lastHC      dbq.ListDnsHealthChecksParams
+	lastPeer    dbq.ListBgpPeersParams
+	lastBind    dbq.ListAnycastBindingsParams
+	blGetErr    error
 }
 
 func (f *fakeQ) ListDnsZones(_ context.Context, a dbq.ListDnsZonesParams) ([]dbq.DnsZone, error) {
@@ -68,6 +75,54 @@ func (f *fakeQ) ListDnsCatalogZones(_ context.Context, a dbq.ListDnsCatalogZones
 	return nil, nil
 }
 func (f *fakeQ) CountDnsCatalogZones(_ context.Context, _ dbq.CountDnsCatalogZonesParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListDnsBlocklists(_ context.Context, a dbq.ListDnsBlocklistsParams) ([]dbq.DnsBlocklist, error) {
+	f.lastBL = a
+	return nil, nil
+}
+func (f *fakeQ) CountDnsBlocklists(_ context.Context, _ dbq.CountDnsBlocklistsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) GetDnsBlocklist(_ context.Context, _ uuid.UUID) (dbq.DnsBlocklist, error) {
+	if f.blGetErr != nil {
+		return dbq.DnsBlocklist{}, f.blGetErr
+	}
+	return dbq.DnsBlocklist{}, nil
+}
+func (f *fakeQ) ListDnsBlocklistEntries(_ context.Context, a dbq.ListDnsBlocklistEntriesParams) ([]dbq.DnsBlocklistEntry, error) {
+	f.lastBLE = a
+	return nil, nil
+}
+func (f *fakeQ) CountDnsBlocklistEntries(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListDnsViews(_ context.Context, a dbq.ListDnsViewsParams) ([]dbq.DnsView, error) {
+	f.lastView = a
+	return nil, nil
+}
+func (f *fakeQ) CountDnsViews(_ context.Context, _ dbq.CountDnsViewsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListDnsHealthChecks(_ context.Context, a dbq.ListDnsHealthChecksParams) ([]dbq.DnsHealthCheck, error) {
+	f.lastHC = a
+	return nil, nil
+}
+func (f *fakeQ) CountDnsHealthChecks(_ context.Context, _ dbq.CountDnsHealthChecksParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListBgpPeers(_ context.Context, a dbq.ListBgpPeersParams) ([]dbq.BgpPeer, error) {
+	f.lastPeer = a
+	return nil, nil
+}
+func (f *fakeQ) CountBgpPeers(_ context.Context, _ dbq.CountBgpPeersParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListAnycastBindings(_ context.Context, a dbq.ListAnycastBindingsParams) ([]dbq.AnycastBgpBinding, error) {
+	f.lastBind = a
+	return nil, nil
+}
+func (f *fakeQ) CountAnycastBindings(_ context.Context, _ dbq.CountAnycastBindingsParams) (int64, error) {
 	return 0, nil
 }
 
@@ -189,6 +244,74 @@ func TestListCatalogZones_FabricFilter(t *testing.T) {
 	}
 }
 
+func TestListBlocklists_FabricFilter(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/blocklists?fabric_id="+fid.String())
+	if f.lastBL.FabricID == nil || *f.lastBL.FabricID != fid {
+		t.Error("fabric_id")
+	}
+}
+
+func TestListBlocklistEntries_PassesParent(t *testing.T) {
+	bid := uuid.New()
+	f := &fakeQ{}
+	rec := do(t, mount(f), "/dns/blocklists/"+bid.String()+"/entries")
+	if rec.Code != 200 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.lastBLE.BlocklistID != bid {
+		t.Error("blocklist_id")
+	}
+}
+
+func TestListBlocklistEntries_ParentNotFound(t *testing.T) {
+	f := &fakeQ{blGetErr: pgx.ErrNoRows}
+	rec := do(t, mount(f), "/dns/blocklists/"+uuid.New().String()+"/entries")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("got %d", rec.Code)
+	}
+}
+
+func TestListViews_FabricFilter(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/views?fabric_id="+fid.String())
+	if f.lastView.FabricID == nil || *f.lastView.FabricID != fid {
+		t.Error("fabric_id")
+	}
+}
+
+func TestListHealthChecks_FabricFilter(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/health-checks?fabric_id="+fid.String())
+	if f.lastHC.FabricID == nil || *f.lastHC.FabricID != fid {
+		t.Error("fabric_id")
+	}
+}
+
+func TestListBgpPeers_SiteFilter(t *testing.T) {
+	sid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/bgp-peers?site_id="+sid.String())
+	if f.lastPeer.SiteID == nil || *f.lastPeer.SiteID != sid {
+		t.Error("site_id")
+	}
+}
+
+func TestListAnycastBindings_BothFilters(t *testing.T) {
+	dsid, pid := uuid.New(), uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/anycast-bindings?dns_server_id="+dsid.String()+"&bgp_peer_id="+pid.String())
+	if f.lastBind.DnsServerID == nil || *f.lastBind.DnsServerID != dsid {
+		t.Error("dns_server_id")
+	}
+	if f.lastBind.BgpPeerID == nil || *f.lastBind.BgpPeerID != pid {
+		t.Error("bgp_peer_id")
+	}
+}
+
 func TestBadUUIDs(t *testing.T) {
 	for _, p := range []string{
 		"/dns/zones?fabric_id=x",
@@ -201,6 +324,13 @@ func TestBadUUIDs(t *testing.T) {
 		"/dns/anycast-groups?fabric_id=x",
 		"/dns/forwarders?fabric_id=x",
 		"/dns/catalog-zones?fabric_id=x",
+		"/dns/blocklists?fabric_id=x",
+		"/dns/blocklists/x/entries",
+		"/dns/views?fabric_id=x",
+		"/dns/health-checks?fabric_id=x",
+		"/dns/bgp-peers?site_id=x",
+		"/dns/anycast-bindings?dns_server_id=x",
+		"/dns/anycast-bindings?bgp_peer_id=x",
 	} {
 		rec := do(t, mount(&fakeQ{}), p)
 		if rec.Code != http.StatusBadRequest {

@@ -520,6 +520,79 @@ type DnsCatalogZone struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type DnsBlocklist struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	FabricID    uuid.UUID `json:"fabric_id"`
+	Action      string    `json:"action"`
+	SinkIPv4    *string   `json:"sink_ipv4"`
+	SinkIPv6    *string   `json:"sink_ipv6"`
+	Enabled     bool      `json:"enabled"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type DnsBlocklistEntry struct {
+	ID          uuid.UUID `json:"id"`
+	BlocklistID uuid.UUID `json:"blocklist_id"`
+	Pattern     string    `json:"pattern"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type DnsView struct {
+	ID          uuid.UUID       `json:"id"`
+	Name        string          `json:"name"`
+	FabricID    uuid.UUID       `json:"fabric_id"`
+	MatchCidrs  json.RawMessage `json:"match_cidrs"`
+	Priority    int32           `json:"priority"`
+	Description *string         `json:"description"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type DnsHealthCheck struct {
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
+	FabricID        uuid.UUID  `json:"fabric_id"`
+	TargetIP        string     `json:"target_ip"`
+	Protocol        string     `json:"protocol"`
+	Port            *int32     `json:"port"`
+	Path            string     `json:"path"`
+	IntervalSeconds int32      `json:"interval_seconds"`
+	TimeoutSeconds  int32      `json:"timeout_seconds"`
+	Enabled         bool       `json:"enabled"`
+	Status          string     `json:"status"`
+	LastCheckedAt   *time.Time `json:"last_checked_at"`
+	LastError       *string    `json:"last_error"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+type BgpPeer struct {
+	ID                uuid.UUID  `json:"id"`
+	Name              string     `json:"name"`
+	SiteID            uuid.UUID  `json:"site_id"`
+	LocalAsnID        uuid.UUID  `json:"local_asn_id"`
+	PeerAsnID         uuid.UUID  `json:"peer_asn_id"`
+	PeerIP            string     `json:"peer_ip"`
+	PeerDescription   *string    `json:"peer_description"`
+	TcpAoKeyChainID   *uuid.UUID `json:"tcp_ao_key_chain_id"`
+	Enabled           bool       `json:"enabled"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+type AnycastBgpBinding struct {
+	ID          uuid.UUID `json:"id"`
+	DnsServerID uuid.UUID `json:"dns_server_id"`
+	BgpPeerID   uuid.UUID `json:"bgp_peer_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type Collector struct {
 	ID                  uuid.UUID       `json:"id"`
 	SiteID              uuid.UUID       `json:"site_id"`

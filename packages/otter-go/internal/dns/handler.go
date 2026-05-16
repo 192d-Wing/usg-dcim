@@ -35,6 +35,20 @@ type Querier interface {
 	CountDnsForwarders(ctx context.Context, arg dbq.CountDnsForwardersParams) (int64, error)
 	ListDnsCatalogZones(ctx context.Context, arg dbq.ListDnsCatalogZonesParams) ([]dbq.DnsCatalogZone, error)
 	CountDnsCatalogZones(ctx context.Context, arg dbq.CountDnsCatalogZonesParams) (int64, error)
+
+	ListDnsBlocklists(ctx context.Context, arg dbq.ListDnsBlocklistsParams) ([]dbq.DnsBlocklist, error)
+	CountDnsBlocklists(ctx context.Context, arg dbq.CountDnsBlocklistsParams) (int64, error)
+	GetDnsBlocklist(ctx context.Context, id uuid.UUID) (dbq.DnsBlocklist, error)
+	ListDnsBlocklistEntries(ctx context.Context, arg dbq.ListDnsBlocklistEntriesParams) ([]dbq.DnsBlocklistEntry, error)
+	CountDnsBlocklistEntries(ctx context.Context, blocklistID uuid.UUID) (int64, error)
+	ListDnsViews(ctx context.Context, arg dbq.ListDnsViewsParams) ([]dbq.DnsView, error)
+	CountDnsViews(ctx context.Context, arg dbq.CountDnsViewsParams) (int64, error)
+	ListDnsHealthChecks(ctx context.Context, arg dbq.ListDnsHealthChecksParams) ([]dbq.DnsHealthCheck, error)
+	CountDnsHealthChecks(ctx context.Context, arg dbq.CountDnsHealthChecksParams) (int64, error)
+	ListBgpPeers(ctx context.Context, arg dbq.ListBgpPeersParams) ([]dbq.BgpPeer, error)
+	CountBgpPeers(ctx context.Context, arg dbq.CountBgpPeersParams) (int64, error)
+	ListAnycastBindings(ctx context.Context, arg dbq.ListAnycastBindingsParams) ([]dbq.AnycastBgpBinding, error)
+	CountAnycastBindings(ctx context.Context, arg dbq.CountAnycastBindingsParams) (int64, error)
 }
 
 type Handler struct {
@@ -52,7 +66,240 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/anycast-groups", h.listAnycastGroups)
 		r.Get("/forwarders", h.listForwarders)
 		r.Get("/catalog-zones", h.listCatalogZones)
+		r.Get("/blocklists", h.listBlocklists)
+		r.Get("/blocklists/{id}/entries", h.listBlocklistEntries)
+		r.Get("/views", h.listViews)
+		r.Get("/health-checks", h.listHealthChecks)
+		r.Get("/bgp-peers", h.listBgpPeers)
+		r.Get("/anycast-bindings", h.listAnycastBindings)
 	})
+}
+
+func fabricIDFromQuery(w http.ResponseWriter, q map[string][]string) (*uuid.UUID, bool) {
+	v := first(q, "fabric_id")
+	if v == "" {
+		return nil, true
+	}
+	id, err := uuid.Parse(v)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "fabric_id is not a uuid")
+		return nil, false
+	}
+	return &id, true
+}
+
+type blocklistsPage struct {
+	Items  []dbq.DnsBlocklist `json:"items"`
+	Total  int64              `json:"total"`
+	Limit  int32              `json:"limit"`
+	Offset int32              `json:"offset"`
+}
+
+func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	fid, ok := fabricIDFromQuery(w, q)
+	if !ok {
+		return
+	}
+	params := dbq.ListDnsBlocklistsParams{Limit: limit, Offset: offset, FabricID: fid}
+	items, err := h.Q.ListDnsBlocklists(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountDnsBlocklists(r.Context(), dbq.CountDnsBlocklistsParams{FabricID: fid})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, blocklistsPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+type blocklistEntriesPage struct {
+	Items  []dbq.DnsBlocklistEntry `json:"items"`
+	Total  int64                   `json:"total"`
+	Limit  int32                   `json:"limit"`
+	Offset int32                   `json:"offset"`
+}
+
+func (h *Handler) listBlocklistEntries(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		return
+	}
+	// Surface a missing parent blocklist as 404, mirroring the FastAPI handler.
+	if _, err := h.Q.GetDnsBlocklist(r.Context(), id); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "blocklist not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	items, err := h.Q.ListDnsBlocklistEntries(r.Context(), dbq.ListDnsBlocklistEntriesParams{
+		Limit: limit, Offset: offset, BlocklistID: id,
+	})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountDnsBlocklistEntries(r.Context(), id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, blocklistEntriesPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+type viewsPage struct {
+	Items  []dbq.DnsView `json:"items"`
+	Total  int64         `json:"total"`
+	Limit  int32         `json:"limit"`
+	Offset int32         `json:"offset"`
+}
+
+func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	fid, ok := fabricIDFromQuery(w, q)
+	if !ok {
+		return
+	}
+	items, err := h.Q.ListDnsViews(r.Context(), dbq.ListDnsViewsParams{Limit: limit, Offset: offset, FabricID: fid})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountDnsViews(r.Context(), dbq.CountDnsViewsParams{FabricID: fid})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, viewsPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+type healthChecksPage struct {
+	Items  []dbq.DnsHealthCheck `json:"items"`
+	Total  int64                `json:"total"`
+	Limit  int32                `json:"limit"`
+	Offset int32                `json:"offset"`
+}
+
+func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	fid, ok := fabricIDFromQuery(w, q)
+	if !ok {
+		return
+	}
+	items, err := h.Q.ListDnsHealthChecks(r.Context(), dbq.ListDnsHealthChecksParams{Limit: limit, Offset: offset, FabricID: fid})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountDnsHealthChecks(r.Context(), dbq.CountDnsHealthChecksParams{FabricID: fid})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, healthChecksPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+type bgpPeersPage struct {
+	Items  []dbq.BgpPeer `json:"items"`
+	Total  int64         `json:"total"`
+	Limit  int32         `json:"limit"`
+	Offset int32         `json:"offset"`
+}
+
+func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	params := dbq.ListBgpPeersParams{Limit: limit, Offset: offset}
+	if v := q.Get("site_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "site_id is not a uuid")
+			return
+		}
+		params.SiteID = &id
+	}
+	items, err := h.Q.ListBgpPeers(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountBgpPeers(r.Context(), dbq.CountBgpPeersParams{SiteID: params.SiteID})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, bgpPeersPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+type anycastBindingsPage struct {
+	Items  []dbq.AnycastBgpBinding `json:"items"`
+	Total  int64                   `json:"total"`
+	Limit  int32                   `json:"limit"`
+	Offset int32                   `json:"offset"`
+}
+
+func (h *Handler) listAnycastBindings(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	params := dbq.ListAnycastBindingsParams{Limit: limit, Offset: offset}
+	for _, f := range []struct {
+		key string
+		dst **uuid.UUID
+	}{
+		{"dns_server_id", &params.DnsServerID},
+		{"bgp_peer_id", &params.BgpPeerID},
+	} {
+		if v := q.Get(f.key); v != "" {
+			id, err := uuid.Parse(v)
+			if err != nil {
+				httpx.Error(w, http.StatusBadRequest, f.key+" is not a uuid")
+				return
+			}
+			*f.dst = &id
+		}
+	}
+	items, err := h.Q.ListAnycastBindings(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountAnycastBindings(r.Context(), dbq.CountAnycastBindingsParams{
+		DnsServerID: params.DnsServerID, BgpPeerID: params.BgpPeerID,
+	})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, anycastBindingsPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
 type serversPage struct {
