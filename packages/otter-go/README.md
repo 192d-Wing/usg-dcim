@@ -3,6 +3,14 @@
 Phase-2 Go port of [packages/otter](../otter). Built around **chi** for
 routing, **pgx** for Postgres, and **sqlc** for typed query codegen.
 
+> [!WARNING]
+> **Auth is a stub.** Every authenticated request is granted `*`
+> capabilities. The process **refuses to start** unless
+> `OTTER_GO_INSECURE_AUTH_STUB=true` is set, and every request logs an
+> `auth_stub_in_use` warning. Do not unset the env-gate until the real
+> OIDC + capability middleware lands (Phase 3 in
+> [the migration doc](../../docs/dev/otter-go-migration.md)).
+
 **Status: vertical-slice scaffold.** Routes implemented:
 - `GET  /healthz`
 - `GET  /readyz`
@@ -40,11 +48,21 @@ otter-go (see migration doc).
 
 ## Regenerating queries
 
+`db/generated/` was hand-written to match what `sqlc generate` would
+emit. Before adding more queries, run sqlc for real **once** so the
+canonical output replaces the hand-written version:
+
 ```sh
-# from packages/otter-go/
-sqlc generate
+# 1. Dump the live Alembic-managed schema sqlc needs for type inference.
+#    Run against any DB that's caught up to `alembic upgrade head`.
+pg_dump -s -O -x -d "$DCIM_POSTGRES_DSN_RAW" > packages/otter-go/db/schema.sql
+
+# 2. Regenerate.
+cd packages/otter-go/db && sqlc generate
+
+# 3. Commit schema.sql + the regenerated db/generated/.
 ```
 
-The committed `db/generated/` output must match what `sqlc generate`
-produces. CI should verify this with a `git diff --exit-code` check
-once sqlc is on the runners; left as a TODO for now.
+CI has a `sqlc-drift` job that's a no-op until `db/schema.sql` lands;
+once committed, the job runs `sqlc generate` and fails the build on
+any diff in `db/generated/`. So step 3 is the bit that arms the gate.

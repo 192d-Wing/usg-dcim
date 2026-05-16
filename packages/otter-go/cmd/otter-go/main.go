@@ -64,8 +64,12 @@ func main() {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
 
+	// Auth is the stub middleware — refuses to start unless
+	// OTTER_GO_INSECURE_AUTH_STUB is truthy. Replace with the real
+	// OIDC+capability middleware before promoting otter-go past Phase 1.
+	authMW := auth.MustStub(log)
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(auth.Require)
+		r.Use(authMW)
 		sh.Mount(r)
 	})
 

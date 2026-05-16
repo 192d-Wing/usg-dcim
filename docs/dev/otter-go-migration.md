@@ -45,6 +45,42 @@ ingress.
   `internal/auth/Require` middleware is a **stub** — promote nothing
   to production until the real implementation lands.
 
+## Profile first — gate Phase 1 on real data
+
+Before writing more handler code, prove that porting actually helps.
+[`packages/otter/src/dcim/metrics.py`](../../packages/otter/src/dcim/metrics.py)
+already exposes per-route latency at `/metrics` as
+`dcim_http_request_duration_seconds{method,route}`. Let it collect a
+**representative two weeks** of production-shaped traffic, then run:
+
+```promql
+# Top 10 endpoints by p95 latency (the ones most worth porting)
+topk(10,
+  histogram_quantile(0.95,
+    sum by (route, le) (rate(dcim_http_request_duration_seconds_bucket[1h]))
+  )
+)
+
+# Top 10 endpoints by total CPU time (latency × volume)
+topk(10,
+  sum by (route) (
+    rate(dcim_http_request_duration_seconds_sum[1h])
+  )
+)
+
+# Routes that account for >5% of total request volume
+sum by (route) (rate(dcim_http_requests_total[1h]))
+  / ignoring(route) group_left()
+  sum (rate(dcim_http_requests_total[1h])) > 0.05
+```
+
+If the topk lists contain mostly endpoints from the same 2–3 routers,
+port those routers first regardless of the alphabetical Phase-1 order
+below. If the top list is dominated by `/healthz`, `/readyz`, or
+already-Go services (heron/magpie/beagle), **stop the migration** and
+declare otter Python-permanent — see "Decisions worth revisiting" at
+the bottom of this doc.
+
 ## Phases
 
 ### Phase 0 — Scaffold (DONE)
