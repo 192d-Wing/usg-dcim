@@ -8,6 +8,34 @@ import (
 	"github.com/google/uuid"
 )
 
+type Building struct {
+	ID        uuid.UUID `json:"id"`
+	SiteID    uuid.UUID `json:"site_id"`
+	Name      string    `json:"name"`
+	Code      string    `json:"code"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type Room struct {
+	ID            uuid.UUID `json:"id"`
+	BuildingID    uuid.UUID `json:"building_id"`
+	Name          string    `json:"name"`
+	Code          string    `json:"code"`
+	FloorAreaSqft *int32    `json:"floor_area_sqft"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+type Row struct {
+	ID        uuid.UUID `json:"id"`
+	RoomID    uuid.UUID `json:"room_id"`
+	Name      string    `json:"name"`
+	Code      string    `json:"code"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Region struct {
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`
