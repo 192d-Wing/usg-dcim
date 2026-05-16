@@ -36,12 +36,14 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/vrfs", h.listVrfs)
-	r.Get("/vrfs/{id}", h.getVrf)
-	r.Get("/subnets", h.listSubnets)
-	r.Get("/subnets/{id}", h.getSubnet)
-	r.Get("/addresses", h.listAddresses)
-	r.Get("/addresses/{id}", h.getAddress)
+	r.Route("/ipam", func(r chi.Router) {
+		r.Get("/vrfs", h.listVrfs)
+		r.Get("/vrfs/{id}", h.getVrf)
+		r.Get("/subnets", h.listSubnets)
+		r.Get("/subnets/{id}", h.getSubnet)
+		r.Get("/addresses", h.listAddresses)
+		r.Get("/addresses/{id}", h.getAddress)
+	})
 }
 
 // ---- VRFs ----
@@ -55,7 +57,7 @@ type vrfsPage struct {
 
 func (h *Handler) listVrfs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
+	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
 	params := dbq.ListVrfsParams{Limit: limit, Offset: offset}
 	if v := q.Get("fabric_id"); v != "" {
@@ -111,7 +113,7 @@ type subnetsPage struct {
 
 func (h *Handler) listSubnets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
+	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
 	params := dbq.ListSubnetsParams{Limit: limit, Offset: offset, Purpose: strPtr(q.Get("purpose"))}
 	for _, f := range []struct {
@@ -178,7 +180,7 @@ type addressesPage struct {
 
 func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
+	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
 	params := dbq.ListIPAddressesParams{
 		Limit: limit, Offset: offset,
@@ -260,4 +262,18 @@ func parseInt32(s string, def, lo, hi int32) int32 {
 		return hi
 	}
 	return v
+}
+
+func pageSize(q map[string][]string) string {
+	if v := first(q, "limit"); v != "" {
+		return v
+	}
+	return first(q, "page_size")
+}
+
+func first(q map[string][]string, key string) string {
+	if vs := q[key]; len(vs) > 0 {
+		return vs[0]
+	}
+	return ""
 }

@@ -14,8 +14,8 @@ import (
 )
 
 type fakeQ struct {
-	lastZone  dbq.ListDnsZonesParams
-	lastRec   dbq.ListDnsRecordsParams
+	lastZone dbq.ListDnsZonesParams
+	lastRec  dbq.ListDnsRecordsParams
 }
 
 func (f *fakeQ) ListDnsZones(_ context.Context, a dbq.ListDnsZonesParams) ([]dbq.DnsZone, error) {
@@ -88,6 +88,17 @@ func TestListRecords_AllFilters(t *testing.T) {
 	}
 	if f.lastRec.Source == nil || *f.lastRec.Source != "manual" {
 		t.Error("source")
+	}
+}
+
+func TestListZones_PageSizeAlias(t *testing.T) {
+	f := &fakeQ{}
+	rec := do(t, mount(f), "/dns/zones?page_size=200")
+	if rec.Code != 200 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.lastZone.Limit != 200 {
+		t.Errorf("page_size not honored: %d", f.lastZone.Limit)
 	}
 }
 

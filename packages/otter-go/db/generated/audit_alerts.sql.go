@@ -21,10 +21,11 @@ WHERE ($3::uuid        IS NULL OR actor_user_id = $3)
   AND ($4::text        IS NULL OR action        = $4)
   AND ($5::text        IS NULL OR target_type   = $5)
   AND ($6::text        IS NULL OR target_id     = $6)
-  AND ($7::uuid        IS NULL OR site_id       = $7)
-  AND ($8::timestamptz IS NULL OR occurred_at  >= $8)
-  AND ($9::timestamptz IS NULL OR occurred_at  <= $9)
-  AND ($10::bool       IS NULL OR success       = $10)
+  AND ($7::text[]      IS NULL OR target_id = ANY($7::text[]))
+  AND ($8::uuid        IS NULL OR site_id       = $8)
+  AND ($9::timestamptz IS NULL OR occurred_at  >= $9)
+  AND ($10::timestamptz IS NULL OR occurred_at <= $10)
+  AND ($11::bool       IS NULL OR success       = $11)
 ORDER BY occurred_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -36,6 +37,7 @@ type ListAuditLogParams struct {
 	Action      *string    `json:"action"`
 	TargetType  *string    `json:"target_type"`
 	TargetID    *string    `json:"target_id"`
+	TargetIDs   []string   `json:"target_ids"`
 	SiteID      *uuid.UUID `json:"site_id"`
 	Since       *time.Time `json:"since"`
 	Until       *time.Time `json:"until"`
@@ -45,7 +47,7 @@ type ListAuditLogParams struct {
 func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error) {
 	rows, err := q.db.Query(ctx, listAuditLog,
 		arg.Limit, arg.Offset, arg.ActorUserID, arg.Action, arg.TargetType,
-		arg.TargetID, arg.SiteID, arg.Since, arg.Until, arg.Success)
+		arg.TargetID, arg.TargetIDs, arg.SiteID, arg.Since, arg.Until, arg.Success)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +72,11 @@ WHERE ($1::uuid        IS NULL OR actor_user_id = $1)
   AND ($2::text        IS NULL OR action        = $2)
   AND ($3::text        IS NULL OR target_type   = $3)
   AND ($4::text        IS NULL OR target_id     = $4)
-  AND ($5::uuid        IS NULL OR site_id       = $5)
-  AND ($6::timestamptz IS NULL OR occurred_at  >= $6)
-  AND ($7::timestamptz IS NULL OR occurred_at  <= $7)
-  AND ($8::bool        IS NULL OR success       = $8)
+  AND ($5::text[]      IS NULL OR target_id = ANY($5::text[]))
+  AND ($6::uuid        IS NULL OR site_id       = $6)
+  AND ($7::timestamptz IS NULL OR occurred_at  >= $7)
+  AND ($8::timestamptz IS NULL OR occurred_at  <= $8)
+  AND ($9::bool        IS NULL OR success       = $9)
 `
 
 type CountAuditLogParams struct {
@@ -81,6 +84,7 @@ type CountAuditLogParams struct {
 	Action      *string    `json:"action"`
 	TargetType  *string    `json:"target_type"`
 	TargetID    *string    `json:"target_id"`
+	TargetIDs   []string   `json:"target_ids"`
 	SiteID      *uuid.UUID `json:"site_id"`
 	Since       *time.Time `json:"since"`
 	Until       *time.Time `json:"until"`
@@ -90,7 +94,7 @@ type CountAuditLogParams struct {
 func (q *Queries) CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAuditLog,
 		arg.ActorUserID, arg.Action, arg.TargetType, arg.TargetID,
-		arg.SiteID, arg.Since, arg.Until, arg.Success)
+		arg.TargetIDs, arg.SiteID, arg.Since, arg.Until, arg.Success)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

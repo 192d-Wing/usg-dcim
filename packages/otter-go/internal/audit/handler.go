@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -42,7 +43,7 @@ type logPage struct {
 
 func (h *Handler) listLog(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
+	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
 	params := dbq.ListAuditLogParams{
 		Limit: limit, Offset: offset,
@@ -65,6 +66,9 @@ func (h *Handler) listLog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.SiteID = &id
+	}
+	if ids := splitCSV(q.Get("target_ids")); len(ids) > 0 {
+		params.TargetIDs = ids
 	}
 	for _, f := range []struct {
 		key string
@@ -95,7 +99,8 @@ func (h *Handler) listLog(w http.ResponseWriter, r *http.Request) {
 	total, err := h.Q.CountAuditLog(r.Context(), dbq.CountAuditLogParams{
 		ActorUserID: params.ActorUserID, Action: params.Action,
 		TargetType: params.TargetType, TargetID: params.TargetID,
-		SiteID: params.SiteID, Since: params.Since, Until: params.Until,
+		TargetIDs: params.TargetIDs,
+		SiteID:    params.SiteID, Since: params.Since, Until: params.Until,
 		Success: params.Success,
 	})
 	if err != nil {
@@ -126,6 +131,29 @@ func strPtr(s string) *string {
 	return &s
 }
 
+func splitCSV(s string) []string {
+	if s == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := []string{}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, ok := seen[part]; ok {
+			continue
+		}
+		seen[part] = struct{}{}
+		out = append(out, part)
+	}
+	if len(out) == 0 {
+		return []string{"__dcim_no_target_ids__"}
+	}
+	return out
+}
+
 func parseInt32(s string, def, lo, hi int32) int32 {
 	if s == "" {
 		return def
@@ -142,4 +170,18 @@ func parseInt32(s string, def, lo, hi int32) int32 {
 		return hi
 	}
 	return v
+}
+
+func pageSize(q map[string][]string) string {
+	if v := first(q, "limit"); v != "" {
+		return v
+	}
+	return first(q, "page_size")
+}
+
+func first(q map[string][]string, key string) string {
+	if vs := q[key]; len(vs) > 0 {
+		return vs[0]
+	}
+	return ""
 }

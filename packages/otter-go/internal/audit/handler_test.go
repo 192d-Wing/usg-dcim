@@ -69,6 +69,20 @@ func TestListLog_AllFilters(t *testing.T) {
 	}
 }
 
+func TestListLog_TargetIDsAndPageSize(t *testing.T) {
+	f := &fakeQ{}
+	rec := do(t, mount(f), "/audit/log?target_ids=a,b,a&page_size=200")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.last.Limit != 200 {
+		t.Errorf("page_size not honored: %d", f.last.Limit)
+	}
+	if got := f.last.TargetIDs; len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("target_ids not parsed/deduped: %#v", got)
+	}
+}
+
 func TestListLog_BadSince(t *testing.T) {
 	rec := do(t, mount(&fakeQ{}), "/audit/log?since=not-a-time")
 	if rec.Code != http.StatusBadRequest {

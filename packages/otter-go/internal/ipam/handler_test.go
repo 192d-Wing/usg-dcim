@@ -63,7 +63,7 @@ func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 func TestListVrfs_FabricFilter(t *testing.T) {
 	fid := uuid.New()
 	f := &fakeQ{}
-	rec := do(t, mount(f), "/vrfs?fabric_id="+fid.String())
+	rec := do(t, mount(f), "/ipam/vrfs?fabric_id="+fid.String())
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -75,7 +75,7 @@ func TestListVrfs_FabricFilter(t *testing.T) {
 func TestListSubnets_AllFilters(t *testing.T) {
 	fid, vid, sid := uuid.New(), uuid.New(), uuid.New()
 	f := &fakeQ{}
-	rec := do(t, mount(f), "/subnets?fabric_id="+fid.String()+"&vrf_id="+vid.String()+"&site_id="+sid.String()+"&purpose=mgmt")
+	rec := do(t, mount(f), "/ipam/subnets?fabric_id="+fid.String()+"&vrf_id="+vid.String()+"&site_id="+sid.String()+"&purpose=mgmt")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -96,7 +96,7 @@ func TestListSubnets_AllFilters(t *testing.T) {
 func TestListAddresses_AllFilters(t *testing.T) {
 	sid, aid := uuid.New(), uuid.New()
 	f := &fakeQ{}
-	rec := do(t, mount(f), "/addresses?subnet_id="+sid.String()+"&asset_id="+aid.String()+"&role=gateway&status=active")
+	rec := do(t, mount(f), "/ipam/addresses?subnet_id="+sid.String()+"&asset_id="+aid.String()+"&role=gateway&status=active")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -116,12 +116,12 @@ func TestListAddresses_AllFilters(t *testing.T) {
 
 func TestBadFilterUUIDs(t *testing.T) {
 	for _, p := range []string{
-		"/vrfs?fabric_id=x",
-		"/subnets?fabric_id=x",
-		"/subnets?vrf_id=x",
-		"/subnets?site_id=x",
-		"/addresses?subnet_id=x",
-		"/addresses?asset_id=x",
+		"/ipam/vrfs?fabric_id=x",
+		"/ipam/subnets?fabric_id=x",
+		"/ipam/subnets?vrf_id=x",
+		"/ipam/subnets?site_id=x",
+		"/ipam/addresses?subnet_id=x",
+		"/ipam/addresses?asset_id=x",
 	} {
 		rec := do(t, mount(&fakeQ{}), p)
 		if rec.Code != http.StatusBadRequest {
@@ -132,9 +132,9 @@ func TestBadFilterUUIDs(t *testing.T) {
 
 func TestGets_NotFound(t *testing.T) {
 	for _, p := range []string{
-		"/vrfs/" + uuid.New().String(),
-		"/subnets/" + uuid.New().String(),
-		"/addresses/" + uuid.New().String(),
+		"/ipam/vrfs/" + uuid.New().String(),
+		"/ipam/subnets/" + uuid.New().String(),
+		"/ipam/addresses/" + uuid.New().String(),
 	} {
 		rec := do(t, mount(&fakeQ{}), p)
 		if rec.Code != http.StatusNotFound {
@@ -145,11 +145,22 @@ func TestGets_NotFound(t *testing.T) {
 
 func TestGets_BadID(t *testing.T) {
 	for _, p := range []string{
-		"/vrfs/x", "/subnets/x", "/addresses/x",
+		"/ipam/vrfs/x", "/ipam/subnets/x", "/ipam/addresses/x",
 	} {
 		rec := do(t, mount(&fakeQ{}), p)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: got %d", p, rec.Code)
 		}
+	}
+}
+
+func TestListVrfs_PageSizeAlias(t *testing.T) {
+	f := &fakeQ{}
+	rec := do(t, mount(f), "/ipam/vrfs?page_size=200")
+	if rec.Code != 200 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.lastVrf.Limit != 200 {
+		t.Errorf("page_size not honored: %d", f.lastVrf.Limit)
 	}
 }

@@ -47,7 +47,7 @@ func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 func TestListAlerts_Filters(t *testing.T) {
 	sid := uuid.New()
 	f := &fakeQ{}
-	do(t, mount(f), "/alerts/?site_id="+sid.String()+"&state=firing&severity=major")
+	do(t, mount(f), "/alerts?site_id="+sid.String()+"&state=firing&severity=major")
 	if f.lastA.SiteID == nil || *f.lastA.SiteID != sid {
 		t.Error("site_id")
 	}
@@ -72,10 +72,28 @@ func TestListRules_Filters(t *testing.T) {
 }
 
 func TestBadUUIDs(t *testing.T) {
-	for _, p := range []string{"/alerts/?site_id=x", "/alerts/rules?site_scope_id=x"} {
+	for _, p := range []string{"/alerts?site_id=x", "/alerts/rules?site_scope_id=x"} {
 		rec := do(t, mount(&fakeQ{}), p)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: got %d", p, rec.Code)
 		}
+	}
+}
+
+func TestListAlerts_TrailingSlashAlsoWorks(t *testing.T) {
+	rec := do(t, mount(&fakeQ{}), "/alerts/")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+func TestListRules_PageSizeAlias(t *testing.T) {
+	f := &fakeQ{}
+	rec := do(t, mount(f), "/alerts/rules?page_size=200")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.lastR.Limit != 200 {
+		t.Errorf("page_size not honored: %d", f.lastR.Limit)
 	}
 }

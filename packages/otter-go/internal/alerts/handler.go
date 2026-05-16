@@ -27,10 +27,9 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Route("/alerts", func(r chi.Router) {
-		r.Get("/", h.listAlerts)
-		r.Get("/rules", h.listRules)
-	})
+	r.Get("/alerts", h.listAlerts)
+	r.Get("/alerts/", h.listAlerts)
+	r.Get("/alerts/rules", h.listRules)
 }
 
 type alertsPage struct {
@@ -42,7 +41,7 @@ type alertsPage struct {
 
 func (h *Handler) listAlerts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
+	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
 	params := dbq.ListAlertsParams{
 		Limit: limit, Offset: offset,
@@ -82,7 +81,7 @@ type rulesPage struct {
 
 func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
+	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
 	params := dbq.ListAlertRulesParams{Limit: limit, Offset: offset}
 	if v := q.Get("site_scope_id"); v != "" {
@@ -137,4 +136,18 @@ func parseInt32(s string, def, lo, hi int32) int32 {
 		return hi
 	}
 	return v
+}
+
+func pageSize(q map[string][]string) string {
+	if v := first(q, "limit"); v != "" {
+		return v
+	}
+	return first(q, "page_size")
+}
+
+func first(q map[string][]string, key string) string {
+	if vs := q[key]; len(vs) > 0 {
+		return vs[0]
+	}
+	return ""
 }

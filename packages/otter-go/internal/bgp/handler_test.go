@@ -52,7 +52,7 @@ func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 
 func TestListAsns_KindFilter(t *testing.T) {
 	f := &fakeQ{}
-	do(t, mount(f), "/asns?kind=private")
+	do(t, mount(f), "/bgp/asns?kind=private")
 	if f.lastAsn.Kind == nil || *f.lastAsn.Kind != "private" {
 		t.Errorf("kind not threaded: %+v", f.lastAsn)
 	}
@@ -60,7 +60,7 @@ func TestListAsns_KindFilter(t *testing.T) {
 
 func TestListPrefixLists_FamilyFilter(t *testing.T) {
 	f := &fakeQ{}
-	do(t, mount(f), "/prefix-lists?family=ipv6")
+	do(t, mount(f), "/bgp/prefix-lists?family=ipv6")
 	if f.lastPL.Family == nil || *f.lastPL.Family != "ipv6" {
 		t.Errorf("family not threaded: %+v", f.lastPL)
 	}
@@ -69,15 +69,23 @@ func TestListPrefixLists_FamilyFilter(t *testing.T) {
 func TestListPrefixListEntries_PrefixListIDFilter(t *testing.T) {
 	id := uuid.New()
 	f := &fakeQ{}
-	do(t, mount(f), "/prefix-list-entries?prefix_list_id="+id.String())
+	do(t, mount(f), "/bgp/prefix-list-entries?prefix_list_id="+id.String())
 	if f.lastEntry.PrefixListID == nil || *f.lastEntry.PrefixListID != id {
 		t.Errorf("prefix_list_id not threaded: %+v", f.lastEntry)
 	}
 }
 
 func TestListPrefixListEntries_BadPrefixListID(t *testing.T) {
-	rec := do(t, mount(&fakeQ{}), "/prefix-list-entries?prefix_list_id=x")
+	rec := do(t, mount(&fakeQ{}), "/bgp/prefix-list-entries?prefix_list_id=x")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("got %d", rec.Code)
+	}
+}
+
+func TestListAsns_PageSizeAlias(t *testing.T) {
+	f := &fakeQ{}
+	do(t, mount(f), "/bgp/asns?page_size=200")
+	if f.lastAsn.Limit != 200 {
+		t.Errorf("page_size not honored: %d", f.lastAsn.Limit)
 	}
 }
