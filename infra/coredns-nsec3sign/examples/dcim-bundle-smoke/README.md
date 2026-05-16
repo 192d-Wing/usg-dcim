@@ -6,7 +6,7 @@ then runs the custom CoreDNS image against it.
 
 `quick-smoke` proved the Go plugin against a hand-rolled Corefile;
 this smoke closes the loop — it proves the Python renderer in
-`backend/src/dcim/services/dns.py` emits a Corefile the Go plugin
+`packages/otter/src/dcim/services/dns.py` emits a Corefile the Go plugin
 actually loads, with the right key file format, the right zone file
 format, and the right `nsec3sign { ... }` directive.
 
@@ -33,7 +33,7 @@ README's "Build" section):
 
 ```powershell
 # 1. Generate the bundle via the DCIM renderer.
-uv run --project ../../../../backend --with cryptography `
+uv run --project ../../../../packages/otter --with cryptography `
   python render_bundle.py
 
 # 2. Boot the custom CoreDNS against the bundle. The keytag in the

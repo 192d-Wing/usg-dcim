@@ -18,10 +18,10 @@ tasks:
         echo "  task test         backend pytest + frontend vitest"
         echo "  task lint         ruff + eslint"
         echo "  task fmt          ruff format + prettier"
-        echo "  task backend      run API locally on :8000"
+        echo "  task otter        run API (otter) locally on :8000  [alias: backend]"
         echo "  task worker       run arq worker locally"
-        echo "  task collector    run sample collector locally"
-        echo "  task frontend     vite dev server on :5173"
+        echo "  task collector    run sample collector (mole, deprecated) locally"
+        echo "  task finch        vite dev server (finch) on :5173   [alias: frontend]"
     silent: true
 
   # Dependency Management
@@ -60,7 +60,7 @@ tasks:
   migrate-local:
     desc: Apply Alembic migrations locally
     cmds:
-      - uv run --project backend alembic -c backend/alembic.ini upgrade head
+      - uv run --project packages/otter alembic -c packages/otter/alembic.ini upgrade head
 
   # Seeding
   seed:
@@ -71,51 +71,57 @@ tasks:
   seed-local:
     desc: Load demo enterprise dataset locally
     cmds:
-      - uv run --project backend python -m dcim.scripts.seed_demo
+      - uv run --project packages/otter python -m dcim.scripts.seed_demo
 
   # Testing & Code Quality
   test:
     desc: Run backend pytest + frontend vitest
     cmds:
-      - uv run --project backend pytest backend/tests -q
-      - cd frontend && npm test --silent
+      - uv run --project packages/otter pytest packages/otter/tests -q
+      - cd packages/finch && npm test --silent
 
   lint:
     desc: Run ruff + eslint
     cmds:
-      - uv run --project backend ruff check backend
-      - cd frontend && npm run lint
+      - uv run --project packages/otter ruff check packages/otter
+      - cd packages/finch && npm run lint
 
   fmt:
     desc: Run ruff format + prettier
     cmds:
-      - uv run --project backend ruff format backend
-      - cd frontend && npm run fmt
+      - uv run --project packages/otter ruff format packages/otter
+      - cd packages/finch && npm run fmt
 
-  # Local Development
-  backend:
-    desc: Run API locally on :8000
+  # Local Development (animal-named per WORKSPACE.md)
+  otter:
+    desc: Run API (otter) locally on :8000
     cmds:
-      - uv run --project backend uvicorn dcim.main:app --reload --port 8000 --host 0.0.0.0
+      - uv run --project packages/otter uvicorn dcim.main:app --reload --port 8000 --host 0.0.0.0
+  backend:
+    desc: Alias for `task otter`
+    deps: [otter]
 
   worker:
     desc: Run arq worker locally
     cmds:
-      - uv run --project backend arq dcim.worker.WorkerSettings
+      - uv run --project packages/otter arq dcim.worker.WorkerSettings
 
   collector:
-    desc: Run sample collector locally
+    desc: Run sample collector (mole, deprecated) locally
     cmds:
       - uv run --project collector dcim-collector --config collector/sample-config.yaml
 
-  frontend:
-    desc: Start frontend vite dev server on :5173
+  finch:
+    desc: Start finch (frontend) vite dev server on :5173
     cmds:
-      - cd frontend && npm install && npm run dev
+      - cd packages/finch && npm install && npm run dev
+  frontend:
+    desc: Alias for `task finch`
+    deps: [finch]
 
   # Cleanup
   clean:
     desc: Clean up generated files and caches
     cmds:
-      - rm -rf .venv backend/.pytest_cache backend/.ruff_cache backend/.mypy_cache
-      - rm -rf frontend/node_modules frontend/dist
+      - rm -rf .venv packages/otter/.pytest_cache packages/otter/.ruff_cache packages/otter/.mypy_cache
+      - rm -rf packages/finch/node_modules packages/finch/dist

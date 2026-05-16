@@ -188,4 +188,4 @@ kubectl delete ns dcim dcim-site1 dcim-site2
 
 - [Docker Compose setup](../docker/docker-compose.yml) — Original dev environment
 - [Site DNS stack](../docker/site-dns/) — Site collector + DNS services
-- [Collectors page](/frontend/src/pages/collectors.tsx) — UI for managing collectors
+- [Collectors page](/packages/finch/src/pages/collectors.tsx) — UI for managing collectors

@@ -9,7 +9,7 @@ from the renderer that ships in DCIM production.
 
 Run from this directory with:
 
-    uv run --project ../../../../backend python render_bundle.py
+    uv run --project ../../../../packages/otter python render_bundle.py
 
 then start the container and dig at it — README.md has the full
 walkthrough.
@@ -28,11 +28,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-# The renderer code lives under backend/src; add it to the path so
+# The renderer code lives under packages/otter/src; add it to the path so
 # we don't need an editable install of the dcim package just to
 # generate a smoke bundle.
 REPO_ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(REPO_ROOT / "backend" / "src"))
+sys.path.insert(0, str(REPO_ROOT / "packages" / "otter" / "src"))
 
 from dcim.models.dns import (  # noqa: E402
     DnsKeyAlgorithm,

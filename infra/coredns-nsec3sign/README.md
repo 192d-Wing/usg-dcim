@@ -52,7 +52,7 @@ only see this duplication in the rendered Corefile.
 
 The key file format matches BIND's `Kname+alg+tag.{key,private}` pair
 — the same format DCIM already renders via
-[`render_dnssec_key_files`](../../backend/src/dcim/services/dns.py).
+[`render_dnssec_key_files`](../../packages/otter/src/dcim/services/dns.py).
 Switching a zone from NSEC to NSEC3 is a one-line Corefile change
 (`dnssec` → `nsec3sign`) plus a salt/iterations decision.
 

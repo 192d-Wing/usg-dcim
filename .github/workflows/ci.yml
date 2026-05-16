@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: packages/otter
     steps:
       - uses: actions/checkout@v6
 
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: packages/finch
     steps:
       - uses: actions/checkout@v6
 
@@ -74,7 +74,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: packages/finch/package-lock.json
 
       - name: Install (npm ci if lockfile, else npm install)
         run: |
@@ -108,16 +108,16 @@ jobs:
         with:
           image: dcim-backend
           tags: ci
-          context: ./backend
-          containerfiles: ./backend/Containerfile
+          context: ./packages/otter
+          containerfiles: ./packages/otter/Containerfile
 
       - name: Build frontend image
         uses: redhat-actions/buildah-build@v2
         with:
           image: dcim-frontend
           tags: ci
-          context: ./frontend
-          containerfiles: ./frontend/Containerfile
+          context: ./packages/finch
+          containerfiles: ./packages/finch/Containerfile
 
       - name: Build collector image
         uses: redhat-actions/buildah-build@v2
@@ -183,7 +183,7 @@ jobs:
           --health-retries 10
     defaults:
       run:
-        working-directory: backend
+        working-directory: packages/otter
     env:
       # asyncpg driver, points at the service container.
       DCIM_POSTGRES_DSN: postgresql+asyncpg://dcim:dcim@localhost:5432/dcim

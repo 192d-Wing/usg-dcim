@@ -95,7 +95,7 @@ services:
 
   api:
     build:
-      context: ../../backend
+      context: ../../packages/otter
       dockerfile: Containerfile
     environment:
       DCIM_ENV: dev
@@ -163,7 +163,7 @@ services:
 
   worker:
     build:
-      context: ../../backend
+      context: ../../packages/otter
       dockerfile: Containerfile
     command: ["arq", "dcim.worker.WorkerSettings"]
     environment:
@@ -191,7 +191,7 @@ services:
 
   frontend:
     build:
-      context: ../../frontend
+      context: ../../packages/finch
       dockerfile: Containerfile
     ports: ["80:80"]
     depends_on: [api]
