@@ -1,0 +1,35 @@
+version: "2"
+sql:
+  - engine: postgresql
+    queries: queries
+    schema:
+      # Alembic owns the schema. Point sqlc at a dumped schema.sql for
+      # type inference. Refresh with:
+      #   pg_dump -s -O -x -d $DSN > db/schema.sql
+      # We do NOT commit schema.sql until the dump is checked in; sqlc
+      # falls back to inferring types from the live DB when CI sets the
+      # SQLC_DATABASE_URL env var.
+      - schema.sql
+    gen:
+      go:
+        package: dbq
+        out: generated
+        sql_package: pgx/v5
+        emit_json_tags: true
+        emit_pointers_for_null_types: true
+        emit_db_tags: false
+        emit_prepared_queries: false
+        emit_interface: true
+        emit_exact_table_names: false
+        overrides:
+          - db_type: uuid
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+          - db_type: timestamptz
+            go_type:
+              import: time
+              type: Time
+          - db_type: jsonb
+            go_type:
+              type: "[]byte"

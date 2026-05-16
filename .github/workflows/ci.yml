@@ -102,7 +102,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pkg: [badger, heron, magpie, beagle]
+        pkg: [badger, heron, magpie, beagle, otter-go]
     defaults:
       run:
         working-directory: packages/${{ matrix.pkg }}
@@ -165,6 +165,7 @@ jobs:
           - { image: dcim-heron,  context: .,               containerfile: packages/heron/Containerfile }
           - { image: dcim-magpie, context: .,               containerfile: packages/magpie/Containerfile }
           - { image: dcim-beagle, context: .,               containerfile: packages/beagle/Containerfile }
+          - { image: dcim-otter-go, context: .,             containerfile: packages/otter-go/Containerfile }
     steps:
       - uses: actions/checkout@v6
 

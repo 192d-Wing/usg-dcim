@@ -15,6 +15,7 @@ includes:
   magpie:    { taskfile: packages/magpie/Taskfile.yaml,    dir: packages/magpie }
   beagle:    { taskfile: packages/beagle/Taskfile.yaml,    dir: packages/beagle }
   shared-go: { taskfile: packages/shared-go/Taskfile.yaml, dir: packages/shared-go }
+  otter-go:  { taskfile: packages/otter-go/Taskfile.yaml,  dir: packages/otter-go }
 
 tasks:
   help:
@@ -107,6 +108,7 @@ tasks:
       - magpie:test
       - beagle:test
       - shared-go:test
+      - otter-go:test
 
   lint:
     desc: Run every package's linter
@@ -119,6 +121,7 @@ tasks:
       - magpie:vet
       - beagle:vet
       - shared-go:vet
+      - otter-go:vet
 
   fmt:
     desc: Run every package's formatter (Python + JS only)

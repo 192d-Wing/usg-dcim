@@ -6,4 +6,5 @@ use (
 	./packages/magpie
 	./packages/beagle
 	./packages/shared-go
+	./packages/otter-go
 )
