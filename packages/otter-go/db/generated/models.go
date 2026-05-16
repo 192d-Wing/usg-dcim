@@ -8,6 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type Region struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Code        string    `json:"code"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type Site struct {
 	ID              uuid.UUID `json:"id"`
 	RegionID        uuid.UUID `json:"region_id"`
