@@ -4,6 +4,7 @@
 package sites
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -16,8 +17,17 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+// Querier is the slice of sqlc-generated *Queries this package uses,
+// exposed as an interface so handlers can be tested against an in-memory
+// fake without spinning up Postgres. *dbq.Queries satisfies this.
+type Querier interface {
+	ListSites(ctx context.Context, arg dbq.ListSitesParams) ([]dbq.Site, error)
+	CountSites(ctx context.Context, arg dbq.CountSitesParams) (int64, error)
+	GetSite(ctx context.Context, id uuid.UUID) (dbq.Site, error)
+}
+
 type Handler struct {
-	Q *dbq.Queries
+	Q Querier
 }
 
 func (h *Handler) Mount(r chi.Router) {
