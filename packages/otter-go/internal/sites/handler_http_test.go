@@ -47,6 +47,15 @@ func (f *fakeQuerier) GetSite(ctx context.Context, id uuid.UUID) (dbq.Site, erro
 	return dbq.Site{}, pgx.ErrNoRows
 }
 
+func (f *fakeQuerier) CreateSite(_ context.Context, arg dbq.CreateSiteParams) (dbq.Site, error) {
+	return dbq.Site{ID: uuid.New(), RegionID: arg.RegionID, Name: arg.Name, Code: arg.Code,
+		LifecycleState: arg.LifecycleState}, nil
+}
+
+func (f *fakeQuerier) UpdateSite(_ context.Context, arg dbq.UpdateSiteParams) (dbq.Site, error) {
+	return dbq.Site{ID: arg.ID}, nil
+}
+
 // mount returns a chi router wired with the handler against f. Mirrors
 // what main.go does for /api/v1/* minus auth (the auth middleware is
 // covered in internal/auth/middleware_test.go).

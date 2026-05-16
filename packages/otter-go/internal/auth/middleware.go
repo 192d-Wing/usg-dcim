@@ -222,6 +222,13 @@ func From(ctx context.Context) (Principal, bool) {
 	return p, ok
 }
 
+// WithPrincipal returns a context with the principal attached. Useful
+// for tests that bypass the verify middleware but need RequireCapability
+// to see a valid principal.
+func WithPrincipal(ctx context.Context, p Principal) context.Context {
+	return context.WithValue(ctx, principalKey, p)
+}
+
 // RequireCapability returns a middleware that rejects requests whose
 // principal doesn't hold `code` (with wildcard matching). It panics if
 // no Principal was injected upstream — that's a wiring bug, not a

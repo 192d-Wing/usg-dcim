@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -24,6 +25,8 @@ type Querier interface {
 	ListSites(ctx context.Context, arg dbq.ListSitesParams) ([]dbq.Site, error)
 	CountSites(ctx context.Context, arg dbq.CountSitesParams) (int64, error)
 	GetSite(ctx context.Context, id uuid.UUID) (dbq.Site, error)
+	CreateSite(ctx context.Context, arg dbq.CreateSiteParams) (dbq.Site, error)
+	UpdateSite(ctx context.Context, arg dbq.UpdateSiteParams) (dbq.Site, error)
 }
 
 type Handler struct {
@@ -33,6 +36,8 @@ type Handler struct {
 func (h *Handler) Mount(r chi.Router) {
 	r.Get("/sites", h.list)
 	r.Get("/sites/{id}", h.get)
+	r.With(auth.RequireCapability("inventory:sites:create")).Post("/sites", h.create)
+	r.With(auth.RequireCapability("inventory:sites:update")).Patch("/sites/{id}", h.update)
 }
 
 // listResponse mirrors the FastAPI Page[SiteOut] shape so finch

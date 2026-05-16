@@ -43,6 +43,21 @@ func (f *fakeQuerier) GetRegion(ctx context.Context, id uuid.UUID) (dbq.Region, 
 	return dbq.Region{}, pgx.ErrNoRows
 }
 
+func (f *fakeQuerier) CreateRegion(_ context.Context, arg dbq.CreateRegionParams) (dbq.Region, error) {
+	return dbq.Region{ID: uuid.New(), Name: arg.Name, Code: arg.Code, Description: arg.Description}, nil
+}
+
+func (f *fakeQuerier) UpdateRegion(_ context.Context, arg dbq.UpdateRegionParams) (dbq.Region, error) {
+	return dbq.Region{ID: arg.ID, Name: derefStr(arg.Name, "x"), Code: "x", Description: arg.Description}, nil
+}
+
+func derefStr(p *string, def string) string {
+	if p == nil {
+		return def
+	}
+	return *p
+}
+
 func mount(f *fakeQuerier) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)
