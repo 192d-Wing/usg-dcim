@@ -20,7 +20,7 @@ services:
     # build.context back to it for emergency rollback (see
     # collector/DEPRECATED.md for the procedure).
     build:
-      context: ../../../services/go-collector
+      context: ../../../packages/badger
       dockerfile: Containerfile
     # image: ghcr.io/192d-wing/usg-dcim-go-collector:latest
     command: ["-config", "/etc/dcim/collector.yaml"]

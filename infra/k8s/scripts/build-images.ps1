@@ -11,10 +11,10 @@ Push-Location $root
 $images = @(
     @{ Name = 'dcim-api';          Context = 'backend' },
     @{ Name = 'dcim-frontend';     Context = 'frontend' },
-    @{ Name = 'dcim-go-collector'; Context = 'services/go-collector' },
-    @{ Name = 'dcim-go-ingest';    Context = 'services/go-ingest' },
-    @{ Name = 'dcim-go-alerts';    Context = 'services/go-alerts' },
-    @{ Name = 'dcim-go-dns-probe'; Context = 'services/go-dns-probe' }
+    @{ Name = 'dcim-go-collector'; Context = 'packages/badger' },
+    @{ Name = 'dcim-go-ingest';    Context = 'packages/heron' },
+    @{ Name = 'dcim-go-alerts';    Context = 'packages/magpie' },
+    @{ Name = 'dcim-go-dns-probe'; Context = 'packages/beagle' }
 )
 
 try {

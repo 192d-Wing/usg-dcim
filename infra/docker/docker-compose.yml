@@ -202,7 +202,7 @@ services:
   # for /v1/ingest/telemetry — same wire format, same auth model.
   go-ingest:
     build:
-      context: ../../services/go-ingest
+      context: ../../packages/heron
       dockerfile: Containerfile
     profiles: ["go-services"]
     environment:
@@ -214,7 +214,7 @@ services:
 
   go-alerts:
     build:
-      context: ../../services/go-alerts
+      context: ../../packages/magpie
       dockerfile: Containerfile
     profiles: ["go-services"]
     environment:
@@ -230,7 +230,7 @@ services:
 
   go-dns-probe:
     build:
-      context: ../../services/go-dns-probe
+      context: ../../packages/beagle
       dockerfile: Containerfile
     profiles: ["go-services"]
     environment:
@@ -245,7 +245,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
-  # collector service uses services/go-collector. The Python collector
+  # collector service uses packages/badger. The Python collector
   # (../../collector) is deprecated and kept in tree as reference / for
   # emergency rollback; flip the build context back to it and re-add
   # PYTHONUNBUFFERED if you need to revert mid-cutover. CMD argument
@@ -253,7 +253,7 @@ services:
   # binary read, and the YAML surface is byte-compatible per Phase 1–4.
   collector:
     build:
-      context: ../../services/go-collector
+      context: ../../packages/badger
       dockerfile: Containerfile
     profiles: ["collector"]   # opt-in: `docker compose --profile collector up`
     command: ["-config", "/etc/dcim/collector.yaml"]
