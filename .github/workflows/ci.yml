@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
-    name: Backend (ruff + pytest)
+  otter:
+    name: otter (ruff + pytest)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -39,12 +39,12 @@ jobs:
       - name: Tests (pytest)
         run: uv run pytest -q
 
-  collector:
-    name: Collector (ruff)
+  mole:
+    name: mole (ruff, deprecated)
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: collector
+        working-directory: packages/mole
     steps:
       - uses: actions/checkout@v6
 
@@ -61,8 +61,8 @@ jobs:
       - name: Lint (ruff)
         run: uv run ruff check . || echo "::warning::ruff check skipped — no rules configured"
 
-  frontend:
-    name: Frontend (tsc + vitest + build)
+  finch:
+    name: finch (tsc + vitest + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -96,36 +96,81 @@ jobs:
       - name: Build
         run: npm run build
 
-  container-build:
-    name: Container images build (Podman/Buildah)
+  go:
+    name: Go ${{ matrix.pkg }} (build + vet + test)
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: [badger, heron, magpie, beagle]
+    defaults:
+      run:
+        working-directory: packages/${{ matrix.pkg }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Build backend image
-        uses: redhat-actions/buildah-build@v2
+      - uses: actions/setup-go@v5
         with:
-          image: dcim-backend
-          tags: ci
-          context: ./packages/otter
-          containerfiles: ./packages/otter/Containerfile
+          # Matches the toolchain version in each packages/<animal>/go.mod.
+          go-version: '1.22'
+          # Cache derived from the per-package go.sum so each matrix shard
+          # gets its own warm cache without cross-contamination.
+          cache-dependency-path: packages/${{ matrix.pkg }}/go.sum
 
-      - name: Build frontend image
-        uses: redhat-actions/buildah-build@v2
-        with:
-          image: dcim-frontend
-          tags: ci
-          context: ./packages/finch
-          containerfiles: ./packages/finch/Containerfile
+      - name: go build
+        run: go build ./...
 
-      - name: Build collector image
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  wolf-coredns-nsec3sign:
+    name: wolf/coredns-nsec3sign (build + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/wolf/coredns-nsec3sign
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: packages/wolf/coredns-nsec3sign/go.sum
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+  container-build:
+    name: Container images build (Podman/Buildah)
+    runs-on: ubuntu-latest
+    needs: [otter, finch, go]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: dcim-otter,  context: packages/otter }
+          - { image: dcim-finch,  context: packages/finch }
+          - { image: dcim-mole,   context: packages/mole }
+          - { image: dcim-badger, context: packages/badger }
+          - { image: dcim-heron,  context: packages/heron }
+          - { image: dcim-magpie, context: packages/magpie }
+          - { image: dcim-beagle, context: packages/beagle }
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build ${{ matrix.image }}
         uses: redhat-actions/buildah-build@v2
         with:
-          image: dcim-collector
+          image: ${{ matrix.image }}
           tags: ci
-          context: ./collector
-          containerfiles: ./collector/Containerfile
+          context: ./${{ matrix.context }}
+          containerfiles: ./${{ matrix.context }}/Containerfile
 
   helm:
     name: Helm chart lint + template
