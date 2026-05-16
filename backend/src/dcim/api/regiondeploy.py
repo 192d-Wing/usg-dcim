@@ -31,6 +31,7 @@ from ..schemas.regiondeploy import (
     PreflightResponse,
     RegionDeploymentCreate,
     RegionDeploymentEventOut,
+    RegionDeploymentKubeconfigCallback,
     RegionDeploymentOut,
     RegionDeploymentSummary,
 )
@@ -238,6 +239,80 @@ async def start_region_deployment(
     finally:
         await pool.close()
     return await _reload(db, deployment_id)
+
+
+@router.post(
+    "/{deployment_id}/kubeconfig/callback",
+    status_code=202,
+    response_model=None,
+)
+async def post_kubeconfig_callback(
+    deployment_id: UUID,
+    payload: RegionDeploymentKubeconfigCallback,
+    db: AsyncSession = Depends(get_db),
+):
+    """Receive the kubeadm-generated kubeconfig from a first
+    control-plane node.
+
+    The Workflow template's `kubeconfig-write` action posts here
+    after `kubeadm init` succeeds. Today we only record receipt —
+    actually persisting the kubeconfig as a k8s Secret on central
+    needs the k8s-client + RBAC work that's still pending. The
+    deployment row's `kubeconfig_secret_ref` is set to a placeholder
+    name (`tinkerbell/kubeconfig-<id>`) so the orchestrator's
+    joining stage knows what Secret to look for once the create
+    side lands.
+
+    Auth: deliberately NOT behind require_capability. The Tink
+    Worker action runs from a freshly-booted node that doesn't have
+    a DCIM token. The endpoint is hardened by:
+
+      * accepting only deployments in `joining` or `provisioning`
+        state (post-PXE, pre-finalize);
+      * the deployment_id is path-scoped — a node only knows its
+        own deployment id, baked into the Ignition payload.
+
+    Once the central-cluster Secret-write path lands, the endpoint
+    will additionally require a one-shot bootstrap token minted at
+    deploy-start and embedded in the Workflow template. Tracked in
+    docs/dev/region-deploy.md §3a kubeconfig workstream.
+    """
+    row = await db.get(RegionDeployment, deployment_id)
+    if row is None:
+        raise NotFoundError(NOT_FOUND_MSG)
+    if row.status not in {
+        RegionDeploymentStatus.provisioning,
+        RegionDeploymentStatus.joining,
+    }:
+        raise ValidationError(
+            f"deployment is {row.status.value}; kubeconfig callback only "
+            f"accepted during provisioning/joining",
+        )
+    # Placeholder ref name — the orchestrator looks for this Secret
+    # in the joining stage. Real Secret creation lands with the
+    # central-cluster k8s-client workstream.
+    row.kubeconfig_secret_ref = f"tinkerbell/kubeconfig-{deployment_id}"
+    await db.commit()
+    # Best-effort event for the SSE stream — gives operators visible
+    # confirmation that the callback fired without exposing the
+    # kubeconfig content in the event log.
+    settings = get_settings()
+    redis = redis_from_url(str(settings.redis_dsn), decode_responses=True)
+    try:
+        await rd_events.emit(
+            db, redis,
+            deployment_id=deployment_id,
+            stage="joining",
+            message=(
+                f"kubeconfig callback received from node {payload.node_id} "
+                f"({len(payload.kubeconfig)} bytes); "
+                "Secret creation pending kubeconfig workstream"
+            ),
+        )
+        await db.commit()
+    finally:
+        await redis.close()
+    return None
 
 
 @router.post("/{deployment_id}/abort", response_model=RegionDeploymentOut)

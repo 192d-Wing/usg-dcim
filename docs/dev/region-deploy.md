@@ -240,6 +240,75 @@ v6 shape, parallel to the existing v4 code path:
 
 ---
 
+## 3a. Kubeconfig workstream (cross-cutting blocker)
+
+Single workstream that unblocks the apply paths for stages 8 / 9 / 10
+plus the four `external_*` verify checks. Without it the orchestrator
+has no way to reach the regional cluster post-`kubeadm init`.
+
+### Pieces
+
+1. **Workflow Template addition** — a `kubeconfig-write` action that
+   runs on the first control-plane node after `kubeadm init`
+   completes. Reads `/etc/kubernetes/admin.conf` and POSTs it to
+   central via the callback endpoint below. Lives in
+   `backend/src/dcim/regiondeploy/crd.py`'s template renderer.
+
+2. **Central callback endpoint** — ✅ scaffolded.
+   `POST /api/v1/region-deployments/{id}/kubeconfig/callback`
+   accepts `{node_id, kubeconfig}`, validates the deployment is in
+   `provisioning`/`joining`, sets `kubeconfig_secret_ref` to the
+   placeholder name, and emits a `joining`-stage event. The actual
+   Secret-write to central's `tinkerbell` namespace is owed work
+   (item 3).
+
+3. **k8s client + RBAC** — the api/worker service account needs a
+   ClusterRole binding to write Secrets in the `tinkerbell`
+   namespace, plus a thin httpx wrapper (or `kubernetes-asyncio`)
+   to drive the create call. Without RBAC the Secret-write fails;
+   with it the callback endpoint becomes the real persistence
+   path.
+
+4. **Orchestrator joining stage** — reads the
+   `tinkerbell/kubeconfig-{id}` Secret, hands a kubeconfig file
+   reference to subsequent stages. Today's stub becomes real once
+   item 3 lands.
+
+5. **Helm + kubectl in the orchestrator** — Helm client wired to
+   the kubeconfig from item 4; stages 8/9/10's render-only handlers
+   gain an apply branch behind a feature flag. Once that's stable
+   for one site, the flag goes away.
+
+### Auth note on the callback endpoint
+
+The callback is deliberately NOT behind `require_capability` — the
+Tink Worker action runs from a freshly-booted node with no DCIM
+token. Today's hardening is "deployment must be in
+provisioning/joining + path-scoped deployment id" (the node only
+knows its own id, baked into the Ignition payload).
+
+Once item 3 lands and Secret writes are real, we mint a per-
+deployment one-shot bootstrap token at deploy-start and bake it
+into the Workflow template. The callback then requires that
+token. Tracked as a follow-up to item 3.
+
+### Status (2026-05-15)
+
+| Item                                                | Status                                    |
+| --------------------------------------------------- | ----------------------------------------- |
+| 1. Workflow Template `kubeconfig-write` action      | ⏳ pending                                |
+| 2. Callback endpoint                                | ✅ scaffolded — receipt + placeholder ref |
+| 3. k8s client + RBAC                                | ⏳ pending                                |
+| 4. Real joining-stage Secret read                   | ⏳ pending                                |
+| 5. Helm + kubectl client + apply branches in 8/9/10 | ⏳ pending                                |
+
+Effort estimate: ~2 days of focused work for items 1+3+4; another
+~2 days for item 5 plus the apply branch wiring. Test depth is the
+real bottleneck — full end-to-end exercises need real BMC
+hardware or a QEMU+EDK2 OVMF rig.
+
+---
+
 ## 3. Phase 0 — Central cluster v6 enablement (prerequisite)
 
 This must land before the first real region deploy. Tracked separately from

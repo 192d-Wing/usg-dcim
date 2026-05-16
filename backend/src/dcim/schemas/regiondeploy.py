@@ -107,6 +107,32 @@ class RegionDeploymentOut(BaseModel):
     services: list[RegionDeploymentServiceOut] = Field(default_factory=list)
 
 
+class RegionDeploymentKubeconfigCallback(BaseModel):
+    """Payload the Tink Worker posts back to central after `kubeadm
+    init` succeeds on the first control-plane node.
+
+    The Workflow template's `kubeconfig-write` action (see
+    docs/dev/region-deploy.md §3a workstream) reads
+    `/etc/kubernetes/admin.conf` post-init and POSTs it here, where
+    central stamps it into the deployment row so the orchestrator's
+    `joining` stage can pick it up.
+
+    Today the endpoint only records receipt — actually persisting
+    the kubeconfig as a k8s Secret needs the central-cluster RBAC +
+    k8s-client work that's still pending (same blocker as the apply
+    path for stages 8/9/10).
+    """
+
+    # node_id: which node wrote it. Lets central correlate the
+    # callback to a specific RegionDeploymentNode in case multiple
+    # control planes try to write.
+    node_id: UUID
+    # kubeconfig: full YAML content of /etc/kubernetes/admin.conf.
+    # Treated as opaque on the central side; the orchestrator uses
+    # it as a kubeconfig file for client-go / kubectl wrapping.
+    kubeconfig: str
+
+
 class PreflightCheckOut(BaseModel):
     """Single pre-flight check result as the wizard renders it."""
 
