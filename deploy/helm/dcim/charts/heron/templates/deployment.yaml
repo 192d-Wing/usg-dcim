@@ -20,8 +20,10 @@ spec:
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
           ports:
             - { name: https, containerPort: 8443 }
+            - { name: admin, containerPort: {{ .Values.service.adminPort }} }
           env:
             - { name: INGEST_ADDR, value: ":8443" }
+            - { name: HERON_ADMIN_ADDR, value: ":{{ .Values.service.adminPort }}" }
             - { name: DCIM_POSTGRES_DSN_RAW, value: {{ .Values.global.postgresql.dsn | quote }} }
             {{- if .Values.mtls.enabled }}
             - { name: INGEST_TLS_CERT, value: "/etc/heron/tls/tls.crt" }
@@ -37,10 +39,15 @@ spec:
           readinessProbe:
             httpGet:
               path: /healthz
-              port: https
-              scheme: HTTPS
+              port: admin
             initialDelaySeconds: 5
             periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            initialDelaySeconds: 15
+            periodSeconds: 20
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- if .Values.mtls.enabled }}
@@ -61,7 +68,7 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: https
+    - { name: https, port: {{ .Values.service.port }},      targetPort: https }
+    - { name: admin, port: {{ .Values.service.adminPort }}, targetPort: admin }
   selector: {{- include "heron.selectorLabels" . | nindent 4 }}
 {{- end }}

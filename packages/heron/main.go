@@ -96,6 +96,10 @@ func main() {
 
 	pgDSN := env.String("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim")
 	addr := env.String("INGEST_ADDR", ":8100")
+	// Plain-HTTP admin listener for /healthz + /metrics. Separate from
+	// the mTLS ingest port so Prometheus + kubelet probes don't need a
+	// client cert. Set to empty string to disable.
+	adminAddr := env.String("HERON_ADMIN_ADDR", ":8090")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -117,14 +121,33 @@ func main() {
 		writeHypertable: writeHypertable,
 	}
 
+	// Ingest mux: only mTLS-gated routes. /healthz and /metrics moved to
+	// the admin mux below so probes and Prometheus don't need client certs.
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
-	promx.Mount(mux)
 	// Path matches the Python API surface (FastAPI mounts at /api/v1).
 	// /v1/ingest/telemetry is also accepted for clients that talk
 	// directly to this service without going through the api proxy.
 	mux.HandleFunc("/api/v1/ingest/telemetry", s.handleIngest)
 	mux.HandleFunc("/v1/ingest/telemetry", s.handleIngest)
+
+	// Admin mux: plain HTTP, no auth. Separate listener so it never
+	// sees ingest traffic and ingest never sees scrape traffic.
+	if adminAddr != "" {
+		adminMux := http.NewServeMux()
+		adminMux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
+		promx.Mount(adminMux)
+		adminSrv := &http.Server{
+			Addr:              adminAddr,
+			Handler:           adminMux,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		go func() {
+			log.Info("admin_listen", "addr", adminAddr)
+			if err := adminSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Error("admin_listen_failed", "err", err)
+			}
+		}()
+	}
 
 	srv := &http.Server{Addr: addr, Handler: mux}
 

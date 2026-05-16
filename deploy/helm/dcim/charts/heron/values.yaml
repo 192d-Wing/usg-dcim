@@ -6,6 +6,9 @@ resources:
 service:
   type: ClusterIP
   port: 8443
+  # Plain-HTTP admin port for /healthz and /metrics. Separate listener
+  # inside heron so probes and Prometheus don't need a client cert.
+  adminPort: 8090
 mtls:
   enabled: true
   # Server TLS secret containing tls.crt + tls.key (e.g. cert-manager output).
