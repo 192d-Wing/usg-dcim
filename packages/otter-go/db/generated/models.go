@@ -45,6 +45,32 @@ type AlertRule struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
+type MaintenanceWindow struct {
+	ID              uuid.UUID       `json:"id"`
+	Name            string          `json:"name"`
+	SiteID          *uuid.UUID      `json:"site_id"`
+	AssetFilterJson json.RawMessage `json:"asset_filter_json"`
+	StartsAt        time.Time       `json:"starts_at"`
+	EndsAt          time.Time       `json:"ends_at"`
+	CreatedBy       *string         `json:"created_by"`
+	Reason          *string         `json:"reason"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+type NotificationChannel struct {
+	ID              uuid.UUID       `json:"id"`
+	Name            string          `json:"name"`
+	Kind            string          `json:"kind"`
+	ConfigJson      json.RawMessage `json:"config_json"`
+	MinSeverity     string          `json:"min_severity"`
+	NotifyOnFire    bool            `json:"notify_on_fire"`
+	NotifyOnResolve bool            `json:"notify_on_resolve"`
+	Enabled         bool            `json:"enabled"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
 type Alert struct {
 	ID             uuid.UUID       `json:"id"`
 	RuleID         *uuid.UUID      `json:"rule_id"`

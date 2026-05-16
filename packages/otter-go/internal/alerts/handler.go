@@ -5,11 +5,14 @@ package alerts
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
@@ -20,6 +23,10 @@ type Querier interface {
 	CountAlerts(ctx context.Context, arg dbq.CountAlertsParams) (int64, error)
 	ListAlertRules(ctx context.Context, arg dbq.ListAlertRulesParams) ([]dbq.AlertRule, error)
 	CountAlertRules(ctx context.Context, arg dbq.CountAlertRulesParams) (int64, error)
+	GetAlertRule(ctx context.Context, id uuid.UUID) (dbq.AlertRule, error)
+	ListMaintenanceWindows(ctx context.Context, arg dbq.ListMaintenanceWindowsParams) ([]dbq.MaintenanceWindow, error)
+	CountMaintenanceWindows(ctx context.Context, arg dbq.CountMaintenanceWindowsParams) (int64, error)
+	GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (dbq.MaintenanceWindow, error)
 }
 
 type Handler struct {
@@ -30,6 +37,9 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/alerts", h.listAlerts)
 	r.Get("/alerts/", h.listAlerts)
 	r.Get("/alerts/rules", h.listRules)
+	r.Get("/alerts/rules/{id}", h.getRule)
+	r.Get("/alerts/maintenance-windows", h.listMaintenanceWindows)
+	r.Get("/alerts/maintenance-windows/{id}", h.getMaintenanceWindow)
 }
 
 type alertsPage struct {
@@ -111,6 +121,102 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, rulesPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+// ---- Rule get-by-id ----
+
+func (h *Handler) getRule(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		return
+	}
+	rule, err := h.Q.GetAlertRule(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "rule not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rule)
+}
+
+// ---- Maintenance windows ----
+
+type maintenanceWindowsPage struct {
+	Items  []dbq.MaintenanceWindow `json:"items"`
+	Total  int64                   `json:"total"`
+	Limit  int32                   `json:"limit"`
+	Offset int32                   `json:"offset"`
+}
+
+func (h *Handler) listMaintenanceWindows(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	params := dbq.ListMaintenanceWindowsParams{Limit: limit, Offset: offset}
+
+	if v := q.Get("site_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "site_id is not a uuid")
+			return
+		}
+		params.SiteID = &id
+	}
+	if v := q.Get("active_at"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "active_at is not RFC3339")
+			return
+		}
+		params.ActiveAt = &t
+	}
+	// `upcoming=true` matches the Python flag — translated to a
+	// server-side `ends_at >= now()` lower-bound so the filter is
+	// stable across paginated requests within the same call.
+	if v := q.Get("upcoming"); v == "true" || v == "1" {
+		now := time.Now().UTC()
+		params.UpcomingAfter = &now
+	}
+
+	items, err := h.Q.ListMaintenanceWindows(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountMaintenanceWindows(r.Context(), dbq.CountMaintenanceWindowsParams{
+		SiteID: params.SiteID, ActiveAt: params.ActiveAt, UpcomingAfter: params.UpcomingAfter,
+	})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, maintenanceWindowsPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+func (h *Handler) getMaintenanceWindow(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		return
+	}
+	mw, err := h.Q.GetMaintenanceWindow(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "maintenance window not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, mw)
 }
 
 func strPtr(s string) *string {
