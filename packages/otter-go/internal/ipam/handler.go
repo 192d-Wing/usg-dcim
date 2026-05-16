@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -50,6 +51,56 @@ type Querier interface {
 
 	ListVrfBgpPeers(ctx context.Context, arg dbq.ListVrfBgpPeersParams) ([]dbq.VrfBgpPeer, error)
 	CountVrfBgpPeers(ctx context.Context, arg dbq.CountVrfBgpPeersParams) (int64, error)
+
+	// Fabrics
+	CreateFabric(ctx context.Context, arg dbq.CreateFabricParams) (dbq.Fabric, error)
+	UpdateFabric(ctx context.Context, arg dbq.UpdateFabricParams) (dbq.Fabric, error)
+	CountVrfsInFabric(ctx context.Context, fabricID uuid.UUID) (int64, error)
+	DeleteFabric(ctx context.Context, id uuid.UUID) error
+	// VRFs
+	CreateVrf(ctx context.Context, arg dbq.CreateVrfParams) (dbq.Vrf, error)
+	UpdateVrf(ctx context.Context, arg dbq.UpdateVrfParams) (dbq.Vrf, error)
+	CountSupernetsInVrf(ctx context.Context, vrfID uuid.UUID) (int64, error)
+	DeleteVrf(ctx context.Context, id uuid.UUID) error
+	// VrfBgpPeers
+	CreateVrfBgpPeer(ctx context.Context, arg dbq.CreateVrfBgpPeerParams) (dbq.VrfBgpPeer, error)
+	UpdateVrfBgpPeer(ctx context.Context, arg dbq.UpdateVrfBgpPeerParams) (dbq.VrfBgpPeer, error)
+	DeleteVrfBgpPeer(ctx context.Context, id uuid.UUID) error
+	// Supernets
+	CreateSupernet(ctx context.Context, arg dbq.CreateSupernetParams) (dbq.Supernet, error)
+	UpdateSupernet(ctx context.Context, arg dbq.UpdateSupernetParams) (dbq.Supernet, error)
+	CountSubnetsInSupernet(ctx context.Context, supernetID uuid.UUID) (int64, error)
+	DeleteSupernet(ctx context.Context, id uuid.UUID) error
+	GetSupernetVrfAndFabric(ctx context.Context, id uuid.UUID) (dbq.SupernetVrfAndFabric, error)
+	// Subnets
+	CreateSubnet(ctx context.Context, arg dbq.CreateSubnetParams) (dbq.Subnet, error)
+	UpdateSubnet(ctx context.Context, arg dbq.UpdateSubnetParams) (dbq.Subnet, error)
+	CountAddressesInSubnet(ctx context.Context, subnetID uuid.UUID) (int64, error)
+	DeleteSubnet(ctx context.Context, id uuid.UUID) error
+	// IPAddresses
+	CreateIPAddress(ctx context.Context, arg dbq.CreateIPAddressParams) (dbq.IPAddress, error)
+	UpdateIPAddress(ctx context.Context, arg dbq.UpdateIPAddressParams) (dbq.IPAddress, error)
+	DeleteIPAddress(ctx context.Context, id uuid.UUID) error
+	// Overlays
+	CreateOverlay(ctx context.Context, arg dbq.CreateOverlayParams) (dbq.Overlay, error)
+	UpdateOverlay(ctx context.Context, arg dbq.UpdateOverlayParams) (dbq.Overlay, error)
+	CountVnisInOverlay(ctx context.Context, overlayID uuid.UUID) (int64, error)
+	DeleteOverlay(ctx context.Context, id uuid.UUID) error
+	// VNIs
+	CreateVni(ctx context.Context, arg dbq.CreateVniParams) (dbq.Vni, error)
+	UpdateVni(ctx context.Context, arg dbq.UpdateVniParams) (dbq.Vni, error)
+	DeleteVni(ctx context.Context, id uuid.UUID) error
+	// VTEPs
+	CreateVtep(ctx context.Context, arg dbq.CreateVtepParams) (dbq.Vtep, error)
+	UpdateVtep(ctx context.Context, arg dbq.UpdateVtepParams) (dbq.Vtep, error)
+	DeleteVtep(ctx context.Context, id uuid.UUID) error
+	// VTEP/VNI memberships
+	CreateVtepMembership(ctx context.Context, arg dbq.CreateVtepMembershipParams) (dbq.VtepVniMembership, error)
+	DeleteVtepMembership(ctx context.Context, id uuid.UUID) error
+	// DHCP servers
+	CreateDhcpServer(ctx context.Context, arg dbq.CreateDhcpServerParams) (dbq.DhcpServer, error)
+	UpdateDhcpServer(ctx context.Context, arg dbq.UpdateDhcpServerParams) (dbq.DhcpServer, error)
+	DeleteDhcpServer(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -74,6 +125,56 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/vtep-memberships", h.listVtepMemberships)
 		r.Get("/dhcp/servers", h.listDhcpServers)
 		r.Get("/vrf-bgp-peers", h.listVrfBgpPeers)
+
+		// ---- Mutations ----
+		// NOTE: PR 42 ports the basic CRUD. CIDR validation, slug
+		// regex, supernet-tree containment, per-VRF uniqueness, and
+		// fabric's auto-create-default-VRF are deferred to a focused
+		// invariants follow-up PR. Simple FK-in-use refusals (delete
+		// fabric → vrfs check, delete vrf → supernets, etc.) ARE
+		// enforced here as 409s.
+		r.With(auth.RequireCapability("ipam:fabrics:create")).Post("/fabrics", h.createFabric)
+		r.With(auth.RequireCapability("ipam:fabrics:update")).Patch("/fabrics/{id}", h.updateFabric)
+		r.With(auth.RequireCapability("ipam:fabrics:delete")).Delete("/fabrics/{id}", h.deleteFabric)
+
+		r.With(auth.RequireCapability("ipam:vrfs:create")).Post("/vrfs", h.createVrf)
+		r.With(auth.RequireCapability("ipam:vrfs:update")).Patch("/vrfs/{id}", h.updateVrf)
+		r.With(auth.RequireCapability("ipam:vrfs:delete")).Delete("/vrfs/{id}", h.deleteVrf)
+
+		r.With(auth.RequireCapability("ipam:vrf-bgp-peers:create")).Post("/vrf-bgp-peers", h.createVrfBgpPeer)
+		r.With(auth.RequireCapability("ipam:vrf-bgp-peers:update")).Patch("/vrf-bgp-peers/{id}", h.updateVrfBgpPeer)
+		r.With(auth.RequireCapability("ipam:vrf-bgp-peers:delete")).Delete("/vrf-bgp-peers/{id}", h.deleteVrfBgpPeer)
+
+		r.With(auth.RequireCapability("ipam:supernets:create")).Post("/supernets", h.createSupernet)
+		r.With(auth.RequireCapability("ipam:supernets:update")).Patch("/supernets/{id}", h.updateSupernet)
+		r.With(auth.RequireCapability("ipam:supernets:delete")).Delete("/supernets/{id}", h.deleteSupernet)
+
+		r.With(auth.RequireCapability("ipam:subnets:create")).Post("/subnets", h.createSubnet)
+		r.With(auth.RequireCapability("ipam:subnets:update")).Patch("/subnets/{id}", h.updateSubnet)
+		r.With(auth.RequireCapability("ipam:subnets:delete")).Delete("/subnets/{id}", h.deleteSubnet)
+
+		r.With(auth.RequireCapability("ipam:addresses:create")).Post("/addresses", h.createAddress)
+		r.With(auth.RequireCapability("ipam:addresses:update")).Patch("/addresses/{id}", h.updateAddress)
+		r.With(auth.RequireCapability("ipam:addresses:delete")).Delete("/addresses/{id}", h.deleteAddress)
+
+		r.With(auth.RequireCapability("ipam:overlays:create")).Post("/overlays", h.createOverlay)
+		r.With(auth.RequireCapability("ipam:overlays:update")).Patch("/overlays/{id}", h.updateOverlay)
+		r.With(auth.RequireCapability("ipam:overlays:delete")).Delete("/overlays/{id}", h.deleteOverlay)
+
+		r.With(auth.RequireCapability("ipam:vnis:create")).Post("/vnis", h.createVni)
+		r.With(auth.RequireCapability("ipam:vnis:update")).Patch("/vnis/{id}", h.updateVni)
+		r.With(auth.RequireCapability("ipam:vnis:delete")).Delete("/vnis/{id}", h.deleteVni)
+
+		r.With(auth.RequireCapability("ipam:vteps:create")).Post("/vteps", h.createVtep)
+		r.With(auth.RequireCapability("ipam:vteps:update")).Patch("/vteps/{id}", h.updateVtep)
+		r.With(auth.RequireCapability("ipam:vteps:delete")).Delete("/vteps/{id}", h.deleteVtep)
+
+		r.With(auth.RequireCapability("ipam:vtep-memberships:create")).Post("/vtep-memberships", h.createVtepMembership)
+		r.With(auth.RequireCapability("ipam:vtep-memberships:delete")).Delete("/vtep-memberships/{id}", h.deleteVtepMembership)
+
+		r.With(auth.RequireCapability("ipam:dhcp-servers:create")).Post("/dhcp/servers", h.createDhcpServer)
+		r.With(auth.RequireCapability("ipam:dhcp-servers:update")).Patch("/dhcp/servers/{id}", h.updateDhcpServer)
+		r.With(auth.RequireCapability("ipam:dhcp-servers:delete")).Delete("/dhcp/servers/{id}", h.deleteDhcpServer)
 	})
 }
 

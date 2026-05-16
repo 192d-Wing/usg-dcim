@@ -82,6 +82,95 @@ func mount(f *fakeQ) http.Handler {
 	(&Handler{Q: f}).Mount(r)
 	return r
 }
+// ---- Mutation stubs (PR 42) ----
+
+func (f *fakeQ) CreateFabric(_ context.Context, a dbq.CreateFabricParams) (dbq.Fabric, error) {
+	return dbq.Fabric{ID: uuid.New(), Name: a.Name, Slug: a.Slug}, nil
+}
+func (f *fakeQ) UpdateFabric(_ context.Context, a dbq.UpdateFabricParams) (dbq.Fabric, error) {
+	return dbq.Fabric{ID: a.ID}, nil
+}
+func (f *fakeQ) CountVrfsInFabric(_ context.Context, _ uuid.UUID) (int64, error) { return 0, nil }
+func (f *fakeQ) DeleteFabric(_ context.Context, _ uuid.UUID) error               { return nil }
+func (f *fakeQ) CreateVrf(_ context.Context, a dbq.CreateVrfParams) (dbq.Vrf, error) {
+	return dbq.Vrf{ID: uuid.New(), FabricID: a.FabricID, Name: a.Name, IsDefault: a.IsDefault}, nil
+}
+func (f *fakeQ) UpdateVrf(_ context.Context, a dbq.UpdateVrfParams) (dbq.Vrf, error) {
+	return dbq.Vrf{ID: a.ID}, nil
+}
+func (f *fakeQ) CountSupernetsInVrf(_ context.Context, _ uuid.UUID) (int64, error) { return 0, nil }
+func (f *fakeQ) DeleteVrf(_ context.Context, _ uuid.UUID) error                    { return nil }
+func (f *fakeQ) CreateVrfBgpPeer(_ context.Context, a dbq.CreateVrfBgpPeerParams) (dbq.VrfBgpPeer, error) {
+	return dbq.VrfBgpPeer{ID: uuid.New(), VrfID: a.VrfID, BgpPeerID: a.BgpPeerID, AddressFamily: a.AddressFamily, Enabled: a.Enabled}, nil
+}
+func (f *fakeQ) UpdateVrfBgpPeer(_ context.Context, a dbq.UpdateVrfBgpPeerParams) (dbq.VrfBgpPeer, error) {
+	return dbq.VrfBgpPeer{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteVrfBgpPeer(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateSupernet(_ context.Context, a dbq.CreateSupernetParams) (dbq.Supernet, error) {
+	return dbq.Supernet{ID: uuid.New(), FabricID: a.FabricID, VrfID: a.VrfID, Prefix: a.Prefix}, nil
+}
+func (f *fakeQ) UpdateSupernet(_ context.Context, a dbq.UpdateSupernetParams) (dbq.Supernet, error) {
+	return dbq.Supernet{ID: a.ID}, nil
+}
+func (f *fakeQ) CountSubnetsInSupernet(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) DeleteSupernet(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) GetSupernetVrfAndFabric(_ context.Context, _ uuid.UUID) (dbq.SupernetVrfAndFabric, error) {
+	return dbq.SupernetVrfAndFabric{VrfID: uuid.New(), FabricID: uuid.New()}, nil
+}
+func (f *fakeQ) CreateSubnet(_ context.Context, a dbq.CreateSubnetParams) (dbq.Subnet, error) {
+	return dbq.Subnet{ID: uuid.New(), SupernetID: a.SupernetID, FabricID: a.FabricID, VrfID: a.VrfID, Prefix: a.Prefix}, nil
+}
+func (f *fakeQ) UpdateSubnet(_ context.Context, a dbq.UpdateSubnetParams) (dbq.Subnet, error) {
+	return dbq.Subnet{ID: a.ID}, nil
+}
+func (f *fakeQ) CountAddressesInSubnet(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) DeleteSubnet(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateIPAddress(_ context.Context, a dbq.CreateIPAddressParams) (dbq.IPAddress, error) {
+	return dbq.IPAddress{ID: uuid.New(), SubnetID: a.SubnetID, Address: a.Address}, nil
+}
+func (f *fakeQ) UpdateIPAddress(_ context.Context, a dbq.UpdateIPAddressParams) (dbq.IPAddress, error) {
+	return dbq.IPAddress{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteIPAddress(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateOverlay(_ context.Context, a dbq.CreateOverlayParams) (dbq.Overlay, error) {
+	return dbq.Overlay{ID: uuid.New(), FabricID: a.FabricID, Name: a.Name, Kind: a.Kind, UDPPort: a.UDPPort}, nil
+}
+func (f *fakeQ) UpdateOverlay(_ context.Context, a dbq.UpdateOverlayParams) (dbq.Overlay, error) {
+	return dbq.Overlay{ID: a.ID}, nil
+}
+func (f *fakeQ) CountVnisInOverlay(_ context.Context, _ uuid.UUID) (int64, error) { return 0, nil }
+func (f *fakeQ) DeleteOverlay(_ context.Context, _ uuid.UUID) error               { return nil }
+func (f *fakeQ) CreateVni(_ context.Context, a dbq.CreateVniParams) (dbq.Vni, error) {
+	return dbq.Vni{ID: uuid.New(), OverlayID: a.OverlayID, VNI: a.VNI, Kind: a.Kind}, nil
+}
+func (f *fakeQ) UpdateVni(_ context.Context, a dbq.UpdateVniParams) (dbq.Vni, error) {
+	return dbq.Vni{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteVni(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateVtep(_ context.Context, a dbq.CreateVtepParams) (dbq.Vtep, error) {
+	return dbq.Vtep{ID: uuid.New(), OverlayID: a.OverlayID, AssetID: a.AssetID, Role: a.Role}, nil
+}
+func (f *fakeQ) UpdateVtep(_ context.Context, a dbq.UpdateVtepParams) (dbq.Vtep, error) {
+	return dbq.Vtep{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteVtep(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateVtepMembership(_ context.Context, a dbq.CreateVtepMembershipParams) (dbq.VtepVniMembership, error) {
+	return dbq.VtepVniMembership{ID: uuid.New(), VtepID: a.VtepID, VniID: a.VniID}, nil
+}
+func (f *fakeQ) DeleteVtepMembership(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateDhcpServer(_ context.Context, a dbq.CreateDhcpServerParams) (dbq.DhcpServer, error) {
+	return dbq.DhcpServer{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, KeaURL: a.KeaURL, Enabled: a.Enabled}, nil
+}
+func (f *fakeQ) UpdateDhcpServer(_ context.Context, a dbq.UpdateDhcpServerParams) (dbq.DhcpServer, error) {
+	return dbq.DhcpServer{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteDhcpServer(_ context.Context, _ uuid.UUID) error { return nil }
+
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
