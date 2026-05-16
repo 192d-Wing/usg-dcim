@@ -95,12 +95,17 @@ deploy/helm/dcim/
 Shared values under `global:` (image registry/tag, postgresql/redis DSN,
 OIDC, OTEL, podSecurityContext) propagate to subcharts automatically.
 
+## Phase 9 — heron Go binary on the chart (done)
+
+`packages/heron` gained native TLS (`INGEST_TLS_CERT`/`KEY`) + optional
+mTLS (`INGEST_TLS_CLIENT_CA`, `INGEST_TLS_REQUIRE_CLIENT_CERT`) and the
+heron Helm subchart now ships the Go image with Secret-mounted certs.
+Defaults: `serverCertSecret=dcim-heron-tls`,
+`clientCABundleSecret=dcim-collector-ca`, `requireClientCert=true`.
+
 ## Deferred follow-ups
 
-- **`packages/heron` Go binary not yet wired into the Helm `heron`
-  subchart.** The chart still uses the otter (Python) image under
-  uvicorn:8443 with mTLS. Switching to the Go binary needs TLS support
-  in `packages/heron` first; flip `heron.image` override afterward.
+_None tracked — open new ones here as they come up._
 
 ## Dev commands
 
