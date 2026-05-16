@@ -43,22 +43,64 @@ named after an animal that hints at its role. Deployment wiring lives under
 5. ✅ `infra/{docker,k8s,helm} → deploy/`; `infra/{coredns-nsec3sign,hickory-prom} → packages/wolf/`.
 6. ✅ Doc cross-links + root Makefile/Taskfile targets.
 
+## Phase 7 — runtime contract rename (BREAKING, done)
+
+Image names, k8s Service names, compose service names, Helm value keys,
+and built binary/ENTRYPOINTs all renamed to match the animal packages:
+
+| Old | New |
+|---|---|
+| `dcim-api` / Service `api` / Helm `api:` | `dcim-otter` / `otter` / `otter:` |
+| `dcim-frontend` / `frontend` | `dcim-finch` / `finch` |
+| `dcim-go-ingest` / `go-ingest` / Helm `ingest:` | `dcim-heron` / `heron` / `heron:` |
+| `dcim-go-alerts` / `go-alerts` | `dcim-magpie` / `magpie` |
+| `dcim-go-dns-probe` / `go-dns-probe` | `dcim-beagle` / `beagle` |
+| `dcim-go-collector` / `go-collector` | `dcim-badger` / `badger` |
+| `dcim-worker` / `worker` | `dcim-otter-worker` / `otter-worker` |
+| `/go-collector` ENTRYPOINT | `/badger` (etc.) |
+
+Intentionally **not** renamed:
+- Buffer path `/var/lib/dcim-collector` and user `collector` in
+  `packages/badger/Containerfile` — preserves site PV/PVC compatibility.
+- External DNS hostname `go-ingest.infra.prod.dcim.mil` — operator-managed.
+- Comment refs to original paths in `packages/badger/internal/**`
+  (historical "this is a port of `collector/src/dcim_collector/...`"
+  notes are accurate to the port's source-of-truth at the time).
+
+## Phase 8 — Helm chart split (BREAKING, done)
+
+`deploy/helm/dcim/` is now an **umbrella chart** with one subchart per
+animal under `charts/`:
+
+```
+deploy/helm/dcim/
+├── Chart.yaml                       # v0.2.0
+├── values.yaml                      # `global:` + per-animal pass-through
+├── values-k3d.yaml
+├── templates/                       # cross-cutting: ingress, networkpolicy,
+│   ├── ingress.yaml                 #   secrets, alembic migrations Job
+│   ├── networkpolicy.yaml
+│   ├── secrets.yaml
+│   └── migrations-job.yaml
+└── charts/
+    ├── otter/                       # FastAPI API + Service + HPA
+    ├── otter-worker/                # arq worker (otter image, separate scale)
+    ├── finch/                       # React UI + Service
+    ├── heron/                       # mTLS ingest (Python via uvicorn for now)
+    ├── magpie/                      # Go alerts evaluator
+    ├── beagle/                      # Go DNS probe (NET_RAW)
+    └── badger/                      # Site collector (enabled=false default)
+```
+
+Shared values under `global:` (image registry/tag, postgresql/redis DSN,
+OIDC, OTEL, podSecurityContext) propagate to subcharts automatically.
+
 ## Deferred follow-ups
 
-- **Per-animal Helm charts.** The single `deploy/helm/dcim/` chart still
-  groups all services. Splitting per-animal would invalidate every
-  existing Helm release and ingress contract; defer until there is an
-  operator-facing reason to break the contract.
-- **Rename runtime contracts.** Kubernetes Service names (`go-ingest`,
-  `frontend`, `api`), image names (`dcim-go-ingest:dev`,
-  `dcim-frontend:dev`), Helm value keys (`frontend:`, `api:`), and
-  in-cluster hostnames are intentionally still pre-rename. Any switch to
-  the animal names is a runtime-breaking change requiring coordinated
-  deploys.
-- **Comment refs to old paths.** Historical "this Go file is a port of
-  `collector/src/dcim_collector/...`" comments in `packages/badger/`
-  describe the original location of the Python source at port time and
-  were intentionally not rewritten.
+- **`packages/heron` Go binary not yet wired into the Helm `heron`
+  subchart.** The chart still uses the otter (Python) image under
+  uvicorn:8443 with mTLS. Switching to the Go binary needs TLS support
+  in `packages/heron` first; flip `heron.image` override afterward.
 
 ## Dev commands
 
