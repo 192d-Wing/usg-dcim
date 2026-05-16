@@ -24,6 +24,11 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/oidc/login", h.oidcLogin)
 		r.Get("/oidc/callback", h.oidcCallback)
 		r.Get("/oidc/logout", h.oidcLogout)
+		r.Post("/login", h.login)
+		r.Post("/logout", h.logout)
+		r.Get("/tokens", h.listTokens)
+		r.Post("/tokens", h.issueToken)
+		r.Delete("/tokens/{id}", h.revokeToken)
 	})
 }
 

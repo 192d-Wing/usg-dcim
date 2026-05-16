@@ -53,6 +53,22 @@ func (f *fakeQ) CreateOidcUser(_ context.Context, _ dbq.CreateOidcUserParams) (d
 func (f *fakeQ) UpdateOidcUserOnLogin(_ context.Context, _ dbq.UpdateOidcUserOnLoginParams) (dbq.User, error) {
 	return dbq.User{ID: uuid.New()}, nil
 }
+func (f *fakeQ) UpdateUserLastLogin(_ context.Context, _ uuid.UUID) error      { return nil }
+func (f *fakeQ) InsertRevokedJti(_ context.Context, _ dbq.InsertRevokedJtiParams) error { return nil }
+func (f *fakeQ) GetApiTokenByHash(_ context.Context, _ string) (dbq.ApiToken, error) {
+	return dbq.ApiToken{}, pgx.ErrNoRows
+}
+func (f *fakeQ) ListApiTokensByOwner(_ context.Context, _ uuid.UUID) ([]dbq.ApiToken, error) {
+	return nil, nil
+}
+func (f *fakeQ) GetApiToken(_ context.Context, _ uuid.UUID) (dbq.ApiToken, error) {
+	return dbq.ApiToken{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateApiToken(_ context.Context, _ dbq.CreateApiTokenParams) (dbq.ApiToken, error) {
+	return dbq.ApiToken{ID: uuid.New()}, nil
+}
+func (f *fakeQ) RevokeApiToken(_ context.Context, _ uuid.UUID) error      { return nil }
+func (f *fakeQ) TouchApiTokenLastUsed(_ context.Context, _ uuid.UUID) error { return nil }
 
 func mintJWT(t *testing.T, secret []byte, sub uuid.UUID, jti string, exp time.Time, idpRoles []string) string {
 	t.Helper()

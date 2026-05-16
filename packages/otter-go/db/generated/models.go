@@ -534,6 +534,20 @@ type User struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
+type ApiToken struct {
+	ID              uuid.UUID       `json:"id"`
+	Name            string          `json:"name"`
+	OwnerUserID     uuid.UUID       `json:"owner_user_id"`
+	TokenHash       string          `json:"-"`
+	PermissionCodes json.RawMessage `json:"permission_codes"`
+	ScopeJson       json.RawMessage `json:"scope_json"`
+	ExpiresAt       *time.Time      `json:"expires_at"`
+	LastUsedAt      *time.Time      `json:"last_used_at"`
+	Revoked         bool            `json:"revoked"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
 type Role struct {
 	ID              uuid.UUID       `json:"id"`
 	Name            string          `json:"name"`

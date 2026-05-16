@@ -61,6 +61,15 @@ type Querier interface {
 	GetUserBySsoSubject(ctx context.Context, ssoSubject string) (dbq.User, error)
 	CreateOidcUser(ctx context.Context, arg dbq.CreateOidcUserParams) (dbq.User, error)
 	UpdateOidcUserOnLogin(ctx context.Context, arg dbq.UpdateOidcUserOnLoginParams) (dbq.User, error)
+
+	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error
+	InsertRevokedJti(ctx context.Context, arg dbq.InsertRevokedJtiParams) error
+	GetApiTokenByHash(ctx context.Context, tokenHash string) (dbq.ApiToken, error)
+	ListApiTokensByOwner(ctx context.Context, ownerUserID uuid.UUID) ([]dbq.ApiToken, error)
+	GetApiToken(ctx context.Context, id uuid.UUID) (dbq.ApiToken, error)
+	CreateApiToken(ctx context.Context, arg dbq.CreateApiTokenParams) (dbq.ApiToken, error)
+	RevokeApiToken(ctx context.Context, id uuid.UUID) error
+	TouchApiTokenLastUsed(ctx context.Context, id uuid.UUID) error
 }
 
 // Verifying returns the production JWT middleware. Every request must
@@ -77,6 +86,20 @@ func Verifying(log *slog.Logger, q Querier, cfg VerifierConfig) func(http.Handle
 			raw, ok := bearerToken(r)
 			if !ok {
 				httpx.Error(w, http.StatusUnauthorized, "missing bearer token")
+				return
+			}
+			// API tokens start with "dcim_" (matches Python's
+			// generate_api_token). Look up by sha256 hash; on hit,
+			// build the principal directly from token.permission_codes
+			// and skip the JWT path entirely.
+			if strings.HasPrefix(raw, "dcim_") {
+				p, ok := apiTokenPrincipal(r.Context(), q, raw)
+				if !ok {
+					httpx.Error(w, http.StatusUnauthorized, "invalid api token")
+					return
+				}
+				ctx := context.WithValue(r.Context(), principalKey, p)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 			claims, err := Verify(raw, cfg)
