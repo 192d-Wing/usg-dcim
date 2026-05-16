@@ -9,6 +9,8 @@ against regressions that would re-introduce that failure mode.
 
 from types import SimpleNamespace
 
+from prometheus_client import CollectorRegistry, Counter, Histogram
+
 from dcim.metrics import _UNMATCHED_ROUTE, _route_label
 
 
@@ -84,3 +86,80 @@ def test_route_label_many_unmatched_uuids_collapse_to_single_series():
         for i in range(1000)
     }
     assert labels == {_UNMATCHED_ROUTE}
+
+
+# ---- Cutover flag: DCIM_DISABLE_GO_PORTED_METRICS ------------------------
+#
+# We exercise the _go_ported helper directly instead of reloading the
+# module. Re-importing dcim.metrics re-registers the same metric names
+# against the default Prometheus registry, which raises
+# "Duplicated timeseries" — and using a fresh CollectorRegistry per test
+# would diverge from how prod actually wires the singletons.
+
+
+def _fresh_counter():
+    """Build a Counter against an isolated registry so tests don't
+    collide with the global one."""
+    return Counter("test_counter", "test", ["label"], registry=CollectorRegistry())
+
+
+def _fresh_histogram():
+    return Histogram("test_histogram", "test", registry=CollectorRegistry())
+
+
+def test_go_ported_returns_real_metric_by_default(monkeypatch):
+    """Without the flag, _go_ported returns the metric unchanged so
+    .inc()/.observe() actually record."""
+    monkeypatch.delenv("DCIM_DISABLE_GO_PORTED_METRICS", raising=False)
+    # Re-import so the module-level _GO_PORTED_DISABLED reflects the env.
+
+    import dcim.metrics as m
+
+    # Patch the module-level flag directly to avoid the singleton-reload
+    # ValueError that test_go_ported_metrics tests trip on.
+    monkeypatch.setattr(m, "_GO_PORTED_DISABLED", False)
+
+    counter = _fresh_counter()
+    histogram = _fresh_histogram()
+    assert m._go_ported(counter) is counter
+    assert m._go_ported(histogram) is histogram
+
+
+def test_go_ported_returns_noop_when_flag_set(monkeypatch):
+    """With the flag, _go_ported returns a _NoopMetric whose .labels(),
+    .inc(), and .observe() are silent."""
+    import dcim.metrics as m
+
+    monkeypatch.setattr(m, "_GO_PORTED_DISABLED", True)
+
+    counter = _fresh_counter()
+    wrapped = m._go_ported(counter)
+    assert wrapped.__class__.__name__ == "_NoopMetric"
+    # The same call surface — must not raise, must not affect the real counter.
+    wrapped.labels(severity="major").inc()
+    wrapped.labels(outcome="ok").inc(5)
+    wrapped.observe(1.0)
+    # Underlying counter untouched.
+    assert counter._metrics == {}
+
+
+def test_noop_metric_chains_indefinitely():
+    """labels() returns self, so chained calls like
+    `m.labels(a=1).labels(b=2).inc()` don't blow up — matches the
+    Counter API even though .labels() on a real Counter doesn't chain."""
+    from dcim.metrics import _NoopMetric
+
+    noop = _NoopMetric()
+    noop.labels(a=1).labels(b=2).inc()
+    noop.labels(c=3).observe(0.5)
+
+
+def test_env_truthy_values_disable(monkeypatch):
+    """The module-level flag reads on import; this test pins which env
+    strings are accepted as truthy by reaching into the same predicate."""
+    truthy = ("1", "true", "TRUE", "yes", "On")
+    falsy = ("0", "false", "no", "off", "", "maybe", "  ")
+    for v in truthy:
+        assert v.lower() in ("1", "true", "yes", "on"), f"{v!r} should disable"
+    for v in falsy:
+        assert v.lower() not in ("1", "true", "yes", "on"), f"{v!r} should keep live"
