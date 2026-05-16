@@ -9,6 +9,64 @@ import (
 	"github.com/google/uuid"
 )
 
+type AuditLog struct {
+	ID           uuid.UUID       `json:"id"`
+	OccurredAt   time.Time       `json:"occurred_at"`
+	ActorUserID  *uuid.UUID      `json:"actor_user_id"`
+	ActorTokenID *uuid.UUID      `json:"actor_token_id"`
+	ActorLabel   *string         `json:"actor_label"`
+	ActorIP      *string         `json:"actor_ip"`
+	Action       string          `json:"action"`
+	TargetType   *string         `json:"target_type"`
+	TargetID     *string         `json:"target_id"`
+	SiteID       *uuid.UUID      `json:"site_id"`
+	RequestID    *string         `json:"request_id"`
+	Success      bool            `json:"success"`
+	DiffJson     json.RawMessage `json:"diff_json"`
+	MetadataJson json.RawMessage `json:"metadata_json"`
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+}
+
+type AlertRule struct {
+	ID              uuid.UUID       `json:"id"`
+	Name            string          `json:"name"`
+	Description     *string         `json:"description"`
+	Metric          string          `json:"metric"`
+	Operator        string          `json:"operator"`
+	Threshold       float64         `json:"threshold"`
+	DurationSeconds int32           `json:"duration_seconds"`
+	Severity        string          `json:"severity"`
+	SiteScopeID     *uuid.UUID      `json:"site_scope_id"`
+	AssetFilterJson json.RawMessage `json:"asset_filter_json"`
+	Enabled         bool            `json:"enabled"`
+	RunbookURL      *string         `json:"runbook_url"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
+type Alert struct {
+	ID             uuid.UUID       `json:"id"`
+	RuleID         *uuid.UUID      `json:"rule_id"`
+	SiteID         uuid.UUID       `json:"site_id"`
+	AssetID        *uuid.UUID      `json:"asset_id"`
+	CollectorID    *uuid.UUID      `json:"collector_id"`
+	Severity       string          `json:"severity"`
+	State          string          `json:"state"`
+	DedupeKey      string          `json:"dedupe_key"`
+	CorrelationKey *string         `json:"correlation_key"`
+	Summary        string          `json:"summary"`
+	Detail         *string         `json:"detail"`
+	FirstSeenAt    time.Time       `json:"first_seen_at"`
+	LastSeenAt     time.Time       `json:"last_seen_at"`
+	AckedBy        *string         `json:"acked_by"`
+	AckedAt        *time.Time      `json:"acked_at"`
+	ResolvedAt     *time.Time      `json:"resolved_at"`
+	LabelsJson     json.RawMessage `json:"labels_json"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+}
+
 type DnsZone struct {
 	ID              uuid.UUID  `json:"id"`
 	Name            string     `json:"name"`

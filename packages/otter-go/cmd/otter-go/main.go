@@ -18,7 +18,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/alerts"
 	"github.com/usg-dcim/packages/otter-go/internal/assets"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
 	"github.com/usg-dcim/packages/otter-go/internal/cables"
@@ -62,6 +64,8 @@ func main() {
 	ph := &power.Handler{Q: q}
 	bh := &bgp.Handler{Q: q}
 	dh := &dns.Handler{Q: q}
+	auh := &audit.Handler{Q: q}
+	alh := &alerts.Handler{Q: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -98,6 +102,8 @@ func main() {
 		ph.Mount(r)
 		bh.Mount(r)
 		dh.Mount(r)
+		auh.Mount(r)
+		alh.Mount(r)
 	})
 
 	srv := &http.Server{
