@@ -22,6 +22,33 @@ from ..models.regiondeploy import (
 )
 
 
+class RegionDeploymentNodeCreate(BaseModel):
+    """Per-node row supplied at deploy-creation time.
+
+    `bmc_creds_secret_ref` is optional at create — the orchestrator
+    can stamp it in once secrets are minted in the `secrets` stage.
+    `primary_ip_v6` is similarly optional; populated by the joining
+    stage when the node's actual address is known.
+    """
+
+    hostname: str
+    mac: str
+    bmc_address: str
+    role: str  # control_plane | worker | edge
+    primary_ip_v6: str | None = None
+    provisioning_ip_v6: str | None = None
+    bmc_creds_secret_ref: str | None = None
+
+
+class RegionDeploymentCreate(BaseModel):
+    """Payload for `POST /region-deployments`. Mirrors the wizard."""
+
+    site_id: UUID
+    name: str
+    config: dict = Field(default_factory=dict)
+    nodes: list[RegionDeploymentNodeCreate] = Field(default_factory=list)
+
+
 class RegionDeploymentNodeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: UUID

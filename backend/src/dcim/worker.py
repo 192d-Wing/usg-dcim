@@ -32,6 +32,7 @@ from .logging_setup import configure_logging
 from .models.alerts import Alert
 from .models.dns import DnsServerMetricsSample, DnsZone, DnsZoneKind
 from .models.telemetry_meta import FreshnessState, TelemetrySource
+from .regiondeploy.orchestrator import run_region_deploy
 from .services import alerts as alerts_svc
 from .services import dns as dns_svc
 from .services import kea as kea_svc
@@ -241,6 +242,9 @@ class WorkerSettings:
         dhcp_sync, dhcp_age_out, dns_sync_from_ipam,
         dns_rotate_zsks, dns_purge_metrics,
         notify_bridge,
+        # Region-deploy orchestrator — enqueued on demand from the
+        # API when an operator clicks Start. No cron entry.
+        run_region_deploy,
     ]
     cron_jobs: ClassVar[list] = [
         # Drain notification events the Go alerts service pushes onto
