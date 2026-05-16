@@ -14,8 +14,12 @@ import (
 )
 
 type fakeQ struct {
-	lastZone dbq.ListDnsZonesParams
-	lastRec  dbq.ListDnsRecordsParams
+	lastZone    dbq.ListDnsZonesParams
+	lastRec     dbq.ListDnsRecordsParams
+	lastServer  dbq.ListDnsServersParams
+	lastAnycast dbq.ListAnycastGroupsParams
+	lastFwd     dbq.ListDnsForwardersParams
+	lastCatalog dbq.ListDnsCatalogZonesParams
 }
 
 func (f *fakeQ) ListDnsZones(_ context.Context, a dbq.ListDnsZonesParams) ([]dbq.DnsZone, error) {
@@ -33,6 +37,37 @@ func (f *fakeQ) ListDnsRecords(_ context.Context, a dbq.ListDnsRecordsParams) ([
 	return nil, nil
 }
 func (f *fakeQ) CountDnsRecords(_ context.Context, _ dbq.CountDnsRecordsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListDnsServers(_ context.Context, a dbq.ListDnsServersParams) ([]dbq.DnsServer, error) {
+	f.lastServer = a
+	return nil, nil
+}
+func (f *fakeQ) CountDnsServers(_ context.Context, _ dbq.CountDnsServersParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) GetDnsServer(_ context.Context, _ uuid.UUID) (dbq.DnsServer, error) {
+	return dbq.DnsServer{}, pgx.ErrNoRows
+}
+func (f *fakeQ) ListAnycastGroups(_ context.Context, a dbq.ListAnycastGroupsParams) ([]dbq.AnycastGroup, error) {
+	f.lastAnycast = a
+	return nil, nil
+}
+func (f *fakeQ) CountAnycastGroups(_ context.Context, _ dbq.CountAnycastGroupsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListDnsForwarders(_ context.Context, a dbq.ListDnsForwardersParams) ([]dbq.DnsForwarder, error) {
+	f.lastFwd = a
+	return nil, nil
+}
+func (f *fakeQ) CountDnsForwarders(_ context.Context, _ dbq.CountDnsForwardersParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) ListDnsCatalogZones(_ context.Context, a dbq.ListDnsCatalogZonesParams) ([]dbq.DnsCatalogZone, error) {
+	f.lastCatalog = a
+	return nil, nil
+}
+func (f *fakeQ) CountDnsCatalogZones(_ context.Context, _ dbq.CountDnsCatalogZonesParams) (int64, error) {
 	return 0, nil
 }
 
@@ -102,12 +137,70 @@ func TestListZones_PageSizeAlias(t *testing.T) {
 	}
 }
 
+func TestListServers_AllFilters(t *testing.T) {
+	sid, fid := uuid.New(), uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/servers?site_id="+sid.String()+"&fabric_id="+fid.String()+"&role=auth")
+	if f.lastServer.SiteID == nil || *f.lastServer.SiteID != sid {
+		t.Error("site_id")
+	}
+	if f.lastServer.FabricID == nil || *f.lastServer.FabricID != fid {
+		t.Error("fabric_id")
+	}
+	if f.lastServer.Role == nil || *f.lastServer.Role != "auth" {
+		t.Error("role")
+	}
+}
+
+func TestGetServer_NotFound(t *testing.T) {
+	rec := do(t, mount(&fakeQ{}), "/dns/servers/"+uuid.New().String())
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("got %d", rec.Code)
+	}
+}
+
+func TestListAnycastGroups_AllFilters(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/anycast-groups?fabric_id="+fid.String()+"&service=dns_recursive")
+	if f.lastAnycast.FabricID == nil || *f.lastAnycast.FabricID != fid {
+		t.Error("fabric_id")
+	}
+	if f.lastAnycast.Service == nil || *f.lastAnycast.Service != "dns_recursive" {
+		t.Error("service")
+	}
+}
+
+func TestListForwarders_FabricFilter(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/forwarders?fabric_id="+fid.String())
+	if f.lastFwd.FabricID == nil || *f.lastFwd.FabricID != fid {
+		t.Error("fabric_id")
+	}
+}
+
+func TestListCatalogZones_FabricFilter(t *testing.T) {
+	fid := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/dns/catalog-zones?fabric_id="+fid.String())
+	if f.lastCatalog.FabricID == nil || *f.lastCatalog.FabricID != fid {
+		t.Error("fabric_id")
+	}
+}
+
 func TestBadUUIDs(t *testing.T) {
 	for _, p := range []string{
 		"/dns/zones?fabric_id=x",
 		"/dns/zones?site_id=x",
 		"/dns/zones/x",
 		"/dns/records?zone_id=x",
+		"/dns/servers?site_id=x",
+		"/dns/servers?fabric_id=x",
+		"/dns/servers/x",
+		"/dns/anycast-groups?fabric_id=x",
+		"/dns/forwarders?fabric_id=x",
+		"/dns/catalog-zones?fabric_id=x",
 	} {
 		rec := do(t, mount(&fakeQ{}), p)
 		if rec.Code != http.StatusBadRequest {

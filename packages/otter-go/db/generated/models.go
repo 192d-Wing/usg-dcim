@@ -469,6 +469,57 @@ type VtepVniMembership struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type DnsServer struct {
+	ID               uuid.UUID  `json:"id"`
+	Name             string     `json:"name"`
+	SiteID           uuid.UUID  `json:"site_id"`
+	FabricID         uuid.UUID  `json:"fabric_id"`
+	Role             string     `json:"role"`
+	UnicastIP        string     `json:"unicast_ip"`
+	Enabled          bool       `json:"enabled"`
+	LastRenderAt     *time.Time `json:"last_render_at"`
+	LastRenderStatus *string    `json:"last_render_status"`
+	LastRenderError  *string    `json:"last_render_error"`
+	LastRenderEtag   *string    `json:"last_render_etag"`
+	CoreDNSVersion   *string    `json:"coredns_version"`
+	AnycastGroupID   *uuid.UUID `json:"anycast_group_id"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type AnycastGroup struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	FabricID    uuid.UUID `json:"fabric_id"`
+	Service     string    `json:"service"`
+	AnycastIPv4 *string   `json:"anycast_ipv4"`
+	AnycastIPv6 *string   `json:"anycast_ipv6"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type DnsForwarder struct {
+	ID          uuid.UUID       `json:"id"`
+	Name        string          `json:"name"`
+	FabricID    uuid.UUID       `json:"fabric_id"`
+	ZonePattern string          `json:"zone_pattern"`
+	Upstreams   json.RawMessage `json:"upstreams"`
+	Description *string         `json:"description"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+}
+
+type DnsCatalogZone struct {
+	ID        uuid.UUID `json:"id"`
+	FabricID  uuid.UUID `json:"fabric_id"`
+	Name      string    `json:"name"`
+	Enabled   bool      `json:"enabled"`
+	Signed    bool      `json:"signed"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Collector struct {
 	ID                  uuid.UUID       `json:"id"`
 	SiteID              uuid.UUID       `json:"site_id"`
