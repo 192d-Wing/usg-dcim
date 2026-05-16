@@ -231,6 +231,36 @@ type PowerConnection struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type Fabric struct {
+	ID                    uuid.UUID       `json:"id"`
+	Name                  string          `json:"name"`
+	Slug                  string          `json:"slug"`
+	Description           *string         `json:"description"`
+	Enclave               *string         `json:"enclave"`
+	Classification        *string         `json:"classification"`
+	// JSON array of "ip" or "ip:port" strings — nullable.
+	DnsRecursiveUpstreams json.RawMessage `json:"dns_recursive_upstreams"`
+	DnsDenyNetworks       json.RawMessage `json:"dns_deny_networks"`
+	CatalogTransferAcl    json.RawMessage `json:"catalog_transfer_acl"`
+	RecursiveEngine       string          `json:"recursive_engine"`
+	CreatedAt             time.Time       `json:"created_at"`
+	UpdatedAt             time.Time       `json:"updated_at"`
+}
+
+type Supernet struct {
+	ID               uuid.UUID  `json:"id"`
+	FabricID         uuid.UUID  `json:"fabric_id"`
+	VrfID            uuid.UUID  `json:"vrf_id"`
+	ParentSupernetID *uuid.UUID `json:"parent_supernet_id"`
+	SiteID           *uuid.UUID `json:"site_id"`
+	Prefix           string     `json:"prefix"`
+	Name             *string    `json:"name"`
+	Description      *string    `json:"description"`
+	Purpose          *string    `json:"purpose"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
 type Vrf struct {
 	ID          uuid.UUID `json:"id"`
 	FabricID    uuid.UUID `json:"fabric_id"`

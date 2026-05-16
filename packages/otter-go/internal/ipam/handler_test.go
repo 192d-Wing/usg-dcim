@@ -14,9 +14,11 @@ import (
 )
 
 type fakeQ struct {
-	lastVrf    dbq.ListVrfsParams
-	lastSubnet dbq.ListSubnetsParams
-	lastAddr   dbq.ListIPAddressesParams
+	lastVrf      dbq.ListVrfsParams
+	lastSubnet   dbq.ListSubnetsParams
+	lastAddr     dbq.ListIPAddressesParams
+	lastFabric   dbq.ListFabricsParams
+	lastSupernet dbq.ListSupernetsParams
 }
 
 func (f *fakeQ) ListVrfs(_ context.Context, a dbq.ListVrfsParams) ([]dbq.Vrf, error) {
@@ -46,6 +48,27 @@ func (f *fakeQ) CountIPAddresses(_ context.Context, _ dbq.CountIPAddressesParams
 }
 func (f *fakeQ) GetIPAddress(_ context.Context, _ uuid.UUID) (dbq.IPAddress, error) {
 	return dbq.IPAddress{}, pgx.ErrNoRows
+}
+
+func (f *fakeQ) ListFabrics(_ context.Context, a dbq.ListFabricsParams) ([]dbq.Fabric, error) {
+	f.lastFabric = a
+	return nil, nil
+}
+func (f *fakeQ) CountFabrics(_ context.Context, _ dbq.CountFabricsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) GetFabric(_ context.Context, _ uuid.UUID) (dbq.Fabric, error) {
+	return dbq.Fabric{}, pgx.ErrNoRows
+}
+func (f *fakeQ) ListSupernets(_ context.Context, a dbq.ListSupernetsParams) ([]dbq.Supernet, error) {
+	f.lastSupernet = a
+	return nil, nil
+}
+func (f *fakeQ) CountSupernets(_ context.Context, _ dbq.CountSupernetsParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) GetSupernet(_ context.Context, _ uuid.UUID) (dbq.Supernet, error) {
+	return dbq.Supernet{}, pgx.ErrNoRows
 }
 
 func mount(f *fakeQ) http.Handler {
@@ -162,5 +185,86 @@ func TestListVrfs_PageSizeAlias(t *testing.T) {
 	}
 	if f.lastVrf.Limit != 200 {
 		t.Errorf("page_size not honored: %d", f.lastVrf.Limit)
+	}
+}
+
+// ---- Fabrics ----
+
+func TestListFabrics_EnclaveFilter(t *testing.T) {
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/fabrics?enclave=siprnet")
+	if f.lastFabric.Enclave == nil || *f.lastFabric.Enclave != "siprnet" {
+		t.Errorf("enclave not threaded: %+v", f.lastFabric)
+	}
+}
+
+func TestGetFabric_NotFound(t *testing.T) {
+	rec := do(t, mount(&fakeQ{}), "/ipam/fabrics/"+uuid.New().String())
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("got %d", rec.Code)
+	}
+}
+
+// ---- Supernets parent_filter ----
+
+func TestListSupernets_NoParentFilter(t *testing.T) {
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/supernets")
+	if f.lastSupernet.ParentFilterMode != "any" {
+		t.Errorf("want any, got %q", f.lastSupernet.ParentFilterMode)
+	}
+}
+
+func TestListSupernets_TopLevelOnly(t *testing.T) {
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/supernets?top_level=true")
+	if f.lastSupernet.ParentFilterMode != "null" {
+		t.Errorf("top_level should map to null mode, got %q", f.lastSupernet.ParentFilterMode)
+	}
+}
+
+func TestListSupernets_ParentNullLiteral(t *testing.T) {
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/supernets?parent_supernet_id=null")
+	if f.lastSupernet.ParentFilterMode != "null" {
+		t.Errorf("literal null should map to null mode, got %q", f.lastSupernet.ParentFilterMode)
+	}
+}
+
+func TestListSupernets_ParentSpecific(t *testing.T) {
+	id := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/supernets?parent_supernet_id="+id.String())
+	if f.lastSupernet.ParentFilterMode != "eq" || f.lastSupernet.ParentSupernetID == nil || *f.lastSupernet.ParentSupernetID != id {
+		t.Errorf("uuid should map to eq mode: %+v", f.lastSupernet)
+	}
+}
+
+func TestListSupernets_TopLevelWinsOverParentID(t *testing.T) {
+	// Python semantics — explicit top_level wins.
+	id := uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/supernets?top_level=true&parent_supernet_id="+id.String())
+	if f.lastSupernet.ParentFilterMode != "null" {
+		t.Errorf("top_level should win, got mode %q", f.lastSupernet.ParentFilterMode)
+	}
+}
+
+func TestListSupernets_BadParentID(t *testing.T) {
+	rec := do(t, mount(&fakeQ{}), "/ipam/supernets?parent_supernet_id=garbage")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("got %d", rec.Code)
+	}
+}
+
+func TestListSupernets_FabricVrfFilters(t *testing.T) {
+	fid, vid := uuid.New(), uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/supernets?fabric_id="+fid.String()+"&vrf_id="+vid.String())
+	if f.lastSupernet.FabricID == nil || *f.lastSupernet.FabricID != fid {
+		t.Errorf("fabric_id not threaded")
+	}
+	if f.lastSupernet.VrfID == nil || *f.lastSupernet.VrfID != vid {
+		t.Errorf("vrf_id not threaded")
 	}
 }
