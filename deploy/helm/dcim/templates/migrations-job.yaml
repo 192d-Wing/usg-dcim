@@ -17,8 +17,8 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: alembic
-          image: {{ include "dcim.image" (dict "Values" .Values "name" "otter") }}
+          image: {{ .Values.global.image.registry }}/otter:{{ .Values.global.image.tag }}
           command: ["alembic", "upgrade", "head"]
           env:
-            - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
+            - { name: DCIM_POSTGRES_DSN, value: {{ .Values.global.postgresql.dsn | quote }} }
 {{- end }}

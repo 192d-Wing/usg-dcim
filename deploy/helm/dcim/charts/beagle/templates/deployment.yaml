@@ -1,0 +1,33 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "beagle.fullname" . }}
+  labels: {{- include "beagle.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "beagle.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "beagle.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: beagle
+          image: {{ include "beagle.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          env:
+            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ .Values.global.postgresql.dsn | quote }} }
+            - { name: DNS_PROBE_TICK,        value: {{ .Values.config.tick | quote }} }
+            - { name: DNS_PROBE_CONCURRENCY, value: {{ .Values.config.concurrency | quote }} }
+          {{- if .Values.capNetRaw }}
+          securityContext:
+            capabilities:
+              add: ["NET_RAW"]
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- end }}

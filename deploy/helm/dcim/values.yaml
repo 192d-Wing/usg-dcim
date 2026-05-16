@@ -1,12 +1,54 @@
-# Default values for dcim Helm chart.
+# Default values for the dcim umbrella chart.
 # Override with `helm install dcim deploy/helm/dcim -f my-values.yaml`.
+#
+# The umbrella owns cross-cutting concerns (ingress, networkpolicy, shared
+# secrets, migrations Job) and bundles one subchart per animal under
+# `charts/`. Per-animal blocks are passed through to the matching subchart
+# (Helm merges `otter:` into the otter subchart's `.Values`, etc.).
+#
+# Shared values under `global:` are auto-propagated to every subchart.
 
-image:
-  registry: ghcr.io/usg-dcim
-  pullPolicy: IfNotPresent
-  tag: "0.1.0"
+global:
+  image:
+    registry: ghcr.io/usg-dcim
+    pullPolicy: IfNotPresent
+    tag: "0.1.0"
+
+  postgresql:
+    external: true
+    dsn: "postgresql+asyncpg://dcim:CHANGE_ME@postgres-ha:5432/dcim"
+
+  redis:
+    external: true
+    dsn: "redis://redis-ha:6379/0"
+
+  config:
+    jwtSecret:                "PROVIDE_VIA_SECRET"
+    collectorTokenSecret:     "PROVIDE_VIA_SECRET"
+    collectorStaleSeconds:    600
+    alertEvalIntervalSeconds: 30
+    oidc:
+      issuer: ""
+      clientId: ""
+      clientSecretRef: ""
+    saml:
+      metadataUrl: ""
+
+  otel:
+    enabled: false
+    exporterEndpoint: https://otel-collector.observability.svc.cluster.local:4318
+    environment: prod
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 10001
+    seccompProfile: { type: RuntimeDefault }
+
+# Per-animal subchart values (passed through to charts/<animal>/).
 
 otter:
+  enabled: true
   replicaCount: 3
   resources:
     requests: { cpu: 250m, memory: 512Mi }
@@ -20,7 +62,8 @@ otter:
     type: ClusterIP
     port: 8000
 
-worker:
+otter-worker:
+  enabled: true
   replicaCount: 2
   resources:
     requests: { cpu: 250m, memory: 512Mi }
@@ -31,16 +74,23 @@ worker:
     maxReplicas: 10
     queueDepthTarget: 50
   # Grant CAP_NET_RAW so the worker can run ICMP health-check probes
-  # (RFC 792 echo). On clusters where `net.ipv4.ping_group_range` is
-  # set wide enough to cover the worker GID (10001 by default), the
-  # probe falls back to unprivileged SOCK_DGRAM ICMP and this
-  # capability is not strictly required — flip to false if your
-  # cluster policy forbids NET_RAW. With both disabled, the probe
-  # returns status=unknown with a "icmp socket requires CAP_NET_RAW
-  # or net.ipv4.ping_group_range" error so the UI flags the gap.
+  # (RFC 792 echo). With CAP_NET_RAW disabled AND ping_group_range too
+  # narrow, the probe returns status=unknown with a "icmp socket requires
+  # CAP_NET_RAW or net.ipv4.ping_group_range" error and the UI flags it.
   capNetRaw: true
 
+finch:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
+  service:
+    type: ClusterIP
+    port: 80
+
 heron:
+  enabled: true
   replicaCount: 3
   resources:
     requests: { cpu: 500m, memory: 1Gi }
@@ -52,14 +102,32 @@ heron:
     enabled: true
     caBundleSecret: dcim-collector-ca
 
-finch:
-  replicaCount: 2
+magpie:
+  enabled: true
+  replicaCount: 1
   resources:
-    requests: { cpu: 50m,  memory: 128Mi }
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+beagle:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
     limits:   { cpu: 200m, memory: 256Mi }
-  service:
-    type: ClusterIP
-    port: 80
+  # NET_RAW for privileged ICMP. Without it the prober uses unprivileged
+  # SOCK_DGRAM (works on Linux with net.ipv4.ping_group_range covering
+  # the container GID) and falls back to TCP/HTTP probes otherwise.
+  capNetRaw: true
+
+# Site collector (badger) is opt-in: by default the central chart does
+# not deploy a collector pod. Sites run their own collector outside the
+# central namespace via deploy/k8s/site-base/ or compose.
+badger:
+  enabled: false
+  replicaCount: 1
+
+# ---- Umbrella-level resources (ingress, networkpolicy, secrets, migrations) ----
 
 ingress:
   enabled: true
@@ -77,52 +145,14 @@ ingress:
     - secretName: dcim-tls
       hosts: [dcim.example.mil]
 
-postgresql:
-  external: true
-  dsn: "postgresql+asyncpg://dcim:CHANGE_ME@postgres-ha:5432/dcim"
-
-redis:
-  external: true
-  dsn: "redis://redis-ha:6379/0"
-
 objectStorage:
   endpoint: "https://s3.example.mil"
   bucket: dcim-reports
   credentialsSecret: dcim-s3-creds
 
-config:
-  jwtSecret:                "PROVIDE_VIA_SECRET"
-  collectorTokenSecret:     "PROVIDE_VIA_SECRET"
-  collectorStaleSeconds:    600
-  alertEvalIntervalSeconds: 30
-  oidc:
-    issuer: ""
-    clientId: ""
-    clientSecretRef: ""
-  saml:
-    metadataUrl: ""
-
-# OpenTelemetry traces. Off by default; flip enabled=true and point
-# exporterEndpoint at an existing OTLP/HTTP collector (Tempo, Jaeger,
-# Honeycomb's OTLP endpoint, vendor-managed APM, ...). The chart does
-# not deploy a collector — that's the operator's choice.
-otel:
-  enabled: false
-  # Defaults to https; if your in-cluster collector terminates TLS at
-  # the service-mesh sidecar or via a separate ingress, override to
-  # http://... in your environment-specific values file.
-  exporterEndpoint: https://otel-collector.observability.svc.cluster.local:4318
-  environment: prod
-
 migrations:
   runOnInstall: true
   runOnUpgrade: true
-
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 10001
-  fsGroup: 10001
-  seccompProfile: { type: RuntimeDefault }
 
 networkPolicy:
   enabled: true

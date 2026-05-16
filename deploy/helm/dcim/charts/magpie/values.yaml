@@ -1,0 +1,10 @@
+enabled: true
+replicaCount: 1
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+config:
+  staleSeconds: 600
+  evalInterval: 30s
+  sweepInterval: 30s
+  maxParallel: 16

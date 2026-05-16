@@ -1,0 +1,6 @@
+apiVersion: v2
+name: badger
+description: Site SNMP/Redfish/Modbus/REST/IPMI collector. Off by default in the central chart — sites typically run badger via deploy/k8s/site-base/ or compose. See packages/badger/.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

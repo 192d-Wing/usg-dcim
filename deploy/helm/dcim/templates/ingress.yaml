@@ -17,7 +17,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "dcim.fullname" $ }}-{{ .backend }}
+                name: {{ include "dcim.subchartService" (dict "ctx" $ "name" .backend) }}
                 port:
                   number: {{ if eq .backend "otter" }}{{ $.Values.otter.service.port }}{{ else }}{{ $.Values.finch.service.port }}{{ end }}
           {{- end }}

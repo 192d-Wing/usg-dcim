@@ -1,0 +1,41 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "otter-worker.fullname" . }}
+  labels: {{- include "otter-worker.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "otter-worker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "otter-worker.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: otter-worker
+          image: {{ include "otter-worker.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command: ["arq", "dcim.worker.WorkerSettings"]
+          env:
+            - { name: DCIM_POSTGRES_DSN, value: {{ .Values.global.postgresql.dsn | quote }} }
+            - { name: DCIM_REDIS_DSN,    value: {{ .Values.global.redis.dsn | quote }} }
+            {{- if .Values.global.otel.enabled }}
+            - { name: DCIM_OTEL_ENABLED, value: "true" }
+            - { name: DCIM_OTEL_EXPORTER_ENDPOINT, value: {{ .Values.global.otel.exporterEndpoint | quote }} }
+            - { name: DCIM_OTEL_SERVICE_NAME, value: "dcim-otter-worker" }
+            - { name: DCIM_OTEL_ENVIRONMENT, value: {{ .Values.global.otel.environment | quote }} }
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.capNetRaw }}
+          securityContext:
+            capabilities:
+              add: ["NET_RAW"]
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+          {{- end }}
+{{- end }}
