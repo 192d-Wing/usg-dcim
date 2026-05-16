@@ -8,6 +8,9 @@ on:
 
 permissions:
   contents: read
+  # container-build pushes to ghcr.io on main; requires packages:write.
+  # On PRs the push step is skipped and the broader permission is unused.
+  packages: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -221,12 +224,36 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Build ${{ matrix.image }}
+        id: build
         uses: redhat-actions/buildah-build@v2
         with:
           image: ${{ matrix.image }}
-          tags: ci
+          # On main: tag the commit SHA and `latest` so deploys can pin.
+          # On PRs: tag only `ci` for build-only validation.
+          tags: >-
+            ${{ github.ref == 'refs/heads/main'
+                && format('latest {0}', github.sha)
+                || 'ci' }}
           context: ./${{ matrix.context }}
           containerfiles: ./${{ matrix.containerfile }}
+
+      # Push happens only on pushes to main. PRs from forks won't have
+      # packages:write anyway, so the conditional double-protects.
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push ${{ matrix.image }} to ghcr.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build.outputs.image }}
+          tags: ${{ steps.build.outputs.tags }}
+          registry: ghcr.io/192d-wing
 
   helm:
     name: Helm chart lint + template
