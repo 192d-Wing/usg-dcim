@@ -1,11 +1,10 @@
 version: 2
 updates:
-  # Backend (uv / pyproject.toml)
+  # ----- Python (uv workspace) -----
+  # otter: the central FastAPI API + workers (was /backend).
   - package-ecosystem: "uv"
-    directory: "/backend"
-    schedule:
-      interval: "weekly"
-      day: "monday"
+    directory: "/packages/otter"
+    schedule: { interval: "weekly", day: "monday" }
     open-pull-requests-limit: 5
     groups:
       python-runtime:
@@ -15,23 +14,20 @@ updates:
       python-dev:
         dependency-type: "development"
 
-  # Collector (uv / pyproject.toml)
+  # mole: legacy collector, deprecated (was /collector).
   - package-ecosystem: "uv"
-    directory: "/collector"
-    schedule:
-      interval: "weekly"
-      day: "monday"
+    directory: "/packages/mole"
+    schedule: { interval: "weekly", day: "monday" }
     open-pull-requests-limit: 5
     groups:
       python-dev:
         dependency-type: "development"
 
-  # Frontend (npm)
+  # ----- Frontend (npm) -----
+  # finch: React + Vite dashboard (was /frontend).
   - package-ecosystem: "npm"
-    directory: "/frontend"
-    schedule:
-      interval: "weekly"
-      day: "monday"
+    directory: "/packages/finch"
+    schedule: { interval: "weekly", day: "monday" }
     open-pull-requests-limit: 5
     groups:
       react:
@@ -43,14 +39,64 @@ updates:
       tooling:
         dependency-type: "development"
 
-  # Go module — custom CoreDNS nsec3sign plugin. Group CoreDNS bumps
-  # to a single PR; miekg/dns surfaces separately because it often
-  # needs a coordinated CoreDNS update.
+  # ----- Go modules -----
+  # Each animal package is its own module. Grouping pgx/redis/prom bumps
+  # keeps churn down; shared-go gets its own slot since other modules
+  # depend on it via in-tree `replace` and we want bumps to ripple
+  # deliberately.
+  - package-ecosystem: "gomod"
+    directory: "/packages/badger"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 3
+    groups:
+      pg: { patterns: ["github.com/jackc/*"] }
+      modernc: { patterns: ["modernc.org/*"] }
+
+  - package-ecosystem: "gomod"
+    directory: "/packages/heron"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 3
+    groups:
+      pg: { patterns: ["github.com/jackc/*"] }
+      prom: { patterns: ["github.com/prometheus/*"] }
+
+  - package-ecosystem: "gomod"
+    directory: "/packages/magpie"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 3
+    groups:
+      pg: { patterns: ["github.com/jackc/*"] }
+      redis: { patterns: ["github.com/redis/*"] }
+      prom: { patterns: ["github.com/prometheus/*"] }
+
+  - package-ecosystem: "gomod"
+    directory: "/packages/beagle"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 3
+    groups:
+      pg: { patterns: ["github.com/jackc/*"] }
+      prom: { patterns: ["github.com/prometheus/*"] }
+
+  - package-ecosystem: "gomod"
+    directory: "/packages/otter-go"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 3
+    groups:
+      pg: { patterns: ["github.com/jackc/*"] }
+      chi: { patterns: ["github.com/go-chi/*"] }
+
+  - package-ecosystem: "gomod"
+    directory: "/packages/shared-go"
+    schedule: { interval: "weekly", day: "monday" }
+    open-pull-requests-limit: 3
+    groups:
+      prom: { patterns: ["github.com/prometheus/*"] }
+
+  # wolf coredns plugin — group CoreDNS bumps; miekg/dns surfaces
+  # separately because it often needs a coordinated CoreDNS update.
   - package-ecosystem: "gomod"
     directory: "/packages/wolf/coredns-nsec3sign"
-    schedule:
-      interval: "weekly"
-      day: "monday"
+    schedule: { interval: "weekly", day: "monday" }
     open-pull-requests-limit: 5
     groups:
       coredns:
@@ -58,23 +104,32 @@ updates:
       dns:
         patterns: ["github.com/miekg/dns"]
 
-  # GitHub Actions
+  # ----- Workflow + container bases -----
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
-      day: "monday"
+    schedule: { interval: "weekly", day: "monday" }
 
-  # Container base images
   - package-ecosystem: "docker"
-    directory: "/backend"
-    schedule:
-      interval: "monthly"
+    directory: "/packages/otter"
+    schedule: { interval: "monthly" }
   - package-ecosystem: "docker"
-    directory: "/frontend"
-    schedule:
-      interval: "monthly"
+    directory: "/packages/finch"
+    schedule: { interval: "monthly" }
   - package-ecosystem: "docker"
-    directory: "/collector"
-    schedule:
-      interval: "monthly"
+    directory: "/packages/mole"
+    schedule: { interval: "monthly" }
+  - package-ecosystem: "docker"
+    directory: "/packages/badger"
+    schedule: { interval: "monthly" }
+  - package-ecosystem: "docker"
+    directory: "/packages/heron"
+    schedule: { interval: "monthly" }
+  - package-ecosystem: "docker"
+    directory: "/packages/magpie"
+    schedule: { interval: "monthly" }
+  - package-ecosystem: "docker"
+    directory: "/packages/beagle"
+    schedule: { interval: "monthly" }
+  - package-ecosystem: "docker"
+    directory: "/packages/otter-go"
+    schedule: { interval: "monthly" }
