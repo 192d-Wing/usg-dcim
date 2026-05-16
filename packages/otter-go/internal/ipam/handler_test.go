@@ -24,6 +24,7 @@ type fakeQ struct {
 	lastVtep       dbq.ListVtepsParams
 	lastMembership dbq.ListVtepMembershipsParams
 	lastDhcp       dbq.ListDhcpServersParams
+	lastVrfPeer    dbq.ListVrfBgpPeersParams
 }
 
 func (f *fakeQ) ListVrfs(_ context.Context, a dbq.ListVrfsParams) ([]dbq.Vrf, error) {
@@ -309,6 +310,13 @@ func (f *fakeQ) ListDhcpServers(_ context.Context, a dbq.ListDhcpServersParams) 
 func (f *fakeQ) CountDhcpServers(_ context.Context, _ dbq.CountDhcpServersParams) (int64, error) {
 	return 0, nil
 }
+func (f *fakeQ) ListVrfBgpPeers(_ context.Context, a dbq.ListVrfBgpPeersParams) ([]dbq.VrfBgpPeer, error) {
+	f.lastVrfPeer = a
+	return nil, nil
+}
+func (f *fakeQ) CountVrfBgpPeers(_ context.Context, _ dbq.CountVrfBgpPeersParams) (int64, error) {
+	return 0, nil
+}
 
 func TestListOverlays_FabricFilter(t *testing.T) {
 	fid := uuid.New()
@@ -367,6 +375,21 @@ func TestListDhcpServers_FabricFilter(t *testing.T) {
 	do(t, mount(f), "/ipam/dhcp/servers?fabric_id="+fid.String())
 	if f.lastDhcp.FabricID == nil || *f.lastDhcp.FabricID != fid {
 		t.Error("fabric_id not threaded")
+	}
+}
+
+func TestListVrfBgpPeers_AllFilters(t *testing.T) {
+	vid, pid := uuid.New(), uuid.New()
+	f := &fakeQ{}
+	do(t, mount(f), "/ipam/vrf-bgp-peers?vrf_id="+vid.String()+"&bgp_peer_id="+pid.String()+"&address_family=vpnv4")
+	if f.lastVrfPeer.VrfID == nil || *f.lastVrfPeer.VrfID != vid {
+		t.Error("vrf_id")
+	}
+	if f.lastVrfPeer.BgpPeerID == nil || *f.lastVrfPeer.BgpPeerID != pid {
+		t.Error("bgp_peer_id")
+	}
+	if f.lastVrfPeer.AddressFamily == nil || *f.lastVrfPeer.AddressFamily != "vpnv4" {
+		t.Error("address_family")
 	}
 }
 

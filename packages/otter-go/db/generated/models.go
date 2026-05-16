@@ -469,6 +469,63 @@ type VtepVniMembership struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type Collector struct {
+	ID                  uuid.UUID       `json:"id"`
+	SiteID              uuid.UUID       `json:"site_id"`
+	Name                string          `json:"name"`
+	Version             *string         `json:"version"`
+	MtlsFingerprint     *string         `json:"mtls_fingerprint"`
+	Status              string          `json:"status"`
+	CapabilitiesJson    json.RawMessage `json:"capabilities"`
+	LastSeenAt          *time.Time      `json:"last_seen_at"`
+	LastIngestAt        *time.Time      `json:"last_ingest_at"`
+	BufferedSamples     int32           `json:"buffered_samples"`
+	Enabled             bool            `json:"enabled"`
+	ConfigOverridesJson json.RawMessage `json:"config_overrides"`
+	CreatedAt           time.Time       `json:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at"`
+}
+
+type Organization struct {
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	ArinOrgID      *string   `json:"arin_org_id"`
+	AddressLine1   string    `json:"address_line1"`
+	AddressLine2   *string   `json:"address_line2"`
+	City           string    `json:"city"`
+	StateProvince  *string   `json:"state_province"`
+	PostalCode     *string   `json:"postal_code"`
+	Country        string    `json:"country"`
+	Phone          *string   `json:"phone"`
+	Email          *string   `json:"email"`
+	AdminPocName   string    `json:"admin_poc_name"`
+	AdminPocEmail  string    `json:"admin_poc_email"`
+	AdminPocPhone  *string   `json:"admin_poc_phone"`
+	TechPocName    string    `json:"tech_poc_name"`
+	TechPocEmail   string    `json:"tech_poc_email"`
+	TechPocPhone   *string   `json:"tech_poc_phone"`
+	AbusePocName   string    `json:"abuse_poc_name"`
+	AbusePocEmail  string    `json:"abuse_poc_email"`
+	AbusePocPhone  *string   `json:"abuse_poc_phone"`
+	NocPocName     *string   `json:"noc_poc_name"`
+	NocPocEmail    *string   `json:"noc_poc_email"`
+	NocPocPhone    *string   `json:"noc_poc_phone"`
+	Description    *string   `json:"description"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type VrfBgpPeer struct {
+	ID            uuid.UUID `json:"id"`
+	VrfID         uuid.UUID `json:"vrf_id"`
+	BgpPeerID     uuid.UUID `json:"bgp_peer_id"`
+	AddressFamily string    `json:"address_family"`
+	RD            *string   `json:"rd"`
+	Enabled       bool      `json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type DhcpServer struct {
 	ID                 uuid.UUID  `json:"id"`
 	Name               string     `json:"name"`

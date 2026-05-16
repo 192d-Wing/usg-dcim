@@ -24,15 +24,18 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
 	"github.com/usg-dcim/packages/otter-go/internal/cables"
+	"github.com/usg-dcim/packages/otter-go/internal/collectors"
 	"github.com/usg-dcim/packages/otter-go/internal/dns"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/ipam"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
 	"github.com/usg-dcim/packages/otter-go/internal/notifications"
+	"github.com/usg-dcim/packages/otter-go/internal/organization"
 	"github.com/usg-dcim/packages/otter-go/internal/power"
 	"github.com/usg-dcim/packages/otter-go/internal/racks"
 	"github.com/usg-dcim/packages/otter-go/internal/regions"
 	"github.com/usg-dcim/packages/otter-go/internal/sites"
+	"github.com/usg-dcim/packages/otter-go/internal/stencils"
 	"github.com/usg-dcim/packages/shared-go/env"
 )
 
@@ -68,6 +71,9 @@ func main() {
 	auh := &audit.Handler{Q: q}
 	alh := &alerts.Handler{Q: q}
 	nh := &notifications.Handler{Q: q}
+	coh := &collectors.Handler{Q: q}
+	oh := &organization.Handler{Q: q}
+	sth := &stencils.Handler{}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -107,6 +113,9 @@ func main() {
 		auh.Mount(r)
 		alh.Mount(r)
 		nh.Mount(r)
+		coh.Mount(r)
+		oh.Mount(r)
+		sth.Mount(r)
 	})
 
 	srv := &http.Server{

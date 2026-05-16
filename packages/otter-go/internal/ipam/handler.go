@@ -47,6 +47,9 @@ type Querier interface {
 	CountVtepMemberships(ctx context.Context, arg dbq.CountVtepMembershipsParams) (int64, error)
 	ListDhcpServers(ctx context.Context, arg dbq.ListDhcpServersParams) ([]dbq.DhcpServer, error)
 	CountDhcpServers(ctx context.Context, arg dbq.CountDhcpServersParams) (int64, error)
+
+	ListVrfBgpPeers(ctx context.Context, arg dbq.ListVrfBgpPeersParams) ([]dbq.VrfBgpPeer, error)
+	CountVrfBgpPeers(ctx context.Context, arg dbq.CountVrfBgpPeersParams) (int64, error)
 }
 
 type Handler struct {
@@ -70,7 +73,57 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/vteps", h.listVteps)
 		r.Get("/vtep-memberships", h.listVtepMemberships)
 		r.Get("/dhcp/servers", h.listDhcpServers)
+		r.Get("/vrf-bgp-peers", h.listVrfBgpPeers)
 	})
+}
+
+type vrfBgpPeersPage struct {
+	Items  []dbq.VrfBgpPeer `json:"items"`
+	Total  int64            `json:"total"`
+	Limit  int32            `json:"limit"`
+	Offset int32            `json:"offset"`
+}
+
+func (h *Handler) listVrfBgpPeers(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	params := dbq.ListVrfBgpPeersParams{
+		Limit:         limit,
+		Offset:        offset,
+		AddressFamily: strPtr(q.Get("address_family")),
+	}
+	if v := q.Get("vrf_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "vrf_id is not a uuid")
+			return
+		}
+		params.VrfID = &id
+	}
+	if v := q.Get("bgp_peer_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "bgp_peer_id is not a uuid")
+			return
+		}
+		params.BgpPeerID = &id
+	}
+	items, err := h.Q.ListVrfBgpPeers(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountVrfBgpPeers(r.Context(), dbq.CountVrfBgpPeersParams{
+		VrfID: params.VrfID, BgpPeerID: params.BgpPeerID, AddressFamily: params.AddressFamily,
+	})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, vrfBgpPeersPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
 // ---- VRFs ----
