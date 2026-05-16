@@ -57,6 +57,10 @@ type Querier interface {
 	GetCapabilitiesForIdpRoles(ctx context.Context, idpRoles []string) ([]string, error)
 	IsJtiRevoked(ctx context.Context, jti string) (bool, error)
 	GetUser(ctx context.Context, id uuid.UUID) (dbq.User, error)
+	GetUserByEmail(ctx context.Context, email string) (dbq.User, error)
+	GetUserBySsoSubject(ctx context.Context, ssoSubject string) (dbq.User, error)
+	CreateOidcUser(ctx context.Context, arg dbq.CreateOidcUserParams) (dbq.User, error)
+	UpdateOidcUserOnLogin(ctx context.Context, arg dbq.UpdateOidcUserOnLoginParams) (dbq.User, error)
 }
 
 // Verifying returns the production JWT middleware. Every request must

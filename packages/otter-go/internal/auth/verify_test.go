@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 )
@@ -39,6 +40,18 @@ func (f *fakeQ) IsJtiRevoked(_ context.Context, _ string) (bool, error) {
 func (f *fakeQ) GetUser(_ context.Context, _ uuid.UUID) (dbq.User, error) {
 	f.getCalls++
 	return f.user, f.userErr
+}
+func (f *fakeQ) GetUserByEmail(_ context.Context, _ string) (dbq.User, error) {
+	return dbq.User{}, pgx.ErrNoRows
+}
+func (f *fakeQ) GetUserBySsoSubject(_ context.Context, _ string) (dbq.User, error) {
+	return dbq.User{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateOidcUser(_ context.Context, _ dbq.CreateOidcUserParams) (dbq.User, error) {
+	return dbq.User{ID: uuid.New()}, nil
+}
+func (f *fakeQ) UpdateOidcUserOnLogin(_ context.Context, _ dbq.UpdateOidcUserOnLoginParams) (dbq.User, error) {
+	return dbq.User{ID: uuid.New()}, nil
 }
 
 func mintJWT(t *testing.T, secret []byte, sub uuid.UUID, jti string, exp time.Time, idpRoles []string) string {

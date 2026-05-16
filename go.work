@@ -1,10 +1,10 @@
-go 1.22
+go 1.25.0
 
 use (
 	./packages/badger
+	./packages/beagle
 	./packages/heron
 	./packages/magpie
-	./packages/beagle
-	./packages/shared-go
 	./packages/otter-go
+	./packages/shared-go
 )

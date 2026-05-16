@@ -101,8 +101,34 @@ func main() {
 	// is set. Operators who haven't wired Keycloak yet can fall back to
 	// the loud-panicking stub by setting OTTER_GO_INSECURE_AUTH_STUB=true
 	// (sealed dev environments only).
-	authHandler := &auth.Handler{Q: q}
 	jwtSecret := env.String("DCIM_JWT_SECRET", "")
+	jwtTTL := env.Int("DCIM_JWT_TTL_SECONDS", 900)
+	oidcCfg := auth.OIDCConfig{
+		Issuer:       env.String("DCIM_OIDC_ISSUER", ""),
+		ClientID:     env.String("DCIM_OIDC_CLIENT_ID", ""),
+		ClientSecret: env.String("DCIM_OIDC_CLIENT_SECRET", ""),
+		RedirectURI:  env.String("DCIM_OIDC_REDIRECT_URI", ""),
+		PublicURL:    env.String("DCIM_OIDC_PUBLIC_URL", ""),
+	}
+	if csv := env.String("DCIM_MFA_AMR_VALUES", "mfa,otp,hwk"); csv != "" {
+		for _, v := range strings.Split(csv, ",") {
+			if v = strings.TrimSpace(v); v != "" {
+				oidcCfg.MFAAMRValues = append(oidcCfg.MFAAMRValues, v)
+			}
+		}
+	}
+	oidcCtx, oidcCancel := context.WithTimeout(ctx, 10*time.Second)
+	oidcProvider, err := auth.NewOIDC(oidcCtx, oidcCfg)
+	oidcCancel()
+	if err != nil {
+		log.Error("oidc_init_failed", "err", err)
+		os.Exit(1)
+	}
+	authHandler := &auth.Handler{
+		Q:    q,
+		OIDC: oidcProvider,
+		Mint: auth.MintConfig{Secret: []byte(jwtSecret), TTLSecond: jwtTTL},
+	}
 	var authMW func(http.Handler) http.Handler
 	if jwtSecret != "" {
 		// jwt_old_secrets is a CSV of base64-or-plain old keys, matching
