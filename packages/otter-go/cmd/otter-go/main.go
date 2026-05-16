@@ -124,10 +124,22 @@ func main() {
 		log.Error("oidc_init_failed", "err", err)
 		os.Exit(1)
 	}
+	// Fernet for the at-rest IdP refresh_token. Same env var the
+	// Python side reads; empty key set disables encryption (plaintext
+	// fallback, logged loudly).
+	fernetCfg, err := auth.ParseFernetKey(env.String("DCIM_DNS_DNSSEC_SECRET", ""))
+	if err != nil {
+		log.Error("fernet_init_failed", "err", err)
+		os.Exit(1)
+	}
+	if len(fernetCfg.Keys) == 0 {
+		log.Warn("refresh_token_plaintext", "msg", "DCIM_DNS_DNSSEC_SECRET unset; IdP refresh_tokens stored in plaintext")
+	}
 	authHandler := &auth.Handler{
-		Q:    q,
-		OIDC: oidcProvider,
-		Mint: auth.MintConfig{Secret: []byte(jwtSecret), TTLSecond: jwtTTL},
+		Q:      q,
+		OIDC:   oidcProvider,
+		Mint:   auth.MintConfig{Secret: []byte(jwtSecret), TTLSecond: jwtTTL},
+		Fernet: fernetCfg,
 	}
 	var authMW func(http.Handler) http.Handler
 	if jwtSecret != "" {

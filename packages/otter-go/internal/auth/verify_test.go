@@ -54,6 +54,9 @@ func (f *fakeQ) UpdateOidcUserOnLogin(_ context.Context, _ dbq.UpdateOidcUserOnL
 	return dbq.User{ID: uuid.New()}, nil
 }
 func (f *fakeQ) UpdateUserLastLogin(_ context.Context, _ uuid.UUID) error      { return nil }
+func (f *fakeQ) UpdateUserRefreshToken(_ context.Context, _ dbq.UpdateUserRefreshTokenParams) error {
+	return nil
+}
 func (f *fakeQ) InsertRevokedJti(_ context.Context, _ dbq.InsertRevokedJtiParams) error { return nil }
 func (f *fakeQ) GetApiTokenByHash(_ context.Context, _ string) (dbq.ApiToken, error) {
 	return dbq.ApiToken{}, pgx.ErrNoRows

@@ -13,9 +13,10 @@ import (
 // /auth/login, /auth/refresh, /auth/logout (jti revocation), and the
 // /auth/tokens CRUD endpoints ship in PR 37.
 type Handler struct {
-	Q     Querier
-	OIDC  *OIDC      // nil when DCIM_OIDC_ISSUER unset; the OIDC handlers 400 in that case
-	Mint  MintConfig // session-JWT signing config; matches the verifier's PrimarySecret
+	Q      Querier
+	OIDC   *OIDC        // nil when DCIM_OIDC_ISSUER unset; the OIDC handlers 400 in that case
+	Mint   MintConfig   // session-JWT signing config; matches the verifier's PrimarySecret
+	Fernet FernetConfig // refresh-token at-rest encryption; empty Keys → plaintext fallback
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -26,6 +27,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/oidc/logout", h.oidcLogout)
 		r.Post("/login", h.login)
 		r.Post("/logout", h.logout)
+		r.Post("/refresh", h.refresh)
 		r.Get("/tokens", h.listTokens)
 		r.Post("/tokens", h.issueToken)
 		r.Delete("/tokens/{id}", h.revokeToken)

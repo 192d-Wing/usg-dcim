@@ -63,6 +63,7 @@ type Querier interface {
 	UpdateOidcUserOnLogin(ctx context.Context, arg dbq.UpdateOidcUserOnLoginParams) (dbq.User, error)
 
 	UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error
+	UpdateUserRefreshToken(ctx context.Context, arg dbq.UpdateUserRefreshTokenParams) error
 	InsertRevokedJti(ctx context.Context, arg dbq.InsertRevokedJtiParams) error
 	GetApiTokenByHash(ctx context.Context, tokenHash string) (dbq.ApiToken, error)
 	ListApiTokensByOwner(ctx context.Context, ownerUserID uuid.UUID) ([]dbq.ApiToken, error)
