@@ -3,7 +3,7 @@
 # and replace the placeholder UUIDs below.
 collector_id: 00000000-0000-0000-0000-0000000000aa
 site_id: 00000000-0000-0000-0000-0000000000bb
-ingest_url: http://api:8000
+ingest_url: http://otter:8000
 # Route telemetry batches to the Go ingest service; everything else
 # (heartbeats, DNS bundle polling, health-check posts) keeps going
 # through the Python api at ingest_url. Using the FQDN (instead of

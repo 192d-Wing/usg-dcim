@@ -3,10 +3,10 @@ WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/go-alerts .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/magpie .
 
 FROM gcr.io/distroless/static-debian12
-COPY --from=build /out/go-alerts /go-alerts
+COPY --from=build /out/magpie /magpie
 EXPOSE 8101
 USER nonroot:nonroot
-ENTRYPOINT ["/go-alerts"]
+ENTRYPOINT ["/magpie"]

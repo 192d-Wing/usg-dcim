@@ -6,7 +6,7 @@ image:
   pullPolicy: IfNotPresent
   tag: "0.1.0"
 
-api:
+otter:
   replicaCount: 3
   resources:
     requests: { cpu: 250m, memory: 512Mi }
@@ -40,7 +40,7 @@ worker:
   # or net.ipv4.ping_group_range" error so the UI flags the gap.
   capNetRaw: true
 
-ingest:
+heron:
   replicaCount: 3
   resources:
     requests: { cpu: 500m, memory: 1Gi }
@@ -52,7 +52,7 @@ ingest:
     enabled: true
     caBundleSecret: dcim-collector-ca
 
-frontend:
+finch:
   replicaCount: 2
   resources:
     requests: { cpu: 50m,  memory: 128Mi }
@@ -69,10 +69,10 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
-          backend: frontend
+          backend: finch
         - path: /api
           pathType: Prefix
-          backend: api
+          backend: otter
   tls:
     - secretName: dcim-tls
       hosts: [dcim.example.mil]

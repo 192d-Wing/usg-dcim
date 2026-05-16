@@ -9,12 +9,12 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '../../..')
 Push-Location $root
 
 $images = @(
-    @{ Name = 'dcim-api';          Context = 'packages/otter' },
-    @{ Name = 'dcim-frontend';     Context = 'packages/finch' },
-    @{ Name = 'dcim-go-collector'; Context = 'packages/badger' },
-    @{ Name = 'dcim-go-ingest';    Context = 'packages/heron' },
-    @{ Name = 'dcim-go-alerts';    Context = 'packages/magpie' },
-    @{ Name = 'dcim-go-dns-probe'; Context = 'packages/beagle' }
+    @{ Name = 'dcim-otter';          Context = 'packages/otter' },
+    @{ Name = 'dcim-finch';     Context = 'packages/finch' },
+    @{ Name = 'dcim-badger'; Context = 'packages/badger' },
+    @{ Name = 'dcim-heron';    Context = 'packages/heron' },
+    @{ Name = 'dcim-magpie';    Context = 'packages/magpie' },
+    @{ Name = 'dcim-beagle'; Context = 'packages/beagle' }
 )
 
 try {

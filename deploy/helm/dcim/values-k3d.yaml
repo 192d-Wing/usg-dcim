@@ -10,7 +10,7 @@ image:
   registry: ghcr.io/192d-wing/usg-dcim
   pullPolicy: IfNotPresent
 
-api:
+otter:
   replicaCount: 1
   autoscaling: { enabled: false }
   resources:
@@ -24,7 +24,7 @@ worker:
     requests: { cpu: 100m, memory: 256Mi }
     limits:   { cpu: 500m, memory: 1Gi }
 
-ingest:
+heron:
   replicaCount: 1
   resources:
     requests: { cpu: 100m, memory: 256Mi }
@@ -32,7 +32,7 @@ ingest:
   mtls:
     enabled: false
 
-frontend:
+finch:
   replicaCount: 1
 
 ingress:
@@ -41,8 +41,8 @@ ingress:
   hosts:
     - host: dcim.local
       paths:
-        - { path: /,    pathType: Prefix, backend: frontend }
-        - { path: /api, pathType: Prefix, backend: api }
+        - { path: /,    pathType: Prefix, backend: finch }
+        - { path: /api, pathType: Prefix, backend: otter }
   tls: []
 
 # Single-node datastores — the chart's external=true paths assume an

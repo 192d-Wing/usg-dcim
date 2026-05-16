@@ -11,12 +11,12 @@ resources:
   - postgres.yaml
   - redis.yaml
   - keycloak.yaml
-  - api.yaml
+  - otter.yaml
   - worker.yaml
-  - frontend.yaml
-  - go-ingest.yaml
-  - go-alerts.yaml
-  - go-dns-probe.yaml
+  - finch.yaml
+  - heron.yaml
+  - magpie.yaml
+  - beagle.yaml
   - nginx-proxy.yaml
 
 labels:

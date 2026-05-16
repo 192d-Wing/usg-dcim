@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: worker
-          image: localhost/dcim-api:dev
+          image: localhost/dcim-otter:dev
           imagePullPolicy: IfNotPresent
           command:
             - arq

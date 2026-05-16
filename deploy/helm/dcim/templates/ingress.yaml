@@ -19,7 +19,7 @@ spec:
               service:
                 name: {{ include "dcim.fullname" $ }}-{{ .backend }}
                 port:
-                  number: {{ if eq .backend "api" }}{{ $.Values.api.service.port }}{{ else }}{{ $.Values.frontend.service.port }}{{ end }}
+                  number: {{ if eq .backend "otter" }}{{ $.Values.otter.service.port }}{{ else }}{{ $.Values.finch.service.port }}{{ end }}
           {{- end }}
     {{- end }}
 {{- end }}

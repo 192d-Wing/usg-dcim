@@ -24,13 +24,13 @@ This directory contains Kubernetes manifests for deploying USG DCIM on Podman De
 
 Builds and tags all images `:dev`:
 
-- `dcim-api:dev` — FastAPI backend
+- `dcim-otter:dev` — FastAPI backend
 - `dcim-worker:dev` — Async task worker
-- `dcim-frontend:dev` — React UI
-- `dcim-go-ingest:dev` — Telemetry ingest service
-- `dcim-go-alerts:dev` — Alert evaluation service
-- `dcim-go-dns-probe:dev` — DNS health checker
-- `dcim-go-collector:dev` — Site collector agent
+- `dcim-finch:dev` — React UI
+- `dcim-heron:dev` — Telemetry ingest service
+- `dcim-magpie:dev` — Alert evaluation service
+- `dcim-beagle:dev` — DNS health checker
+- `dcim-badger:dev` — Site collector agent
 
 ### 2. Deploy Central Stack
 
@@ -38,7 +38,7 @@ Builds and tags all images `:dev`:
 kubectl apply -k deploy/k8s/central/
 ```
 
-Deploys: postgres (TimescaleDB), redis, keycloak, api, worker, frontend, go-ingest, go-alerts, go-dns-probe into the `dcim` namespace.
+Deploys: postgres (TimescaleDB), redis, keycloak, api, otter-worker, finch, heron, magpie, beagle into the `dcim` namespace.
 
 Wait for all pods:
 

@@ -41,7 +41,7 @@ spec:
 
         # ── go-collector ────────────────────────────────────────────────────
         - name: collector
-          image: localhost/dcim-go-collector:dev
+          image: localhost/dcim-badger:dev
           imagePullPolicy: Never
           args: ["-config", "/etc/dcim/collector.yaml"]
           securityContext:

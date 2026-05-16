@@ -52,12 +52,12 @@ Add these entries to `C:\Windows\System32\drivers\etc\hosts` (run Notepad as Adm
 
 This builds seven images locally using `podman build`:
 
-- `dcim-api:dev` — FastAPI backend + Alembic
-- `dcim-frontend:dev` — React UI (nginx)
-- `dcim-go-collector:dev` — Site collector agent
-- `dcim-go-ingest:dev` — High-volume telemetry receiver
-- `dcim-go-alerts:dev` — Alert evaluation loop
-- `dcim-go-dns-probe:dev` — DNS health prober
+- `dcim-otter:dev` — FastAPI backend + Alembic
+- `dcim-finch:dev` — React UI (nginx)
+- `dcim-badger:dev` — Site collector agent
+- `dcim-heron:dev` — High-volume telemetry receiver
+- `dcim-magpie:dev` — Alert evaluation loop
+- `dcim-beagle:dev` — DNS health prober
 
 ### 2. Deploy to Kubernetes
 
@@ -77,9 +77,9 @@ All pods should reach `Running`:
 NAME                          READY   STATUS    RESTARTS
 api-xxxxx                     1/1     Running   0
 frontend-xxxxx                1/1     Running   0
-go-alerts-xxxxx               1/1     Running   0
-go-dns-probe-xxxxx            1/1     Running   0
-go-ingest-xxxxx               1/1     Running   0
+magpie-xxxxx               1/1     Running   0
+beagle-xxxxx            1/1     Running   0
+heron-xxxxx               1/1     Running   0
 keycloak-xxxxx                1/1     Running   0
 postgres-xxxxx                1/1     Running   0
 redis-xxxxx                   1/1     Running   0
@@ -229,13 +229,13 @@ After changing backend or frontend code, rebuild the affected image and redeploy
 
 ```powershell
 # Rebuild just the API image
-podman build -t dcim-api:dev backend
+podman build -t dcim-otter:dev backend
 
 # Roll the deployment to pick up the new image
 kubectl rollout restart deployment/api -n dcim
 
 # Rebuild and restart the frontend
-podman build -t dcim-frontend:dev frontend
+podman build -t dcim-finch:dev frontend
 kubectl rollout restart deployment/frontend -n dcim
 ```
 

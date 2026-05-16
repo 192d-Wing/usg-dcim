@@ -48,7 +48,7 @@ data:
             return 444;
         }
 
-        # dcim.prod.dev.mil:443 → frontend:80
+        # dcim.prod.dev.mil:443 → finch:80
         server {
             listen 443 ssl;
             server_name dcim.prod.dev.mil;
@@ -56,7 +56,7 @@ data:
             ssl_certificate_key /etc/nginx/tls/tls.key;
 
             location / {
-                proxy_pass http://frontend:80;
+                proxy_pass http://finch:80;
                 proxy_set_header Host              $host;
                 proxy_set_header X-Real-IP         $remote_addr;
                 proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;

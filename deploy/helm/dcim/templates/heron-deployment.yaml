@@ -4,45 +4,45 @@ metadata:
   name: {{ include "dcim.fullname" . }}-ingest
   labels:
     {{- include "dcim.labels" . | nindent 4 }}
-    app.kubernetes.io/component: ingest
+    app.kubernetes.io/component: heron
 spec:
-  replicas: {{ .Values.ingest.replicaCount }}
+  replicas: {{ .Values.heron.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}
       app.kubernetes.io/instance: {{ .Release.Name }}
-      app.kubernetes.io/component: ingest
+      app.kubernetes.io/component: heron
   template:
     metadata:
       labels:
         {{- include "dcim.labels" . | nindent 8 }}
-        app.kubernetes.io/component: ingest
+        app.kubernetes.io/component: heron
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: ingest
-          image: {{ include "dcim.image" (dict "Values" .Values "name" "api") }}
+        - name: heron
+          image: {{ include "dcim.image" (dict "Values" .Values "name" "otter") }}
           command: ["uvicorn", "dcim.main:app", "--host", "0.0.0.0", "--port", "8443"]
           ports:
             - { name: https, containerPort: 8443 }
           env:
-            - { name: DCIM_COLLECTOR_MTLS_REQUIRED, value: {{ .Values.ingest.mtls.enabled | quote }} }
+            - { name: DCIM_COLLECTOR_MTLS_REQUIRED, value: {{ .Values.heron.mtls.enabled | quote }} }
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
             - { name: DCIM_REDIS_DSN,    value: {{ .Values.redis.dsn | quote }} }
           resources:
-            {{- toYaml .Values.ingest.resources | nindent 12 }}
+            {{- toYaml .Values.heron.resources | nindent 12 }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "dcim.fullname" . }}-ingest
 spec:
-  type: {{ .Values.ingest.service.type }}
+  type: {{ .Values.heron.service.type }}
   ports:
-    - port: {{ .Values.ingest.service.port }}
+    - port: {{ .Values.heron.service.port }}
       targetPort: https
   selector:
     app.kubernetes.io/name: {{ .Chart.Name }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/component: ingest
+    app.kubernetes.io/component: heron

@@ -1,11 +1,11 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: frontend
+  name: finch
   namespace: dcim
 spec:
   selector:
-    app: frontend
+    app: finch
   ports:
     - port: 80
       targetPort: 80
@@ -15,21 +15,21 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: frontend
+  name: finch
   namespace: dcim
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: frontend
+      app: finch
   template:
     metadata:
       labels:
-        app: frontend
+        app: finch
     spec:
       containers:
-        - name: frontend
-          image: localhost/dcim-frontend:dev
+        - name: finch
+          image: localhost/dcim-finch:dev
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 80

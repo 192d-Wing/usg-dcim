@@ -93,7 +93,7 @@ services:
       interval: 10s
       retries: 6
 
-  api:
+  otter:
     build:
       context: ../../packages/otter
       dockerfile: Containerfile
@@ -145,7 +145,7 @@ services:
       # `DCIM_OTEL_ENABLED=true podman compose --profile otel up`.
       DCIM_OTEL_ENABLED: "${DCIM_OTEL_ENABLED:-false}"
       DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
-      DCIM_OTEL_SERVICE_NAME: dcim-api
+      DCIM_OTEL_SERVICE_NAME: dcim-otter
       DCIM_OTEL_ENVIRONMENT: dev
     ports: ["8000:8000"]
     extra_hosts:
@@ -161,7 +161,7 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
 
-  worker:
+  otter-worker:
     build:
       context: ../../packages/otter
       dockerfile: Containerfile
@@ -177,7 +177,7 @@ services:
       DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
       DCIM_OTEL_ENABLED: "${DCIM_OTEL_ENABLED:-false}"
       DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
-      DCIM_OTEL_SERVICE_NAME: dcim-worker
+      DCIM_OTEL_SERVICE_NAME: dcim-otter-worker
       DCIM_OTEL_ENVIRONMENT: dev
     # NET_RAW lets the worker open ICMP sockets for the DNS
     # health-check engine's `icmp` protocol probes. Without it the
@@ -187,20 +187,20 @@ services:
     cap_add:
       - NET_RAW
     depends_on:
-      api: { condition: service_started }
+      otter: { condition: service_started }
 
-  frontend:
+  finch:
     build:
       context: ../../packages/finch
       dockerfile: Containerfile
     ports: ["80:80"]
-    depends_on: [api]
+    depends_on: [otter]
 
   # ---- Go services (Tier 1 perf migrations) ----
   # All three default to off; bring them up with `--profile go-services`.
   # When enabled, point collectors at go-ingest:8100 instead of api:8000
   # for /v1/ingest/telemetry — same wire format, same auth model.
-  go-ingest:
+  heron:
     build:
       context: ../../packages/heron
       dockerfile: Containerfile
@@ -212,7 +212,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
-  go-alerts:
+  magpie:
     build:
       context: ../../packages/magpie
       dockerfile: Containerfile
@@ -228,7 +228,7 @@ services:
       postgres: { condition: service_healthy }
       redis:    { condition: service_healthy }
 
-  go-dns-probe:
+  beagle:
     build:
       context: ../../packages/beagle
       dockerfile: Containerfile
@@ -251,7 +251,7 @@ services:
   # PYTHONUNBUFFERED if you need to revert mid-cutover. CMD argument
   # `-config` points at the same /etc/dcim/collector.yaml the Python
   # binary read, and the YAML surface is byte-compatible per Phase 1–4.
-  collector:
+  badger:
     build:
       context: ../../packages/badger
       dockerfile: Containerfile
@@ -267,7 +267,7 @@ services:
       # docker network — same pattern as keycloak.prod.dev.mil on api.
       - "go-ingest.infra.prod.dcim.mil:host-gateway"
     depends_on:
-      api: { condition: service_started }
+      otter: { condition: service_started }
       snmpsim: { condition: service_started }
 
 volumes:

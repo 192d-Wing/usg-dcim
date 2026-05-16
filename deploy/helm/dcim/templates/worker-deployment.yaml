@@ -4,25 +4,25 @@ metadata:
   name: {{ include "dcim.fullname" . }}-worker
   labels:
     {{- include "dcim.labels" . | nindent 4 }}
-    app.kubernetes.io/component: worker
+    app.kubernetes.io/component: otter-worker
 spec:
   replicas: {{ .Values.worker.replicaCount }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}
       app.kubernetes.io/instance: {{ .Release.Name }}
-      app.kubernetes.io/component: worker
+      app.kubernetes.io/component: otter-worker
   template:
     metadata:
       labels:
         {{- include "dcim.labels" . | nindent 8 }}
-        app.kubernetes.io/component: worker
+        app.kubernetes.io/component: otter-worker
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: worker
-          image: {{ include "dcim.image" (dict "Values" .Values "name" "api") }}
+        - name: otter-worker
+          image: {{ include "dcim.image" (dict "Values" .Values "name" "otter") }}
           command: ["arq", "dcim.worker.WorkerSettings"]
           env:
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.postgresql.dsn | quote }} }
@@ -30,7 +30,7 @@ spec:
             {{- if .Values.otel.enabled }}
             - { name: DCIM_OTEL_ENABLED, value: "true" }
             - { name: DCIM_OTEL_EXPORTER_ENDPOINT, value: {{ .Values.otel.exporterEndpoint | quote }} }
-            - { name: DCIM_OTEL_SERVICE_NAME, value: "dcim-worker" }
+            - { name: DCIM_OTEL_SERVICE_NAME, value: "dcim-otter-worker" }
             - { name: DCIM_OTEL_ENVIRONMENT, value: {{ .Values.otel.environment | quote }} }
             {{- end }}
           resources:
