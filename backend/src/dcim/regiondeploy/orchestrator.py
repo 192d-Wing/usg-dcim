@@ -51,6 +51,7 @@ from ..models.regiondeploy import (
     RegionDeploymentEventLevel,
     RegionDeploymentStatus,
 )
+from . import apps as apps_gen
 from . import cilium as cilium_gen
 from . import crd as crd_gen
 from . import events, preflight
@@ -203,6 +204,9 @@ async def _run_stage(
     if stage_key == "cni.bgp":
         await _stage_cni_bgp(db, redis, row)
         return
+    if stage_key in _APPS_STAGES:
+        await _stage_app(db, redis, row, stage_key)
+        return
     # Remaining stages are stubs for now: emit an info event and
     # advance. The UI shows the stage tree progressing without any
     # real cluster mutations happening.
@@ -296,6 +300,52 @@ async def _stage_render(
     await db.commit()
 
 
+# Map stage key → (renderer fn, chart-name label for log + payload).
+# One source of truth — `_stage_app` dispatches via this dict and
+# the STAGES list at the top of the file matches its keys.
+_APPS_STAGES: dict[str, tuple[Any, str]] = {
+    "apps.cert-manager":  (apps_gen.render_cert_manager_values,  "cert-manager"),
+    "apps.dns_auth":      (apps_gen.render_dns_auth_values,      "coredns-auth"),
+    "apps.dns_recursive": (apps_gen.render_dns_recursive_values, "hickory-recursive"),
+    "apps.dhcp":          (apps_gen.render_dhcp_values,          "kea-dhcp"),
+    "apps.collector":     (apps_gen.render_collector_values,     "go-collector"),
+}
+
+# Shared event-payload note for the render-but-don't-apply stages.
+# When the regional-cluster kubeconfig retrieval workstream lands,
+# this string + the per-stage `note` fields go away in one sweep.
+_APPLY_PENDING_NOTE = (
+    "apply path waits on regional-cluster kubeconfig retrieval"
+)
+
+
+async def _stage_app(
+    db: AsyncSession, redis: Any, row: RegionDeployment, stage_key: str,
+) -> None:
+    """Generic apps.* stage handler.
+
+    Same render-but-don't-apply shape as the cni stages: produce the
+    Helm values and emit them as an event payload the operator can
+    `helm install -f -` against the regional cluster while the
+    apply path waits on the regional-cluster kubeconfig retrieval
+    workstream."""
+    renderer, chart = _APPS_STAGES[stage_key]
+    values = renderer(row)
+    await events.emit(
+        db, redis,
+        deployment_id=row.id,
+        stage=stage_key,
+        message=f"rendered {chart} Helm values ({len(values)} top-level keys)",
+        payload={
+            "chart": chart,
+            "values_yaml": apps_gen.dump_values(values),
+            "values": values,
+            "note": _APPLY_PENDING_NOTE,
+        },
+    )
+    await db.commit()
+
+
 async def _stage_cni(
     db: AsyncSession, redis: Any, row: RegionDeployment,
 ) -> None:
@@ -321,9 +371,7 @@ async def _stage_cni(
             "cilium_version": version,
             "values_yaml": cilium_gen.dump_values(values),
             "values": values,
-            "note": (
-                "apply path waits on regional-cluster kubeconfig retrieval"
-            ),
+            "note": _APPLY_PENDING_NOTE,
         },
     )
     await db.commit()
@@ -363,9 +411,7 @@ async def _stage_cni_bgp(
             "crd_count": len(crds),
             "crds_yaml": cilium_gen.dump_yaml(crds),
             "crds": crds,
-            "note": (
-                "apply path waits on regional-cluster kubeconfig retrieval"
-            ),
+            "note": _APPLY_PENDING_NOTE,
         },
     )
     await db.commit()
