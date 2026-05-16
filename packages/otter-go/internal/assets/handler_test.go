@@ -27,6 +27,23 @@ func (f *fakeQ) CountAssets(_ context.Context, _ dbq.CountAssetsParams) (int64, 
 func (f *fakeQ) GetAsset(_ context.Context, _ uuid.UUID) (dbq.Asset, error) {
 	return dbq.Asset{}, pgx.ErrNoRows
 }
+func (f *fakeQ) CreateAsset(_ context.Context, a dbq.CreateAssetParams) (dbq.Asset, error) {
+	return dbq.Asset{ID: uuid.New(), SiteID: a.SiteID, Name: a.Name, Kind: a.Kind,
+		Face: a.Face, Mount: a.Mount, LifecycleState: a.LifecycleState}, nil
+}
+func (f *fakeQ) UpdateAsset(_ context.Context, a dbq.UpdateAssetParams) (dbq.Asset, error) {
+	return dbq.Asset{ID: a.ID}, nil
+}
+func (f *fakeQ) SetAssetDecommissioned(_ context.Context, id uuid.UUID) (dbq.Asset, error) {
+	return dbq.Asset{ID: id, LifecycleState: "decommissioned"}, nil
+}
+func (f *fakeQ) CountConsumerPowerDrops(_ context.Context, _ uuid.UUID) (int64, error) { return 0, nil }
+func (f *fakeQ) CountPduPowerDrops(_ context.Context, _ uuid.UUID) (int64, error)      { return 0, nil }
+func (f *fakeQ) ListDownstreamAssetNames(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeQ) DeleteConsumerPowerConnections(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) DeletePduPowerConnections(_ context.Context, _ uuid.UUID) error      { return nil }
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

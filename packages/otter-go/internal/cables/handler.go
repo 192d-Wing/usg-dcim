@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -19,6 +20,9 @@ type Querier interface {
 	ListCables(ctx context.Context, arg dbq.ListCablesParams) ([]dbq.Cable, error)
 	CountCables(ctx context.Context, arg dbq.CountCablesParams) (int64, error)
 	GetCable(ctx context.Context, id uuid.UUID) (dbq.Cable, error)
+	CreateCable(ctx context.Context, arg dbq.CreateCableParams) (dbq.Cable, error)
+	DeleteCable(ctx context.Context, id uuid.UUID) error
+	GetAssetSiteID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 }
 
 type Handler struct {
@@ -28,6 +32,8 @@ type Handler struct {
 func (h *Handler) Mount(r chi.Router) {
 	r.Get("/cables", h.list)
 	r.Get("/cables/{id}", h.get)
+	r.With(auth.RequireCapability("inventory:cables:create")).Post("/cables", h.create)
+	r.With(auth.RequireCapability("inventory:cables:delete")).Delete("/cables/{id}", h.delete)
 }
 
 type listResponse struct {

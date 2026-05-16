@@ -25,6 +25,13 @@ func (f *fakeQ) CountCables(_ context.Context, _ dbq.CountCablesParams) (int64, 
 func (f *fakeQ) GetCable(_ context.Context, _ uuid.UUID) (dbq.Cable, error) {
 	return dbq.Cable{}, pgx.ErrNoRows
 }
+func (f *fakeQ) CreateCable(_ context.Context, a dbq.CreateCableParams) (dbq.Cable, error) {
+	return dbq.Cable{ID: uuid.New(), SiteID: a.SiteID, AAssetID: a.AAssetID, BAssetID: a.BAssetID}, nil
+}
+func (f *fakeQ) DeleteCable(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) GetAssetSiteID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

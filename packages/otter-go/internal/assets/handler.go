@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -21,6 +22,14 @@ type Querier interface {
 	ListAssets(ctx context.Context, arg dbq.ListAssetsParams) ([]dbq.Asset, error)
 	CountAssets(ctx context.Context, arg dbq.CountAssetsParams) (int64, error)
 	GetAsset(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
+	CreateAsset(ctx context.Context, arg dbq.CreateAssetParams) (dbq.Asset, error)
+	UpdateAsset(ctx context.Context, arg dbq.UpdateAssetParams) (dbq.Asset, error)
+	SetAssetDecommissioned(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
+	CountConsumerPowerDrops(ctx context.Context, assetID uuid.UUID) (int64, error)
+	CountPduPowerDrops(ctx context.Context, pduAssetID uuid.UUID) (int64, error)
+	ListDownstreamAssetNames(ctx context.Context, pduAssetID uuid.UUID) ([]string, error)
+	DeleteConsumerPowerConnections(ctx context.Context, assetID uuid.UUID) error
+	DeletePduPowerConnections(ctx context.Context, pduAssetID uuid.UUID) error
 }
 
 type Handler struct {
@@ -30,6 +39,10 @@ type Handler struct {
 func (h *Handler) Mount(r chi.Router) {
 	r.Get("/assets", h.list)
 	r.Get("/assets/{id}", h.get)
+	r.With(auth.RequireCapability("inventory:assets:read")).Get("/assets/{id}/decommission/preview", h.decommissionPreview)
+	r.With(auth.RequireCapability("inventory:assets:create")).Post("/assets", h.create)
+	r.With(auth.RequireCapability("inventory:assets:update")).Patch("/assets/{id}", h.update)
+	r.With(auth.RequireCapability("inventory:assets:update")).Post("/assets/{id}/decommission", h.decommission)
 }
 
 type listResponse struct {

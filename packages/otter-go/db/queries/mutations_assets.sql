@@ -1,0 +1,117 @@
+-- ===== Assets =====
+-- name: CreateAsset :one
+-- Note: PDU outlet auto-seeding (24 outlets, alternating sides, C13) is
+-- deferred to a follow-up PR. Python create_asset does it inline; doing
+-- the same here means a transaction wrapper that we don't yet have plumbed.
+INSERT INTO assets (id, site_id, rack_id, parent_asset_id, name, hostname,
+                    kind, manufacturer, model, serial, firmware,
+                    rack_position_u, rack_units, face, mount, pdu_side,
+                    psu_count, port_count, mgmt_ip, mgmt_protocol, mgmt_port,
+                    mgmt_credentials_ref, lifecycle_state, metadata_json,
+                    created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5,
+        $6::asset_kind, $7, $8, $9, $10,
+        $11, COALESCE($12::int, 1), $13::asset_face, $14::asset_mount, $15::pdu_side,
+        $16, $17, $18, $19, $20,
+        $21, $22::lifecycle_state, COALESCE($23::jsonb, '{}'::jsonb),
+        NOW(), NOW())
+RETURNING id, site_id, rack_id, parent_asset_id, name, hostname, kind::text AS kind,
+          manufacturer, model, serial, firmware,
+          rack_position_u, rack_units, face::text AS face, mount::text AS mount,
+          pdu_side::text AS pdu_side, psu_count, port_count,
+          mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+          lifecycle_state::text AS lifecycle_state, NULL::text AS install_date,
+          NULL::text AS warranty_expires, metadata_json, created_at, updated_at;
+
+-- name: UpdateAsset :one
+-- Placement validation (u-grid fit, slot collision) is deferred — same
+-- transaction-scoping reason as above. The handler should refuse a
+-- placement-changing PATCH until that lands; for now placement fields
+-- write straight through.
+UPDATE assets
+SET name           = COALESCE(sqlc.narg(name)::text, name),
+    hostname       = CASE WHEN sqlc.arg(hostname_set)::bool THEN sqlc.narg(hostname)::text ELSE hostname END,
+    rack_id        = CASE WHEN sqlc.arg(rack_id_set)::bool  THEN sqlc.narg(rack_id)::uuid  ELSE rack_id END,
+    rack_position_u = CASE WHEN sqlc.arg(rack_position_u_set)::bool THEN sqlc.narg(rack_position_u)::int ELSE rack_position_u END,
+    rack_units     = CASE WHEN sqlc.arg(rack_units_set)::bool THEN sqlc.narg(rack_units)::int ELSE rack_units END,
+    face           = COALESCE(sqlc.narg(face)::asset_face, face),
+    mount          = COALESCE(sqlc.narg(mount)::asset_mount, mount),
+    pdu_side       = CASE WHEN sqlc.arg(pdu_side_set)::bool THEN sqlc.narg(pdu_side)::pdu_side ELSE pdu_side END,
+    psu_count      = CASE WHEN sqlc.arg(psu_count_set)::bool THEN sqlc.narg(psu_count)::int ELSE psu_count END,
+    port_count     = CASE WHEN sqlc.arg(port_count_set)::bool THEN sqlc.narg(port_count)::int ELSE port_count END,
+    mgmt_ip        = CASE WHEN sqlc.arg(mgmt_ip_set)::bool THEN sqlc.narg(mgmt_ip)::text ELSE mgmt_ip END,
+    mgmt_protocol  = CASE WHEN sqlc.arg(mgmt_protocol_set)::bool THEN sqlc.narg(mgmt_protocol)::text ELSE mgmt_protocol END,
+    mgmt_port      = CASE WHEN sqlc.arg(mgmt_port_set)::bool THEN sqlc.narg(mgmt_port)::int ELSE mgmt_port END,
+    firmware       = CASE WHEN sqlc.arg(firmware_set)::bool THEN sqlc.narg(firmware)::text ELSE firmware END,
+    lifecycle_state = COALESCE(sqlc.narg(lifecycle_state)::lifecycle_state, lifecycle_state),
+    metadata_json  = COALESCE(sqlc.narg(metadata_json)::jsonb, metadata_json),
+    updated_at     = NOW()
+WHERE id = $1
+RETURNING id, site_id, rack_id, parent_asset_id, name, hostname, kind::text AS kind,
+          manufacturer, model, serial, firmware,
+          rack_position_u, rack_units, face::text AS face, mount::text AS mount,
+          pdu_side::text AS pdu_side, psu_count, port_count,
+          mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+          lifecycle_state::text AS lifecycle_state, NULL::text AS install_date,
+          NULL::text AS warranty_expires, metadata_json, created_at, updated_at;
+
+-- ===== Decommission =====
+
+-- name: CountConsumerPowerDrops :one
+SELECT count(*)::bigint
+FROM power_connections
+WHERE asset_id = $1;
+
+-- name: CountPduPowerDrops :one
+SELECT count(*)::bigint
+FROM power_connections pc
+JOIN outlets o ON o.id = pc.outlet_id
+WHERE o.pdu_asset_id = $1;
+
+-- name: ListDownstreamAssetNames :many
+SELECT DISTINCT a.name
+FROM power_connections pc
+JOIN outlets o ON o.id = pc.outlet_id
+JOIN assets a ON a.id = pc.asset_id
+WHERE o.pdu_asset_id = $1
+ORDER BY a.name;
+
+-- name: DeleteConsumerPowerConnections :exec
+DELETE FROM power_connections WHERE asset_id = $1;
+
+-- name: DeletePduPowerConnections :exec
+DELETE FROM power_connections
+WHERE outlet_id IN (SELECT id FROM outlets WHERE pdu_asset_id = $1);
+
+-- name: SetAssetDecommissioned :one
+UPDATE assets
+SET lifecycle_state = 'decommissioned'::lifecycle_state,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, site_id, rack_id, parent_asset_id, name, hostname, kind::text AS kind,
+          manufacturer, model, serial, firmware,
+          rack_position_u, rack_units, face::text AS face, mount::text AS mount,
+          pdu_side::text AS pdu_side, psu_count, port_count,
+          mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+          lifecycle_state::text AS lifecycle_state, NULL::text AS install_date,
+          NULL::text AS warranty_expires, metadata_json, created_at, updated_at;
+
+-- ===== Cables =====
+-- name: CreateCable :one
+-- Port-in-range + port-in-use validations are deferred to the same
+-- follow-up PR as asset placement validation. site_id is set from the
+-- a-end asset by the handler before this query runs.
+INSERT INTO cables (id, site_id, a_asset_id, a_port, b_asset_id, b_port,
+                    medium, color, length_m, label, face, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10, NOW(), NOW())
+RETURNING id, site_id, a_asset_id, a_port, b_asset_id, b_port,
+          medium, color, length_m, label, face, created_at, updated_at;
+
+-- name: DeleteCable :exec
+DELETE FROM cables WHERE id = $1;
+
+-- name: GetAssetSiteID :one
+-- Lookup helper used by the cables handler to set site_id from the
+-- a-end asset, matching Python's behavior.
+SELECT site_id FROM assets WHERE id = $1;
