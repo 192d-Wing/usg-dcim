@@ -23,6 +23,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	probing "github.com/prometheus-community/pro-bing"
+
+	"github.com/usg-dcim/packages/shared-go/env"
 )
 
 type check struct {
@@ -40,9 +42,9 @@ type check struct {
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	pgDSN := envDefault("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim")
-	loopEvery := envDuration("DNS_PROBE_TICK", 30*time.Second)
-	concurrency := envInt("DNS_PROBE_CONCURRENCY", 64)
+	pgDSN := env.String("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim")
+	loopEvery := env.Duration("DNS_PROBE_TICK", 30*time.Second)
+	concurrency := env.Int("DNS_PROBE_CONCURRENCY", 64)
 
 	pg, err := pgxpool.New(context.Background(), pgDSN)
 	if err != nil {
@@ -54,7 +56,7 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
-		_ = http.ListenAndServe(envDefault("DNS_PROBE_HEALTH_ADDR", ":8102"), mux)
+		_ = http.ListenAndServe(env.String("DNS_PROBE_HEALTH_ADDR", ":8102"), mux)
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -209,7 +211,7 @@ func probeICMP(target string, timeout time.Duration) (string, string) {
 		return "unhealthy", err.Error()
 	}
 	// Try unprivileged ICMP first; fall back to raw if explicitly enabled.
-	pinger.SetPrivileged(envBool("DNS_PROBE_ICMP_PRIVILEGED", false))
+	pinger.SetPrivileged(env.Bool("DNS_PROBE_ICMP_PRIVILEGED", false))
 	pinger.Count = 1
 	pinger.Timeout = timeout
 	if err := pinger.Run(); err != nil {
@@ -264,36 +266,3 @@ func probeHTTP(ctx context.Context, scheme, target string, port int, path string
 	return "unhealthy", fmt.Sprintf("http %d", resp.StatusCode)
 }
 
-func envDefault(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
-}
-func envInt(k string, d int) int {
-	if v := os.Getenv(k); v != "" {
-		var n int
-		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
-			return n
-		}
-	}
-	return d
-}
-func envDuration(k string, d time.Duration) time.Duration {
-	if v := os.Getenv(k); v != "" {
-		if dd, err := time.ParseDuration(v); err == nil {
-			return dd
-		}
-	}
-	return d
-}
-func envBool(k string, d bool) bool {
-	v := strings.ToLower(os.Getenv(k))
-	switch v {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	}
-	return d
-}

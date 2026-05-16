@@ -154,13 +154,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { image: dcim-otter,  context: packages/otter }
-          - { image: dcim-finch,  context: packages/finch }
-          - { image: dcim-mole,   context: packages/mole }
-          - { image: dcim-badger, context: packages/badger }
-          - { image: dcim-heron,  context: packages/heron }
-          - { image: dcim-magpie, context: packages/magpie }
-          - { image: dcim-beagle, context: packages/beagle }
+          # Self-contained services (build context = the package dir).
+          - { image: dcim-otter,  context: packages/otter,  containerfile: packages/otter/Containerfile }
+          - { image: dcim-finch,  context: packages/finch,  containerfile: packages/finch/Containerfile }
+          - { image: dcim-mole,   context: packages/mole,   containerfile: packages/mole/Containerfile }
+          - { image: dcim-badger, context: packages/badger, containerfile: packages/badger/Containerfile }
+          # Go services that import packages/shared-go via an in-tree
+          # replace directive — build context must be repo root so the
+          # COPY of packages/shared-go resolves.
+          - { image: dcim-heron,  context: .,               containerfile: packages/heron/Containerfile }
+          - { image: dcim-magpie, context: .,               containerfile: packages/magpie/Containerfile }
+          - { image: dcim-beagle, context: .,               containerfile: packages/beagle/Containerfile }
     steps:
       - uses: actions/checkout@v6
 
@@ -170,7 +174,7 @@ jobs:
           image: ${{ matrix.image }}
           tags: ci
           context: ./${{ matrix.context }}
-          containerfiles: ./${{ matrix.context }}/Containerfile
+          containerfiles: ./${{ matrix.containerfile }}
 
   helm:
     name: Helm chart lint + template

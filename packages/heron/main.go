@@ -37,6 +37,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/usg-dcim/packages/shared-go/env"
 )
 
 const requiredCap = "collectors:ingest:write"
@@ -66,8 +68,8 @@ type server struct {
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	pgDSN := envDefault("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim")
-	addr := envDefault("INGEST_ADDR", ":8100")
+	pgDSN := env.String("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim")
+	addr := env.String("INGEST_ADDR", ":8100")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -81,7 +83,7 @@ func main() {
 
 	// Opt-out for stock-PG deployments without the TimescaleDB extension.
 	// Matches the Python settings.telemetry_write_hypertable flag.
-	writeHypertable := envDefault("DCIM_TELEMETRY_WRITE_HYPERTABLE", "true") != "false"
+	writeHypertable := env.Bool("DCIM_TELEMETRY_WRITE_HYPERTABLE", true)
 
 	s := &server{
 		pg:              pg,
@@ -104,7 +106,7 @@ func main() {
 	if certFile != "" && keyFile != "" {
 		tlsCfg, err := buildTLSConfig(
 			os.Getenv("INGEST_TLS_CLIENT_CA"),
-			envDefault("INGEST_TLS_REQUIRE_CLIENT_CERT", "false") != "false",
+			env.Bool("INGEST_TLS_REQUIRE_CLIENT_CERT", false),
 		)
 		if err != nil {
 			log.Error("tls_config_failed", "err", err)
@@ -149,13 +151,6 @@ func buildTLSConfig(clientCAFile string, requireClientCert bool) (*tls.Config, e
 		cfg.ClientAuth = tls.VerifyClientCertIfGiven
 	}
 	return cfg, nil
-}
-
-func envDefault(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
 }
 
 func (s *server) handleIngest(w http.ResponseWriter, r *http.Request) {

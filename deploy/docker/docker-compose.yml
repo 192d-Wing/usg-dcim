@@ -202,8 +202,8 @@ services:
   # for /v1/ingest/telemetry — same wire format, same auth model.
   heron:
     build:
-      context: ../../packages/heron
-      dockerfile: Containerfile
+      context: ../..
+      dockerfile: packages/heron/Containerfile
     profiles: ["go-services"]
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
@@ -214,8 +214,8 @@ services:
 
   magpie:
     build:
-      context: ../../packages/magpie
-      dockerfile: Containerfile
+      context: ../..
+      dockerfile: packages/magpie/Containerfile
     profiles: ["go-services"]
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
@@ -230,8 +230,8 @@ services:
 
   beagle:
     build:
-      context: ../../packages/beagle
-      dockerfile: Containerfile
+      context: ../..
+      dockerfile: packages/beagle/Containerfile
     profiles: ["go-services"]
     environment:
       DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim

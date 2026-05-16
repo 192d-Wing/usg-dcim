@@ -5,7 +5,11 @@ go 1.22
 require (
 	github.com/jackc/pgx/v5 v5.6.0
 	github.com/prometheus-community/pro-bing v0.4.0
+	github.com/usg-dcim/packages/shared-go v0.0.0-00010101000000-000000000000
 )
+
+// In-tree module; see packages/shared-go/README.md.
+replace github.com/usg-dcim/packages/shared-go => ../shared-go
 
 require (
 	github.com/google/uuid v1.6.0 // indirect

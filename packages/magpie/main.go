@@ -29,6 +29,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+
+	"github.com/usg-dcim/packages/shared-go/env"
 )
 
 type alertRule struct {
@@ -57,13 +59,13 @@ func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	cfg := config{
-		pgDSN:              envDefault("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim"),
-		redisURL:           envDefault("DCIM_REDIS_DSN", "redis://redis:6379/0"),
-		evalInterval:       envDuration("ALERTS_EVAL_INTERVAL", 30*time.Second),
-		sweepInterval:      envDuration("ALERTS_SWEEP_INTERVAL", 30*time.Second),
-		collectorStaleSecs: envInt("DCIM_COLLECTOR_STALE_SECONDS", 600),
-		notifyQueueName:    envDefault("ALERTS_NOTIFY_QUEUE", "arq:queue"),
-		maxConcurrentRules: envInt("ALERTS_MAX_PARALLEL", 16),
+		pgDSN:              env.String("DCIM_POSTGRES_DSN_RAW", "postgres://dcim:dcim@postgres:5432/dcim"),
+		redisURL:           env.String("DCIM_REDIS_DSN", "redis://redis:6379/0"),
+		evalInterval:       env.Duration("ALERTS_EVAL_INTERVAL", 30*time.Second),
+		sweepInterval:      env.Duration("ALERTS_SWEEP_INTERVAL", 30*time.Second),
+		collectorStaleSecs: env.Int("DCIM_COLLECTOR_STALE_SECONDS", 600),
+		notifyQueueName:    env.String("ALERTS_NOTIFY_QUEUE", "arq:queue"),
+		maxConcurrentRules: env.Int("ALERTS_MAX_PARALLEL", 16),
 	}
 
 	pg, err := pgxpool.New(context.Background(), cfg.pgDSN)
@@ -87,7 +89,7 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
-		_ = http.ListenAndServe(envDefault("ALERTS_HEALTH_ADDR", ":8101"), mux)
+		_ = http.ListenAndServe(env.String("ALERTS_HEALTH_ADDR", ":8101"), mux)
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -418,26 +420,3 @@ func (e *engine) enqueueNotify(ctx context.Context, kind string, alertID uuid.UU
 	}
 }
 
-func envDefault(k, d string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return d
-}
-func envInt(k string, d int) int {
-	if v := os.Getenv(k); v != "" {
-		var n int
-		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
-			return n
-		}
-	}
-	return d
-}
-func envDuration(k string, d time.Duration) time.Duration {
-	if v := os.Getenv(k); v != "" {
-		if dd, err := time.ParseDuration(v); err == nil {
-			return dd
-		}
-	}
-	return d
-}
