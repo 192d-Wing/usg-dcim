@@ -164,6 +164,50 @@ type PrefixListEntry struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+type CommunityList struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Kind        string    `json:"kind"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type CommunityListEntry struct {
+	ID              uuid.UUID `json:"id"`
+	CommunityListID uuid.UUID `json:"community_list_id"`
+	Seq             int32     `json:"seq"`
+	Action          string    `json:"action"`
+	Value           string    `json:"value"`
+	Description     *string   `json:"description"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type RouteMap struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type RouteMapEntry struct {
+	ID                   uuid.UUID  `json:"id"`
+	RouteMapID           uuid.UUID  `json:"route_map_id"`
+	Seq                  int32      `json:"seq"`
+	Action               string     `json:"action"`
+	MatchPrefixListID    *uuid.UUID `json:"match_prefix_list_id"`
+	MatchCommunityListID *uuid.UUID `json:"match_community_list_id"`
+	MatchAsPathRegex     *string    `json:"match_as_path_regex"`
+	SetLocalPref         *int32     `json:"set_local_pref"`
+	SetMed               *int32     `json:"set_med"`
+	SetCommunity         *string    `json:"set_community"`
+	Description          *string    `json:"description"`
+	CreatedAt            time.Time  `json:"created_at"`
+	UpdatedAt            time.Time  `json:"updated_at"`
+}
+
 type Outlet struct {
 	ID         uuid.UUID `json:"id"`
 	PduAssetID uuid.UUID `json:"pdu_asset_id"`

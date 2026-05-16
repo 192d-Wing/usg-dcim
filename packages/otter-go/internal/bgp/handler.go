@@ -23,6 +23,15 @@ type Querier interface {
 	CountPrefixLists(ctx context.Context, arg dbq.CountPrefixListsParams) (int64, error)
 	ListPrefixListEntries(ctx context.Context, arg dbq.ListPrefixListEntriesParams) ([]dbq.PrefixListEntry, error)
 	CountPrefixListEntries(ctx context.Context, arg dbq.CountPrefixListEntriesParams) (int64, error)
+
+	ListCommunityLists(ctx context.Context, arg dbq.ListCommunityListsParams) ([]dbq.CommunityList, error)
+	CountCommunityLists(ctx context.Context, arg dbq.CountCommunityListsParams) (int64, error)
+	ListCommunityListEntries(ctx context.Context, arg dbq.ListCommunityListEntriesParams) ([]dbq.CommunityListEntry, error)
+	CountCommunityListEntries(ctx context.Context, arg dbq.CountCommunityListEntriesParams) (int64, error)
+	ListRouteMaps(ctx context.Context, arg dbq.ListRouteMapsParams) ([]dbq.RouteMap, error)
+	CountRouteMaps(ctx context.Context) (int64, error)
+	ListRouteMapEntries(ctx context.Context, arg dbq.ListRouteMapEntriesParams) ([]dbq.RouteMapEntry, error)
+	CountRouteMapEntries(ctx context.Context, arg dbq.CountRouteMapEntriesParams) (int64, error)
 }
 
 type Handler struct {
@@ -34,6 +43,10 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/asns", h.listAsns)
 		r.Get("/prefix-lists", h.listPrefixLists)
 		r.Get("/prefix-list-entries", h.listPrefixListEntries)
+		r.Get("/community-lists", h.listCommunityLists)
+		r.Get("/community-list-entries", h.listCommunityListEntries)
+		r.Get("/route-maps", h.listRouteMaps)
+		r.Get("/route-map-entries", h.listRouteMapEntries)
 	})
 }
 
@@ -124,6 +137,137 @@ func (h *Handler) listPrefixListEntries(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	httpx.JSON(w, http.StatusOK, prefixListEntriesPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+// ---- Community lists ----
+
+type communityListsPage struct {
+	Items  []dbq.CommunityList `json:"items"`
+	Total  int64               `json:"total"`
+	Limit  int32               `json:"limit"`
+	Offset int32               `json:"offset"`
+}
+
+func (h *Handler) listCommunityLists(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	params := dbq.ListCommunityListsParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind"))}
+	items, err := h.Q.ListCommunityLists(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountCommunityLists(r.Context(), dbq.CountCommunityListsParams{Kind: params.Kind})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, communityListsPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+// ---- Community list entries ----
+
+type communityListEntriesPage struct {
+	Items  []dbq.CommunityListEntry `json:"items"`
+	Total  int64                    `json:"total"`
+	Limit  int32                    `json:"limit"`
+	Offset int32                    `json:"offset"`
+}
+
+func (h *Handler) listCommunityListEntries(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	params := dbq.ListCommunityListEntriesParams{Limit: limit, Offset: offset}
+	if v := q.Get("community_list_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "community_list_id is not a uuid")
+			return
+		}
+		params.CommunityListID = &id
+	}
+	items, err := h.Q.ListCommunityListEntries(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountCommunityListEntries(r.Context(), dbq.CountCommunityListEntriesParams{CommunityListID: params.CommunityListID})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, communityListEntriesPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+// ---- Route maps ----
+
+type routeMapsPage struct {
+	Items  []dbq.RouteMap `json:"items"`
+	Total  int64          `json:"total"`
+	Limit  int32          `json:"limit"`
+	Offset int32          `json:"offset"`
+}
+
+func (h *Handler) listRouteMaps(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	items, err := h.Q.ListRouteMaps(r.Context(), dbq.ListRouteMapsParams{Limit: limit, Offset: offset})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountRouteMaps(r.Context())
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, routeMapsPage{Items: items, Total: total, Limit: limit, Offset: offset})
+}
+
+// ---- Route map entries ----
+
+type routeMapEntriesPage struct {
+	Items  []dbq.RouteMapEntry `json:"items"`
+	Total  int64               `json:"total"`
+	Limit  int32               `json:"limit"`
+	Offset int32               `json:"offset"`
+}
+
+func (h *Handler) listRouteMapEntries(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := parseInt32(pageSize(q), 50, 1, 500)
+	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	params := dbq.ListRouteMapEntriesParams{Limit: limit, Offset: offset}
+	if v := q.Get("route_map_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "route_map_id is not a uuid")
+			return
+		}
+		params.RouteMapID = &id
+	}
+	items, err := h.Q.ListRouteMapEntries(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	total, err := h.Q.CountRouteMapEntries(r.Context(), dbq.CountRouteMapEntriesParams{RouteMapID: params.RouteMapID})
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, routeMapEntriesPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
 func strPtr(s string) *string {
