@@ -21,6 +21,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
+	"github.com/usg-dcim/packages/otter-go/internal/racks"
 	"github.com/usg-dcim/packages/otter-go/internal/regions"
 	"github.com/usg-dcim/packages/otter-go/internal/sites"
 	"github.com/usg-dcim/packages/shared-go/env"
@@ -48,6 +49,7 @@ func main() {
 	sh := &sites.Handler{Q: q}
 	rh := &regions.Handler{Q: q}
 	lh := &locations.Handler{Q: q}
+	rkh := &racks.Handler{Q: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -77,6 +79,7 @@ func main() {
 		sh.Mount(r)
 		rh.Mount(r)
 		lh.Mount(r)
+		rkh.Mount(r)
 	})
 
 	srv := &http.Server{

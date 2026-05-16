@@ -36,6 +36,20 @@ type Row struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type Rack struct {
+	ID           uuid.UUID `json:"id"`
+	SiteID       uuid.UUID `json:"site_id"`
+	RowID        uuid.UUID `json:"row_id"`
+	Name         string    `json:"name"`
+	Code         string    `json:"code"`
+	UHeight      int32     `json:"u_height"`
+	MaxKw        *string   `json:"max_kw"`
+	MaxWeightLbs *int32    `json:"max_weight_lbs"`
+	Serial       *string   `json:"serial"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 type Region struct {
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`
