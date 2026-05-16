@@ -143,6 +143,7 @@ _DASHBOARDS_READ = "dashboards:dashboards:read"
 _TELEMETRY_ALL = "telemetry:*"
 _COLLECTORS_READ = "collectors:collectors:read"
 _ALERTS_READ = "alerts:alerts:read"
+_REGION_DEPLOY_READ = "infrastructure:region-deployments:read"
 
 
 def all_granular_codes() -> set[str]:
@@ -173,6 +174,10 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
         "alerts:*",
         "audit:events:read",
         "admin:api-tokens:*",
+        # Region-deploy: full lifecycle. download-kubeconfig is the
+        # one elevated capability — gates access to the cluster's
+        # admin kubeconfig.
+        "infrastructure:region-deployments:*",
     ],
     "SiteAdmin": [
         "inventory:racks:*", "inventory:rows:*", "inventory:rooms:*",
@@ -182,6 +187,13 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         "alerts:*",
         POWER_APPROVE,
+        # Region-deploy: site-scoped operators can create + run + stop
+        # deploys at their site, but not download the cluster
+        # kubeconfig (kept to RegionalAdmin / EnterpriseAdmin).
+        _REGION_DEPLOY_READ,
+        "infrastructure:region-deployments:create",
+        "infrastructure:region-deployments:start",
+        "infrastructure:region-deployments:abort",
     ],
     "DataCenterManager": [
         "inventory:racks:*", "inventory:assets:*",
@@ -208,11 +220,15 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         "maintenance:windows:read",
         "audit:events:read", "audit:events:export",
+        # Region-deploy: read-only — auditors see history + event
+        # streams but never trigger anything.
+        _REGION_DEPLOY_READ,
     ],
     "Viewer": [
         "inventory:*:read", "ipam:*:read", "dns:*:read",
         _COLLECTORS_READ, "alerts:*:read",
         _TELEMETRY_ALL, _DASHBOARDS_READ,
+        _REGION_DEPLOY_READ,
     ],
     "ApiServiceAccount": [
         "inventory:*:read",

@@ -51,7 +51,9 @@ from ..models.regiondeploy import (
     RegionDeploymentEventLevel,
     RegionDeploymentStatus,
 )
+from . import crd as crd_gen
 from . import events, preflight
+from . import ignition as ignition_gen
 
 log = structlog.get_logger("dcim.regiondeploy.orchestrator")
 
@@ -191,15 +193,98 @@ async def _run_stage(
     if stage_key == "preflight":
         await _stage_preflight(db, redis, row)
         return
-    # All other stages are stubs for now: emit a "stub" info event
-    # and advance. The UI shows the stage tree progressing without
-    # any real cluster mutations happening.
+    if stage_key == "render":
+        await _stage_render(db, redis, row)
+        return
+    # Remaining stages are stubs for now: emit an info event and
+    # advance. The UI shows the stage tree progressing without any
+    # real cluster mutations happening.
     await events.emit(
         db, redis,
         deployment_id=row.id,
         stage=stage_key,
         message=f"stub stage {stage_key} — real implementation pending",
         payload={"stub": True},
+    )
+    await db.commit()
+
+
+async def _stage_render(
+    db: AsyncSession, redis: Any, row: RegionDeployment,
+) -> None:
+    """Render the Tinkerbell/Rufio CRDs + per-node Ignition.
+
+    This stage **doesn't apply anything to a cluster yet** — that's
+    pending the central-cluster RBAC chart change that lets the api/
+    worker service account write `tinkerbell.org` and `bmc.tinkerbell.org`
+    CRs. What it does today:
+
+      * Run the PR 4 + PR 5 generators against the deployment row.
+      * Emit two events whose `payload` carries the rendered output:
+          - render.crds : multi-doc YAML for all CRs (Template +
+            Hardware/BMCMachine/Workflow per node)
+          - render.ignition : per-node Ignition JSON dict, keyed by
+            node id
+
+    Operators inspecting `/region-deployments/{id}/events` see the
+    full manifest set + Ignition payloads and can copy-paste them
+    into a cluster for now. Once the apply path lands, the stage
+    becomes "render → apply → confirm" without changing the event
+    surface — the UI keeps working unchanged.
+
+    Why expose the rendered output now: it makes the stage *useful*
+    immediately for testing the PR 4/5 generators against real deploy
+    configs, without waiting on the cluster-apply RBAC work.
+    """
+    # `image_url` is the Flatcar PXE image URL Smee hands clients
+    # via Option 59 (v4) or as part of the iPXE script (v6). For
+    # now we read it from config.flatcar_image_url, falling back to
+    # an empty string so the renderer still produces inspectable
+    # output even when the field's unset.
+    cfg = row.config or {}
+    image_url = cfg.get("flatcar_image_url", "")
+
+    ignitions: dict[str, dict] = {}
+    ignition_strs: dict[str, str] = {}
+    for node in row.nodes:
+        try:
+            cfg_dict = ignition_gen.build_ignition(row, node)
+            ignitions[str(node.id)] = cfg_dict
+            ignition_strs[str(node.id)] = ignition_gen.render_ignition_for_node(
+                row, node,
+            )
+        except ValueError as e:
+            # ValueError fires when a non-first-CP node has no
+            # join token yet. In the render stage that's expected —
+            # the orchestrator stamps tokens in later. Skip with a
+            # warning event, don't fail the stage.
+            await events.emit(
+                db, redis,
+                deployment_id=row.id,
+                stage="render",
+                level=RegionDeploymentEventLevel.warn,
+                message=f"ignition skipped for {node.hostname}: {e}",
+            )
+
+    crds = crd_gen.crds_for_deployment(
+        row, image_url=image_url, ignition_for=ignition_strs,
+    )
+    crd_yaml = crd_gen.dump_yaml(crds)
+
+    await events.emit(
+        db, redis,
+        deployment_id=row.id,
+        stage="render",
+        message=f"rendered {len(crds)} CRDs + {len(ignitions)} ignition payloads",
+        payload={
+            "crds_yaml": crd_yaml,
+            "crd_count": len(crds),
+            "ignition_for_node": ignitions,
+            "note": (
+                "apply path lands once central-cluster RBAC allows the "
+                "api/worker SA to write tinkerbell.org CRDs"
+            ),
+        },
     )
     await db.commit()
 
