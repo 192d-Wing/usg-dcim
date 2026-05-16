@@ -22,6 +22,7 @@ import { useParams } from 'react-router';
 import { useOne } from '@refinedev/core';
 import { toast } from 'sonner';
 
+import Alert from '@cloudscape-design/components/alert';
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
 import Button from '@cloudscape-design/components/button';
@@ -292,8 +293,30 @@ export function RegionDeployShowPage() {
         </Header>
       }
     >
-      <ColumnLayout columns={2} variant="text-grid">
-        <Container header={<Header variant="h2">Stages</Header>}>
+      <SpaceBetween size="m">
+        {dep.last_error && (dep.status === 'failed' || dep.status === 'aborted') && (
+          // Lift last_error out of the event-log pane and into a full-width
+          // Alert above the columns. Operators triaging a stopped deploy
+          // see what broke + the action (Retry or Abort) in the same
+          // glance, without scanning the log first.
+          <Alert
+            type={dep.status === 'failed' ? 'error' : 'warning'}
+            header={
+              dep.status === 'failed'
+                ? `Failed at stage ${dep.current_stage ?? 'unknown'}`
+                : 'Deployment aborted'
+            }
+            action={
+              showRetry
+                ? <Button onClick={clickRetry}>Retry from {dep.current_stage ?? 'start'}</Button>
+                : undefined
+            }
+          >
+            {dep.last_error}
+          </Alert>
+        )}
+        <ColumnLayout columns={2} variant="text-grid">
+          <Container header={<Header variant="h2">Stages</Header>}>
           <Table
             variant="embedded"
             items={STAGES.map((s) => ({
@@ -329,11 +352,6 @@ export function RegionDeployShowPage() {
             </Header>
           }
         >
-          {dep.last_error && (
-            <Box color="text-status-error" padding={{ bottom: 's' }}>
-              <b>Last error:</b> {dep.last_error}
-            </Box>
-          )}
           <Table
             variant="embedded"
             items={events}
@@ -363,7 +381,8 @@ export function RegionDeployShowPage() {
             }
           />
         </Container>
-      </ColumnLayout>
+        </ColumnLayout>
+      </SpaceBetween>
     </ContentLayout>
   );
 }

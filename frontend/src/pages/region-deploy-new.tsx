@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import Alert from '@cloudscape-design/components/alert';
 import Box from '@cloudscape-design/components/box';
 import Button from '@cloudscape-design/components/button';
+import Checkbox from '@cloudscape-design/components/checkbox';
 import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
 import Form from '@cloudscape-design/components/form';
@@ -99,6 +100,12 @@ export function RegionDeployNewPage() {
   const [configJson, setConfigJson] = useState(DEFAULT_CONFIG);
   const [configErr, setConfigErr] = useState<string | null>(null);
 
+  // Step 4 — service-stack feature flags. These flip booleans in the
+  // config JSONB on submit; defaults match the doc's recommendations
+  // (SNAT default, NAT46 default, NAT64+DNS64 + DSR opt-in only).
+  const [dsrEnabled, setDsrEnabled] = useState(false);
+  const [nat64Enabled, setNat64Enabled] = useState(false);
+
   // Created deployment + preflight result for the review step.
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [preflightReady, setPreflightReady] = useState(false);
@@ -143,10 +150,24 @@ export function RegionDeployNewPage() {
     }
     setSubmitting(true);
     try {
+      // Layer the step-4 toggles on top of the JSON config. Doing the
+      // overlay here (rather than mutating configJson live) keeps the
+      // textarea representation stable as the operator clicks between
+      // steps — toggling NAT64 doesn't rewrite the JSON they're
+      // editing.
+      const parsedConfig = JSON.parse(configJson);
+      const mergedConfig = {
+        ...parsedConfig,
+        lb_mode: dsrEnabled ? 'dsr' : 'snat',
+        nat64_enabled: nat64Enabled,
+        // edge_mode stays 'nat46' (the default for v6-only sites).
+        // NAT64+DNS64 is an add-on, not a replacement for the NAT46
+        // edge LB — doc §2 Edge model note.
+      };
       const res = await http.post<CreateResponse>('/region-deployments', {
         site_id: siteOpt!.value,
         name: name.trim(),
-        config: JSON.parse(configJson),
+        config: mergedConfig,
         nodes: nodes.map((n) => ({
           hostname: n.hostname,
           mac: n.mac,
@@ -374,12 +395,69 @@ export function RegionDeployNewPage() {
           {
             title: 'Services',
             content: (
-              <Container header={<Header variant="h2">Site services</Header>}>
-                <Alert type="info" header="Default selection: all four services">
-                  Auth DNS, recursive DNS, DHCP, and the site collector
-                  ship in every region deploy. Per-service version pinning +
-                  replicas land in a later iteration of this step.
-                </Alert>
+              <Container
+                header={
+                  <Header
+                    variant="h2"
+                    description="Advanced opt-ins. Defaults match the documented production stance."
+                  >
+                    Site services & advanced opt-ins
+                  </Header>
+                }
+              >
+                <SpaceBetween size="m">
+                  <Alert type="info" header="Default selection: all four services">
+                    Auth DNS, recursive DNS, DHCP, and the site collector
+                    ship in every region deploy. Per-service version
+                    pinning + replicas land in a later iteration of this
+                    step.
+                  </Alert>
+
+                  <FormField
+                    label="LB mode: DSR (Direct Server Return)"
+                    description={
+                      <>
+                        Default <b>off</b> (SNAT). DSR preserves the
+                        client IP and lowers latency, but requires
+                        symmetric routing across the site fabric — no
+                        strict uRPF or stateful firewalls between
+                        clients and the cluster LB IPs. Enable per-site
+                        only after confirming the upstream routers and
+                        any in-path middleboxes won't drop asymmetric
+                        replies.
+                      </>
+                    }
+                  >
+                    <Checkbox
+                      checked={dsrEnabled}
+                      onChange={({ detail }) => setDsrEnabled(detail.checked)}
+                    >
+                      Enable DSR
+                    </Checkbox>
+                  </FormField>
+
+                  <FormField
+                    label="Edge: NAT64 + DNS64"
+                    description={
+                      <>
+                        Default <b>off</b>. NAT46 at the edge LB covers
+                        every north-south case for typical workloads
+                        (auth DNS, recursive DNS, DHCP, collector). Turn
+                        this on only when v6-only pods at this site
+                        must reach IPv4-only external endpoints —
+                        deploys a Jool/tayga gateway + DNS64 zone in
+                        Hickory.
+                      </>
+                    }
+                  >
+                    <Checkbox
+                      checked={nat64Enabled}
+                      onChange={({ detail }) => setNat64Enabled(detail.checked)}
+                    >
+                      Enable NAT64 + DNS64
+                    </Checkbox>
+                  </FormField>
+                </SpaceBetween>
               </Container>
             ),
           },
