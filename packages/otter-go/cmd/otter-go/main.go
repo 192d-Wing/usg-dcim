@@ -68,8 +68,8 @@ func main() {
 	ch := &cables.Handler{Q: q, Audit: q}
 	ih := &ipam.Handler{Q: q, Audit: q}
 	ph := &power.Handler{Q: q}
-	bh := &bgp.Handler{Q: q}
-	dh := &dns.Handler{Q: q}
+	bh := &bgp.Handler{Q: q, Audit: q}
+	dh := &dns.Handler{Q: q, Audit: q}
 	auh := &audit.Handler{Q: q}
 	alh := &alerts.Handler{Q: q}
 	nh := &notifications.Handler{Q: q}

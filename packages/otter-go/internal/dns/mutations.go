@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -96,6 +97,7 @@ func (h *Handler) createZone(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "zone not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_zone.create", TargetType: "dns_zone", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -159,6 +161,7 @@ func (h *Handler) updateZone(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "zone not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_zone.update", TargetType: "dns_zone", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -171,6 +174,7 @@ func (h *Handler) deleteZone(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "zone not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_zone.delete", TargetType: "dns_zone", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -203,6 +207,7 @@ func (h *Handler) createRecord(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "record not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_record.create", TargetType: "dns_record", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -271,6 +276,7 @@ func (h *Handler) updateRecord(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "record not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_record.update", TargetType: "dns_record", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -283,6 +289,7 @@ func (h *Handler) deleteRecord(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "record not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_record.delete", TargetType: "dns_record", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -319,6 +326,7 @@ func (h *Handler) createServer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "server not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_server.create", TargetType: "dns_server", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -369,6 +377,7 @@ func (h *Handler) updateServer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "server not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_server.update", TargetType: "dns_server", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -381,6 +390,7 @@ func (h *Handler) deleteServer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "server not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_server.delete", TargetType: "dns_server", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -410,6 +420,7 @@ func (h *Handler) createAnycastGroup(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "anycast group not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "anycast_group.create", TargetType: "anycast_group", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -466,6 +477,7 @@ func (h *Handler) updateAnycastGroup(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "anycast group not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "anycast_group.update", TargetType: "anycast_group", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -478,6 +490,7 @@ func (h *Handler) deleteAnycastGroup(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "anycast group not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "anycast_group.delete", TargetType: "anycast_group", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -509,6 +522,7 @@ func (h *Handler) createForwarder(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "forwarder not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_forwarder.create", TargetType: "dns_forwarder", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -559,6 +573,7 @@ func (h *Handler) updateForwarder(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "forwarder not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_forwarder.update", TargetType: "dns_forwarder", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -571,6 +586,7 @@ func (h *Handler) deleteForwarder(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "forwarder not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_forwarder.delete", TargetType: "dns_forwarder", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -600,6 +616,7 @@ func (h *Handler) createCatalogZone(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "catalog zone not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_catalog_zone.create", TargetType: "dns_catalog_zone", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -625,6 +642,7 @@ func (h *Handler) updateCatalogZone(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "catalog zone not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_catalog_zone.update", TargetType: "dns_catalog_zone", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -637,6 +655,7 @@ func (h *Handler) deleteCatalogZone(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "catalog zone not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_catalog_zone.delete", TargetType: "dns_catalog_zone", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -672,6 +691,7 @@ func (h *Handler) createBlocklist(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "blocklist not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist.create", TargetType: "dns_blocklist", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -737,6 +757,7 @@ func (h *Handler) updateBlocklist(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "blocklist not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist.update", TargetType: "dns_blocklist", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -749,6 +770,7 @@ func (h *Handler) deleteBlocklist(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "blocklist not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist.delete", TargetType: "dns_blocklist", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -776,6 +798,7 @@ func (h *Handler) createBlocklistEntry(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist_entry.create", TargetType: "dns_blocklist_entry", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -788,6 +811,7 @@ func (h *Handler) deleteBlocklistEntry(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist_entry.delete", TargetType: "dns_blocklist_entry", TargetID: entryID.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -823,6 +847,7 @@ func (h *Handler) createView(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "view not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_view.create", TargetType: "dns_view", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -873,6 +898,7 @@ func (h *Handler) updateView(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "view not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_view.update", TargetType: "dns_view", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -885,6 +911,7 @@ func (h *Handler) deleteView(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "view not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_view.delete", TargetType: "dns_view", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -933,6 +960,7 @@ func (h *Handler) createHealthCheck(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "health check not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_health_check.create", TargetType: "dns_health_check", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -989,6 +1017,7 @@ func (h *Handler) updateHealthCheck(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "health check not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_health_check.update", TargetType: "dns_health_check", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -1001,6 +1030,7 @@ func (h *Handler) deleteHealthCheck(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "health check not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_health_check.delete", TargetType: "dns_health_check", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1039,6 +1069,7 @@ func (h *Handler) createBgpPeer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "bgp peer not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "bgp_peer.create", TargetType: "bgp_peer", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -1099,6 +1130,7 @@ func (h *Handler) updateBgpPeer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "bgp peer not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "bgp_peer.update", TargetType: "bgp_peer", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -1111,6 +1143,7 @@ func (h *Handler) deleteBgpPeer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "bgp peer not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "bgp_peer.delete", TargetType: "bgp_peer", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1135,6 +1168,7 @@ func (h *Handler) createAnycastBinding(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "binding not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "anycast_binding.create", TargetType: "anycast_binding", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -1147,5 +1181,6 @@ func (h *Handler) deleteAnycastBinding(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "binding not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "anycast_binding.delete", TargetType: "anycast_binding", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }

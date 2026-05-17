@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
@@ -59,7 +60,8 @@ type Querier interface {
 }
 
 type Handler struct {
-	Q Querier
+	Q     Querier
+	Audit audit.Recorder
 }
 
 func (h *Handler) Mount(r chi.Router) {

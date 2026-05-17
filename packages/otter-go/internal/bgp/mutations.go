@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -60,6 +61,7 @@ func (h *Handler) createAsn(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "asn not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "asn.create", TargetType: "asn", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -113,6 +115,7 @@ func (h *Handler) updateAsn(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "asn not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "asn.update", TargetType: "asn", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -125,6 +128,7 @@ func (h *Handler) deleteAsn(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "asn not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "asn.delete", TargetType: "asn", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -149,6 +153,7 @@ func (h *Handler) createPrefixList(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "prefix list not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "prefix_list.create", TargetType: "prefix_list", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -195,6 +200,7 @@ func (h *Handler) updatePrefixList(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "prefix list not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "prefix_list.update", TargetType: "prefix_list", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -207,6 +213,7 @@ func (h *Handler) deletePrefixList(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "prefix list not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "prefix_list.delete", TargetType: "prefix_list", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -237,6 +244,7 @@ func (h *Handler) createPrefixListEntry(w http.ResponseWriter, r *http.Request) 
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "prefix_list_entry.create", TargetType: "prefix_list_entry", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -300,6 +308,7 @@ func (h *Handler) updatePrefixListEntry(w http.ResponseWriter, r *http.Request) 
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "prefix_list_entry.update", TargetType: "prefix_list_entry", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -312,6 +321,7 @@ func (h *Handler) deletePrefixListEntry(w http.ResponseWriter, r *http.Request) 
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "prefix_list_entry.delete", TargetType: "prefix_list_entry", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -339,6 +349,7 @@ func (h *Handler) createCommunityList(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "community list not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "community_list.create", TargetType: "community_list", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -385,6 +396,7 @@ func (h *Handler) updateCommunityList(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "community list not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "community_list.update", TargetType: "community_list", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -397,6 +409,7 @@ func (h *Handler) deleteCommunityList(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "community list not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "community_list.delete", TargetType: "community_list", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -425,6 +438,7 @@ func (h *Handler) createCommunityListEntry(w http.ResponseWriter, r *http.Reques
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "community_list_entry.create", TargetType: "community_list_entry", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -475,6 +489,7 @@ func (h *Handler) updateCommunityListEntry(w http.ResponseWriter, r *http.Reques
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "community_list_entry.update", TargetType: "community_list_entry", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -487,6 +502,7 @@ func (h *Handler) deleteCommunityListEntry(w http.ResponseWriter, r *http.Reques
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "community_list_entry.delete", TargetType: "community_list_entry", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -510,6 +526,7 @@ func (h *Handler) createRouteMap(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "route map not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "route_map.create", TargetType: "route_map", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -552,6 +569,7 @@ func (h *Handler) updateRouteMap(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "route map not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "route_map.update", TargetType: "route_map", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -564,6 +582,7 @@ func (h *Handler) deleteRouteMap(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "route map not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "route_map.delete", TargetType: "route_map", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -600,6 +619,7 @@ func (h *Handler) createRouteMapEntry(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "route_map_entry.create", TargetType: "route_map_entry", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -688,6 +708,7 @@ func (h *Handler) updateRouteMapEntry(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "route_map_entry.update", TargetType: "route_map_entry", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -700,5 +721,6 @@ func (h *Handler) deleteRouteMapEntry(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "entry not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "route_map_entry.delete", TargetType: "route_map_entry", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
