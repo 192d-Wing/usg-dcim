@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -73,6 +74,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "organization not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "organization.create", TargetType: "organization", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -199,6 +201,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "organization not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "organization.update", TargetType: "organization", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -225,5 +228,6 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "organization not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "organization.delete", TargetType: "organization", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }

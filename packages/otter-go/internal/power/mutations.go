@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -54,6 +55,10 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "power_connection.create", TargetType: "power_connection", TargetID: out.ID.String(),
+		Metadata: map[string]any{"outlet_id": outletID.String(), "asset_id": req.AssetID.String()},
+	})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -68,5 +73,8 @@ func (h *Handler) disconnect(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "power_connection.delete", TargetType: "outlet", TargetID: outletID.String(),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -70,6 +71,7 @@ func (h *Handler) createChannel(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "notification_channel.create", TargetType: "notification_channel", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -100,6 +102,7 @@ func (h *Handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "notification_channel.update", TargetType: "notification_channel", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -112,5 +115,6 @@ func (h *Handler) deleteChannel(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "notification_channel.delete", TargetType: "notification_channel", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }

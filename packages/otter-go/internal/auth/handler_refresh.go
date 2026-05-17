@@ -111,6 +111,9 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "jwt mint failed")
 		return
 	}
+	uid := userID
+	h.auditAuth(r.Context(), "auth.refresh", userID.String(), &uid, "user:"+userID.String(), true,
+		map[string]any{"mfa": mfa})
 	httpx.JSON(w, http.StatusOK, tokenOut{
 		AccessToken: tok, ExpiresIn: h.Mint.TTLSecond, IDToken: newTokens.IDToken,
 	})

@@ -14,9 +14,10 @@ import (
 // /auth/tokens CRUD endpoints ship in PR 37.
 type Handler struct {
 	Q      Querier
-	OIDC   *OIDC        // nil when DCIM_OIDC_ISSUER unset; the OIDC handlers 400 in that case
-	Mint   MintConfig   // session-JWT signing config; matches the verifier's PrimarySecret
-	Fernet FernetConfig // refresh-token at-rest encryption; empty Keys → plaintext fallback
+	OIDC   *OIDC         // nil when DCIM_OIDC_ISSUER unset; the OIDC handlers 400 in that case
+	Mint   MintConfig    // session-JWT signing config; matches the verifier's PrimarySecret
+	Fernet FernetConfig  // refresh-token at-rest encryption; empty Keys → plaintext fallback
+	Audit  AuditRecorder // nil-safe; when set, login/logout/token-CRUD/refresh write audit rows
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -113,6 +114,9 @@ func (h *Handler) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "jwt mint failed")
 		return
 	}
+	uid := user.ID
+	h.auditAuth(r.Context(), "auth.oidc_login", user.ID.String(), &uid, "user:"+user.ID.String(), true,
+		map[string]any{"method": "oidc", "sub": res.Subject, "email": res.Email, "mfa": res.MFA})
 	httpx.JSON(w, http.StatusOK, tokenOut{
 		AccessToken: tok,
 		ExpiresIn:   h.Mint.TTLSecond,

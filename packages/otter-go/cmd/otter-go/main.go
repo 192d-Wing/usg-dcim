@@ -67,14 +67,14 @@ func main() {
 	ah := &assets.Handler{Q: q, Audit: q}
 	ch := &cables.Handler{Q: q, Audit: q}
 	ih := &ipam.Handler{Q: q, Audit: q}
-	ph := &power.Handler{Q: q}
+	ph := &power.Handler{Q: q, Audit: q}
 	bh := &bgp.Handler{Q: q, Audit: q}
 	dh := &dns.Handler{Q: q, Audit: q}
 	auh := &audit.Handler{Q: q}
-	alh := &alerts.Handler{Q: q}
-	nh := &notifications.Handler{Q: q}
-	coh := &collectors.Handler{Q: q}
-	oh := &organization.Handler{Q: q}
+	alh := &alerts.Handler{Q: q, Audit: q}
+	nh := &notifications.Handler{Q: q, Audit: q}
+	coh := &collectors.Handler{Q: q, Audit: q}
+	oh := &organization.Handler{Q: q, Audit: q}
 	sth := &stencils.Handler{}
 	th := &telemetry.Handler{Q: q}
 
@@ -140,6 +140,7 @@ func main() {
 		OIDC:   oidcProvider,
 		Mint:   auth.MintConfig{Secret: []byte(jwtSecret), TTLSecond: jwtTTL},
 		Fernet: fernetCfg,
+		Audit:  q,
 	}
 	var authMW func(http.Handler) http.Handler
 	if jwtSecret != "" {

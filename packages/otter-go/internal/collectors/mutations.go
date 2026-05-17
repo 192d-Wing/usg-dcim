@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -58,6 +59,7 @@ func (h *Handler) patchConfig(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "collector.config_overrides.update", TargetType: "collector", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -82,6 +84,7 @@ func (h *Handler) patchEnabled(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "collector.enabled.update", TargetType: "collector", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -98,5 +101,6 @@ func (h *Handler) decommission(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "collector.decommission", TargetType: "collector", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }

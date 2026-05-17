@@ -49,6 +49,9 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "jwt mint failed")
 		return
 	}
+	uid := user.ID
+	h.auditAuth(r.Context(), "auth.login", user.ID.String(), &uid, "user:"+user.ID.String(), true,
+		map[string]any{"method": "local", "email": user.Email})
 	httpx.JSON(w, http.StatusOK, tokenOut{AccessToken: tok, ExpiresIn: h.Mint.TTLSecond})
 }
 
@@ -95,6 +98,12 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	_ = h.Q.InsertRevokedJti(r.Context(), dbq.InsertRevokedJtiParams{
 		Jti: jti, UserID: userPtr, Reason: &reason, ExpiresAt: expiresAt,
 	})
+	var subLabel string
+	if userPtr != nil {
+		subLabel = "user:" + userPtr.String()
+	}
+	h.auditAuth(r.Context(), "auth.logout", jti, userPtr, subLabel, true,
+		map[string]any{"jti": jti})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -212,6 +221,9 @@ func (h *Handler) issueToken(w http.ResponseWriter, r *http.Request) {
 	}
 	out := marshalApiToken(tok)
 	out.Plaintext = raw // only returned on first creation
+	sub := p.Subject
+	h.auditAuth(r.Context(), "api_token.create", tok.ID.String(), &sub, p.Label, true,
+		map[string]any{"name": req.Name, "permission_codes": req.PermissionCodes})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -242,5 +254,7 @@ func (h *Handler) revokeToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "revoke failed")
 		return
 	}
+	sub := p.Subject
+	h.auditAuth(r.Context(), "api_token.revoke", id.String(), &sub, p.Label, true, nil)
 	httpx.JSON(w, http.StatusOK, map[string]bool{"revoked": true})
 }

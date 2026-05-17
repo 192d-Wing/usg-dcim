@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
@@ -27,7 +28,10 @@ type Querier interface {
 	DecommissionCollector(ctx context.Context, id uuid.UUID) (dbq.Collector, error)
 }
 
-type Handler struct{ Q Querier }
+type Handler struct {
+	Q     Querier
+	Audit audit.Recorder
+}
 
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/collectors", func(r chi.Router) {

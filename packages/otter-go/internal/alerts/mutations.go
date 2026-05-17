@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
@@ -60,6 +61,7 @@ func (h *Handler) ack(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "alert not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "alert.ack", TargetType: "alert", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -105,6 +107,7 @@ func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "rule not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "alert_rule.create", TargetType: "alert_rule", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -180,6 +183,7 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "rule not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "alert_rule.update", TargetType: "alert_rule", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -192,6 +196,7 @@ func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "rule not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "alert_rule.delete", TargetType: "alert_rule", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -228,6 +233,7 @@ func (h *Handler) createMW(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "maintenance window not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "maintenance_window.create", TargetType: "maintenance_window", TargetID: out.ID.String()})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -291,6 +297,7 @@ func (h *Handler) updateMW(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "maintenance window not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "maintenance_window.update", TargetType: "maintenance_window", TargetID: id.String()})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -303,5 +310,6 @@ func (h *Handler) deleteMW(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "maintenance window not found")
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "maintenance_window.delete", TargetType: "maintenance_window", TargetID: id.String()})
 	w.WriteHeader(http.StatusNoContent)
 }
