@@ -12,6 +12,7 @@ import (
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -31,6 +32,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.Code == "" || req.SiteID == uuid.Nil || req.RowID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "site_id, row_id, name, code required")
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, req.SiteID, "inventory:racks:create"); serr != nil {
+		httpx.Error(w, http.StatusForbidden, serr.Error())
 		return
 	}
 	u := int32(42)
@@ -107,20 +113,26 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "u_height must be between 1 and 60")
 		return
 	}
+	// PR 54 ABAC: look up the rack's site and enforce before any work.
+	currentRack, err := h.Q.GetRack(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "rack not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, currentRack.SiteID, "inventory:racks:update"); serr != nil {
+		httpx.Error(w, http.StatusForbidden, serr.Error())
+		return
+	}
 	// Shrink check: if u_height is decreasing, refuse if any placed
 	// asset would fall outside the new envelope.
 	if req.UHeight != nil {
-		current, err := h.Q.GetRack(r.Context(), id)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				httpx.Error(w, http.StatusNotFound, "rack not found")
-				return
-			}
-			status, msg := httpx.Mapped(err)
-			httpx.Error(w, status, msg)
-			return
-		}
-		if *req.UHeight < current.UHeight {
+		if *req.UHeight < currentRack.UHeight {
 			placed, err := h.Q.GetRackAssetsForShrinkCheck(r.Context(), id)
 			if err == nil {
 				var offenders []string

@@ -6,6 +6,7 @@
 package ipam
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,8 +17,34 @@ import (
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
+
+// enforceFabric resolves the caller's Principal and refuses with 403 if
+// EnforceFabricScope rejects the target fabric. Returns false when a
+// response has been written. PR 54 wires this onto every IPAM mutation
+// that owns or transitively belongs to a fabric.
+func (h *Handler) enforceFabric(w http.ResponseWriter, r *http.Request, fabricID uuid.UUID, capCode string) bool {
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceFabricScope(p, fabricID, capCode); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
+}
+
+// lookupFabricID is a small wrapper that converts the pgx.ErrNoRows
+// from a parent-fabric lookup into a 404 with the supplied notFoundMsg.
+// Callers should bail (return) when ok=false.
+func (h *Handler) lookupFabricID(w http.ResponseWriter, ctx context.Context, fn func(context.Context) (uuid.UUID, error), notFoundMsg string) (uuid.UUID, bool) {
+	fid, err := fn(ctx)
+	if err != nil {
+		mapErr(w, err, notFoundMsg)
+		return uuid.Nil, false
+	}
+	return fid, true
+}
 
 // auditMut is a tiny wrapper so the 32 IPAM mutation handlers each
 // stay one line of audit instead of four. Use auditMutWithMeta when
@@ -156,6 +183,9 @@ func (h *Handler) updateFabric(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.enforceFabric(w, r, id, "ipam:fabrics:update") {
+		return
+	}
 	var req fabricUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -190,6 +220,9 @@ func (h *Handler) deleteFabric(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.enforceFabric(w, r, id, "ipam:fabrics:delete") {
+		return
+	}
 	n, err := h.Q.CountVrfsInFabric(r.Context(), id)
 	if err != nil {
 		mapErr(w, err, "fabric not found")
@@ -221,6 +254,9 @@ func (h *Handler) createVrf(w http.ResponseWriter, r *http.Request) {
 	var req vrfCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" || req.FabricID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "fabric_id and name required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "ipam:vrfs:create") {
 		return
 	}
 	out, err := h.Q.CreateVrf(r.Context(), dbq.CreateVrfParams{
@@ -271,6 +307,15 @@ func (h *Handler) updateVrf(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVrfFabricID(ctx, id)
+	}, "vrf not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vrfs:update") {
+		return
+	}
 	var req vrfUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -293,6 +338,15 @@ func (h *Handler) updateVrf(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteVrf(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVrfFabricID(ctx, id)
+	}, "vrf not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vrfs:delete") {
 		return
 	}
 	current, err := h.Q.GetVrf(r.Context(), id)
@@ -429,6 +483,9 @@ func (h *Handler) createSupernet(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "fabric_id, vrf_id, prefix required")
 		return
 	}
+	if !h.enforceFabric(w, r, req.FabricID, "ipam:supernets:create") {
+		return
+	}
 	prefix, err := parseCIDR(req.Prefix)
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
@@ -506,6 +563,14 @@ func (h *Handler) updateSupernet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	parent, err := h.Q.GetSupernetVrfAndFabric(r.Context(), id)
+	if err != nil {
+		mapErr(w, err, "supernet not found")
+		return
+	}
+	if !h.enforceFabric(w, r, parent.FabricID, "ipam:supernets:update") {
+		return
+	}
 	var req supernetUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -530,6 +595,14 @@ func (h *Handler) updateSupernet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteSupernet(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	parent, err := h.Q.GetSupernetVrfAndFabric(r.Context(), id)
+	if err != nil {
+		mapErr(w, err, "supernet not found")
+		return
+	}
+	if !h.enforceFabric(w, r, parent.FabricID, "ipam:supernets:delete") {
 		return
 	}
 	n, err := h.Q.CountSubnetsInSupernet(r.Context(), id)
@@ -854,6 +927,9 @@ func (h *Handler) createOverlay(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "fabric_id and name required")
 		return
 	}
+	if !h.enforceFabric(w, r, req.FabricID, "ipam:overlays:create") {
+		return
+	}
 	if req.Kind == "" {
 		req.Kind = "vxlan"
 	}
@@ -919,6 +995,15 @@ func (h *Handler) updateOverlay(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetOverlayFabricID(ctx, id)
+	}, "overlay not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:overlays:update") {
+		return
+	}
 	var req overlayUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -941,6 +1026,15 @@ func (h *Handler) updateOverlay(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteOverlay(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetOverlayFabricID(ctx, id)
+	}, "overlay not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:overlays:delete") {
 		return
 	}
 	n, err := h.Q.CountVnisInOverlay(r.Context(), id)
@@ -1240,6 +1334,9 @@ func (h *Handler) createDhcpServer(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "name, fabric_id, kea_url required")
 		return
 	}
+	if !h.enforceFabric(w, r, req.FabricID, "ipam:dhcp-servers:create") {
+		return
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -1296,6 +1393,15 @@ func (h *Handler) updateDhcpServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDhcpServerFabricID(ctx, id)
+	}, "dhcp server not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:dhcp-servers:update") {
+		return
+	}
 	var req dhcpUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -1318,6 +1424,15 @@ func (h *Handler) updateDhcpServer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteDhcpServer(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDhcpServerFabricID(ctx, id)
+	}, "dhcp server not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:dhcp-servers:delete") {
 		return
 	}
 	if err := h.Q.DeleteDhcpServer(r.Context(), id); err != nil {

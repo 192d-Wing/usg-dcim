@@ -74,3 +74,33 @@ func (q *Queries) ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID)
 	}
 	return items, rows.Err()
 }
+
+const getVrfFabricID = `-- name: GetVrfFabricID :one
+SELECT fabric_id FROM vrfs WHERE id = $1`
+
+func (q *Queries) GetVrfFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getVrfFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getOverlayFabricID = `-- name: GetOverlayFabricID :one
+SELECT fabric_id FROM overlays WHERE id = $1`
+
+func (q *Queries) GetOverlayFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getOverlayFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDhcpServerFabricID = `-- name: GetDhcpServerFabricID :one
+SELECT fabric_id FROM dhcp_servers WHERE id = $1`
+
+func (q *Queries) GetDhcpServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDhcpServerFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}

@@ -11,6 +11,7 @@ import (
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -133,6 +134,11 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, id, "inventory:sites:update"); serr != nil {
+		httpx.Error(w, http.StatusForbidden, serr.Error())
 		return
 	}
 	var req updateReq

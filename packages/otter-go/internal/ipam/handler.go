@@ -102,6 +102,13 @@ type Querier interface {
 	CreateDhcpServer(ctx context.Context, arg dbq.CreateDhcpServerParams) (dbq.DhcpServer, error)
 	UpdateDhcpServer(ctx context.Context, arg dbq.UpdateDhcpServerParams) (dbq.DhcpServer, error)
 	DeleteDhcpServer(ctx context.Context, id uuid.UUID) error
+
+	// ABAC parent-fabric lookups (PR 54). Used by mutation handlers to
+	// resolve {id} → fabric_id before EnforceFabricScope. 2+ hop lookups
+	// (subnet/address/vni/vtep) ship in PR 55.
+	GetVrfFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetOverlayFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDhcpServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 }
 
 type Handler struct {

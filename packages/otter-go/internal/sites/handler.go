@@ -28,6 +28,11 @@ type Querier interface {
 	GetSite(ctx context.Context, id uuid.UUID) (dbq.Site, error)
 	CreateSite(ctx context.Context, arg dbq.CreateSiteParams) (dbq.Site, error)
 	UpdateSite(ctx context.Context, arg dbq.UpdateSiteParams) (dbq.Site, error)
+
+	// PR 54: ABAC SiteMatches expansion. Region- and site-group-scoped
+	// principals need these to resolve whether a target site is reachable.
+	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type Handler struct {

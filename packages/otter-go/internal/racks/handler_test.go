@@ -42,6 +42,12 @@ func (f *fakeQ) UpdateRack(_ context.Context, a dbq.UpdateRackParams) (dbq.Rack,
 func (f *fakeQ) GetRackAssetsForShrinkCheck(_ context.Context, _ uuid.UUID) ([]dbq.RackPlacedAsset, error) {
 	return nil, nil
 }
+func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

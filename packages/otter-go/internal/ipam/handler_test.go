@@ -171,6 +171,19 @@ func (f *fakeQ) UpdateDhcpServer(_ context.Context, a dbq.UpdateDhcpServerParams
 }
 func (f *fakeQ) DeleteDhcpServer(_ context.Context, _ uuid.UUID) error { return nil }
 
+// PR 54 ABAC parent-fabric lookups. Tests that don't care about scope
+// can let these return uuid.Nil (treated as "no fabric to enforce" by
+// EnforceFabricScope, so global behavior).
+func (f *fakeQ) GetVrfFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetOverlayFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDhcpServerFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()

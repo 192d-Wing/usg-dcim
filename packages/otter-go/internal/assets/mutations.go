@@ -11,8 +11,21 @@ import (
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
+
+// enforceSite is a tiny wrapper so the asset mutation handlers can stay
+// terse. Returns false (after writing 403) when the caller's scope
+// rejects siteID for capCode.
+func (h *Handler) enforceSite(w http.ResponseWriter, r *http.Request, siteID uuid.UUID, capCode string) bool {
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceSiteScope(r.Context(), h.Q, p, siteID, capCode); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
+}
 
 // NOTE: PR 41 ports the basic CRUD + decommission. The following are
 // intentionally deferred and will arrive in a focused follow-up PR:
@@ -53,6 +66,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.Kind == "" || req.SiteID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "site_id, name, kind required")
+		return
+	}
+	if !h.enforceSite(w, r, req.SiteID, "inventory:assets:create") {
 		return
 	}
 	if req.Face == "" {
@@ -197,6 +213,20 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
 		return
 	}
+	// PR 54 ABAC: resolve current site, enforce before write.
+	current, err := h.Q.GetAsset(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "asset not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:update") {
+		return
+	}
 	out, err := h.Q.UpdateAsset(r.Context(), dbq.UpdateAssetParams{
 		ID: id, Name: req.Name,
 		HostnameSet: req.hostnameSet, Hostname: req.Hostname,
@@ -272,13 +302,17 @@ func (h *Handler) decommissionPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 404 if asset doesn't exist — matches Python's preflight check.
-	if _, err := h.Q.GetAsset(r.Context(), id); err != nil {
+	current, err := h.Q.GetAsset(r.Context(), id)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "asset not found")
 			return
 		}
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
+		return
+	}
+	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:read") {
 		return
 	}
 	imp, err := h.computeImpact(r, id)
@@ -304,6 +338,9 @@ func (h *Handler) decommission(w http.ResponseWriter, r *http.Request) {
 		}
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
+		return
+	}
+	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:update") {
 		return
 	}
 	if current.LifecycleState == "decommissioned" {

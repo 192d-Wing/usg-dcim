@@ -24,3 +24,17 @@ SELECT region_id FROM sites WHERE id = $1;
 -- matches a site if any of its memberships overlap the principal's
 -- site_group_ids set.
 SELECT group_id FROM site_group_memberships WHERE site_id = $1;
+
+-- Parent-fabric lookups used by PR 54 mutation handlers to enforce
+-- EnforceFabricScope before update/delete of resources that don't carry
+-- fabric_id in the request body. One per IPAM resource family. Subnets,
+-- addresses, VNIs, VTEPs (2+ hop transitive lookups) ship in PR 55.
+
+-- name: GetVrfFabricID :one
+SELECT fabric_id FROM vrfs WHERE id = $1;
+
+-- name: GetOverlayFabricID :one
+SELECT fabric_id FROM overlays WHERE id = $1;
+
+-- name: GetDhcpServerFabricID :one
+SELECT fabric_id FROM dhcp_servers WHERE id = $1;

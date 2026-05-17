@@ -35,6 +35,10 @@ type Querier interface {
 	// Placement invariants (PR 51)
 	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
 	ListRackAssetsForPlacement(ctx context.Context, arg dbq.ListRackAssetsForPlacementParams) ([]dbq.RackPlacementRow, error)
+
+	// PR 54: ABAC SiteMatches expansion.
+	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type Handler struct {

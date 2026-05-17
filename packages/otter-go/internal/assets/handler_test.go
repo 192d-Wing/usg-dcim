@@ -50,6 +50,12 @@ func (f *fakeQ) GetRack(_ context.Context, id uuid.UUID) (dbq.Rack, error) {
 func (f *fakeQ) ListRackAssetsForPlacement(_ context.Context, _ dbq.ListRackAssetsForPlacementParams) ([]dbq.RackPlacementRow, error) {
 	return nil, nil
 }
+func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
