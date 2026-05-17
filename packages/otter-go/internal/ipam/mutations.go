@@ -69,6 +69,10 @@ func (h *Handler) createFabric(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "name and slug required")
 		return
 	}
+	if err := validateSlug(req.Slug); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.RecursiveEngine == "" {
 		req.RecursiveEngine = "coredns"
 	}
@@ -156,6 +160,12 @@ func (h *Handler) updateFabric(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
 		return
+	}
+	if req.Slug != nil {
+		if err := validateSlug(*req.Slug); err != nil {
+			httpx.Error(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	out, err := h.Q.UpdateFabric(r.Context(), dbq.UpdateFabricParams{
 		ID: id, Name: req.Name, Slug: req.Slug,
@@ -419,6 +429,24 @@ func (h *Handler) createSupernet(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "fabric_id, vrf_id, prefix required")
 		return
 	}
+	prefix, err := parseCIDR(req.Prefix)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var parentPurpose *string
+	if req.ParentSupernetID != nil {
+		parent, perr := h.assertSupernetInsideParent(r.Context(), *req.ParentSupernetID, prefix, req.FabricID, req.VrfID)
+		if perr != nil {
+			httpx.Error(w, http.StatusBadRequest, perr.Error())
+			return
+		}
+		parentPurpose = parent.Purpose
+	}
+	if perr := validatePurposeCompatible(parentPurpose, req.Purpose); perr != nil {
+		httpx.Error(w, http.StatusBadRequest, perr.Error())
+		return
+	}
 	out, err := h.Q.CreateSupernet(r.Context(), dbq.CreateSupernetParams{
 		FabricID: req.FabricID, VrfID: req.VrfID,
 		ParentSupernetID: req.ParentSupernetID, SiteID: req.SiteID,
@@ -540,6 +568,20 @@ func (h *Handler) createSubnet(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.SupernetID == uuid.Nil || req.Prefix == "" {
 		httpx.Error(w, http.StatusBadRequest, "supernet_id and prefix required")
+		return
+	}
+	prefix, err := parseCIDR(req.Prefix)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	supernet, err := h.assertSubnetInsideSupernet(r.Context(), req.SupernetID, prefix)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if perr := validatePurposeCompatible(supernet.Purpose, req.Purpose); perr != nil {
+		httpx.Error(w, http.StatusBadRequest, perr.Error())
 		return
 	}
 	parent, err := h.Q.GetSupernetVrfAndFabric(r.Context(), req.SupernetID)
@@ -686,6 +728,15 @@ func (h *Handler) createAddress(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.SubnetID == uuid.Nil || req.Address == "" {
 		httpx.Error(w, http.StatusBadRequest, "subnet_id and address required")
+		return
+	}
+	addr, err := parseAddr(req.Address)
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, aerr := h.assertAddressInSubnet(r.Context(), req.SubnetID, addr); aerr != nil {
+		httpx.Error(w, http.StatusBadRequest, aerr.Error())
 		return
 	}
 	if req.Role == "" {
@@ -931,6 +982,14 @@ func (h *Handler) createVni(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Kind == "" {
 		req.Kind = "l2"
+	}
+	if err := validateVni(req.VNI); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateVniKind(req.Kind, req.VlanID, req.VrfID); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	out, err := h.Q.CreateVni(r.Context(), dbq.CreateVniParams{
 		OverlayID: req.OverlayID, VNI: req.VNI, Kind: req.Kind,
