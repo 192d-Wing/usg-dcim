@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -27,6 +28,15 @@ type Querier interface {
 	ListMaintenanceWindows(ctx context.Context, arg dbq.ListMaintenanceWindowsParams) ([]dbq.MaintenanceWindow, error)
 	CountMaintenanceWindows(ctx context.Context, arg dbq.CountMaintenanceWindowsParams) (int64, error)
 	GetMaintenanceWindow(ctx context.Context, id uuid.UUID) (dbq.MaintenanceWindow, error)
+
+	// Mutations (PR 45)
+	AckAlert(ctx context.Context, arg dbq.AckAlertParams) (dbq.Alert, error)
+	CreateAlertRule(ctx context.Context, arg dbq.CreateAlertRuleParams) (dbq.AlertRule, error)
+	UpdateAlertRule(ctx context.Context, arg dbq.UpdateAlertRuleParams) (dbq.AlertRule, error)
+	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
+	CreateMaintenanceWindow(ctx context.Context, arg dbq.CreateMaintenanceWindowParams) (dbq.MaintenanceWindow, error)
+	UpdateMaintenanceWindow(ctx context.Context, arg dbq.UpdateMaintenanceWindowParams) (dbq.MaintenanceWindow, error)
+	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -40,6 +50,15 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/alerts/rules/{id}", h.getRule)
 	r.Get("/alerts/maintenance-windows", h.listMaintenanceWindows)
 	r.Get("/alerts/maintenance-windows/{id}", h.getMaintenanceWindow)
+
+	// Mutations (PR 45)
+	r.With(auth.RequireCapability("alerts:alerts:update")).Post("/alerts/{id}/ack", h.ack)
+	r.With(auth.RequireCapability("alerts:rules:create")).Post("/alerts/rules", h.createRule)
+	r.With(auth.RequireCapability("alerts:rules:update")).Patch("/alerts/rules/{id}", h.updateRule)
+	r.With(auth.RequireCapability("alerts:rules:delete")).Delete("/alerts/rules/{id}", h.deleteRule)
+	r.With(auth.RequireCapability("alerts:maintenance-windows:create")).Post("/alerts/maintenance-windows", h.createMW)
+	r.With(auth.RequireCapability("alerts:maintenance-windows:update")).Patch("/alerts/maintenance-windows/{id}", h.updateMW)
+	r.With(auth.RequireCapability("alerts:maintenance-windows:delete")).Delete("/alerts/maintenance-windows/{id}", h.deleteMW)
 }
 
 type alertsPage struct {

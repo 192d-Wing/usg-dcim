@@ -11,13 +11,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/google/uuid"
+
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
 type Querier interface {
 	ListNotificationChannels(ctx context.Context, arg dbq.ListNotificationChannelsParams) ([]dbq.NotificationChannel, error)
 	CountNotificationChannels(ctx context.Context) (int64, error)
+
+	// Mutations (PR 45)
+	CreateNotificationChannel(ctx context.Context, arg dbq.CreateNotificationChannelParams) (dbq.NotificationChannel, error)
+	UpdateNotificationChannel(ctx context.Context, arg dbq.UpdateNotificationChannelParams) (dbq.NotificationChannel, error)
+	DeleteNotificationChannel(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -27,6 +35,9 @@ type Handler struct {
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/notifications", func(r chi.Router) {
 		r.Get("/channels", h.listChannels)
+		r.With(auth.RequireCapability("alerts:notifications:create")).Post("/channels", h.createChannel)
+		r.With(auth.RequireCapability("alerts:notifications:update")).Patch("/channels/{id}", h.updateChannel)
+		r.With(auth.RequireCapability("alerts:notifications:delete")).Delete("/channels/{id}", h.deleteChannel)
 	})
 }
 

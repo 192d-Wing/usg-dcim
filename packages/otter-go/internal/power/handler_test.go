@@ -34,6 +34,10 @@ func (f *fakeQ) ListOutletsByPdu(_ context.Context, _ uuid.UUID) ([]dbq.Outlet, 
 func (f *fakeQ) ListPowerConnectionsByOutletIDs(_ context.Context, _ []uuid.UUID) ([]dbq.PowerConnection, error) {
 	return f.conns, nil
 }
+func (f *fakeQ) CreatePowerConnection(_ context.Context, a dbq.CreatePowerConnectionParams) (dbq.PowerConnection, error) {
+	return dbq.PowerConnection{ID: uuid.New(), OutletID: a.OutletID, AssetID: a.AssetID, PsuIndex: a.PsuIndex}, nil
+}
+func (f *fakeQ) DeleteOutletConnection(_ context.Context, _ uuid.UUID) error { return nil }
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

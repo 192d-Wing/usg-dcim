@@ -51,6 +51,25 @@ func (f *fakeQ) GetMaintenanceWindow(_ context.Context, _ uuid.UUID) (dbq.Mainte
 	return dbq.MaintenanceWindow{}, pgx.ErrNoRows
 }
 
+// ---- Mutation stubs (PR 45) ----
+func (f *fakeQ) AckAlert(_ context.Context, a dbq.AckAlertParams) (dbq.Alert, error) {
+	return dbq.Alert{ID: a.ID, State: "acked", AckedBy: &a.AckedBy}, nil
+}
+func (f *fakeQ) CreateAlertRule(_ context.Context, a dbq.CreateAlertRuleParams) (dbq.AlertRule, error) {
+	return dbq.AlertRule{ID: uuid.New(), Name: a.Name, Metric: a.Metric, Operator: a.Operator, Threshold: a.Threshold, Severity: a.Severity}, nil
+}
+func (f *fakeQ) UpdateAlertRule(_ context.Context, a dbq.UpdateAlertRuleParams) (dbq.AlertRule, error) {
+	return dbq.AlertRule{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteAlertRule(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateMaintenanceWindow(_ context.Context, a dbq.CreateMaintenanceWindowParams) (dbq.MaintenanceWindow, error) {
+	return dbq.MaintenanceWindow{ID: uuid.New(), Name: a.Name, StartsAt: a.StartsAt, EndsAt: a.EndsAt}, nil
+}
+func (f *fakeQ) UpdateMaintenanceWindow(_ context.Context, a dbq.UpdateMaintenanceWindowParams) (dbq.MaintenanceWindow, error) {
+	return dbq.MaintenanceWindow{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteMaintenanceWindow(_ context.Context, _ uuid.UUID) error { return nil }
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 )
@@ -26,6 +27,13 @@ func (f *fakeQ) ListNotificationChannels(_ context.Context, a dbq.ListNotificati
 func (f *fakeQ) CountNotificationChannels(_ context.Context) (int64, error) {
 	return int64(len(f.channels)), nil
 }
+func (f *fakeQ) CreateNotificationChannel(_ context.Context, a dbq.CreateNotificationChannelParams) (dbq.NotificationChannel, error) {
+	return dbq.NotificationChannel{ID: uuid.New(), Name: a.Name, Kind: a.Kind, MinSeverity: a.MinSeverity, Enabled: a.Enabled}, nil
+}
+func (f *fakeQ) UpdateNotificationChannel(_ context.Context, a dbq.UpdateNotificationChannelParams) (dbq.NotificationChannel, error) {
+	return dbq.NotificationChannel{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteNotificationChannel(_ context.Context, _ uuid.UUID) error { return nil }
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

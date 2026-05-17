@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -21,6 +22,10 @@ type Querier interface {
 	GetPduAsset(ctx context.Context, id uuid.UUID) (dbq.AssetKindRow, error)
 	ListOutletsByPdu(ctx context.Context, pduID uuid.UUID) ([]dbq.Outlet, error)
 	ListPowerConnectionsByOutletIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.PowerConnection, error)
+
+	// Mutations (PR 45) — outlet connect/disconnect.
+	CreatePowerConnection(ctx context.Context, arg dbq.CreatePowerConnectionParams) (dbq.PowerConnection, error)
+	DeleteOutletConnection(ctx context.Context, outletID uuid.UUID) error
 }
 
 type Handler struct {
@@ -32,6 +37,8 @@ func (h *Handler) Mount(r chi.Router) {
 	// here so the URL is `/api/v1/power/pdus/{id}/outlets`.
 	r.Route("/power", func(r chi.Router) {
 		r.Get("/pdus/{pdu_id}/outlets", h.listOutlets)
+		r.With(auth.RequireCapability("inventory:power-connections:create")).Post("/outlets/{outlet_id}/connect", h.connect)
+		r.With(auth.RequireCapability("inventory:power-connections:delete")).Delete("/outlets/{outlet_id}/connect", h.disconnect)
 	})
 }
 
