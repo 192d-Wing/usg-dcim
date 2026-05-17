@@ -44,7 +44,12 @@ const EnvInsecureStub = "OTTER_GO_INSECURE_AUTH_STUB"
 type Principal struct {
 	Subject      uuid.UUID
 	Capabilities []string
-	MFA          bool
+	// Scopes maps capability code → Scope. Populated alongside
+	// Capabilities by the Verifying middleware from user_roles +
+	// role_scopes. nil = no scope info (treat caps as global).
+	// Handlers that enforce ABAC call auth.FindScope(p, code).
+	Scopes map[string]Scope
+	MFA    bool
 	// Label is the audit-trail-friendly identifier. Today it's
 	// "user:<uuid>"; once API tokens land it'll be "token:<id>".
 	Label string
@@ -55,6 +60,7 @@ type Principal struct {
 type Querier interface {
 	GetUserCapabilities(ctx context.Context, userID uuid.UUID) ([]string, error)
 	GetCapabilitiesForIdpRoles(ctx context.Context, idpRoles []string) ([]string, error)
+	GetUserScopedCapabilities(ctx context.Context, userID uuid.UUID) ([]dbq.ScopedCapabilityRow, error)
 	IsJtiRevoked(ctx context.Context, jti string) (bool, error)
 	GetUser(ctx context.Context, id uuid.UUID) (dbq.User, error)
 	GetUserByEmail(ctx context.Context, email string) (dbq.User, error)
@@ -125,9 +131,18 @@ func Verifying(log *slog.Logger, q Querier, cfg VerifierConfig) func(http.Handle
 				httpx.Error(w, http.StatusInternalServerError, "auth backend unavailable")
 				return
 			}
+			// Best-effort scope resolution. A failure here doesn't
+			// 500 the request — it leaves Scopes nil and ABAC paths
+			// fall back to global (matching pre-PR-53 behavior). The
+			// log line lets operators notice and investigate.
+			scopeRows, scopeErr := q.GetUserScopedCapabilities(r.Context(), claims.Subject)
+			if scopeErr != nil {
+				log.Warn("scope_resolve_failed", "err", scopeErr.Error())
+			}
 			p := Principal{
 				Subject:      claims.Subject,
 				Capabilities: caps,
+				Scopes:       resolveUserScopes(scopeRows),
 				MFA:          claims.MFA,
 				Label:        "user:" + claims.Subject.String(),
 			}
