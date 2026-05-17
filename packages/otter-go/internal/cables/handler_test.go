@@ -32,6 +32,12 @@ func (f *fakeQ) DeleteCable(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) GetAssetSiteID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return uuid.New(), nil
 }
+func (f *fakeQ) GetAsset(_ context.Context, id uuid.UUID) (dbq.Asset, error) {
+	return dbq.Asset{ID: id, SiteID: uuid.New(), Name: "stub"}, nil
+}
+func (f *fakeQ) FindCableForPort(_ context.Context, _ dbq.FindCableForPortParams) (dbq.FindCableForPortRow, error) {
+	return dbq.FindCableForPortRow{}, pgx.ErrNoRows
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

@@ -39,7 +39,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "a_asset_id and b_asset_id required")
 		return
 	}
-	siteID, err := h.Q.GetAssetSiteID(r.Context(), req.AAssetID)
+	if err := validateEndpoints(req.AAssetID, req.BAssetID); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	aAsset, err := h.Q.GetAsset(r.Context(), req.AAssetID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusBadRequest, "a_asset_id not found")
@@ -49,6 +53,33 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	bAsset, err := h.Q.GetAsset(r.Context(), req.BAssetID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusBadRequest, "b_asset_id not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if err := validatePortInRange(aAsset.Name, aAsset.PortCount, req.APort, "a"); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validatePortInRange(bAsset.Name, bAsset.PortCount, req.BPort, "b"); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := h.validatePortNotInUse(r.Context(), req.AAssetID, req.APort, uuid.Nil, "a"); err != nil {
+		httpx.Error(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err := h.validatePortNotInUse(r.Context(), req.BAssetID, req.BPort, uuid.Nil, "b"); err != nil {
+		httpx.Error(w, http.StatusConflict, err.Error())
+		return
+	}
+	siteID := aAsset.SiteID
 	out, err := h.Q.CreateCable(r.Context(), dbq.CreateCableParams{
 		SiteID: siteID, AAssetID: req.AAssetID, APort: req.APort,
 		BAssetID: req.BAssetID, BPort: req.BPort,

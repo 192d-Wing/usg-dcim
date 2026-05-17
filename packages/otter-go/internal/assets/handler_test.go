@@ -44,6 +44,12 @@ func (f *fakeQ) ListDownstreamAssetNames(_ context.Context, _ uuid.UUID) ([]stri
 }
 func (f *fakeQ) DeleteConsumerPowerConnections(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) DeletePduPowerConnections(_ context.Context, _ uuid.UUID) error      { return nil }
+func (f *fakeQ) GetRack(_ context.Context, id uuid.UUID) (dbq.Rack, error) {
+	return dbq.Rack{ID: id, UHeight: 42}, nil
+}
+func (f *fakeQ) ListRackAssetsForPlacement(_ context.Context, _ dbq.ListRackAssetsForPlacementParams) ([]dbq.RackPlacementRow, error) {
+	return nil, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

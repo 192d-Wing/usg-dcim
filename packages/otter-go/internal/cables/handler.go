@@ -24,6 +24,8 @@ type Querier interface {
 	CreateCable(ctx context.Context, arg dbq.CreateCableParams) (dbq.Cable, error)
 	DeleteCable(ctx context.Context, id uuid.UUID) error
 	GetAssetSiteID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetAsset(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
+	FindCableForPort(ctx context.Context, arg dbq.FindCableForPortParams) (dbq.FindCableForPortRow, error)
 }
 
 type Handler struct {

@@ -64,6 +64,17 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	if req.LifecycleState == "" {
 		req.LifecycleState = "active"
 	}
+	// Placement validation: only when rack-mounted with a position set.
+	if req.RackID != nil && req.Mount == "rack" && req.RackPositionU != nil {
+		units := int32(1)
+		if req.RackUnits != nil && *req.RackUnits > 0 {
+			units = *req.RackUnits
+		}
+		if perr := h.validateUGridFit(r.Context(), *req.RackID, uuid.Nil, *req.RackPositionU, units, req.Face); perr != nil {
+			httpx.Error(w, http.StatusConflict, perr.Error())
+			return
+		}
+	}
 	out, err := h.Q.CreateAsset(r.Context(), dbq.CreateAssetParams{
 		SiteID: req.SiteID, RackID: req.RackID, ParentAssetID: req.ParentAssetID,
 		Name: req.Name, Hostname: req.Hostname, Kind: req.Kind,

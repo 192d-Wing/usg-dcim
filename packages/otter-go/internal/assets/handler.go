@@ -31,6 +31,10 @@ type Querier interface {
 	ListDownstreamAssetNames(ctx context.Context, pduAssetID uuid.UUID) ([]string, error)
 	DeleteConsumerPowerConnections(ctx context.Context, assetID uuid.UUID) error
 	DeletePduPowerConnections(ctx context.Context, pduAssetID uuid.UUID) error
+
+	// Placement invariants (PR 51)
+	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
+	ListRackAssetsForPlacement(ctx context.Context, arg dbq.ListRackAssetsForPlacementParams) ([]dbq.RackPlacementRow, error)
 }
 
 type Handler struct {
