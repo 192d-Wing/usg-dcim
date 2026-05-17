@@ -29,6 +29,15 @@ func (f *fakeQ) GetCollector(_ context.Context, _ uuid.UUID) (dbq.Collector, err
 	f.getCalls++
 	return dbq.Collector{}, pgx.ErrNoRows
 }
+func (f *fakeQ) SetCollectorConfigOverrides(_ context.Context, a dbq.SetCollectorConfigOverridesParams) (dbq.Collector, error) {
+	return dbq.Collector{ID: a.ID, ConfigOverridesJson: a.ConfigOverrides}, nil
+}
+func (f *fakeQ) SetCollectorEnabled(_ context.Context, a dbq.SetCollectorEnabledParams) (dbq.Collector, error) {
+	return dbq.Collector{ID: a.ID, Enabled: a.Enabled}, nil
+}
+func (f *fakeQ) DecommissionCollector(_ context.Context, id uuid.UUID) (dbq.Collector, error) {
+	return dbq.Collector{ID: id, Status: "decommissioned"}, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

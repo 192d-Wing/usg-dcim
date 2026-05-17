@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -20,6 +21,10 @@ type Querier interface {
 	ListOrganizations(ctx context.Context, arg dbq.ListOrganizationsParams) ([]dbq.Organization, error)
 	CountOrganizations(ctx context.Context) (int64, error)
 	GetOrganization(ctx context.Context, id uuid.UUID) (dbq.Organization, error)
+	CreateOrganization(ctx context.Context, arg dbq.CreateOrganizationParams) (dbq.Organization, error)
+	UpdateOrganization(ctx context.Context, arg dbq.UpdateOrganizationParams) (dbq.Organization, error)
+	CountAsnsForOrganization(ctx context.Context, orgID uuid.UUID) (int64, error)
+	DeleteOrganization(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct{ Q Querier }
@@ -28,6 +33,9 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Route("/organizations", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Get("/{id}", h.get)
+		r.With(auth.RequireCapability("inventory:organizations:create")).Post("/", h.create)
+		r.With(auth.RequireCapability("inventory:organizations:update")).Patch("/{id}", h.update)
+		r.With(auth.RequireCapability("inventory:organizations:delete")).Delete("/{id}", h.delete)
 	})
 }
 

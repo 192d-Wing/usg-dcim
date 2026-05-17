@@ -25,6 +25,16 @@ func (f *fakeQ) CountOrganizations(_ context.Context) (int64, error) { return 0,
 func (f *fakeQ) GetOrganization(_ context.Context, _ uuid.UUID) (dbq.Organization, error) {
 	return dbq.Organization{}, pgx.ErrNoRows
 }
+func (f *fakeQ) CreateOrganization(_ context.Context, a dbq.CreateOrganizationParams) (dbq.Organization, error) {
+	return dbq.Organization{ID: uuid.New(), Name: a.Name, Country: a.Country, City: a.City, AddressLine1: a.AddressLine1}, nil
+}
+func (f *fakeQ) UpdateOrganization(_ context.Context, a dbq.UpdateOrganizationParams) (dbq.Organization, error) {
+	return dbq.Organization{ID: a.ID}, nil
+}
+func (f *fakeQ) CountAsnsForOrganization(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) DeleteOrganization(_ context.Context, _ uuid.UUID) error { return nil }
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()

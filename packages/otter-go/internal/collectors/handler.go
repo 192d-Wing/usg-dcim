@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -21,6 +22,9 @@ type Querier interface {
 	ListCollectors(ctx context.Context, arg dbq.ListCollectorsParams) ([]dbq.Collector, error)
 	CountCollectors(ctx context.Context, arg dbq.CountCollectorsParams) (int64, error)
 	GetCollector(ctx context.Context, id uuid.UUID) (dbq.Collector, error)
+	SetCollectorConfigOverrides(ctx context.Context, arg dbq.SetCollectorConfigOverridesParams) (dbq.Collector, error)
+	SetCollectorEnabled(ctx context.Context, arg dbq.SetCollectorEnabledParams) (dbq.Collector, error)
+	DecommissionCollector(ctx context.Context, id uuid.UUID) (dbq.Collector, error)
 }
 
 type Handler struct{ Q Querier }
@@ -29,6 +33,9 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Route("/collectors", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Get("/{id}", h.get)
+		r.With(auth.RequireCapability("collectors:collectors:update")).Patch("/{id}/config", h.patchConfig)
+		r.With(auth.RequireCapability("collectors:collectors:update")).Patch("/{id}/enabled", h.patchEnabled)
+		r.With(auth.RequireCapability("collectors:collectors:update")).Delete("/{id}", h.decommission)
 	})
 }
 

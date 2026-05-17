@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -32,6 +33,29 @@ type Querier interface {
 	CountRouteMaps(ctx context.Context) (int64, error)
 	ListRouteMapEntries(ctx context.Context, arg dbq.ListRouteMapEntriesParams) ([]dbq.RouteMapEntry, error)
 	CountRouteMapEntries(ctx context.Context, arg dbq.CountRouteMapEntriesParams) (int64, error)
+
+	// Mutations (PR 44). TCP AO + asn bulk-rotate deferred.
+	CreateAsn(ctx context.Context, arg dbq.CreateAsnParams) (dbq.Asn, error)
+	UpdateAsn(ctx context.Context, arg dbq.UpdateAsnParams) (dbq.Asn, error)
+	DeleteAsn(ctx context.Context, id uuid.UUID) error
+	CreatePrefixList(ctx context.Context, arg dbq.CreatePrefixListParams) (dbq.PrefixList, error)
+	UpdatePrefixList(ctx context.Context, arg dbq.UpdatePrefixListParams) (dbq.PrefixList, error)
+	DeletePrefixList(ctx context.Context, id uuid.UUID) error
+	CreatePrefixListEntry(ctx context.Context, arg dbq.CreatePrefixListEntryParams) (dbq.PrefixListEntry, error)
+	UpdatePrefixListEntry(ctx context.Context, arg dbq.UpdatePrefixListEntryParams) (dbq.PrefixListEntry, error)
+	DeletePrefixListEntry(ctx context.Context, id uuid.UUID) error
+	CreateCommunityList(ctx context.Context, arg dbq.CreateCommunityListParams) (dbq.CommunityList, error)
+	UpdateCommunityList(ctx context.Context, arg dbq.UpdateCommunityListParams) (dbq.CommunityList, error)
+	DeleteCommunityList(ctx context.Context, id uuid.UUID) error
+	CreateCommunityListEntry(ctx context.Context, arg dbq.CreateCommunityListEntryParams) (dbq.CommunityListEntry, error)
+	UpdateCommunityListEntry(ctx context.Context, arg dbq.UpdateCommunityListEntryParams) (dbq.CommunityListEntry, error)
+	DeleteCommunityListEntry(ctx context.Context, id uuid.UUID) error
+	CreateRouteMap(ctx context.Context, arg dbq.CreateRouteMapParams) (dbq.RouteMap, error)
+	UpdateRouteMap(ctx context.Context, arg dbq.UpdateRouteMapParams) (dbq.RouteMap, error)
+	DeleteRouteMap(ctx context.Context, id uuid.UUID) error
+	CreateRouteMapEntry(ctx context.Context, arg dbq.CreateRouteMapEntryParams) (dbq.RouteMapEntry, error)
+	UpdateRouteMapEntry(ctx context.Context, arg dbq.UpdateRouteMapEntryParams) (dbq.RouteMapEntry, error)
+	DeleteRouteMapEntry(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -47,6 +71,29 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/community-list-entries", h.listCommunityListEntries)
 		r.Get("/route-maps", h.listRouteMaps)
 		r.Get("/route-map-entries", h.listRouteMapEntries)
+
+		// ---- Mutations (PR 44) ----
+		r.With(auth.RequireCapability("routing:asns:create")).Post("/asns", h.createAsn)
+		r.With(auth.RequireCapability("routing:asns:update")).Patch("/asns/{id}", h.updateAsn)
+		r.With(auth.RequireCapability("routing:asns:delete")).Delete("/asns/{id}", h.deleteAsn)
+		r.With(auth.RequireCapability("routing:prefix-lists:create")).Post("/prefix-lists", h.createPrefixList)
+		r.With(auth.RequireCapability("routing:prefix-lists:update")).Patch("/prefix-lists/{id}", h.updatePrefixList)
+		r.With(auth.RequireCapability("routing:prefix-lists:delete")).Delete("/prefix-lists/{id}", h.deletePrefixList)
+		r.With(auth.RequireCapability("routing:prefix-list-entries:create")).Post("/prefix-list-entries", h.createPrefixListEntry)
+		r.With(auth.RequireCapability("routing:prefix-list-entries:update")).Patch("/prefix-list-entries/{id}", h.updatePrefixListEntry)
+		r.With(auth.RequireCapability("routing:prefix-list-entries:delete")).Delete("/prefix-list-entries/{id}", h.deletePrefixListEntry)
+		r.With(auth.RequireCapability("routing:community-lists:create")).Post("/community-lists", h.createCommunityList)
+		r.With(auth.RequireCapability("routing:community-lists:update")).Patch("/community-lists/{id}", h.updateCommunityList)
+		r.With(auth.RequireCapability("routing:community-lists:delete")).Delete("/community-lists/{id}", h.deleteCommunityList)
+		r.With(auth.RequireCapability("routing:community-list-entries:create")).Post("/community-list-entries", h.createCommunityListEntry)
+		r.With(auth.RequireCapability("routing:community-list-entries:update")).Patch("/community-list-entries/{id}", h.updateCommunityListEntry)
+		r.With(auth.RequireCapability("routing:community-list-entries:delete")).Delete("/community-list-entries/{id}", h.deleteCommunityListEntry)
+		r.With(auth.RequireCapability("routing:route-maps:create")).Post("/route-maps", h.createRouteMap)
+		r.With(auth.RequireCapability("routing:route-maps:update")).Patch("/route-maps/{id}", h.updateRouteMap)
+		r.With(auth.RequireCapability("routing:route-maps:delete")).Delete("/route-maps/{id}", h.deleteRouteMap)
+		r.With(auth.RequireCapability("routing:route-map-entries:create")).Post("/route-map-entries", h.createRouteMapEntry)
+		r.With(auth.RequireCapability("routing:route-map-entries:update")).Patch("/route-map-entries/{id}", h.updateRouteMapEntry)
+		r.With(auth.RequireCapability("routing:route-map-entries:delete")).Delete("/route-map-entries/{id}", h.deleteRouteMapEntry)
 	})
 }
 

@@ -69,6 +69,58 @@ func (f *fakeQ) CountRouteMapEntries(_ context.Context, _ dbq.CountRouteMapEntri
 	return 0, nil
 }
 
+// ---- Mutation stubs (PR 44) ----
+
+func (f *fakeQ) CreateAsn(_ context.Context, a dbq.CreateAsnParams) (dbq.Asn, error) {
+	return dbq.Asn{ID: uuid.New(), Asn: a.Asn, Name: a.Name, Kind: a.Kind}, nil
+}
+func (f *fakeQ) UpdateAsn(_ context.Context, a dbq.UpdateAsnParams) (dbq.Asn, error) {
+	return dbq.Asn{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteAsn(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreatePrefixList(_ context.Context, a dbq.CreatePrefixListParams) (dbq.PrefixList, error) {
+	return dbq.PrefixList{ID: uuid.New(), Name: a.Name, Family: a.Family}, nil
+}
+func (f *fakeQ) UpdatePrefixList(_ context.Context, a dbq.UpdatePrefixListParams) (dbq.PrefixList, error) {
+	return dbq.PrefixList{ID: a.ID}, nil
+}
+func (f *fakeQ) DeletePrefixList(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreatePrefixListEntry(_ context.Context, a dbq.CreatePrefixListEntryParams) (dbq.PrefixListEntry, error) {
+	return dbq.PrefixListEntry{ID: uuid.New(), PrefixListID: a.PrefixListID, Seq: a.Seq, Action: a.Action, Prefix: a.Prefix}, nil
+}
+func (f *fakeQ) UpdatePrefixListEntry(_ context.Context, a dbq.UpdatePrefixListEntryParams) (dbq.PrefixListEntry, error) {
+	return dbq.PrefixListEntry{ID: a.ID}, nil
+}
+func (f *fakeQ) DeletePrefixListEntry(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateCommunityList(_ context.Context, a dbq.CreateCommunityListParams) (dbq.CommunityList, error) {
+	return dbq.CommunityList{ID: uuid.New(), Name: a.Name, Kind: a.Kind}, nil
+}
+func (f *fakeQ) UpdateCommunityList(_ context.Context, a dbq.UpdateCommunityListParams) (dbq.CommunityList, error) {
+	return dbq.CommunityList{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteCommunityList(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateCommunityListEntry(_ context.Context, a dbq.CreateCommunityListEntryParams) (dbq.CommunityListEntry, error) {
+	return dbq.CommunityListEntry{ID: uuid.New(), CommunityListID: a.CommunityListID, Seq: a.Seq, Action: a.Action, Value: a.Value}, nil
+}
+func (f *fakeQ) UpdateCommunityListEntry(_ context.Context, a dbq.UpdateCommunityListEntryParams) (dbq.CommunityListEntry, error) {
+	return dbq.CommunityListEntry{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteCommunityListEntry(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateRouteMap(_ context.Context, a dbq.CreateRouteMapParams) (dbq.RouteMap, error) {
+	return dbq.RouteMap{ID: uuid.New(), Name: a.Name}, nil
+}
+func (f *fakeQ) UpdateRouteMap(_ context.Context, a dbq.UpdateRouteMapParams) (dbq.RouteMap, error) {
+	return dbq.RouteMap{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteRouteMap(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CreateRouteMapEntry(_ context.Context, a dbq.CreateRouteMapEntryParams) (dbq.RouteMapEntry, error) {
+	return dbq.RouteMapEntry{ID: uuid.New(), RouteMapID: a.RouteMapID, Seq: a.Seq, Action: a.Action}, nil
+}
+func (f *fakeQ) UpdateRouteMapEntry(_ context.Context, a dbq.UpdateRouteMapEntryParams) (dbq.RouteMapEntry, error) {
+	return dbq.RouteMapEntry{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteRouteMapEntry(_ context.Context, _ uuid.UUID) error { return nil }
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)
