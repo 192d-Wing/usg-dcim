@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -30,6 +31,10 @@ func (h *Handler) createBuilding(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	sid := out.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "building.create", TargetType: "building", TargetID: out.ID.String(), SiteID: &sid,
+	})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -54,6 +59,9 @@ func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "room.create", TargetType: "room", TargetID: out.ID.String(),
+	})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -77,5 +85,8 @@ func (h *Handler) createRow(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "row.create", TargetType: "row", TargetID: out.ID.String(),
+	})
 	httpx.JSON(w, http.StatusCreated, out)
 }

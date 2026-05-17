@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -79,6 +80,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	sid := out.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "asset.create", TargetType: "asset", TargetID: out.ID.String(), SiteID: &sid,
+	})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -206,6 +211,10 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	sid := out.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "asset.update", TargetType: "asset", TargetID: id.String(), SiteID: &sid,
+	})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -313,5 +322,14 @@ func (h *Handler) decommission(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	sid := updated.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "asset.decommission", TargetType: "asset", TargetID: id.String(), SiteID: &sid,
+		Metadata: map[string]any{
+			"consumer_drops":    imp.ConsumerDrops,
+			"pdu_drops":         imp.PduDrops,
+			"downstream_assets": imp.DownstreamAssets,
+		},
+	})
 	httpx.JSON(w, http.StatusOK, decommissionResult{Asset: updated, Impact: imp})
 }

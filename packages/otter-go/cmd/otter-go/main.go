@@ -60,13 +60,13 @@ func main() {
 	defer pool.Close()
 
 	q := dbq.New(pool)
-	sh := &sites.Handler{Q: q}
-	rh := &regions.Handler{Q: q}
-	lh := &locations.Handler{Q: q}
-	rkh := &racks.Handler{Q: q}
-	ah := &assets.Handler{Q: q}
-	ch := &cables.Handler{Q: q}
-	ih := &ipam.Handler{Q: q}
+	sh := &sites.Handler{Q: q, Audit: q}
+	rh := &regions.Handler{Q: q, Audit: q}
+	lh := &locations.Handler{Q: q, Audit: q}
+	rkh := &racks.Handler{Q: q, Audit: q}
+	ah := &assets.Handler{Q: q, Audit: q}
+	ch := &cables.Handler{Q: q, Audit: q}
+	ih := &ipam.Handler{Q: q, Audit: q}
 	ph := &power.Handler{Q: q}
 	bh := &bgp.Handler{Q: q}
 	dh := &dns.Handler{Q: q}

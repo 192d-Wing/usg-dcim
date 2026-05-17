@@ -15,8 +15,18 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
+
+// auditMut is a tiny wrapper so the 32 IPAM mutation handlers each
+// stay one line of audit instead of four. Use auditMutWithMeta when
+// extra context (resolved fabric, conflict count) belongs in metadata.
+func (h *Handler) auditMut(r *http.Request, action, targetType, targetID string) {
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: action, TargetType: targetType, TargetID: targetID,
+	})
+}
 
 // idFromURL returns the {id} path param parsed as a UUID, or writes a
 // 400 + returns ok=false on failure.
@@ -74,6 +84,7 @@ func (h *Handler) createFabric(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "fabric not found")
 		return
 	}
+	h.auditMut(r, "fabric.create", "fabric", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -160,6 +171,7 @@ func (h *Handler) updateFabric(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "fabric not found")
 		return
 	}
+	h.auditMut(r, "fabric.update", "fabric", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -181,6 +193,7 @@ func (h *Handler) deleteFabric(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "fabric not found")
 		return
 	}
+	h.auditMut(r, "fabric.delete", "fabric", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -208,6 +221,7 @@ func (h *Handler) createVrf(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vrf not found")
 		return
 	}
+	h.auditMut(r, "vrf.create", "vrf", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -262,6 +276,7 @@ func (h *Handler) updateVrf(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vrf not found")
 		return
 	}
+	h.auditMut(r, "vrf.update", "vrf", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -292,6 +307,7 @@ func (h *Handler) deleteVrf(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vrf not found")
 		return
 	}
+	h.auditMut(r, "vrf.delete", "vrf", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -324,6 +340,7 @@ func (h *Handler) createVrfBgpPeer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "binding not found")
 		return
 	}
+	h.auditMut(r, "vrf_bgp_peer.create", "vrf_bgp_peer", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -365,6 +382,7 @@ func (h *Handler) updateVrfBgpPeer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "binding not found")
 		return
 	}
+	h.auditMut(r, "vrf_bgp_peer.update", "vrf_bgp_peer", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -377,6 +395,7 @@ func (h *Handler) deleteVrfBgpPeer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "binding not found")
 		return
 	}
+	h.auditMut(r, "vrf_bgp_peer.delete", "vrf_bgp_peer", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -409,6 +428,7 @@ func (h *Handler) createSupernet(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "supernet not found")
 		return
 	}
+	h.auditMut(r, "supernet.create", "supernet", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -475,6 +495,7 @@ func (h *Handler) updateSupernet(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "supernet not found")
 		return
 	}
+	h.auditMut(r, "supernet.update", "supernet", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -496,6 +517,7 @@ func (h *Handler) deleteSupernet(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "supernet not found")
 		return
 	}
+	h.auditMut(r, "supernet.delete", "supernet", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -535,6 +557,7 @@ func (h *Handler) createSubnet(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "subnet not found")
 		return
 	}
+	h.auditMut(r, "subnet.create", "subnet", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -619,6 +642,7 @@ func (h *Handler) updateSubnet(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "subnet not found")
 		return
 	}
+	h.auditMut(r, "subnet.update", "subnet", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -640,6 +664,7 @@ func (h *Handler) deleteSubnet(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "subnet not found")
 		return
 	}
+	h.auditMut(r, "subnet.delete", "subnet", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -681,6 +706,7 @@ func (h *Handler) createAddress(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "address not found")
 		return
 	}
+	h.auditMut(r, "ip_address.create", "ip_address", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -741,6 +767,7 @@ func (h *Handler) updateAddress(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "address not found")
 		return
 	}
+	h.auditMut(r, "ip_address.update", "ip_address", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -753,6 +780,7 @@ func (h *Handler) deleteAddress(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "address not found")
 		return
 	}
+	h.auditMut(r, "ip_address.delete", "ip_address", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -790,6 +818,7 @@ func (h *Handler) createOverlay(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "overlay not found")
 		return
 	}
+	h.auditMut(r, "overlay.create", "overlay", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -854,6 +883,7 @@ func (h *Handler) updateOverlay(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "overlay not found")
 		return
 	}
+	h.auditMut(r, "overlay.update", "overlay", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -875,6 +905,7 @@ func (h *Handler) deleteOverlay(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "overlay not found")
 		return
 	}
+	h.auditMut(r, "overlay.delete", "overlay", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -910,6 +941,7 @@ func (h *Handler) createVni(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vni not found")
 		return
 	}
+	h.auditMut(r, "vni.create", "vni", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -981,6 +1013,7 @@ func (h *Handler) updateVni(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vni not found")
 		return
 	}
+	h.auditMut(r, "vni.update", "vni", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -993,6 +1026,7 @@ func (h *Handler) deleteVni(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vni not found")
 		return
 	}
+	h.auditMut(r, "vni.delete", "vni", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1024,6 +1058,7 @@ func (h *Handler) createVtep(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vtep not found")
 		return
 	}
+	h.auditMut(r, "vtep.create", "vtep", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -1073,6 +1108,7 @@ func (h *Handler) updateVtep(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vtep not found")
 		return
 	}
+	h.auditMut(r, "vtep.update", "vtep", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -1085,6 +1121,7 @@ func (h *Handler) deleteVtep(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "vtep not found")
 		return
 	}
+	h.auditMut(r, "vtep.delete", "vtep", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1109,6 +1146,7 @@ func (h *Handler) createVtepMembership(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "membership not found")
 		return
 	}
+	h.auditMut(r, "vtep_membership.create", "vtep_vni_membership", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -1121,6 +1159,7 @@ func (h *Handler) deleteVtepMembership(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "membership not found")
 		return
 	}
+	h.auditMut(r, "vtep_membership.delete", "vtep_vni_membership", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1154,6 +1193,7 @@ func (h *Handler) createDhcpServer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "dhcp server not found")
 		return
 	}
+	h.auditMut(r, "dhcp_server.create", "dhcp_server", out.ID.String())
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -1212,6 +1252,7 @@ func (h *Handler) updateDhcpServer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "dhcp server not found")
 		return
 	}
+	h.auditMut(r, "dhcp_server.update", "dhcp_server", id.String())
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -1224,5 +1265,6 @@ func (h *Handler) deleteDhcpServer(w http.ResponseWriter, r *http.Request) {
 		mapErr(w, err, "dhcp server not found")
 		return
 	}
+	h.auditMut(r, "dhcp_server.delete", "dhcp_server", id.String())
 	w.WriteHeader(http.StatusNoContent)
 }

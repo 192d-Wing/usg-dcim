@@ -95,9 +95,14 @@ func Record(ctx context.Context, q Recorder, log *slog.Logger, ev Event) {
 			params.MetadataJson = b
 		}
 	}
-	if err := q.InsertAuditLog(ctx, params); err != nil && log != nil {
+	if err := q.InsertAuditLog(ctx, params); err != nil {
 		// Loud-fail to logs; never return to caller. The mutation has
-		// already committed.
+		// already committed. Fall back to slog.Default() when callers
+		// omit the logger (passing nil) — handlers don't need to thread
+		// a logger field through to call Record.
+		if log == nil {
+			log = slog.Default()
+		}
 		log.Error("audit_write_failed",
 			"action", ev.Action,
 			"target_type", ev.TargetType,

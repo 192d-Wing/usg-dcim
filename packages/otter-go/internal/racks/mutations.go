@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -45,6 +46,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	sid := out.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "rack.create", TargetType: "rack", TargetID: out.ID.String(), SiteID: &sid,
+	})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -153,5 +158,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	sid := out.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "rack.update", TargetType: "rack", TargetID: id.String(), SiteID: &sid,
+	})
 	httpx.JSON(w, http.StatusOK, out)
 }

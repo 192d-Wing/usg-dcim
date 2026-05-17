@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -59,6 +60,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	sid := out.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "cable.create", TargetType: "cable", TargetID: out.ID.String(), SiteID: &sid,
+		Metadata: map[string]any{
+			"a_asset_id": out.AAssetID.String(),
+			"b_asset_id": out.BAssetID.String(),
+		},
+	})
 	httpx.JSON(w, http.StatusCreated, out)
 }
 
@@ -82,5 +91,8 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "cable.delete", TargetType: "cable", TargetID: id.String(),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
