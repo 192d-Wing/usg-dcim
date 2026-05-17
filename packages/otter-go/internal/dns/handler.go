@@ -90,6 +90,9 @@ type Querier interface {
 	DeleteBgpPeer(ctx context.Context, id uuid.UUID) error
 	CreateAnycastBinding(ctx context.Context, arg dbq.CreateAnycastBindingParams) (dbq.AnycastBgpBinding, error)
 	DeleteAnycastBinding(ctx context.Context, id uuid.UUID) error
+
+	// Invariants (PR 52)
+	GetZoneFrozenByRecord(ctx context.Context, recordID uuid.UUID) (dbq.ZoneFrozenRow, error)
 }
 
 type Handler struct {

@@ -198,6 +198,19 @@ func (h *Handler) createRecord(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "zone_id, name, type, data required")
 		return
 	}
+	zone, err := h.Q.GetDnsZone(r.Context(), req.ZoneID)
+	if err != nil {
+		mapErr(w, err, "zone not found")
+		return
+	}
+	if zone.Frozen {
+		httpx.Error(w, http.StatusUnprocessableEntity, errZoneFrozen.Error())
+		return
+	}
+	if err := validateRecordData(req.Type, req.Data); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	out, err := h.Q.CreateDnsRecord(r.Context(), dbq.CreateDnsRecordParams{
 		ZoneID: req.ZoneID, Name: req.Name, Type: req.Type, TTL: req.TTL,
 		Data: req.Data, ViewID: req.ViewID, HealthCheckID: req.HealthCheckID,
@@ -264,6 +277,15 @@ func (h *Handler) updateRecord(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
 		return
 	}
+	zf, err := h.Q.GetZoneFrozenByRecord(r.Context(), id)
+	if err != nil {
+		mapErr(w, err, "record not found")
+		return
+	}
+	if zf.Frozen {
+		httpx.Error(w, http.StatusUnprocessableEntity, errZoneFrozen.Error())
+		return
+	}
 	out, err := h.Q.UpdateDnsRecord(r.Context(), dbq.UpdateDnsRecordParams{
 		ID: id, Name: req.Name,
 		TTLSet: req.ttlSet, TTL: req.TTL,
@@ -283,6 +305,15 @@ func (h *Handler) updateRecord(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteRecord(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	zf, err := h.Q.GetZoneFrozenByRecord(r.Context(), id)
+	if err != nil {
+		mapErr(w, err, "record not found")
+		return
+	}
+	if zf.Frozen {
+		httpx.Error(w, http.StatusUnprocessableEntity, errZoneFrozen.Error())
 		return
 	}
 	if err := h.Q.DeleteDnsRecord(r.Context(), id); err != nil {

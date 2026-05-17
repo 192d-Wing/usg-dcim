@@ -206,6 +206,9 @@ func (f *fakeQ) CreateAnycastBinding(_ context.Context, a dbq.CreateAnycastBindi
 	return dbq.AnycastBgpBinding{ID: uuid.New(), DnsServerID: a.DnsServerID, BgpPeerID: a.BgpPeerID}, nil
 }
 func (f *fakeQ) DeleteAnycastBinding(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) GetZoneFrozenByRecord(_ context.Context, _ uuid.UUID) (dbq.ZoneFrozenRow, error) {
+	return dbq.ZoneFrozenRow{ZoneID: uuid.New(), Frozen: false}, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
