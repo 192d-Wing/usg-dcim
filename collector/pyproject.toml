@@ -22,7 +22,7 @@ snmp = ["pysnmp-lextudio>=6.1"]
 redfish = ["sushy>=5.0"]
 ipmi = ["python-ipmi>=0.5"]
 all = ["pysnmp-lextudio>=6.1", "sushy>=5.0", "python-ipmi>=0.5"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.15.13"]
 
 [build-system]
 requires = ["hatchling"]
