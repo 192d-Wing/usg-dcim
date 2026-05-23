@@ -103,12 +103,20 @@ type Querier interface {
 	UpdateDhcpServer(ctx context.Context, arg dbq.UpdateDhcpServerParams) (dbq.DhcpServer, error)
 	DeleteDhcpServer(ctx context.Context, id uuid.UUID) error
 
-	// ABAC parent-fabric lookups (PR 54). Used by mutation handlers to
-	// resolve {id} → fabric_id before EnforceFabricScope. 2+ hop lookups
-	// (subnet/address/vni/vtep) ship in PR 55.
+	// ABAC parent-fabric lookups. Used by mutation handlers to resolve
+	// {id} → fabric_id before EnforceFabricScope. 1-hop lookups shipped
+	// in PR 54; PR 55 adds the 2+ hop transitive lookups for subnet
+	// (subnets denormalize fabric_id, so still 1-hop in SQL), address
+	// (→subnet→fabric), vni (→overlay→fabric), vtep (→overlay→fabric),
+	// and vtep-membership (→vtep→overlay→fabric).
 	GetVrfFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetOverlayFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetDhcpServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetSubnetFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetIPAddressFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetVniFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetVtepFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetVtepMembershipFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 }
 
 type Handler struct {
@@ -141,7 +149,10 @@ func (h *Handler) Mount(r chi.Router) {
 		// fabric's auto-create-default-VRF are deferred to a focused
 		// invariants follow-up PR. Simple FK-in-use refusals (delete
 		// fabric → vrfs check, delete vrf → supernets, etc.) ARE
-		// enforced here as 409s.
+		// enforced here as 409s. ABAC fabric-scope enforcement on
+		// every mutation that owns or transitively belongs to a fabric
+		// landed in PR 54 (1-hop) and PR 55 (2+ hop: subnet, address,
+		// vni, vtep, vtep-membership).
 		r.With(auth.RequireCapability("ipam:fabrics:create")).Post("/fabrics", h.createFabric)
 		r.With(auth.RequireCapability("ipam:fabrics:update")).Patch("/fabrics/{id}", h.updateFabric)
 		r.With(auth.RequireCapability("ipam:fabrics:delete")).Delete("/fabrics/{id}", h.deleteFabric)

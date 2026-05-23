@@ -11,12 +11,14 @@
 // PR 53 ships the foundation: Scope struct + resolver + matchers +
 // enforcers + filters, plus a wire-up in the Verifying middleware to
 // populate Principal.Scopes from user_roles + role_scopes. Per-route
-// retrofits land in PR 54 (IPAM/inventory) and PR 55 (DNS/BGP/alerts).
+// retrofits land in PR 54 (IPAM 1-hop + inventory), PR 55 (IPAM 2-hop:
+// subnet/address/vni/vtep/vtep-membership), and a later PR
+// (DNS/BGP/alerts/auth handlers + scope-filtered LIST queries).
 //
 // OIDC-mapping scope resolution (the cross-table code→UUID lookups
-// from _resolve_mapping_scope in Python) is intentionally deferred to
-// PR 54 — IdP roles in this PR fall back to global scope so the
-// behavior is no-worse than today's "every cap is global" status quo.
+// from _resolve_mapping_scope in Python) is intentionally deferred —
+// IdP roles fall back to global scope so the behavior is no-worse than
+// today's "every cap is global" status quo.
 package auth
 
 import (

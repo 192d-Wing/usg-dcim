@@ -104,3 +104,66 @@ func (q *Queries) GetDhcpServerFabricID(ctx context.Context, id uuid.UUID) (uuid
 	err := row.Scan(&fid)
 	return fid, err
 }
+
+const getSubnetFabricID = `-- name: GetSubnetFabricID :one
+SELECT fabric_id FROM subnets WHERE id = $1`
+
+func (q *Queries) GetSubnetFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getSubnetFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getIPAddressFabricID = `-- name: GetIPAddressFabricID :one
+SELECT s.fabric_id
+FROM ip_addresses a
+JOIN subnets s ON s.id = a.subnet_id
+WHERE a.id = $1`
+
+func (q *Queries) GetIPAddressFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getIPAddressFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getVniFabricID = `-- name: GetVniFabricID :one
+SELECT o.fabric_id
+FROM vnis v
+JOIN overlays o ON o.id = v.overlay_id
+WHERE v.id = $1`
+
+func (q *Queries) GetVniFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getVniFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getVtepFabricID = `-- name: GetVtepFabricID :one
+SELECT o.fabric_id
+FROM vteps v
+JOIN overlays o ON o.id = v.overlay_id
+WHERE v.id = $1`
+
+func (q *Queries) GetVtepFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getVtepFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getVtepMembershipFabricID = `-- name: GetVtepMembershipFabricID :one
+SELECT o.fabric_id
+FROM vtep_vni_memberships m
+JOIN vteps v ON v.id = m.vtep_id
+JOIN overlays o ON o.id = v.overlay_id
+WHERE m.id = $1`
+
+func (q *Queries) GetVtepMembershipFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getVtepMembershipFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}

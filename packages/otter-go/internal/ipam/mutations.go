@@ -24,7 +24,8 @@ import (
 // enforceFabric resolves the caller's Principal and refuses with 403 if
 // EnforceFabricScope rejects the target fabric. Returns false when a
 // response has been written. PR 54 wires this onto every IPAM mutation
-// that owns or transitively belongs to a fabric.
+// that owns or transitively belongs to a fabric (1-hop); PR 55 extends
+// to 2+ hop resources (subnet, address, vni, vtep, vtep-membership).
 func (h *Handler) enforceFabric(w http.ResponseWriter, r *http.Request, fabricID uuid.UUID, capCode string) bool {
 	p, _ := auth.From(r.Context())
 	if err := auth.EnforceFabricScope(p, fabricID, capCode); err != nil {
@@ -653,17 +654,15 @@ func (h *Handler) createSubnet(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !h.enforceFabric(w, r, supernet.FabricID, "ipam:subnets:create") {
+		return
+	}
 	if perr := validatePurposeCompatible(supernet.Purpose, req.Purpose); perr != nil {
 		httpx.Error(w, http.StatusBadRequest, perr.Error())
 		return
 	}
-	parent, err := h.Q.GetSupernetVrfAndFabric(r.Context(), req.SupernetID)
-	if err != nil {
-		mapErr(w, err, "supernet not found")
-		return
-	}
 	out, err := h.Q.CreateSubnet(r.Context(), dbq.CreateSubnetParams{
-		SupernetID: req.SupernetID, FabricID: parent.FabricID, VrfID: parent.VrfID,
+		SupernetID: req.SupernetID, FabricID: supernet.FabricID, VrfID: supernet.VrfID,
 		SiteID: req.SiteID, VniID: req.VniID, Prefix: req.Prefix,
 		Name: req.Name, Description: req.Description, Purpose: req.Purpose,
 		VlanID: req.VlanID, Gateway: req.Gateway,
@@ -738,6 +737,15 @@ func (h *Handler) updateSubnet(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetSubnetFabricID(ctx, id)
+	}, "subnet not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:subnets:update") {
+		return
+	}
 	var req subnetUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -764,6 +772,15 @@ func (h *Handler) updateSubnet(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteSubnet(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetSubnetFabricID(ctx, id)
+	}, "subnet not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:subnets:delete") {
 		return
 	}
 	n, err := h.Q.CountAddressesInSubnet(r.Context(), id)
@@ -808,8 +825,12 @@ func (h *Handler) createAddress(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, aerr := h.assertAddressInSubnet(r.Context(), req.SubnetID, addr); aerr != nil {
+	subnet, aerr := h.assertAddressInSubnet(r.Context(), req.SubnetID, addr)
+	if aerr != nil {
 		httpx.Error(w, http.StatusBadRequest, aerr.Error())
+		return
+	}
+	if !h.enforceFabric(w, r, subnet.FabricID, "ipam:addresses:create") {
 		return
 	}
 	if req.Role == "" {
@@ -876,6 +897,15 @@ func (h *Handler) updateAddress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetIPAddressFabricID(ctx, id)
+	}, "address not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:addresses:update") {
+		return
+	}
 	var req addressUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -898,6 +928,15 @@ func (h *Handler) updateAddress(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteAddress(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetIPAddressFabricID(ctx, id)
+	}, "address not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:addresses:delete") {
 		return
 	}
 	if err := h.Q.DeleteIPAddress(r.Context(), id); err != nil {
@@ -1074,6 +1113,15 @@ func (h *Handler) createVni(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "overlay_id and vni required")
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetOverlayFabricID(ctx, req.OverlayID)
+	}, "overlay not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vnis:create") {
+		return
+	}
 	if req.Kind == "" {
 		req.Kind = "l2"
 	}
@@ -1148,6 +1196,15 @@ func (h *Handler) updateVni(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVniFabricID(ctx, id)
+	}, "vni not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vnis:update") {
+		return
+	}
 	var req vniUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -1175,6 +1232,15 @@ func (h *Handler) deleteVni(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVniFabricID(ctx, id)
+	}, "vni not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vnis:delete") {
+		return
+	}
 	if err := h.Q.DeleteVni(r.Context(), id); err != nil {
 		mapErr(w, err, "vni not found")
 		return
@@ -1198,6 +1264,15 @@ func (h *Handler) createVtep(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.OverlayID == uuid.Nil || req.AssetID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "overlay_id and asset_id required")
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetOverlayFabricID(ctx, req.OverlayID)
+	}, "overlay not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vteps:create") {
 		return
 	}
 	if req.Role == "" {
@@ -1247,6 +1322,15 @@ func (h *Handler) updateVtep(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVtepFabricID(ctx, id)
+	}, "vtep not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vteps:update") {
+		return
+	}
 	var req vtepUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -1268,6 +1352,15 @@ func (h *Handler) updateVtep(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteVtep(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVtepFabricID(ctx, id)
+	}, "vtep not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vteps:delete") {
 		return
 	}
 	if err := h.Q.DeleteVtep(r.Context(), id); err != nil {
@@ -1292,6 +1385,19 @@ func (h *Handler) createVtepMembership(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "vtep_id and vni_id required")
 		return
 	}
+	// VTEPs and VNIs share an overlay (and therefore a fabric); resolve
+	// the fabric via the vtep side. We don't cross-check that VniID is
+	// in the same fabric here — the existing FK + uq_vtep_vni_membership
+	// constraint will reject a bad pair downstream.
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVtepFabricID(ctx, req.VtepID)
+	}, "vtep not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vtep-memberships:create") {
+		return
+	}
 	out, err := h.Q.CreateVtepMembership(r.Context(), dbq.CreateVtepMembershipParams{
 		VtepID: req.VtepID, VniID: req.VniID,
 	})
@@ -1306,6 +1412,15 @@ func (h *Handler) createVtepMembership(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteVtepMembership(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetVtepMembershipFabricID(ctx, id)
+	}, "membership not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "ipam:vtep-memberships:delete") {
 		return
 	}
 	if err := h.Q.DeleteVtepMembership(r.Context(), id); err != nil {

@@ -171,9 +171,9 @@ func (f *fakeQ) UpdateDhcpServer(_ context.Context, a dbq.UpdateDhcpServerParams
 }
 func (f *fakeQ) DeleteDhcpServer(_ context.Context, _ uuid.UUID) error { return nil }
 
-// PR 54 ABAC parent-fabric lookups. Tests that don't care about scope
-// can let these return uuid.Nil (treated as "no fabric to enforce" by
-// EnforceFabricScope, so global behavior).
+// ABAC parent-fabric lookups (PRs 54 + 55). Tests that don't care
+// about scope can let these return uuid.Nil (treated as "no fabric to
+// enforce" by EnforceFabricScope, so global behavior).
 func (f *fakeQ) GetVrfFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
@@ -181,6 +181,21 @@ func (f *fakeQ) GetOverlayFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, e
 	return uuid.Nil, nil
 }
 func (f *fakeQ) GetDhcpServerFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetSubnetFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetIPAddressFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetVniFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetVtepFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetVtepMembershipFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
 
