@@ -13,10 +13,13 @@
 // populate Principal.Scopes from user_roles + role_scopes. Per-route
 // retrofits: PR 54 (IPAM 1-hop + inventory), PR 55 (IPAM 2-hop:
 // subnet/address/vni/vtep/vtep-membership), PR 56 (scope-filtered
-// IPAM LIST queries), PR 57 (DNS mutations: zones/records/servers/
-// anycast-groups/forwarders/catalog-zones/blocklists/views/
-// health-checks). Remaining: BGP (site-scoped, separate PR),
-// alerts/auth-handler retrofit, DNS list-scope filtering.
+// IPAM LIST queries), PR 57 (DNS fabric-rooted mutations), PR 58
+// (BGP peers site-scope + anycast bindings fabric-scope). Remaining:
+// alerts/maintenance-windows site-scope, auth-handler retrofit,
+// DNS scope-filtered LISTs. BGP policy resources (asns/prefix-lists/
+// community-lists/route-maps + entries) are intentionally global —
+// they have no scope FK and cannot be ABAC-scoped without a schema
+// change.
 //
 // OIDC-mapping scope resolution (the cross-table code→UUID lookups
 // from _resolve_mapping_scope in Python) is intentionally deferred —

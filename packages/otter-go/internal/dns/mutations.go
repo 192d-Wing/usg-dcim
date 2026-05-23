@@ -1,13 +1,17 @@
 // DNS mutations (PR 43). Basic CRUD only. Action endpoints
 // (freeze/unfreeze, import, sync-from-ipam, enable/disable-dnssec,
 // nsec3, render-status, health-checks/result, blocklists entries/bulk)
-// are deferred to a focused follow-up. ABAC fabric-scope enforcement
-// on every fabric-rooted mutation landed in PR 57 (1-hop: zones,
-// servers, anycast-groups, forwarders, catalog-zones, blocklists,
-// views, health-checks; 2-hop: records via zone, blocklist-entries
-// via blocklist). BGP peers + anycast bindings live in this file but
-// are site-scoped, not fabric-scoped, and stay deferred to a BGP-
-// specific PR.
+// are deferred to a focused follow-up.
+//
+// ABAC enforcement:
+//   - PR 57 — fabric-rooted mutations: zones, records (2-hop via
+//     zone), servers, anycast-groups, forwarders, catalog-zones,
+//     blocklists, blocklist-entries (2-hop via blocklist), views,
+//     health-checks.
+//   - PR 58 — bgp_peers via EnforceSiteScope (site_id, with
+//     region + site-group expansion through the shared siteScopeQ
+//     interface); anycast_bgp_bindings via EnforceFabricScope on the
+//     dns_server's fabric (the binding's fabric-side anchor).
 package dns
 
 import (
@@ -33,6 +37,19 @@ import (
 func (h *Handler) enforceFabric(w http.ResponseWriter, r *http.Request, fabricID uuid.UUID, capCode string) bool {
 	p, _ := auth.From(r.Context())
 	if err := auth.EnforceFabricScope(p, fabricID, capCode); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
+}
+
+// enforceSite is the site-scoped twin of enforceFabric (PR 58). Used by
+// bgp_peers mutations, which carry site_id rather than fabric_id.
+// EnforceSiteScope is DB-backed (region + site-group expansion) so it
+// needs the Handler.Q's siteScopeQ methods to be wired through.
+func (h *Handler) enforceSite(w http.ResponseWriter, r *http.Request, siteID uuid.UUID, capCode string) bool {
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceSiteScope(r.Context(), h.Q, p, siteID, capCode); err != nil {
 		httpx.Error(w, http.StatusForbidden, err.Error())
 		return false
 	}
@@ -1329,6 +1346,9 @@ func (h *Handler) createBgpPeer(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "name, site_id, local_asn_id, peer_asn_id, peer_ip required")
 		return
 	}
+	if !h.enforceSite(w, r, req.SiteID, "dns:bgp-peers:create") {
+		return
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -1388,6 +1408,15 @@ func (h *Handler) updateBgpPeer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	sid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetBgpPeerSiteID(ctx, id)
+	}, "bgp peer not found")
+	if !ok {
+		return
+	}
+	if !h.enforceSite(w, r, sid, "dns:bgp-peers:update") {
+		return
+	}
 	var req bgpPeerUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -1413,6 +1442,15 @@ func (h *Handler) deleteBgpPeer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	sid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetBgpPeerSiteID(ctx, id)
+	}, "bgp peer not found")
+	if !ok {
+		return
+	}
+	if !h.enforceSite(w, r, sid, "dns:bgp-peers:delete") {
+		return
+	}
 	if err := h.Q.DeleteBgpPeer(r.Context(), id); err != nil {
 		mapErr(w, err, "bgp peer not found")
 		return
@@ -1435,6 +1473,21 @@ func (h *Handler) createAnycastBinding(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "dns_server_id and bgp_peer_id required")
 		return
 	}
+	// Anycast bindings link a fabric-rooted dns_server to a site-rooted
+	// bgp_peer. PR 58 enforces on the fabric side via the dns_server's
+	// fabric_id — that's the scope a binding-mutating principal needs to
+	// own. (A cross-fabric/cross-site combination is rejected by the
+	// existing uq_anycast_binding constraint and downstream renderer
+	// validation; bgp-peer-side site scope is not double-checked here.)
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsServerFabricID(ctx, req.DnsServerID)
+	}, "dns server not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:anycast-bindings:create") {
+		return
+	}
 	out, err := h.Q.CreateAnycastBinding(r.Context(), dbq.CreateAnycastBindingParams{
 		DnsServerID: req.DnsServerID, BgpPeerID: req.BgpPeerID,
 	})
@@ -1449,6 +1502,15 @@ func (h *Handler) createAnycastBinding(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteAnycastBinding(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetAnycastBindingDnsServerFabricID(ctx, id)
+	}, "binding not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:anycast-bindings:delete") {
 		return
 	}
 	if err := h.Q.DeleteAnycastBinding(r.Context(), id); err != nil {

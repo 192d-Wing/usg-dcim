@@ -273,3 +273,26 @@ func (q *Queries) GetDnsHealthCheckFabricID(ctx context.Context, id uuid.UUID) (
 	err := row.Scan(&fid)
 	return fid, err
 }
+
+const getBgpPeerSiteID = `-- name: GetBgpPeerSiteID :one
+SELECT site_id FROM bgp_peers WHERE id = $1`
+
+func (q *Queries) GetBgpPeerSiteID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getBgpPeerSiteID, id)
+	var sid uuid.UUID
+	err := row.Scan(&sid)
+	return sid, err
+}
+
+const getAnycastBindingDnsServerFabricID = `-- name: GetAnycastBindingDnsServerFabricID :one
+SELECT s.fabric_id
+FROM anycast_bgp_bindings b
+JOIN dns_servers s ON s.id = b.dns_server_id
+WHERE b.id = $1`
+
+func (q *Queries) GetAnycastBindingDnsServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getAnycastBindingDnsServerFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}

@@ -116,3 +116,18 @@ SELECT fabric_id FROM dns_views WHERE id = $1;
 
 -- name: GetDnsHealthCheckFabricID :one
 SELECT fabric_id FROM dns_health_checks WHERE id = $1;
+
+-- BGP peers + anycast bindings (PR 58). BGP peers are site-scoped via
+-- bgp_peers.site_id (NOT fabric-scoped — bgp_peers don't carry a
+-- fabric, they carry a site). anycast_bgp_bindings link a dns_server
+-- (fabric-rooted) to a bgp_peer (site-rooted); ABAC enforces on the
+-- fabric side via dns_server.fabric_id for create/delete.
+
+-- name: GetBgpPeerSiteID :one
+SELECT site_id FROM bgp_peers WHERE id = $1;
+
+-- name: GetAnycastBindingDnsServerFabricID :one
+SELECT s.fabric_id
+FROM anycast_bgp_bindings b
+JOIN dns_servers s ON s.id = b.dns_server_id
+WHERE b.id = $1;

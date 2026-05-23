@@ -244,6 +244,22 @@ func (f *fakeQ) GetDnsHealthCheckFabricID(_ context.Context, _ uuid.UUID) (uuid.
 	return uuid.Nil, nil
 }
 
+// PR 58 — BGP peer site lookup + anycast binding fabric lookup. Tests
+// that don't care about scope let these return uuid.Nil (treated as
+// "no fabric/site to enforce", so global behavior).
+func (f *fakeQ) GetBgpPeerSiteID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetAnycastBindingDnsServerFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)

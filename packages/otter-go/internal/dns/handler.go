@@ -109,6 +109,14 @@ type Querier interface {
 	GetDnsBlocklistEntryFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetDnsViewFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetDnsHealthCheckFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+
+	// PR 58 — BGP peers (site-scoped) + anycast bindings (fabric-scoped
+	// via dns_server). EnforceSiteScope walks region/site-group via the
+	// two lookups below; they're shared with sites/racks/assets handlers.
+	GetBgpPeerSiteID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetAnycastBindingDnsServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type Handler struct {
