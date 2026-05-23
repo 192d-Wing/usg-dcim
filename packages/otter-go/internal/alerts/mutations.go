@@ -2,9 +2,19 @@
 // windows CRUD. Resolve + comment endpoints don't exist in Python's
 // alerts router (alerts auto-resolve when the underlying condition
 // clears) so they aren't ported.
+//
+// ABAC (PR 59): both alert_rules.site_scope_id and
+// maintenance_windows.site_id are NULLABLE. A nil value means
+// "enterprise default" (applies to every site); only a global
+// principal can mutate. A scoped principal touching a non-nil
+// resource walks the usual region + site-group expansion through
+// auth.EnforceSiteScope. Update paths also enforce on the new site
+// when the caller is reassigning, so a site-X admin can't elevate
+// a rule into an enterprise default or into a site they don't own.
 package alerts
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,6 +29,48 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
+
+// enforceSiteOrGlobal is the PR 59 nullable-site-scope guard. alert_rules
+// and maintenance_windows both carry a nullable site (site_scope_id /
+// site_id). The semantics:
+//
+//   - siteID == nil  → "enterprise default" (applies to every site).
+//     Only a global principal can mutate. A scoped principal gets 403
+//     even if they hold the cap, because they can't unilaterally
+//     create/touch a rule that affects sites outside their scope.
+//   - siteID != nil  → standard EnforceSiteScope; DB-backed region +
+//     site-group expansion through Handler.Q.
+//
+// Returns false when a response has been written.
+func (h *Handler) enforceSiteOrGlobal(w http.ResponseWriter, r *http.Request, siteID *uuid.UUID, capCode string) bool {
+	p, _ := auth.From(r.Context())
+	if siteID == nil {
+		s := auth.FindScope(p, capCode)
+		if s != nil && s.IsGlobal {
+			return true
+		}
+		httpx.Error(w, http.StatusForbidden, "enterprise-default rule: requires global scope")
+		return false
+	}
+	if err := auth.EnforceSiteScope(r.Context(), h.Q, p, *siteID, capCode); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
+}
+
+// lookupNullableSiteID runs a slim nullable-site lookup and maps
+// pgx.ErrNoRows to a 404 with notFoundMsg. ok=false means a response
+// was already written. The returned pointer may be nil (enterprise
+// default) — callers pass it straight into enforceSiteOrGlobal.
+func (h *Handler) lookupNullableSiteID(w http.ResponseWriter, ctx context.Context, fn func(context.Context) (*uuid.UUID, error), notFoundMsg string) (*uuid.UUID, bool) {
+	sid, err := fn(ctx)
+	if err != nil {
+		mapErr(w, err, notFoundMsg)
+		return nil, false
+	}
+	return sid, true
+}
 
 func idFromURL(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -86,6 +138,9 @@ func (h *Handler) createRule(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.Metric == "" || req.Operator == "" || req.Severity == "" {
 		httpx.Error(w, http.StatusBadRequest, "name, metric, operator, severity required")
+		return
+	}
+	if !h.enforceSiteOrGlobal(w, r, req.SiteScopeID, "alerts:rules:create") {
 		return
 	}
 	duration := int32(60)
@@ -165,9 +220,24 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	currentSite, ok := h.lookupNullableSiteID(w, r.Context(), func(ctx context.Context) (*uuid.UUID, error) {
+		return h.Q.GetAlertRuleSiteScopeID(ctx, id)
+	}, "rule not found")
+	if !ok {
+		return
+	}
+	if !h.enforceSiteOrGlobal(w, r, currentSite, "alerts:rules:update") {
+		return
+	}
 	var req ruleUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
+		return
+	}
+	// If the caller is reassigning the rule to a different site
+	// (or to/from enterprise-default), they must own the destination
+	// scope too — guards against privilege escalation via reassignment.
+	if req.siteSet && !h.enforceSiteOrGlobal(w, r, req.SiteScopeID, "alerts:rules:update") {
 		return
 	}
 	out, err := h.Q.UpdateAlertRule(r.Context(), dbq.UpdateAlertRuleParams{
@@ -190,6 +260,15 @@ func (h *Handler) updateRule(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteRule(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	currentSite, ok := h.lookupNullableSiteID(w, r.Context(), func(ctx context.Context) (*uuid.UUID, error) {
+		return h.Q.GetAlertRuleSiteScopeID(ctx, id)
+	}, "rule not found")
+	if !ok {
+		return
+	}
+	if !h.enforceSiteOrGlobal(w, r, currentSite, "alerts:rules:delete") {
 		return
 	}
 	if err := h.Q.DeleteAlertRule(r.Context(), id); err != nil {
@@ -216,6 +295,9 @@ func (h *Handler) createMW(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.StartsAt.IsZero() || req.EndsAt.IsZero() {
 		httpx.Error(w, http.StatusBadRequest, "name, starts_at, ends_at required")
+		return
+	}
+	if !h.enforceSiteOrGlobal(w, r, req.SiteID, "alerts:maintenance-windows:create") {
 		return
 	}
 	p, _ := auth.From(r.Context())
@@ -281,9 +363,21 @@ func (h *Handler) updateMW(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	currentSite, ok := h.lookupNullableSiteID(w, r.Context(), func(ctx context.Context) (*uuid.UUID, error) {
+		return h.Q.GetMaintenanceWindowSiteID(ctx, id)
+	}, "maintenance window not found")
+	if !ok {
+		return
+	}
+	if !h.enforceSiteOrGlobal(w, r, currentSite, "alerts:maintenance-windows:update") {
+		return
+	}
 	var req mwUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
+		return
+	}
+	if req.siteSet && !h.enforceSiteOrGlobal(w, r, req.SiteID, "alerts:maintenance-windows:update") {
 		return
 	}
 	out, err := h.Q.UpdateMaintenanceWindow(r.Context(), dbq.UpdateMaintenanceWindowParams{
@@ -304,6 +398,15 @@ func (h *Handler) updateMW(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteMW(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r)
 	if !ok {
+		return
+	}
+	currentSite, ok := h.lookupNullableSiteID(w, r.Context(), func(ctx context.Context) (*uuid.UUID, error) {
+		return h.Q.GetMaintenanceWindowSiteID(ctx, id)
+	}, "maintenance window not found")
+	if !ok {
+		return
+	}
+	if !h.enforceSiteOrGlobal(w, r, currentSite, "alerts:maintenance-windows:delete") {
 		return
 	}
 	if err := h.Q.DeleteMaintenanceWindow(r.Context(), id); err != nil {

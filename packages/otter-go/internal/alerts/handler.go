@@ -38,6 +38,16 @@ type Querier interface {
 	CreateMaintenanceWindow(ctx context.Context, arg dbq.CreateMaintenanceWindowParams) (dbq.MaintenanceWindow, error)
 	UpdateMaintenanceWindow(ctx context.Context, arg dbq.UpdateMaintenanceWindowParams) (dbq.MaintenanceWindow, error)
 	DeleteMaintenanceWindow(ctx context.Context, id uuid.UUID) error
+
+	// PR 59 — site-scope ABAC. site_scope_id / site_id are nullable;
+	// nil = enterprise-default and only global principals can mutate.
+	// GetSiteRegionID + ListSiteGroupIDsForSite expose the region +
+	// site-group expansion EnforceSiteScope needs (same shape used by
+	// sites/racks/assets handlers).
+	GetAlertRuleSiteScopeID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
+	GetMaintenanceWindowSiteID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
+	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type Handler struct {

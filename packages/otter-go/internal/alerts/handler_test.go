@@ -70,6 +70,23 @@ func (f *fakeQ) UpdateMaintenanceWindow(_ context.Context, a dbq.UpdateMaintenan
 }
 func (f *fakeQ) DeleteMaintenanceWindow(_ context.Context, _ uuid.UUID) error { return nil }
 
+// PR 59 — nullable-site-scope lookups + site-scope expansion. Tests
+// that don't care about scope let these return nil/uuid.Nil; the
+// nullable case (nil site) means "enterprise default" — only global
+// principals can mutate.
+func (f *fakeQ) GetAlertRuleSiteScopeID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeQ) GetMaintenanceWindowSiteID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)

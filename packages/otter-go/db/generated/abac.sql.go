@@ -296,3 +296,28 @@ func (q *Queries) GetAnycastBindingDnsServerFabricID(ctx context.Context, id uui
 	err := row.Scan(&fid)
 	return fid, err
 }
+
+const getAlertRuleSiteScopeID = `-- name: GetAlertRuleSiteScopeID :one
+SELECT site_scope_id FROM alert_rules WHERE id = $1`
+
+// Returns (*uuid.UUID, error). nil result = enterprise-default rule
+// (only global principals can mutate). pgx.ErrNoRows = rule doesn't
+// exist.
+func (q *Queries) GetAlertRuleSiteScopeID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getAlertRuleSiteScopeID, id)
+	var sid *uuid.UUID
+	err := row.Scan(&sid)
+	return sid, err
+}
+
+const getMaintenanceWindowSiteID = `-- name: GetMaintenanceWindowSiteID :one
+SELECT site_id FROM maintenance_windows WHERE id = $1`
+
+// Returns (*uuid.UUID, error). nil result = enterprise-default
+// window (only global principals can mutate).
+func (q *Queries) GetMaintenanceWindowSiteID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getMaintenanceWindowSiteID, id)
+	var sid *uuid.UUID
+	err := row.Scan(&sid)
+	return sid, err
+}

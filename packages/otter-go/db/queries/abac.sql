@@ -131,3 +131,14 @@ SELECT s.fabric_id
 FROM anycast_bgp_bindings b
 JOIN dns_servers s ON s.id = b.dns_server_id
 WHERE b.id = $1;
+
+-- Alerts + maintenance windows (PR 59). Both columns are NULLABLE —
+-- NULL means "enterprise default" (applies to all sites) and only a
+-- global principal can mutate. A scoped principal can only touch
+-- resources whose site_scope_id / site_id is inside their site scope.
+
+-- name: GetAlertRuleSiteScopeID :one
+SELECT site_scope_id FROM alert_rules WHERE id = $1;
+
+-- name: GetMaintenanceWindowSiteID :one
+SELECT site_id FROM maintenance_windows WHERE id = $1;
