@@ -210,6 +210,40 @@ func (f *fakeQ) GetZoneFrozenByRecord(_ context.Context, _ uuid.UUID) (dbq.ZoneF
 	return dbq.ZoneFrozenRow{ZoneID: uuid.New(), Frozen: false}, nil
 }
 
+// ABAC parent-fabric lookups (PR 57). Tests that don't care about scope
+// let these return uuid.Nil (treated as "no fabric to enforce" by
+// EnforceFabricScope, so global behavior).
+func (f *fakeQ) GetDnsZoneFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsRecordFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsServerFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetAnycastGroupFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsForwarderFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsCatalogZoneFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsBlocklistFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsBlocklistEntryFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsViewFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetDnsHealthCheckFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)

@@ -167,3 +167,109 @@ func (q *Queries) GetVtepMembershipFabricID(ctx context.Context, id uuid.UUID) (
 	err := row.Scan(&fid)
 	return fid, err
 }
+
+const getDnsZoneFabricID = `-- name: GetDnsZoneFabricID :one
+SELECT fabric_id FROM dns_zones WHERE id = $1`
+
+func (q *Queries) GetDnsZoneFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsZoneFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsRecordFabricID = `-- name: GetDnsRecordFabricID :one
+SELECT z.fabric_id
+FROM dns_records r
+JOIN dns_zones z ON z.id = r.zone_id
+WHERE r.id = $1`
+
+func (q *Queries) GetDnsRecordFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsRecordFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsServerFabricID = `-- name: GetDnsServerFabricID :one
+SELECT fabric_id FROM dns_servers WHERE id = $1`
+
+func (q *Queries) GetDnsServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsServerFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getAnycastGroupFabricID = `-- name: GetAnycastGroupFabricID :one
+SELECT fabric_id FROM anycast_groups WHERE id = $1`
+
+func (q *Queries) GetAnycastGroupFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getAnycastGroupFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsForwarderFabricID = `-- name: GetDnsForwarderFabricID :one
+SELECT fabric_id FROM dns_forwarders WHERE id = $1`
+
+func (q *Queries) GetDnsForwarderFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsForwarderFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsCatalogZoneFabricID = `-- name: GetDnsCatalogZoneFabricID :one
+SELECT fabric_id FROM dns_catalog_zones WHERE id = $1`
+
+func (q *Queries) GetDnsCatalogZoneFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsCatalogZoneFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsBlocklistFabricID = `-- name: GetDnsBlocklistFabricID :one
+SELECT fabric_id FROM dns_blocklists WHERE id = $1`
+
+func (q *Queries) GetDnsBlocklistFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsBlocklistFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsBlocklistEntryFabricID = `-- name: GetDnsBlocklistEntryFabricID :one
+SELECT b.fabric_id
+FROM dns_blocklist_entries e
+JOIN dns_blocklists b ON b.id = e.blocklist_id
+WHERE e.id = $1`
+
+func (q *Queries) GetDnsBlocklistEntryFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsBlocklistEntryFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsViewFabricID = `-- name: GetDnsViewFabricID :one
+SELECT fabric_id FROM dns_views WHERE id = $1`
+
+func (q *Queries) GetDnsViewFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsViewFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
+const getDnsHealthCheckFabricID = `-- name: GetDnsHealthCheckFabricID :one
+SELECT fabric_id FROM dns_health_checks WHERE id = $1`
+
+func (q *Queries) GetDnsHealthCheckFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDnsHealthCheckFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}

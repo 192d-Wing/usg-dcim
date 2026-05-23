@@ -76,3 +76,43 @@ FROM vtep_vni_memberships m
 JOIN vteps v ON v.id = m.vtep_id
 JOIN overlays o ON o.id = v.overlay_id
 WHERE m.id = $1;
+
+-- DNS parent-fabric lookups (PR 57). Most DNS resources are 1-hop
+-- (have a direct fabric_id); dns_records and dns_blocklist_entries are
+-- 2-hop via their parent zone / blocklist.
+
+-- name: GetDnsZoneFabricID :one
+SELECT fabric_id FROM dns_zones WHERE id = $1;
+
+-- name: GetDnsRecordFabricID :one
+SELECT z.fabric_id
+FROM dns_records r
+JOIN dns_zones z ON z.id = r.zone_id
+WHERE r.id = $1;
+
+-- name: GetDnsServerFabricID :one
+SELECT fabric_id FROM dns_servers WHERE id = $1;
+
+-- name: GetAnycastGroupFabricID :one
+SELECT fabric_id FROM anycast_groups WHERE id = $1;
+
+-- name: GetDnsForwarderFabricID :one
+SELECT fabric_id FROM dns_forwarders WHERE id = $1;
+
+-- name: GetDnsCatalogZoneFabricID :one
+SELECT fabric_id FROM dns_catalog_zones WHERE id = $1;
+
+-- name: GetDnsBlocklistFabricID :one
+SELECT fabric_id FROM dns_blocklists WHERE id = $1;
+
+-- name: GetDnsBlocklistEntryFabricID :one
+SELECT b.fabric_id
+FROM dns_blocklist_entries e
+JOIN dns_blocklists b ON b.id = e.blocklist_id
+WHERE e.id = $1;
+
+-- name: GetDnsViewFabricID :one
+SELECT fabric_id FROM dns_views WHERE id = $1;
+
+-- name: GetDnsHealthCheckFabricID :one
+SELECT fabric_id FROM dns_health_checks WHERE id = $1;

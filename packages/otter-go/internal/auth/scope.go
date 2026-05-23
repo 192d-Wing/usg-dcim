@@ -11,9 +11,12 @@
 // PR 53 ships the foundation: Scope struct + resolver + matchers +
 // enforcers + filters, plus a wire-up in the Verifying middleware to
 // populate Principal.Scopes from user_roles + role_scopes. Per-route
-// retrofits land in PR 54 (IPAM 1-hop + inventory), PR 55 (IPAM 2-hop:
-// subnet/address/vni/vtep/vtep-membership), and a later PR
-// (DNS/BGP/alerts/auth handlers + scope-filtered LIST queries).
+// retrofits: PR 54 (IPAM 1-hop + inventory), PR 55 (IPAM 2-hop:
+// subnet/address/vni/vtep/vtep-membership), PR 56 (scope-filtered
+// IPAM LIST queries), PR 57 (DNS mutations: zones/records/servers/
+// anycast-groups/forwarders/catalog-zones/blocklists/views/
+// health-checks). Remaining: BGP (site-scoped, separate PR),
+// alerts/auth-handler retrofit, DNS list-scope filtering.
 //
 // OIDC-mapping scope resolution (the cross-table code→UUID lookups
 // from _resolve_mapping_scope in Python) is intentionally deferred —

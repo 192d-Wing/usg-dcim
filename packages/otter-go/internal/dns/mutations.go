@@ -1,10 +1,17 @@
 // DNS mutations (PR 43). Basic CRUD only. Action endpoints
 // (freeze/unfreeze, import, sync-from-ipam, enable/disable-dnssec,
 // nsec3, render-status, health-checks/result, blocklists entries/bulk)
-// are deferred to a focused follow-up.
+// are deferred to a focused follow-up. ABAC fabric-scope enforcement
+// on every fabric-rooted mutation landed in PR 57 (1-hop: zones,
+// servers, anycast-groups, forwarders, catalog-zones, blocklists,
+// views, health-checks; 2-hop: records via zone, blocklist-entries
+// via blocklist). BGP peers + anycast bindings live in this file but
+// are site-scoped, not fabric-scoped, and stay deferred to a BGP-
+// specific PR.
 package dns
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -15,8 +22,34 @@ import (
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
+
+// enforceFabric resolves the caller's Principal and refuses with 403 if
+// EnforceFabricScope rejects the target fabric. Returns false when a
+// response has been written. PR 57 wires this onto every DNS mutation
+// that owns or transitively belongs to a fabric.
+func (h *Handler) enforceFabric(w http.ResponseWriter, r *http.Request, fabricID uuid.UUID, capCode string) bool {
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceFabricScope(p, fabricID, capCode); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return false
+	}
+	return true
+}
+
+// lookupFabricID runs a slim parent-fabric lookup and converts
+// pgx.ErrNoRows into a 404 with the supplied notFoundMsg. Returns
+// ok=false when a response has been written.
+func (h *Handler) lookupFabricID(w http.ResponseWriter, ctx context.Context, fn func(context.Context) (uuid.UUID, error), notFoundMsg string) (uuid.UUID, bool) {
+	fid, err := fn(ctx)
+	if err != nil {
+		mapErr(w, err, notFoundMsg)
+		return uuid.Nil, false
+	}
+	return fid, true
+}
 
 func idFromURL(w http.ResponseWriter, r *http.Request, key string) (uuid.UUID, bool) {
 	if key == "" {
@@ -63,6 +96,9 @@ func (h *Handler) createZone(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.Kind == "" || req.FabricID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "name, kind, fabric_id required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:zones:create") {
 		return
 	}
 	if req.SoaMname == "" {
@@ -143,6 +179,15 @@ func (h *Handler) updateZone(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsZoneFabricID(ctx, id)
+	}, "zone not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:zones:update") {
+		return
+	}
 	var req zoneUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -168,6 +213,15 @@ func (h *Handler) updateZone(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteZone(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsZoneFabricID(ctx, id)
+	}, "zone not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:zones:delete") {
 		return
 	}
 	if err := h.Q.DeleteDnsZone(r.Context(), id); err != nil {
@@ -201,6 +255,9 @@ func (h *Handler) createRecord(w http.ResponseWriter, r *http.Request) {
 	zone, err := h.Q.GetDnsZone(r.Context(), req.ZoneID)
 	if err != nil {
 		mapErr(w, err, "zone not found")
+		return
+	}
+	if !h.enforceFabric(w, r, zone.FabricID, "dns:records:create") {
 		return
 	}
 	if zone.Frozen {
@@ -272,6 +329,15 @@ func (h *Handler) updateRecord(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsRecordFabricID(ctx, id)
+	}, "record not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:records:update") {
+		return
+	}
 	var req recordUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -305,6 +371,15 @@ func (h *Handler) updateRecord(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteRecord(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsRecordFabricID(ctx, id)
+	}, "record not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:records:delete") {
 		return
 	}
 	zf, err := h.Q.GetZoneFrozenByRecord(r.Context(), id)
@@ -342,6 +417,9 @@ func (h *Handler) createServer(w http.ResponseWriter, r *http.Request) {
 		req.Name == "" || req.SiteID == uuid.Nil || req.FabricID == uuid.Nil ||
 		req.Role == "" || req.UnicastIP == "" {
 		httpx.Error(w, http.StatusBadRequest, "name, site_id, fabric_id, role, unicast_ip required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:servers:create") {
 		return
 	}
 	enabled := true
@@ -395,6 +473,15 @@ func (h *Handler) updateServer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsServerFabricID(ctx, id)
+	}, "server not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:servers:update") {
+		return
+	}
 	var req serverUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -415,6 +502,15 @@ func (h *Handler) updateServer(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteServer(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsServerFabricID(ctx, id)
+	}, "server not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:servers:delete") {
 		return
 	}
 	if err := h.Q.DeleteDnsServerRow(r.Context(), id); err != nil {
@@ -441,6 +537,9 @@ func (h *Handler) createAnycastGroup(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.FabricID == uuid.Nil || req.Service == "" {
 		httpx.Error(w, http.StatusBadRequest, "name, fabric_id, service required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:anycast-groups:create") {
 		return
 	}
 	out, err := h.Q.CreateAnycastGroup(r.Context(), dbq.CreateAnycastGroupParams{
@@ -493,6 +592,15 @@ func (h *Handler) updateAnycastGroup(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetAnycastGroupFabricID(ctx, id)
+	}, "anycast group not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:anycast-groups:update") {
+		return
+	}
 	var req acGroupUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -515,6 +623,15 @@ func (h *Handler) updateAnycastGroup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteAnycastGroup(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetAnycastGroupFabricID(ctx, id)
+	}, "anycast group not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:anycast-groups:delete") {
 		return
 	}
 	if err := h.Q.DeleteAnycastGroup(r.Context(), id); err != nil {
@@ -540,6 +657,9 @@ func (h *Handler) createForwarder(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.FabricID == uuid.Nil || req.ZonePattern == "" {
 		httpx.Error(w, http.StatusBadRequest, "name, fabric_id, zone_pattern required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:forwarders:create") {
 		return
 	}
 	if len(req.Upstreams) == 0 {
@@ -591,6 +711,15 @@ func (h *Handler) updateForwarder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsForwarderFabricID(ctx, id)
+	}, "forwarder not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:forwarders:update") {
+		return
+	}
 	var req forwarderUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -611,6 +740,15 @@ func (h *Handler) updateForwarder(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteForwarder(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsForwarderFabricID(ctx, id)
+	}, "forwarder not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:forwarders:delete") {
 		return
 	}
 	if err := h.Q.DeleteDnsForwarder(r.Context(), id); err != nil {
@@ -634,6 +772,9 @@ func (h *Handler) createCatalogZone(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.FabricID == uuid.Nil || req.Name == "" {
 		httpx.Error(w, http.StatusBadRequest, "fabric_id and name required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:catalog-zones:create") {
 		return
 	}
 	enabled := true
@@ -661,6 +802,15 @@ func (h *Handler) updateCatalogZone(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsCatalogZoneFabricID(ctx, id)
+	}, "catalog zone not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:catalog-zones:update") {
+		return
+	}
 	var req catalogUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -680,6 +830,15 @@ func (h *Handler) updateCatalogZone(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteCatalogZone(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsCatalogZoneFabricID(ctx, id)
+	}, "catalog zone not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:catalog-zones:delete") {
 		return
 	}
 	if err := h.Q.DeleteDnsCatalogZone(r.Context(), id); err != nil {
@@ -707,6 +866,9 @@ func (h *Handler) createBlocklist(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.FabricID == uuid.Nil || req.Action == "" {
 		httpx.Error(w, http.StatusBadRequest, "name, fabric_id, action required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:blocklists:create") {
 		return
 	}
 	enabled := true
@@ -772,6 +934,15 @@ func (h *Handler) updateBlocklist(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsBlocklistFabricID(ctx, id)
+	}, "blocklist not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:blocklists:update") {
+		return
+	}
 	var req blocklistUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -797,6 +968,15 @@ func (h *Handler) deleteBlocklist(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsBlocklistFabricID(ctx, id)
+	}, "blocklist not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:blocklists:delete") {
+		return
+	}
 	if err := h.Q.DeleteDnsBlocklist(r.Context(), id); err != nil {
 		mapErr(w, err, "blocklist not found")
 		return
@@ -815,6 +995,18 @@ type blocklistEntryCreateReq struct {
 func (h *Handler) createBlocklistEntry(w http.ResponseWriter, r *http.Request) {
 	blID, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	// Blocklist-entry create is gated under dns:blocklists:update (route
+	// definition), so resolve the parent blocklist's fabric and enforce
+	// that scope.
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsBlocklistFabricID(ctx, blID)
+	}, "blocklist not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:blocklists:update") {
 		return
 	}
 	var req blocklistEntryCreateReq
@@ -836,6 +1028,15 @@ func (h *Handler) createBlocklistEntry(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteBlocklistEntry(w http.ResponseWriter, r *http.Request) {
 	entryID, ok := idFromURL(w, r, "entry_id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsBlocklistEntryFabricID(ctx, entryID)
+	}, "entry not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:blocklists:update") {
 		return
 	}
 	if err := h.Q.DeleteDnsBlocklistEntry(r.Context(), entryID); err != nil {
@@ -861,6 +1062,9 @@ func (h *Handler) createView(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.FabricID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "name and fabric_id required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:views:create") {
 		return
 	}
 	if len(req.MatchCidrs) == 0 {
@@ -916,6 +1120,15 @@ func (h *Handler) updateView(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsViewFabricID(ctx, id)
+	}, "view not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:views:update") {
+		return
+	}
 	var req viewUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -936,6 +1149,15 @@ func (h *Handler) updateView(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteView(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsViewFabricID(ctx, id)
+	}, "view not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:views:delete") {
 		return
 	}
 	if err := h.Q.DeleteDnsView(r.Context(), id); err != nil {
@@ -965,6 +1187,9 @@ func (h *Handler) createHealthCheck(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
 		req.Name == "" || req.FabricID == uuid.Nil || req.TargetIP == "" || req.Protocol == "" {
 		httpx.Error(w, http.StatusBadRequest, "name, fabric_id, target_ip, protocol required")
+		return
+	}
+	if !h.enforceFabric(w, r, req.FabricID, "dns:health-checks:create") {
 		return
 	}
 	if req.Path == "" {
@@ -1033,6 +1258,15 @@ func (h *Handler) updateHealthCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsHealthCheckFabricID(ctx, id)
+	}, "health check not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:health-checks:update") {
+		return
+	}
 	var req hcUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
@@ -1055,6 +1289,15 @@ func (h *Handler) updateHealthCheck(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) deleteHealthCheck(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsHealthCheckFabricID(ctx, id)
+	}, "health check not found")
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, "dns:health-checks:delete") {
 		return
 	}
 	if err := h.Q.DeleteDnsHealthCheck(r.Context(), id); err != nil {

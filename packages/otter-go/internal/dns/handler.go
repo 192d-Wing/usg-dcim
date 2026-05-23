@@ -93,6 +93,22 @@ type Querier interface {
 
 	// Invariants (PR 52)
 	GetZoneFrozenByRecord(ctx context.Context, recordID uuid.UUID) (dbq.ZoneFrozenRow, error)
+
+	// ABAC parent-fabric lookups (PR 57). Used by mutation handlers to
+	// resolve {id} → fabric_id before EnforceFabricScope on update/
+	// delete paths, and to resolve parent-id → fabric_id on the 2-hop
+	// dns_records / dns_blocklist_entries create paths via their parent
+	// (zone / blocklist) lookups above.
+	GetDnsZoneFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsRecordFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetAnycastGroupFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsForwarderFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsCatalogZoneFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsBlocklistFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsBlocklistEntryFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsViewFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDnsHealthCheckFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 }
 
 type Handler struct {
