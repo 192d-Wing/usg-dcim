@@ -16,18 +16,20 @@ SELECT id, fabric_id, name, kind::text AS kind, udp_port, mtu,
        underlay_vrf_id, description, created_at, updated_at
 FROM overlays
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
+  AND ($4::uuid[] IS NULL OR fabric_id = ANY($4::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListOverlaysParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListOverlays(ctx context.Context, arg ListOverlaysParams) ([]Overlay, error) {
-	rows, err := q.db.Query(ctx, listOverlays, arg.Limit, arg.Offset, arg.FabricID)
+	rows, err := q.db.Query(ctx, listOverlays, arg.Limit, arg.Offset, arg.FabricID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -47,12 +49,16 @@ func (q *Queries) ListOverlays(ctx context.Context, arg ListOverlaysParams) ([]O
 const countOverlays = `-- name: CountOverlays :one
 SELECT count(*)::bigint FROM overlays
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::uuid[] IS NULL OR fabric_id = ANY($2::uuid[]))
 `
 
-type CountOverlaysParams struct{ FabricID *uuid.UUID `json:"fabric_id"` }
+type CountOverlaysParams struct {
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
+}
 
 func (q *Queries) CountOverlays(ctx context.Context, arg CountOverlaysParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countOverlays, arg.FabricID)
+	row := q.db.QueryRow(ctx, countOverlays, arg.FabricID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -66,21 +72,23 @@ SELECT id, overlay_id, vni, kind::text AS kind, name, description,
 FROM vnis
 WHERE ($3::uuid IS NULL OR overlay_id = $3)
   AND ($4::uuid IS NULL OR overlay_id IN (SELECT id FROM overlays WHERE fabric_id = $4))
+  AND ($6::uuid[] IS NULL OR overlay_id IN (SELECT id FROM overlays WHERE fabric_id = ANY($6::uuid[])))
   AND ($5::text IS NULL OR kind::text  = $5)
 ORDER BY vni
 LIMIT $1 OFFSET $2
 `
 
 type ListVnisParams struct {
-	Limit     int32      `json:"limit"`
-	Offset    int32      `json:"offset"`
-	OverlayID *uuid.UUID `json:"overlay_id"`
-	FabricID  *uuid.UUID `json:"fabric_id"`
-	Kind      *string    `json:"kind"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	OverlayID      *uuid.UUID  `json:"overlay_id"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	Kind           *string     `json:"kind"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListVnis(ctx context.Context, arg ListVnisParams) ([]Vni, error) {
-	rows, err := q.db.Query(ctx, listVnis, arg.Limit, arg.Offset, arg.OverlayID, arg.FabricID, arg.Kind)
+	rows, err := q.db.Query(ctx, listVnis, arg.Limit, arg.Offset, arg.OverlayID, arg.FabricID, arg.Kind, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -101,17 +109,19 @@ const countVnis = `-- name: CountVnis :one
 SELECT count(*)::bigint FROM vnis
 WHERE ($1::uuid IS NULL OR overlay_id = $1)
   AND ($2::uuid IS NULL OR overlay_id IN (SELECT id FROM overlays WHERE fabric_id = $2))
+  AND ($4::uuid[] IS NULL OR overlay_id IN (SELECT id FROM overlays WHERE fabric_id = ANY($4::uuid[])))
   AND ($3::text IS NULL OR kind::text  = $3)
 `
 
 type CountVnisParams struct {
-	OverlayID *uuid.UUID `json:"overlay_id"`
-	FabricID  *uuid.UUID `json:"fabric_id"`
-	Kind      *string    `json:"kind"`
+	OverlayID      *uuid.UUID  `json:"overlay_id"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	Kind           *string     `json:"kind"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountVnis(ctx context.Context, arg CountVnisParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countVnis, arg.OverlayID, arg.FabricID, arg.Kind)
+	row := q.db.QueryRow(ctx, countVnis, arg.OverlayID, arg.FabricID, arg.Kind, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -125,19 +135,21 @@ SELECT id, overlay_id, asset_id, host(loopback_ip) AS loopback_ip,
 FROM vteps
 WHERE ($3::uuid IS NULL OR overlay_id = $3)
   AND ($4::uuid IS NULL OR asset_id   = $4)
+  AND ($5::uuid[] IS NULL OR overlay_id IN (SELECT id FROM overlays WHERE fabric_id = ANY($5::uuid[])))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListVtepsParams struct {
-	Limit     int32      `json:"limit"`
-	Offset    int32      `json:"offset"`
-	OverlayID *uuid.UUID `json:"overlay_id"`
-	AssetID   *uuid.UUID `json:"asset_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	OverlayID      *uuid.UUID  `json:"overlay_id"`
+	AssetID        *uuid.UUID  `json:"asset_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListVteps(ctx context.Context, arg ListVtepsParams) ([]Vtep, error) {
-	rows, err := q.db.Query(ctx, listVteps, arg.Limit, arg.Offset, arg.OverlayID, arg.AssetID)
+	rows, err := q.db.Query(ctx, listVteps, arg.Limit, arg.Offset, arg.OverlayID, arg.AssetID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -158,15 +170,17 @@ const countVteps = `-- name: CountVteps :one
 SELECT count(*)::bigint FROM vteps
 WHERE ($1::uuid IS NULL OR overlay_id = $1)
   AND ($2::uuid IS NULL OR asset_id   = $2)
+  AND ($3::uuid[] IS NULL OR overlay_id IN (SELECT id FROM overlays WHERE fabric_id = ANY($3::uuid[])))
 `
 
 type CountVtepsParams struct {
-	OverlayID *uuid.UUID `json:"overlay_id"`
-	AssetID   *uuid.UUID `json:"asset_id"`
+	OverlayID      *uuid.UUID  `json:"overlay_id"`
+	AssetID        *uuid.UUID  `json:"asset_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountVteps(ctx context.Context, arg CountVtepsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countVteps, arg.OverlayID, arg.AssetID)
+	row := q.db.QueryRow(ctx, countVteps, arg.OverlayID, arg.AssetID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -181,20 +195,22 @@ LEFT JOIN vteps v ON v.id = m.vtep_id
 WHERE ($3::uuid IS NULL OR m.vtep_id    = $3)
   AND ($4::uuid IS NULL OR m.vni_id     = $4)
   AND ($5::uuid IS NULL OR v.overlay_id = $5)
+  AND ($6::uuid[] IS NULL OR v.overlay_id IN (SELECT id FROM overlays WHERE fabric_id = ANY($6::uuid[])))
 ORDER BY m.created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListVtepMembershipsParams struct {
-	Limit     int32      `json:"limit"`
-	Offset    int32      `json:"offset"`
-	VtepID    *uuid.UUID `json:"vtep_id"`
-	VniID     *uuid.UUID `json:"vni_id"`
-	OverlayID *uuid.UUID `json:"overlay_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	VtepID         *uuid.UUID  `json:"vtep_id"`
+	VniID          *uuid.UUID  `json:"vni_id"`
+	OverlayID      *uuid.UUID  `json:"overlay_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListVtepMemberships(ctx context.Context, arg ListVtepMembershipsParams) ([]VtepVniMembership, error) {
-	rows, err := q.db.Query(ctx, listVtepMemberships, arg.Limit, arg.Offset, arg.VtepID, arg.VniID, arg.OverlayID)
+	rows, err := q.db.Query(ctx, listVtepMemberships, arg.Limit, arg.Offset, arg.VtepID, arg.VniID, arg.OverlayID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -217,16 +233,18 @@ LEFT JOIN vteps v ON v.id = m.vtep_id
 WHERE ($1::uuid IS NULL OR m.vtep_id    = $1)
   AND ($2::uuid IS NULL OR m.vni_id     = $2)
   AND ($3::uuid IS NULL OR v.overlay_id = $3)
+  AND ($4::uuid[] IS NULL OR v.overlay_id IN (SELECT id FROM overlays WHERE fabric_id = ANY($4::uuid[])))
 `
 
 type CountVtepMembershipsParams struct {
-	VtepID    *uuid.UUID `json:"vtep_id"`
-	VniID     *uuid.UUID `json:"vni_id"`
-	OverlayID *uuid.UUID `json:"overlay_id"`
+	VtepID         *uuid.UUID  `json:"vtep_id"`
+	VniID          *uuid.UUID  `json:"vni_id"`
+	OverlayID      *uuid.UUID  `json:"overlay_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountVtepMemberships(ctx context.Context, arg CountVtepMembershipsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countVtepMemberships, arg.VtepID, arg.VniID, arg.OverlayID)
+	row := q.db.QueryRow(ctx, countVtepMemberships, arg.VtepID, arg.VniID, arg.OverlayID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -240,18 +258,20 @@ SELECT id, name, fabric_id, kea_url, auth_username, enabled,
        created_at, updated_at
 FROM dhcp_servers
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
+  AND ($4::uuid[] IS NULL OR fabric_id = ANY($4::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListDhcpServersParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListDhcpServers(ctx context.Context, arg ListDhcpServersParams) ([]DhcpServer, error) {
-	rows, err := q.db.Query(ctx, listDhcpServers, arg.Limit, arg.Offset, arg.FabricID)
+	rows, err := q.db.Query(ctx, listDhcpServers, arg.Limit, arg.Offset, arg.FabricID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -272,12 +292,16 @@ func (q *Queries) ListDhcpServers(ctx context.Context, arg ListDhcpServersParams
 const countDhcpServers = `-- name: CountDhcpServers :one
 SELECT count(*)::bigint FROM dhcp_servers
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::uuid[] IS NULL OR fabric_id = ANY($2::uuid[]))
 `
 
-type CountDhcpServersParams struct{ FabricID *uuid.UUID `json:"fabric_id"` }
+type CountDhcpServersParams struct {
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
+}
 
 func (q *Queries) CountDhcpServers(ctx context.Context, arg CountDhcpServersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDhcpServers, arg.FabricID)
+	row := q.db.QueryRow(ctx, countDhcpServers, arg.FabricID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

@@ -16,20 +16,22 @@ FROM vrf_bgp_peers
 WHERE ($3::uuid IS NULL OR vrf_id      = $3)
   AND ($4::uuid IS NULL OR bgp_peer_id = $4)
   AND ($5::text IS NULL OR address_family::text = $5)
+  AND ($6::uuid[] IS NULL OR vrf_id IN (SELECT id FROM vrfs WHERE fabric_id = ANY($6::uuid[])))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListVrfBgpPeersParams struct {
-	Limit         int32      `json:"limit"`
-	Offset        int32      `json:"offset"`
-	VrfID         *uuid.UUID `json:"vrf_id"`
-	BgpPeerID     *uuid.UUID `json:"bgp_peer_id"`
-	AddressFamily *string    `json:"address_family"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	VrfID          *uuid.UUID  `json:"vrf_id"`
+	BgpPeerID      *uuid.UUID  `json:"bgp_peer_id"`
+	AddressFamily  *string     `json:"address_family"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListVrfBgpPeers(ctx context.Context, arg ListVrfBgpPeersParams) ([]VrfBgpPeer, error) {
-	rows, err := q.db.Query(ctx, listVrfBgpPeers, arg.Limit, arg.Offset, arg.VrfID, arg.BgpPeerID, arg.AddressFamily)
+	rows, err := q.db.Query(ctx, listVrfBgpPeers, arg.Limit, arg.Offset, arg.VrfID, arg.BgpPeerID, arg.AddressFamily, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -51,16 +53,18 @@ SELECT count(*)::bigint FROM vrf_bgp_peers
 WHERE ($1::uuid IS NULL OR vrf_id      = $1)
   AND ($2::uuid IS NULL OR bgp_peer_id = $2)
   AND ($3::text IS NULL OR address_family::text = $3)
+  AND ($4::uuid[] IS NULL OR vrf_id IN (SELECT id FROM vrfs WHERE fabric_id = ANY($4::uuid[])))
 `
 
 type CountVrfBgpPeersParams struct {
-	VrfID         *uuid.UUID `json:"vrf_id"`
-	BgpPeerID     *uuid.UUID `json:"bgp_peer_id"`
-	AddressFamily *string    `json:"address_family"`
+	VrfID          *uuid.UUID  `json:"vrf_id"`
+	BgpPeerID      *uuid.UUID  `json:"bgp_peer_id"`
+	AddressFamily  *string     `json:"address_family"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountVrfBgpPeers(ctx context.Context, arg CountVrfBgpPeersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countVrfBgpPeers, arg.VrfID, arg.BgpPeerID, arg.AddressFamily)
+	row := q.db.QueryRow(ctx, countVrfBgpPeers, arg.VrfID, arg.BgpPeerID, arg.AddressFamily, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

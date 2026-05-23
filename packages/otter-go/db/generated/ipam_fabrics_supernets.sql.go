@@ -18,18 +18,20 @@ SELECT id, name, slug, description, enclave, classification,
        created_at, updated_at
 FROM fabrics
 WHERE ($3::text IS NULL OR enclave = $3)
+  AND ($4::uuid[] IS NULL OR id = ANY($4::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListFabricsParams struct {
-	Limit   int32   `json:"limit"`
-	Offset  int32   `json:"offset"`
-	Enclave *string `json:"enclave"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	Enclave        *string     `json:"enclave"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListFabrics(ctx context.Context, arg ListFabricsParams) ([]Fabric, error) {
-	rows, err := q.db.Query(ctx, listFabrics, arg.Limit, arg.Offset, arg.Enclave)
+	rows, err := q.db.Query(ctx, listFabrics, arg.Limit, arg.Offset, arg.Enclave, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -51,12 +53,16 @@ const countFabrics = `-- name: CountFabrics :one
 SELECT count(*)::bigint
 FROM fabrics
 WHERE ($1::text IS NULL OR enclave = $1)
+  AND ($2::uuid[] IS NULL OR id = ANY($2::uuid[]))
 `
 
-type CountFabricsParams struct{ Enclave *string `json:"enclave"` }
+type CountFabricsParams struct {
+	Enclave        *string     `json:"enclave"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
+}
 
 func (q *Queries) CountFabrics(ctx context.Context, arg CountFabricsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countFabrics, arg.Enclave)
+	row := q.db.QueryRow(ctx, countFabrics, arg.Enclave, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -89,6 +95,7 @@ SELECT id, fabric_id, vrf_id, parent_supernet_id, site_id,
 FROM supernets
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
   AND ($4::uuid IS NULL OR vrf_id    = $4)
+  AND ($7::uuid[] IS NULL OR fabric_id = ANY($7::uuid[]))
   AND (
         $5::text = 'any'
      OR ($5::text = 'null' AND parent_supernet_id IS NULL)
@@ -101,17 +108,18 @@ LIMIT $1 OFFSET $2
 // ParentFilterMode is a 3-state filter: 'any' (no constraint), 'null'
 // (top-level only — parent_supernet_id IS NULL), or 'eq' (specific parent).
 type ListSupernetsParams struct {
-	Limit            int32      `json:"limit"`
-	Offset           int32      `json:"offset"`
-	FabricID         *uuid.UUID `json:"fabric_id"`
-	VrfID            *uuid.UUID `json:"vrf_id"`
-	ParentFilterMode string     `json:"parent_filter_mode"`
-	ParentSupernetID *uuid.UUID `json:"parent_supernet_id"`
+	Limit            int32       `json:"limit"`
+	Offset           int32       `json:"offset"`
+	FabricID         *uuid.UUID  `json:"fabric_id"`
+	VrfID            *uuid.UUID  `json:"vrf_id"`
+	ParentFilterMode string      `json:"parent_filter_mode"`
+	ParentSupernetID *uuid.UUID  `json:"parent_supernet_id"`
+	ScopeFabricIds   []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListSupernets(ctx context.Context, arg ListSupernetsParams) ([]Supernet, error) {
 	rows, err := q.db.Query(ctx, listSupernets,
-		arg.Limit, arg.Offset, arg.FabricID, arg.VrfID, arg.ParentFilterMode, arg.ParentSupernetID)
+		arg.Limit, arg.Offset, arg.FabricID, arg.VrfID, arg.ParentFilterMode, arg.ParentSupernetID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +141,7 @@ SELECT count(*)::bigint
 FROM supernets
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
   AND ($2::uuid IS NULL OR vrf_id    = $2)
+  AND ($5::uuid[] IS NULL OR fabric_id = ANY($5::uuid[]))
   AND (
         $3::text = 'any'
      OR ($3::text = 'null' AND parent_supernet_id IS NULL)
@@ -141,14 +150,15 @@ WHERE ($1::uuid IS NULL OR fabric_id = $1)
 `
 
 type CountSupernetsParams struct {
-	FabricID         *uuid.UUID `json:"fabric_id"`
-	VrfID            *uuid.UUID `json:"vrf_id"`
-	ParentFilterMode string     `json:"parent_filter_mode"`
-	ParentSupernetID *uuid.UUID `json:"parent_supernet_id"`
+	FabricID         *uuid.UUID  `json:"fabric_id"`
+	VrfID            *uuid.UUID  `json:"vrf_id"`
+	ParentFilterMode string      `json:"parent_filter_mode"`
+	ParentSupernetID *uuid.UUID  `json:"parent_supernet_id"`
+	ScopeFabricIds   []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountSupernets(ctx context.Context, arg CountSupernetsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSupernets, arg.FabricID, arg.VrfID, arg.ParentFilterMode, arg.ParentSupernetID)
+	row := q.db.QueryRow(ctx, countSupernets, arg.FabricID, arg.VrfID, arg.ParentFilterMode, arg.ParentSupernetID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

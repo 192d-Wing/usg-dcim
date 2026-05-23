@@ -88,6 +88,36 @@ func (s Scope) FabricIDsInScope() map[uuid.UUID]struct{} {
 	return s.FabricIDs
 }
 
+// ScopedFabricFilter resolves the caller's scope for capCode and turns
+// it into the (slice, scoped) pair that LIST/COUNT handlers should pass
+// as their scope_fabric_ids SQL parameter:
+//
+//   - (nil, false)        — principal is global for this cap; pass nil
+//     to skip the filter.
+//   - (ids, true) with ids — principal is fabric-scoped; pass ids so
+//     the query restricts to fabric_id = ANY(ids).
+//   - ([]uuid.UUID{}, true) — principal is non-global but has no fabric
+//     dimension (e.g. region-only scope). Caller should short-circuit
+//     to an empty page without hitting the DB — fabric-rooted resources
+//     don't expand from region/site/group scopes.
+//
+// Region/site/site-group dimensions of Scope are deliberately ignored
+// here: fabrics are not site-rooted, so those dimensions can't expand
+// into a fabric set. A region-only principal therefore sees nothing
+// under any fabric-rooted /ipam/* LIST endpoint, which matches the
+// EnforceFabricScope behavior on the same caps.
+func ScopedFabricFilter(p Principal, capCode string) (ids []uuid.UUID, scoped bool) {
+	s := FindScope(p, capCode)
+	if s == nil || s.IsGlobal {
+		return nil, false
+	}
+	out := make([]uuid.UUID, 0, len(s.FabricIDs))
+	for id := range s.FabricIDs {
+		out = append(out, id)
+	}
+	return out, true
+}
+
 // SiteMatches reports whether site_id is reachable under s. Walks the
 // region + site-group dimensions via DB lookups when needed; for
 // site-scoped principals it's a pure set check.

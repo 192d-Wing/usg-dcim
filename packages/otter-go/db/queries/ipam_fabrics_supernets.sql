@@ -1,4 +1,7 @@
 -- ===== Fabrics =====
+-- scope_fabric_ids gates the list to a specific set of fabrics for
+-- fabric-scoped principals. NULL = no scope filter (global caller).
+-- See auth.ScopedFabricFilter.
 -- name: ListFabrics :many
 SELECT id, name, slug, description, enclave, classification,
        dns_recursive_upstreams, dns_deny_networks, catalog_transfer_acl,
@@ -6,13 +9,15 @@ SELECT id, name, slug, description, enclave, classification,
        created_at, updated_at
 FROM fabrics
 WHERE (sqlc.narg(enclave)::text IS NULL OR enclave = sqlc.narg(enclave))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
 -- name: CountFabrics :one
 SELECT count(*)::bigint
 FROM fabrics
-WHERE (sqlc.narg(enclave)::text IS NULL OR enclave = sqlc.narg(enclave));
+WHERE (sqlc.narg(enclave)::text IS NULL OR enclave = sqlc.narg(enclave))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- name: GetFabric :one
 SELECT id, name, slug, description, enclave, classification,
@@ -36,6 +41,7 @@ SELECT id, fabric_id, vrf_id, parent_supernet_id, site_id,
 FROM supernets
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(vrf_id)::uuid    IS NULL OR vrf_id    = sqlc.narg(vrf_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
   AND (
         sqlc.narg(parent_filter_mode)::text = 'any'
      OR (sqlc.narg(parent_filter_mode)::text = 'null' AND parent_supernet_id IS NULL)
@@ -49,6 +55,7 @@ SELECT count(*)::bigint
 FROM supernets
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(vrf_id)::uuid    IS NULL OR vrf_id    = sqlc.narg(vrf_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
   AND (
         sqlc.narg(parent_filter_mode)::text = 'any'
      OR (sqlc.narg(parent_filter_mode)::text = 'null' AND parent_supernet_id IS NULL)

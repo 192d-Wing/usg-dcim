@@ -124,6 +124,22 @@ type Handler struct {
 	Audit audit.Recorder
 }
 
+// scopedListFilter resolves the caller's fabric scope for capCode and
+// returns the slice to pass as ScopeFabricIds on a LIST/COUNT params
+// struct, plus an ok flag. ok=false means the principal is fabric-
+// scoped but holds zero fabric IDs for capCode — caller must
+// short-circuit to an empty page without hitting the DB. On ok=true,
+// the slice is nil for a global caller (no filter applied in SQL) or a
+// non-nil non-empty slice for a fabric-scoped caller.
+func scopedListFilter(r *http.Request, capCode string) (ids []uuid.UUID, ok bool) {
+	p, _ := auth.From(r.Context())
+	ids, scoped := auth.ScopedFabricFilter(p, capCode)
+	if scoped && len(ids) == 0 {
+		return nil, false
+	}
+	return ids, true
+}
+
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/ipam", func(r chi.Router) {
 		r.Get("/vrfs", h.listVrfs)
@@ -209,10 +225,16 @@ func (h *Handler) listVrfBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	scopeIds, ok := scopedListFilter(r, "ipam:vrf-bgp-peers:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, vrfBgpPeersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
 	params := dbq.ListVrfBgpPeersParams{
-		Limit:         limit,
-		Offset:        offset,
-		AddressFamily: strPtr(q.Get("address_family")),
+		Limit:          limit,
+		Offset:         offset,
+		AddressFamily:  strPtr(q.Get("address_family")),
+		ScopeFabricIds: scopeIds,
 	}
 	if v := q.Get("vrf_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -238,6 +260,7 @@ func (h *Handler) listVrfBgpPeers(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountVrfBgpPeers(r.Context(), dbq.CountVrfBgpPeersParams{
 		VrfID: params.VrfID, BgpPeerID: params.BgpPeerID, AddressFamily: params.AddressFamily,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -260,7 +283,12 @@ func (h *Handler) listVrfs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListVrfsParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "ipam:vrfs:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, vrfsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListVrfsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	if v := q.Get("fabric_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -275,7 +303,7 @@ func (h *Handler) listVrfs(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountVrfs(r.Context(), dbq.CountVrfsParams{FabricID: params.FabricID})
+	total, err := h.Q.CountVrfs(r.Context(), dbq.CountVrfsParams{FabricID: params.FabricID, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -316,7 +344,12 @@ func (h *Handler) listSubnets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListSubnetsParams{Limit: limit, Offset: offset, Purpose: strPtr(q.Get("purpose"))}
+	scopeIds, ok := scopedListFilter(r, "ipam:subnets:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, subnetsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListSubnetsParams{Limit: limit, Offset: offset, Purpose: strPtr(q.Get("purpose")), ScopeFabricIds: scopeIds}
 	for _, f := range []struct {
 		key string
 		dst **uuid.UUID
@@ -342,6 +375,7 @@ func (h *Handler) listSubnets(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountSubnets(r.Context(), dbq.CountSubnetsParams{
 		FabricID: params.FabricID, VrfID: params.VrfID, SiteID: params.SiteID, Purpose: params.Purpose,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -383,9 +417,15 @@ func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	scopeIds, ok := scopedListFilter(r, "ipam:addresses:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, addressesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
 	params := dbq.ListIPAddressesParams{
 		Limit: limit, Offset: offset,
 		Role: strPtr(q.Get("role")), Status: strPtr(q.Get("status")),
+		ScopeFabricIds: scopeIds,
 	}
 	for _, f := range []struct {
 		key string
@@ -412,6 +452,7 @@ func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 	total, err := h.Q.CountIPAddresses(r.Context(), dbq.CountIPAddressesParams{
 		SubnetID: params.SubnetID, AssetID: params.AssetID,
 		Role: params.Role, Status: params.Status,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -453,14 +494,19 @@ func (h *Handler) listFabrics(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListFabricsParams{Limit: limit, Offset: offset, Enclave: strPtr(q.Get("enclave"))}
+	scopeIds, ok := scopedListFilter(r, "ipam:fabrics:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, fabricsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListFabricsParams{Limit: limit, Offset: offset, Enclave: strPtr(q.Get("enclave")), ScopeFabricIds: scopeIds}
 	items, err := h.Q.ListFabrics(r.Context(), params)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountFabrics(r.Context(), dbq.CountFabricsParams{Enclave: params.Enclave})
+	total, err := h.Q.CountFabrics(r.Context(), dbq.CountFabricsParams{Enclave: params.Enclave, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -531,9 +577,15 @@ func (h *Handler) listSupernets(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "parent_supernet_id is not a uuid or 'null'")
 		return
 	}
+	scopeIds, ok := scopedListFilter(r, "ipam:supernets:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, supernetsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
 	params := dbq.ListSupernetsParams{
 		Limit: limit, Offset: offset,
 		ParentFilterMode: mode, ParentSupernetID: parentID,
+		ScopeFabricIds: scopeIds,
 	}
 	if v := q.Get("fabric_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -560,6 +612,7 @@ func (h *Handler) listSupernets(w http.ResponseWriter, r *http.Request) {
 	total, err := h.Q.CountSupernets(r.Context(), dbq.CountSupernetsParams{
 		FabricID: params.FabricID, VrfID: params.VrfID,
 		ParentFilterMode: params.ParentFilterMode, ParentSupernetID: params.ParentSupernetID,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -601,7 +654,12 @@ func (h *Handler) listOverlays(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListOverlaysParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "ipam:overlays:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, overlaysPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListOverlaysParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	if v := q.Get("fabric_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -616,7 +674,7 @@ func (h *Handler) listOverlays(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountOverlays(r.Context(), dbq.CountOverlaysParams{FabricID: params.FabricID})
+	total, err := h.Q.CountOverlays(r.Context(), dbq.CountOverlaysParams{FabricID: params.FabricID, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -638,7 +696,12 @@ func (h *Handler) listVnis(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListVnisParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind"))}
+	scopeIds, ok := scopedListFilter(r, "ipam:vnis:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, vnisPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListVnisParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind")), ScopeFabricIds: scopeIds}
 	for _, f := range []struct {
 		key string
 		dst **uuid.UUID
@@ -663,6 +726,7 @@ func (h *Handler) listVnis(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountVnis(r.Context(), dbq.CountVnisParams{
 		OverlayID: params.OverlayID, FabricID: params.FabricID, Kind: params.Kind,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -685,7 +749,12 @@ func (h *Handler) listVteps(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListVtepsParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "ipam:vteps:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, vtepsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListVtepsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	for _, f := range []struct {
 		key string
 		dst **uuid.UUID
@@ -708,7 +777,7 @@ func (h *Handler) listVteps(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountVteps(r.Context(), dbq.CountVtepsParams{OverlayID: params.OverlayID, AssetID: params.AssetID})
+	total, err := h.Q.CountVteps(r.Context(), dbq.CountVtepsParams{OverlayID: params.OverlayID, AssetID: params.AssetID, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -730,7 +799,12 @@ func (h *Handler) listVtepMemberships(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListVtepMembershipsParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "ipam:vtep-memberships:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, membershipsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListVtepMembershipsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	for _, f := range []struct {
 		key string
 		dst **uuid.UUID
@@ -756,6 +830,7 @@ func (h *Handler) listVtepMemberships(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountVtepMemberships(r.Context(), dbq.CountVtepMembershipsParams{
 		VtepID: params.VtepID, VniID: params.VniID, OverlayID: params.OverlayID,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -778,7 +853,12 @@ func (h *Handler) listDhcpServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListDhcpServersParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "ipam:dhcp-servers:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, dhcpServersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListDhcpServersParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	if v := q.Get("fabric_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -793,7 +873,7 @@ func (h *Handler) listDhcpServers(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountDhcpServers(r.Context(), dbq.CountDhcpServersParams{FabricID: params.FabricID})
+	total, err := h.Q.CountDhcpServers(r.Context(), dbq.CountDhcpServersParams{FabricID: params.FabricID, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

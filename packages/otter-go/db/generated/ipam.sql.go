@@ -15,18 +15,20 @@ const listVrfs = `-- name: ListVrfs :many
 SELECT id, fabric_id, name, route_target, description, is_default, created_at, updated_at
 FROM vrfs
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
+  AND ($4::uuid[] IS NULL OR fabric_id = ANY($4::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListVrfsParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListVrfs(ctx context.Context, arg ListVrfsParams) ([]Vrf, error) {
-	rows, err := q.db.Query(ctx, listVrfs, arg.Limit, arg.Offset, arg.FabricID)
+	rows, err := q.db.Query(ctx, listVrfs, arg.Limit, arg.Offset, arg.FabricID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -46,12 +48,16 @@ const countVrfs = `-- name: CountVrfs :one
 SELECT count(*)::bigint
 FROM vrfs
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::uuid[] IS NULL OR fabric_id = ANY($2::uuid[]))
 `
 
-type CountVrfsParams struct{ FabricID *uuid.UUID `json:"fabric_id"` }
+type CountVrfsParams struct {
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
+}
 
 func (q *Queries) CountVrfs(ctx context.Context, arg CountVrfsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countVrfs, arg.FabricID)
+	row := q.db.QueryRow(ctx, countVrfs, arg.FabricID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -82,21 +88,23 @@ WHERE ($3::uuid IS NULL OR fabric_id = $3)
   AND ($4::uuid IS NULL OR vrf_id    = $4)
   AND ($5::uuid IS NULL OR site_id   = $5)
   AND ($6::text IS NULL OR purpose   = $6)
+  AND ($7::uuid[] IS NULL OR fabric_id = ANY($7::uuid[]))
 ORDER BY prefix
 LIMIT $1 OFFSET $2
 `
 
 type ListSubnetsParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
-	VrfID    *uuid.UUID `json:"vrf_id"`
-	SiteID   *uuid.UUID `json:"site_id"`
-	Purpose  *string    `json:"purpose"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	VrfID          *uuid.UUID  `json:"vrf_id"`
+	SiteID         *uuid.UUID  `json:"site_id"`
+	Purpose        *string     `json:"purpose"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListSubnets(ctx context.Context, arg ListSubnetsParams) ([]Subnet, error) {
-	rows, err := q.db.Query(ctx, listSubnets, arg.Limit, arg.Offset, arg.FabricID, arg.VrfID, arg.SiteID, arg.Purpose)
+	rows, err := q.db.Query(ctx, listSubnets, arg.Limit, arg.Offset, arg.FabricID, arg.VrfID, arg.SiteID, arg.Purpose, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -119,17 +127,19 @@ WHERE ($1::uuid IS NULL OR fabric_id = $1)
   AND ($2::uuid IS NULL OR vrf_id    = $2)
   AND ($3::uuid IS NULL OR site_id   = $3)
   AND ($4::text IS NULL OR purpose   = $4)
+  AND ($5::uuid[] IS NULL OR fabric_id = ANY($5::uuid[]))
 `
 
 type CountSubnetsParams struct {
-	FabricID *uuid.UUID `json:"fabric_id"`
-	VrfID    *uuid.UUID `json:"vrf_id"`
-	SiteID   *uuid.UUID `json:"site_id"`
-	Purpose  *string    `json:"purpose"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	VrfID          *uuid.UUID  `json:"vrf_id"`
+	SiteID         *uuid.UUID  `json:"site_id"`
+	Purpose        *string     `json:"purpose"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountSubnets(ctx context.Context, arg CountSubnetsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countSubnets, arg.FabricID, arg.VrfID, arg.SiteID, arg.Purpose)
+	row := q.db.QueryRow(ctx, countSubnets, arg.FabricID, arg.VrfID, arg.SiteID, arg.Purpose, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -169,21 +179,25 @@ WHERE ($3::uuid IS NULL OR subnet_id    = $3)
   AND ($4::uuid IS NULL OR asset_id     = $4)
   AND ($5::text IS NULL OR role::text   = $5)
   AND ($6::text IS NULL OR status::text = $6)
+  AND ($7::uuid[] IS NULL OR subnet_id IN (
+        SELECT id FROM subnets WHERE fabric_id = ANY($7::uuid[])
+      ))
 ORDER BY address
 LIMIT $1 OFFSET $2
 `
 
 type ListIPAddressesParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	SubnetID *uuid.UUID `json:"subnet_id"`
-	AssetID  *uuid.UUID `json:"asset_id"`
-	Role     *string    `json:"role"`
-	Status   *string    `json:"status"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	SubnetID       *uuid.UUID  `json:"subnet_id"`
+	AssetID        *uuid.UUID  `json:"asset_id"`
+	Role           *string     `json:"role"`
+	Status         *string     `json:"status"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListIPAddresses(ctx context.Context, arg ListIPAddressesParams) ([]IPAddress, error) {
-	rows, err := q.db.Query(ctx, listIPAddresses, arg.Limit, arg.Offset, arg.SubnetID, arg.AssetID, arg.Role, arg.Status)
+	rows, err := q.db.Query(ctx, listIPAddresses, arg.Limit, arg.Offset, arg.SubnetID, arg.AssetID, arg.Role, arg.Status, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -206,17 +220,21 @@ WHERE ($1::uuid IS NULL OR subnet_id    = $1)
   AND ($2::uuid IS NULL OR asset_id     = $2)
   AND ($3::text IS NULL OR role::text   = $3)
   AND ($4::text IS NULL OR status::text = $4)
+  AND ($5::uuid[] IS NULL OR subnet_id IN (
+        SELECT id FROM subnets WHERE fabric_id = ANY($5::uuid[])
+      ))
 `
 
 type CountIPAddressesParams struct {
-	SubnetID *uuid.UUID `json:"subnet_id"`
-	AssetID  *uuid.UUID `json:"asset_id"`
-	Role     *string    `json:"role"`
-	Status   *string    `json:"status"`
+	SubnetID       *uuid.UUID  `json:"subnet_id"`
+	AssetID        *uuid.UUID  `json:"asset_id"`
+	Role           *string     `json:"role"`
+	Status         *string     `json:"status"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountIPAddresses(ctx context.Context, arg CountIPAddressesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countIPAddresses, arg.SubnetID, arg.AssetID, arg.Role, arg.Status)
+	row := q.db.QueryRow(ctx, countIPAddresses, arg.SubnetID, arg.AssetID, arg.Role, arg.Status, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
