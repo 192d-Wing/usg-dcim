@@ -1,0 +1,17 @@
+apiVersion: v2
+name: dns-site
+description: |
+  Per-DnsServer CoreDNS pod + bundle-puller, with anycast Service IPs
+  advertised by Cilium BGP (PR 71). One Helm release per DnsServer row
+  on the site cluster: `helm install dns-<server-name> dcim/dns-site`.
+
+  Replaces the GoBGP sidecar pattern used by deploy/k8s/site42/site42.yaml.
+  The collector still owns Corefile/zone authoring (via the existing
+  /dns/servers/{id}/bundle endpoint); Cilium owns BGP advertisement of
+  the Service IP via the umbrella chart's CiliumBGPAdvertisement.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: USG DCIM Team
+keywords: [dcim, dns, coredns, anycast, cilium, bgp]

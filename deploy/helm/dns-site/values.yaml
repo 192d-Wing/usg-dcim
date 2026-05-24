@@ -1,0 +1,91 @@
+# Per-DnsServer values. One release per DnsServer row. Most fields
+# are populated by the Python renderer
+# (packages/otter/src/dcim/regiondeploy/dns_site.py); operators only
+# override credentials + bundle URL out-of-band.
+
+# Identity — used for labels and resource names. Stable per server.
+server:
+  id: ""            # DnsServer.id (uuid)
+  name: ""          # DnsServer.name; becomes the release suffix
+  role: recursive   # auth | recursive
+  fabricId: ""      # DnsServer.fabric_id (uuid; informational label)
+  siteId: ""        # DnsServer.site_id (uuid; informational label)
+
+image:
+  # auth (NSEC3) and recursive (stock CoreDNS) tracked separately so
+  # operators can pin them independently; the renderer picks one based
+  # on server.role.
+  auth:
+    repository: ghcr.io/192d-wing/coredns-nsec3sign
+    tag: v1.14.2-1
+  recursive:
+    repository: coredns/coredns
+    tag: "1.14.2"
+  collector:
+    repository: ghcr.io/usg-dcim/dcim-badger
+    tag: "0.1.0"
+  pullPolicy: IfNotPresent
+
+# Service exposure. The lbipam.cilium.io/ips annotation pins the
+# anycast IP(s) so Cilium hands out exactly those addresses; the
+# bgp-advertise label is what the umbrella's CiliumBGPAdvertisement
+# selector matches on.
+service:
+  type: LoadBalancer
+  port: 53
+  # AnycastGroup.anycast_ipv4 / anycast_ipv6 — recursive only. Renderer
+  # leaves the field empty if the role is auth (auth servers are
+  # unicast-only on DnsServer.unicast_ip).
+  anycastIPs: []  # e.g. ["192.0.2.53", "2001:db8:dns::53"]
+  labels:
+    dcim.io/bgp-advertise: "true"
+    # An advertisement-selector facet so an operator could split which
+    # routers see auth vs recursive prefixes; default labels make every
+    # advertisement select every Service.
+    dcim.io/dns-role: ""  # filled by renderer with server.role
+  annotations:
+    # Cilium 1.16+ honors `io.cilium/lb-ipam-ips`; v1.15 used
+    # `lbipam.cilium.io/ips`. We emit the modern one; back-compat is
+    # the operator's call via override.
+    io.cilium/lb-ipam-ips: ""  # filled by renderer with anycastIPs
+
+# Bundle puller — runs as a sidecar in the same pod. Pulls
+# /dns/servers/{id}/bundle on a timer + writes files into the shared
+# emptyDir, then signals coredns via SIGUSR1 to reload.
+bundle:
+  # URL prefix; the renderer appends /api/v1/dns/servers/{server.id}/bundle.
+  apiBaseUrl: "https://dcim.example.mil"
+  # The bearer token the collector presents. Resolved from a Secret
+  # the operator creates out-of-band (see chart README).
+  tokenSecretName: dcim-dns-site-token
+  tokenSecretKey: token
+  # Poll interval seconds. Long enough that the etag short-circuits
+  # cheaply, short enough that DNS catches new zones within minutes.
+  pollSeconds: 60
+  # If the API uses a private CA, mount it here.
+  caBundleSecretName: ""
+  caBundleSecretKey: ca.crt
+
+# Pod scheduling. Recursive pods want one-per-node on the cluster's
+# BGP-speaking nodes; the renderer doesn't enforce this — operators
+# tune anti-affinity for their topology.
+replicaCount: 1
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+
+# Pod security. CoreDNS needs NET_BIND_SERVICE for :53 (root not
+# required when the cap is granted; we keep runAsNonRoot=true).
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10053
+  fsGroup: 10053
+  seccompProfile: { type: RuntimeDefault }
+
+# Optional dnstap socket path. When set, an emptyDir is mounted and
+# both coredns and any sidecar reader can share it. PR 71 does NOT
+# ship the reader — that's a follow-up.
+dnstap:
+  enabled: false
+  socketPath: /var/lib/dcim-dns/dnstap.sock

@@ -121,6 +121,28 @@ The default `bgp.advertise.selectorLabels` is
 different label key, or `selectorLabels: {}` to advertise every LB
 Service in the namespace.
 
+## Site DNS via Cilium BGP (PR 71)
+
+`deploy/helm/dns-site/` deploys one CoreDNS pod per `DnsServer` row on
+the site cluster, fronted by a `type: LoadBalancer` Service whose IP
+is pinned to the matching `AnycastGroup` addresses via the
+`io.cilium/lb-ipam-ips` annotation. The bundle pipeline
+(`/api/v1/dns/servers/{id}/bundle`) is unchanged; the GoBGP sidecar is
+replaced by Cilium BGP advertising the Service label
+`dcim.io/bgp-advertise=true`.
+
+Render values from a `DnsServer` + `AnycastGroup` row via
+[`packages/otter/src/dcim/regiondeploy/dns_site.py`](../packages/otter/src/dcim/regiondeploy/dns_site.py)
+(`render_dns_site_values(server, anycast_group=..., bundle_api_base_url=...)`).
+See [`deploy/helm/dns-site/README.md`](../deploy/helm/dns-site/README.md)
+for the install flow and required prerequisites (Cilium BGP, bundle
+token Secret, optional private-CA Secret).
+
+`AnycastBgpBinding` rows are no longer consumed by config generation
+in the k8s-native path — they remain as audit/policy state. The
+cluster's BGP peer list comes from `regiondeploy/cilium.py` (regional)
+or the umbrella `bgp.peers` values (central).
+
 ## SSO smoke (Keycloak)
 
 For end-to-end OIDC validation against a real issuer, bring up the

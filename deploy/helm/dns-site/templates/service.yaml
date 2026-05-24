@@ -1,0 +1,51 @@
+{{- /*
+  type=LoadBalancer Service that Cilium hands an anycast IP to.
+
+  Two pieces drive the BGP advertisement:
+
+  1. service.labels (dcim.io/bgp-advertise + dcim.io/dns-role): matched
+     by the umbrella chart's CiliumBGPAdvertisement selector, so the
+     prefix is announced on the cluster's existing BGP session.
+
+  2. annotations.io.cilium/lb-ipam-ips: the *specific* anycast IPs from
+     AnycastGroup.anycast_ipv4 / anycast_ipv6. Without this annotation
+     Cilium picks from the LoadBalancerIPPool — fine for the central
+     control plane, wrong for DNS where the IP is data-model owned.
+
+  Auth servers (server.role=auth) are unicast-only; the renderer leaves
+  anycastIPs empty and we still emit the LB Service so the auth pod
+  has a stable IP at the cluster level — operators expose it to the
+  fabric via a per-site CiliumLoadBalancerIPPool, not BGP anycast.
+*/}}
+{{- $dnsRoleLabels := dict -}}
+{{- if .Values.service.labels.dcim_io_dns_role -}}
+{{- $_ := set $dnsRoleLabels "dcim.io/dns-role" .Values.service.labels.dcim_io_dns_role -}}
+{{- end -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dnsSite.fullname" . }}
+  labels:
+    {{- include "dnsSite.labels" . | nindent 4 }}
+    {{- range $k, $v := .Values.service.labels }}
+    {{- if $v }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+    {{- end }}
+  annotations:
+    {{- if .Values.service.anycastIPs }}
+    io.cilium/lb-ipam-ips: {{ join "," .Values.service.anycastIPs | quote }}
+    {{- end }}
+    {{- range $k, $v := .Values.service.annotations }}
+    {{- if and $v (ne $k "io.cilium/lb-ipam-ips") }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+    {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  externalTrafficPolicy: Local
+  ports:
+    - { name: dns-udp, port: {{ .Values.service.port }}, targetPort: dns-udp, protocol: UDP }
+    - { name: dns-tcp, port: {{ .Values.service.port }}, targetPort: dns-tcp, protocol: TCP }
+  selector:
+    {{- include "dnsSite.selectorLabels" . | nindent 4 }}
