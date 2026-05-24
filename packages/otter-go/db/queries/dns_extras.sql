@@ -8,6 +8,7 @@ FROM dns_servers
 WHERE (sqlc.narg(site_id)::uuid   IS NULL OR site_id   = sqlc.narg(site_id))
   AND (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(role)::text      IS NULL OR role::text = sqlc.narg(role))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
@@ -15,7 +16,8 @@ LIMIT $1 OFFSET $2;
 SELECT count(*)::bigint FROM dns_servers
 WHERE (sqlc.narg(site_id)::uuid   IS NULL OR site_id   = sqlc.narg(site_id))
   AND (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
-  AND (sqlc.narg(role)::text      IS NULL OR role::text = sqlc.narg(role));
+  AND (sqlc.narg(role)::text      IS NULL OR role::text = sqlc.narg(role))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- name: GetDnsServer :one
 SELECT id, name, site_id, fabric_id, role::text AS role,
@@ -34,13 +36,15 @@ SELECT id, name, fabric_id, service::text AS service,
 FROM anycast_groups
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(service)::text   IS NULL OR service::text = sqlc.narg(service))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
 -- name: CountAnycastGroups :one
 SELECT count(*)::bigint FROM anycast_groups
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
-  AND (sqlc.narg(service)::text   IS NULL OR service::text = sqlc.narg(service));
+  AND (sqlc.narg(service)::text   IS NULL OR service::text = sqlc.narg(service))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- ===== DNS forwarders =====
 -- name: ListDnsForwarders :many
@@ -48,21 +52,25 @@ SELECT id, name, fabric_id, zone_pattern, upstreams,
        description, created_at, updated_at
 FROM dns_forwarders
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY zone_pattern
 LIMIT $1 OFFSET $2;
 
 -- name: CountDnsForwarders :one
 SELECT count(*)::bigint FROM dns_forwarders
-WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- ===== DNS catalog zones =====
 -- name: ListDnsCatalogZones :many
 SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
 FROM dns_catalog_zones
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
 -- name: CountDnsCatalogZones :one
 SELECT count(*)::bigint FROM dns_catalog_zones
-WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));

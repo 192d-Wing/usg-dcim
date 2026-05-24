@@ -6,12 +6,14 @@ SELECT id, name, fabric_id, action::text AS action,
        enabled, description, created_at, updated_at
 FROM dns_blocklists
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
 -- name: CountDnsBlocklists :one
 SELECT count(*)::bigint FROM dns_blocklists
-WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- name: GetDnsBlocklist :one
 SELECT id, name, fabric_id, action::text AS action,
@@ -38,12 +40,14 @@ WHERE blocklist_id = $1;
 SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at
 FROM dns_views
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY priority, name
 LIMIT $1 OFFSET $2;
 
 -- name: CountDnsViews :one
 SELECT count(*)::bigint FROM dns_views
-WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- ===== DNS health checks =====
 -- name: ListDnsHealthChecks :many
@@ -54,12 +58,14 @@ SELECT id, name, fabric_id, host(target_ip) AS target_ip,
        created_at, updated_at
 FROM dns_health_checks
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
 -- name: CountDnsHealthChecks :one
 SELECT count(*)::bigint FROM dns_health_checks
-WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- ===== BGP peers (dns-managed) =====
 -- name: ListBgpPeers :many
@@ -76,15 +82,23 @@ SELECT count(*)::bigint FROM bgp_peers
 WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id));
 
 -- ===== Anycast BGP bindings =====
+-- 2-hop scope: binding → dns_server → fabric. Matches the create/delete
+-- ABAC anchor (PR 58) that enforces on the dns_server side.
 -- name: ListAnycastBindings :many
 SELECT id, dns_server_id, bgp_peer_id, created_at, updated_at
 FROM anycast_bgp_bindings
 WHERE (sqlc.narg(dns_server_id)::uuid IS NULL OR dns_server_id = sqlc.narg(dns_server_id))
   AND (sqlc.narg(bgp_peer_id)::uuid   IS NULL OR bgp_peer_id   = sqlc.narg(bgp_peer_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR dns_server_id IN (
+        SELECT id FROM dns_servers WHERE fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[])
+      ))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
 
 -- name: CountAnycastBindings :one
 SELECT count(*)::bigint FROM anycast_bgp_bindings
 WHERE (sqlc.narg(dns_server_id)::uuid IS NULL OR dns_server_id = sqlc.narg(dns_server_id))
-  AND (sqlc.narg(bgp_peer_id)::uuid   IS NULL OR bgp_peer_id   = sqlc.narg(bgp_peer_id));
+  AND (sqlc.narg(bgp_peer_id)::uuid   IS NULL OR bgp_peer_id   = sqlc.narg(bgp_peer_id))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR dns_server_id IN (
+        SELECT id FROM dns_servers WHERE fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[])
+      ));

@@ -16,12 +16,15 @@
 // IPAM LIST queries), PR 57 (DNS fabric-rooted mutations), PR 58
 // (BGP peers site-scope + anycast bindings fabric-scope), PR 59
 // (alert_rules + maintenance_windows site-scope with the nullable-
-// site "enterprise default" rule: only global principals can mutate
-// rules / windows whose site is NULL). Remaining: auth-handler
-// retrofit, DNS scope-filtered LISTs. BGP policy resources
-// (asns/prefix-lists/community-lists/route-maps + entries) are
-// intentionally global — they have no scope FK and cannot be
-// ABAC-scoped without a schema change.
+// site "enterprise default" rule), PR 60 (scope-filtered DNS LIST
+// queries — zones, records, servers, anycast-groups, forwarders,
+// catalog-zones, blocklists + entries, views, health-checks,
+// anycast-bindings). Remaining: auth-handler retrofit (api_tokens,
+// user roles), site-scoped LIST filtering (bgp_peers, alert_rules,
+// maintenance_windows, sites/racks/assets), IdP-mapping scope
+// resolver. BGP policy resources (asns/prefix-lists/community-lists/
+// route-maps + entries) are intentionally global — they have no
+// scope FK and cannot be ABAC-scoped without a schema change.
 //
 // OIDC-mapping scope resolution (the cross-table code→UUID lookups
 // from _resolve_mapping_scope in Python) is intentionally deferred —

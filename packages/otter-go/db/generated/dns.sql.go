@@ -21,20 +21,22 @@ FROM dns_zones
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
   AND ($4::uuid IS NULL OR site_id   = $4)
   AND ($5::text IS NULL OR kind::text = $5)
+  AND ($6::uuid[] IS NULL OR fabric_id = ANY($6::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListDnsZonesParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
-	SiteID   *uuid.UUID `json:"site_id"`
-	Kind     *string    `json:"kind"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	SiteID         *uuid.UUID  `json:"site_id"`
+	Kind           *string     `json:"kind"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListDnsZones(ctx context.Context, arg ListDnsZonesParams) ([]DnsZone, error) {
-	rows, err := q.db.Query(ctx, listDnsZones, arg.Limit, arg.Offset, arg.FabricID, arg.SiteID, arg.Kind)
+	rows, err := q.db.Query(ctx, listDnsZones, arg.Limit, arg.Offset, arg.FabricID, arg.SiteID, arg.Kind, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -56,16 +58,18 @@ FROM dns_zones
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
   AND ($2::uuid IS NULL OR site_id   = $2)
   AND ($3::text IS NULL OR kind::text = $3)
+  AND ($4::uuid[] IS NULL OR fabric_id = ANY($4::uuid[]))
 `
 
 type CountDnsZonesParams struct {
-	FabricID *uuid.UUID `json:"fabric_id"`
-	SiteID   *uuid.UUID `json:"site_id"`
-	Kind     *string    `json:"kind"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	SiteID         *uuid.UUID  `json:"site_id"`
+	Kind           *string     `json:"kind"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountDnsZones(ctx context.Context, arg CountDnsZonesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDnsZones, arg.FabricID, arg.SiteID, arg.Kind)
+	row := q.db.QueryRow(ctx, countDnsZones, arg.FabricID, arg.SiteID, arg.Kind, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -105,20 +109,22 @@ FROM dns_records
 WHERE ($3::uuid IS NULL OR zone_id     = $3)
   AND ($4::text IS NULL OR type::text   = $4)
   AND ($5::text IS NULL OR source::text = $5)
+  AND ($6::uuid[] IS NULL OR zone_id IN (SELECT id FROM dns_zones WHERE fabric_id = ANY($6::uuid[])))
 ORDER BY zone_id, name, type
 LIMIT $1 OFFSET $2
 `
 
 type ListDnsRecordsParams struct {
-	Limit  int32      `json:"limit"`
-	Offset int32      `json:"offset"`
-	ZoneID *uuid.UUID `json:"zone_id"`
-	Type   *string    `json:"type"`
-	Source *string    `json:"source"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	ZoneID         *uuid.UUID  `json:"zone_id"`
+	Type           *string     `json:"type"`
+	Source         *string     `json:"source"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListDnsRecords(ctx context.Context, arg ListDnsRecordsParams) ([]DnsRecord, error) {
-	rows, err := q.db.Query(ctx, listDnsRecords, arg.Limit, arg.Offset, arg.ZoneID, arg.Type, arg.Source)
+	rows, err := q.db.Query(ctx, listDnsRecords, arg.Limit, arg.Offset, arg.ZoneID, arg.Type, arg.Source, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -141,16 +147,18 @@ FROM dns_records
 WHERE ($1::uuid IS NULL OR zone_id     = $1)
   AND ($2::text IS NULL OR type::text   = $2)
   AND ($3::text IS NULL OR source::text = $3)
+  AND ($4::uuid[] IS NULL OR zone_id IN (SELECT id FROM dns_zones WHERE fabric_id = ANY($4::uuid[])))
 `
 
 type CountDnsRecordsParams struct {
-	ZoneID *uuid.UUID `json:"zone_id"`
-	Type   *string    `json:"type"`
-	Source *string    `json:"source"`
+	ZoneID         *uuid.UUID  `json:"zone_id"`
+	Type           *string     `json:"type"`
+	Source         *string     `json:"source"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountDnsRecords(ctx context.Context, arg CountDnsRecordsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDnsRecords, arg.ZoneID, arg.Type, arg.Source)
+	row := q.db.QueryRow(ctx, countDnsRecords, arg.ZoneID, arg.Type, arg.Source, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

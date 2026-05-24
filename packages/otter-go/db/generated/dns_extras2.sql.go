@@ -18,14 +18,16 @@ SELECT id, name, fabric_id, action::text AS action,
        enabled, description, created_at, updated_at
 FROM dns_blocklists
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
+  AND ($4::uuid[] IS NULL OR fabric_id = ANY($4::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListDnsBlocklistsParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func scanDnsBlocklist(row interface{ Scan(...any) error }, b *DnsBlocklist) error {
@@ -35,7 +37,7 @@ func scanDnsBlocklist(row interface{ Scan(...any) error }, b *DnsBlocklist) erro
 }
 
 func (q *Queries) ListDnsBlocklists(ctx context.Context, arg ListDnsBlocklistsParams) ([]DnsBlocklist, error) {
-	rows, err := q.db.Query(ctx, listDnsBlocklists, arg.Limit, arg.Offset, arg.FabricID)
+	rows, err := q.db.Query(ctx, listDnsBlocklists, arg.Limit, arg.Offset, arg.FabricID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -54,14 +56,16 @@ func (q *Queries) ListDnsBlocklists(ctx context.Context, arg ListDnsBlocklistsPa
 const countDnsBlocklists = `-- name: CountDnsBlocklists :one
 SELECT count(*)::bigint FROM dns_blocklists
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::uuid[] IS NULL OR fabric_id = ANY($2::uuid[]))
 `
 
 type CountDnsBlocklistsParams struct {
-	FabricID *uuid.UUID `json:"fabric_id"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountDnsBlocklists(ctx context.Context, arg CountDnsBlocklistsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDnsBlocklists, arg.FabricID)
+	row := q.db.QueryRow(ctx, countDnsBlocklists, arg.FabricID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -135,18 +139,20 @@ const listDnsViews = `-- name: ListDnsViews :many
 SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at
 FROM dns_views
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
+  AND ($4::uuid[] IS NULL OR fabric_id = ANY($4::uuid[]))
 ORDER BY priority, name
 LIMIT $1 OFFSET $2
 `
 
 type ListDnsViewsParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListDnsViews(ctx context.Context, arg ListDnsViewsParams) ([]DnsView, error) {
-	rows, err := q.db.Query(ctx, listDnsViews, arg.Limit, arg.Offset, arg.FabricID)
+	rows, err := q.db.Query(ctx, listDnsViews, arg.Limit, arg.Offset, arg.FabricID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -166,14 +172,16 @@ func (q *Queries) ListDnsViews(ctx context.Context, arg ListDnsViewsParams) ([]D
 const countDnsViews = `-- name: CountDnsViews :one
 SELECT count(*)::bigint FROM dns_views
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::uuid[] IS NULL OR fabric_id = ANY($2::uuid[]))
 `
 
 type CountDnsViewsParams struct {
-	FabricID *uuid.UUID `json:"fabric_id"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountDnsViews(ctx context.Context, arg CountDnsViewsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDnsViews, arg.FabricID)
+	row := q.db.QueryRow(ctx, countDnsViews, arg.FabricID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -189,18 +197,20 @@ SELECT id, name, fabric_id, host(target_ip) AS target_ip,
        created_at, updated_at
 FROM dns_health_checks
 WHERE ($3::uuid IS NULL OR fabric_id = $3)
+  AND ($4::uuid[] IS NULL OR fabric_id = ANY($4::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListDnsHealthChecksParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	FabricID *uuid.UUID `json:"fabric_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListDnsHealthChecks(ctx context.Context, arg ListDnsHealthChecksParams) ([]DnsHealthCheck, error) {
-	rows, err := q.db.Query(ctx, listDnsHealthChecks, arg.Limit, arg.Offset, arg.FabricID)
+	rows, err := q.db.Query(ctx, listDnsHealthChecks, arg.Limit, arg.Offset, arg.FabricID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -223,14 +233,16 @@ func (q *Queries) ListDnsHealthChecks(ctx context.Context, arg ListDnsHealthChec
 const countDnsHealthChecks = `-- name: CountDnsHealthChecks :one
 SELECT count(*)::bigint FROM dns_health_checks
 WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::uuid[] IS NULL OR fabric_id = ANY($2::uuid[]))
 `
 
 type CountDnsHealthChecksParams struct {
-	FabricID *uuid.UUID `json:"fabric_id"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountDnsHealthChecks(ctx context.Context, arg CountDnsHealthChecksParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countDnsHealthChecks, arg.FabricID)
+	row := q.db.QueryRow(ctx, countDnsHealthChecks, arg.FabricID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -296,19 +308,21 @@ SELECT id, dns_server_id, bgp_peer_id, created_at, updated_at
 FROM anycast_bgp_bindings
 WHERE ($3::uuid IS NULL OR dns_server_id = $3)
   AND ($4::uuid IS NULL OR bgp_peer_id   = $4)
+  AND ($5::uuid[] IS NULL OR dns_server_id IN (SELECT id FROM dns_servers WHERE fabric_id = ANY($5::uuid[])))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListAnycastBindingsParams struct {
-	Limit       int32      `json:"limit"`
-	Offset      int32      `json:"offset"`
-	DnsServerID *uuid.UUID `json:"dns_server_id"`
-	BgpPeerID   *uuid.UUID `json:"bgp_peer_id"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	DnsServerID    *uuid.UUID  `json:"dns_server_id"`
+	BgpPeerID      *uuid.UUID  `json:"bgp_peer_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) ListAnycastBindings(ctx context.Context, arg ListAnycastBindingsParams) ([]AnycastBgpBinding, error) {
-	rows, err := q.db.Query(ctx, listAnycastBindings, arg.Limit, arg.Offset, arg.DnsServerID, arg.BgpPeerID)
+	rows, err := q.db.Query(ctx, listAnycastBindings, arg.Limit, arg.Offset, arg.DnsServerID, arg.BgpPeerID, arg.ScopeFabricIds)
 	if err != nil {
 		return nil, err
 	}
@@ -328,15 +342,17 @@ const countAnycastBindings = `-- name: CountAnycastBindings :one
 SELECT count(*)::bigint FROM anycast_bgp_bindings
 WHERE ($1::uuid IS NULL OR dns_server_id = $1)
   AND ($2::uuid IS NULL OR bgp_peer_id   = $2)
+  AND ($3::uuid[] IS NULL OR dns_server_id IN (SELECT id FROM dns_servers WHERE fabric_id = ANY($3::uuid[])))
 `
 
 type CountAnycastBindingsParams struct {
-	DnsServerID *uuid.UUID `json:"dns_server_id"`
-	BgpPeerID   *uuid.UUID `json:"bgp_peer_id"`
+	DnsServerID    *uuid.UUID  `json:"dns_server_id"`
+	BgpPeerID      *uuid.UUID  `json:"bgp_peer_id"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
 }
 
 func (q *Queries) CountAnycastBindings(ctx context.Context, arg CountAnycastBindingsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAnycastBindings, arg.DnsServerID, arg.BgpPeerID)
+	row := q.db.QueryRow(ctx, countAnycastBindings, arg.DnsServerID, arg.BgpPeerID, arg.ScopeFabricIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

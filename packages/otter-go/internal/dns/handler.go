@@ -124,6 +124,23 @@ type Handler struct {
 	Audit audit.Recorder
 }
 
+// scopedListFilter resolves the caller's fabric scope for capCode and
+// returns the slice to pass as ScopeFabricIds on a LIST/COUNT params
+// struct, plus an ok flag. ok=false means the principal is fabric-
+// scoped but holds zero fabric IDs for capCode — caller must
+// short-circuit to an empty page without hitting the DB. On ok=true,
+// the slice is nil for a global caller (no filter applied in SQL) or a
+// non-nil non-empty slice for a fabric-scoped caller. Same shape as
+// the helper in internal/ipam (PR 56).
+func scopedListFilter(r *http.Request, capCode string) (ids []uuid.UUID, ok bool) {
+	p, _ := auth.From(r.Context())
+	ids, scoped := auth.ScopedFabricFilter(p, capCode)
+	if scoped && len(ids) == 0 {
+		return nil, false
+	}
+	return ids, true
+}
+
 func (h *Handler) Mount(r chi.Router) {
 	// Python mounts the dns router with prefix `/dns`.
 	r.Route("/dns", func(r chi.Router) {
@@ -218,14 +235,19 @@ func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	params := dbq.ListDnsBlocklistsParams{Limit: limit, Offset: offset, FabricID: fid}
+	scopeIds, ok := scopedListFilter(r, "dns:blocklists:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, blocklistsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListDnsBlocklistsParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds}
 	items, err := h.Q.ListDnsBlocklists(r.Context(), params)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountDnsBlocklists(r.Context(), dbq.CountDnsBlocklistsParams{FabricID: fid})
+	total, err := h.Q.CountDnsBlocklists(r.Context(), dbq.CountDnsBlocklistsParams{FabricID: fid, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -248,7 +270,8 @@ func (h *Handler) listBlocklistEntries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Surface a missing parent blocklist as 404, mirroring the FastAPI handler.
-	if _, err := h.Q.GetDnsBlocklist(r.Context(), id); err != nil {
+	bl, err := h.Q.GetDnsBlocklist(r.Context(), id)
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.Error(w, http.StatusNotFound, "blocklist not found")
 			return
@@ -256,6 +279,22 @@ func (h *Handler) listBlocklistEntries(w http.ResponseWriter, r *http.Request) {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
 		return
+	}
+	// Scope check on the parent blocklist's fabric (PR 60). A scoped
+	// caller poking at a blocklist outside their scope gets an empty
+	// page rather than the entry data. ListDnsBlocklistEntries itself
+	// is keyed only by blocklist_id (no scope_fabric_ids in the SQL)
+	// because the parent lookup above is sufficient — once we know
+	// the caller can see the blocklist, they can see its entries.
+	p, _ := auth.From(r.Context())
+	if _, scoped := auth.ScopedFabricFilter(p, "dns:blocklists:read"); scoped {
+		if err := auth.EnforceFabricScope(p, bl.FabricID, "dns:blocklists:read"); err != nil {
+			httpx.JSON(w, http.StatusOK, blocklistEntriesPage{Items: nil, Total: 0,
+				Limit:  parseInt32(pageSize(r.URL.Query()), 50, 1, 500),
+				Offset: parseInt32(r.URL.Query().Get("offset"), 0, 0, 1_000_000),
+			})
+			return
+		}
 	}
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
@@ -292,13 +331,18 @@ func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := h.Q.ListDnsViews(r.Context(), dbq.ListDnsViewsParams{Limit: limit, Offset: offset, FabricID: fid})
+	scopeIds, ok := scopedListFilter(r, "dns:views:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, viewsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	items, err := h.Q.ListDnsViews(r.Context(), dbq.ListDnsViewsParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountDnsViews(r.Context(), dbq.CountDnsViewsParams{FabricID: fid})
+	total, err := h.Q.CountDnsViews(r.Context(), dbq.CountDnsViewsParams{FabricID: fid, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -322,13 +366,18 @@ func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := h.Q.ListDnsHealthChecks(r.Context(), dbq.ListDnsHealthChecksParams{Limit: limit, Offset: offset, FabricID: fid})
+	scopeIds, ok := scopedListFilter(r, "dns:health-checks:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, healthChecksPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	items, err := h.Q.ListDnsHealthChecks(r.Context(), dbq.ListDnsHealthChecksParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountDnsHealthChecks(r.Context(), dbq.CountDnsHealthChecksParams{FabricID: fid})
+	total, err := h.Q.CountDnsHealthChecks(r.Context(), dbq.CountDnsHealthChecksParams{FabricID: fid, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -383,7 +432,12 @@ func (h *Handler) listAnycastBindings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListAnycastBindingsParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "dns:anycast-bindings:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, anycastBindingsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListAnycastBindingsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	for _, f := range []struct {
 		key string
 		dst **uuid.UUID
@@ -408,6 +462,7 @@ func (h *Handler) listAnycastBindings(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountAnycastBindings(r.Context(), dbq.CountAnycastBindingsParams{
 		DnsServerID: params.DnsServerID, BgpPeerID: params.BgpPeerID,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -428,7 +483,12 @@ func (h *Handler) listServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListDnsServersParams{Limit: limit, Offset: offset, Role: strPtr(q.Get("role"))}
+	scopeIds, ok := scopedListFilter(r, "dns:servers:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, serversPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListDnsServersParams{Limit: limit, Offset: offset, Role: strPtr(q.Get("role")), ScopeFabricIds: scopeIds}
 	for _, f := range []struct {
 		key string
 		dst **uuid.UUID
@@ -453,6 +513,7 @@ func (h *Handler) listServers(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountDnsServers(r.Context(), dbq.CountDnsServersParams{
 		SiteID: params.SiteID, FabricID: params.FabricID, Role: params.Role,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -492,7 +553,12 @@ func (h *Handler) listAnycastGroups(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListAnycastGroupsParams{Limit: limit, Offset: offset, Service: strPtr(q.Get("service"))}
+	scopeIds, ok := scopedListFilter(r, "dns:anycast-groups:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, anycastGroupsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListAnycastGroupsParams{Limit: limit, Offset: offset, Service: strPtr(q.Get("service")), ScopeFabricIds: scopeIds}
 	if v := q.Get("fabric_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -509,6 +575,7 @@ func (h *Handler) listAnycastGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountAnycastGroups(r.Context(), dbq.CountAnycastGroupsParams{
 		FabricID: params.FabricID, Service: params.Service,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -529,7 +596,12 @@ func (h *Handler) listForwarders(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListDnsForwardersParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "dns:forwarders:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, forwardersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListDnsForwardersParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	if v := q.Get("fabric_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -544,7 +616,7 @@ func (h *Handler) listForwarders(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountDnsForwarders(r.Context(), dbq.CountDnsForwardersParams{FabricID: params.FabricID})
+	total, err := h.Q.CountDnsForwarders(r.Context(), dbq.CountDnsForwardersParams{FabricID: params.FabricID, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -564,7 +636,12 @@ func (h *Handler) listCatalogZones(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListDnsCatalogZonesParams{Limit: limit, Offset: offset}
+	scopeIds, ok := scopedListFilter(r, "dns:catalog-zones:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, catalogZonesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListDnsCatalogZonesParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
 	if v := q.Get("fabric_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -579,7 +656,7 @@ func (h *Handler) listCatalogZones(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountDnsCatalogZones(r.Context(), dbq.CountDnsCatalogZonesParams{FabricID: params.FabricID})
+	total, err := h.Q.CountDnsCatalogZones(r.Context(), dbq.CountDnsCatalogZonesParams{FabricID: params.FabricID, ScopeFabricIds: scopeIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -599,7 +676,12 @@ func (h *Handler) listZones(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListDnsZonesParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind"))}
+	scopeIds, ok := scopedListFilter(r, "dns:zones:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, zonesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListDnsZonesParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind")), ScopeFabricIds: scopeIds}
 	for _, f := range []struct {
 		key string
 		dst **uuid.UUID
@@ -624,6 +706,7 @@ func (h *Handler) listZones(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountDnsZones(r.Context(), dbq.CountDnsZonesParams{
 		FabricID: params.FabricID, SiteID: params.SiteID, Kind: params.Kind,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -663,9 +746,15 @@ func (h *Handler) listRecords(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	scopeIds, ok := scopedListFilter(r, "dns:records:read")
+	if !ok {
+		httpx.JSON(w, http.StatusOK, recordsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
 	params := dbq.ListDnsRecordsParams{
 		Limit: limit, Offset: offset,
 		Type: strPtr(q.Get("type")), Source: strPtr(q.Get("source")),
+		ScopeFabricIds: scopeIds,
 	}
 	if v := q.Get("zone_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -683,6 +772,7 @@ func (h *Handler) listRecords(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountDnsRecords(r.Context(), dbq.CountDnsRecordsParams{
 		ZoneID: params.ZoneID, Type: params.Type, Source: params.Source,
+		ScopeFabricIds: scopeIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
