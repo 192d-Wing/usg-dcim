@@ -97,6 +97,17 @@ func (h *Handler) createFabric(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "name and slug required")
 		return
 	}
+	// PR 61 — caller must own both the enclave and classification they're
+	// tagging the fabric with. Nil/empty values are gated to global.
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceEnclave(p, req.Enclave, "ipam:fabrics:create"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err := auth.EnforceClassification(p, req.Classification, "ipam:fabrics:create"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if err := validateSlug(req.Slug); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -187,10 +198,41 @@ func (h *Handler) updateFabric(w http.ResponseWriter, r *http.Request) {
 	if !h.enforceFabric(w, r, id, "ipam:fabrics:update") {
 		return
 	}
+	// PR 61 — current fabric's enclave + classification must be in
+	// scope (privilege guard against escalating from an in-scope
+	// fabric_id alone). Read the full row to inspect both.
+	current, err := h.Q.GetFabric(r.Context(), id)
+	if err != nil {
+		mapErr(w, err, "fabric not found")
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceEnclave(p, current.Enclave, "ipam:fabrics:update"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err := auth.EnforceClassification(p, current.Classification, "ipam:fabrics:update"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return
+	}
 	var req fabricUpdateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
 		return
+	}
+	// Reassignment guard: if the caller is changing enclave or
+	// classification, they must also own the new value.
+	if req.enclaveSet {
+		if err := auth.EnforceEnclave(p, req.Enclave, "ipam:fabrics:update"); err != nil {
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
+	if req.classificationSet {
+		if err := auth.EnforceClassification(p, req.Classification, "ipam:fabrics:update"); err != nil {
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		}
 	}
 	if req.Slug != nil {
 		if err := validateSlug(*req.Slug); err != nil {
@@ -222,6 +264,22 @@ func (h *Handler) deleteFabric(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.enforceFabric(w, r, id, "ipam:fabrics:delete") {
+		return
+	}
+	// PR 61 — caller must also own the fabric's enclave and
+	// classification before they can delete it.
+	current, err := h.Q.GetFabric(r.Context(), id)
+	if err != nil {
+		mapErr(w, err, "fabric not found")
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceEnclave(p, current.Enclave, "ipam:fabrics:delete"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err := auth.EnforceClassification(p, current.Classification, "ipam:fabrics:delete"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
 		return
 	}
 	n, err := h.Q.CountVrfsInFabric(r.Context(), id)

@@ -26,6 +26,11 @@ class ScopeType(str, enum.Enum):
     # Resolved via Fabric.slug at sign-in (OIDC mappings) or stored as
     # UUID in role_scopes.target_id for manual assignments.
     fabric = "fabric"
+    # Classification (PR 61) — restricts a principal to resources tagged
+    # with a specific classification level (e.g. "unclassified", "secret").
+    # Stored as the literal classification string in role_scopes.target_id.
+    # Migration 20260523_0049 adds the value to the Postgres scope_type ENUM.
+    classification = "classification"
 
 
 class Permission(UUIDPrimaryKey, Timestamped, Base):

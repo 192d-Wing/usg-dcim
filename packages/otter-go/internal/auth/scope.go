@@ -46,13 +46,14 @@ import (
 // matches everything. Mixed scopes match any target listed in any
 // non-empty dimension set.
 type Scope struct {
-	IsGlobal      bool
-	RegionIDs     map[uuid.UUID]struct{}
-	SiteIDs       map[uuid.UUID]struct{}
-	SiteGroupIDs  map[uuid.UUID]struct{}
-	Enclaves      map[string]struct{}
-	Organizations map[string]struct{}
-	FabricIDs     map[uuid.UUID]struct{}
+	IsGlobal        bool
+	RegionIDs       map[uuid.UUID]struct{}
+	SiteIDs         map[uuid.UUID]struct{}
+	SiteGroupIDs    map[uuid.UUID]struct{}
+	Enclaves        map[string]struct{}
+	Organizations   map[string]struct{}
+	Classifications map[string]struct{}
+	FabricIDs       map[uuid.UUID]struct{}
 }
 
 // GlobalScope is the unrestricted constructor — every matcher returns
@@ -66,13 +67,14 @@ func GlobalScope() Scope {
 // Mirrors Python Scope.union.
 func (s Scope) Union(other Scope) Scope {
 	out := Scope{
-		IsGlobal:      s.IsGlobal || other.IsGlobal,
-		RegionIDs:     mergeUUIDSet(s.RegionIDs, other.RegionIDs),
-		SiteIDs:       mergeUUIDSet(s.SiteIDs, other.SiteIDs),
-		SiteGroupIDs:  mergeUUIDSet(s.SiteGroupIDs, other.SiteGroupIDs),
-		Enclaves:      mergeStrSet(s.Enclaves, other.Enclaves),
-		Organizations: mergeStrSet(s.Organizations, other.Organizations),
-		FabricIDs:     mergeUUIDSet(s.FabricIDs, other.FabricIDs),
+		IsGlobal:        s.IsGlobal || other.IsGlobal,
+		RegionIDs:       mergeUUIDSet(s.RegionIDs, other.RegionIDs),
+		SiteIDs:         mergeUUIDSet(s.SiteIDs, other.SiteIDs),
+		SiteGroupIDs:    mergeUUIDSet(s.SiteGroupIDs, other.SiteGroupIDs),
+		Enclaves:        mergeStrSet(s.Enclaves, other.Enclaves),
+		Organizations:   mergeStrSet(s.Organizations, other.Organizations),
+		Classifications: mergeStrSet(s.Classifications, other.Classifications),
+		FabricIDs:       mergeUUIDSet(s.FabricIDs, other.FabricIDs),
 	}
 	return out
 }
@@ -85,6 +87,26 @@ func (s Scope) FabricMatches(fabricID uuid.UUID) bool {
 		return true
 	}
 	_, ok := s.FabricIDs[fabricID]
+	return ok
+}
+
+// EnclaveMatches reports whether the given enclave is reachable under s.
+// Pure string set check.
+func (s Scope) EnclaveMatches(enclave string) bool {
+	if s.IsGlobal {
+		return true
+	}
+	_, ok := s.Enclaves[enclave]
+	return ok
+}
+
+// ClassificationMatches reports whether the given classification tag is
+// reachable under s. Pure string set check.
+func (s Scope) ClassificationMatches(classification string) bool {
+	if s.IsGlobal {
+		return true
+	}
+	_, ok := s.Classifications[classification]
 	return ok
 }
 
@@ -236,6 +258,46 @@ func EnforceSiteScope(ctx context.Context, q siteScopeQ, p Principal, siteID uui
 	return nil
 }
 
+// EnforceEnclave refuses with ErrOutsideScope if the principal has
+// capCode but the target's enclave is outside their scope. PR 61
+// semantic for the nil case: when enclave is nil/empty (e.g. an asset
+// or site with no enclave tag yet), a scoped principal cannot mutate
+// — only global principals can touch un-tagged resources. This
+// matches the DoD-context posture: unlabeled resources are treated as
+// "classification unknown" and gate-kept to global.
+func EnforceEnclave(p Principal, enclave *string, capCode string) error {
+	s := FindScope(p, capCode)
+	if s == nil || s.IsGlobal {
+		return nil
+	}
+	if enclave == nil || *enclave == "" {
+		return ErrOutsideScope
+	}
+	if !s.EnclaveMatches(*enclave) {
+		return ErrOutsideScope
+	}
+	return nil
+}
+
+// EnforceClassification is the classification-dimension twin of
+// EnforceEnclave. Same nil-handling semantic: unclassified-tagged
+// (i.e. classification IS NULL) means "tag missing, gate to global."
+// Sites and fabrics carry classification today; assets do not (they
+// inherit from their site).
+func EnforceClassification(p Principal, classification *string, capCode string) error {
+	s := FindScope(p, capCode)
+	if s == nil || s.IsGlobal {
+		return nil
+	}
+	if classification == nil || *classification == "" {
+		return ErrOutsideScope
+	}
+	if !s.ClassificationMatches(*classification) {
+		return ErrOutsideScope
+	}
+	return nil
+}
+
 // ErrOutsideScope is the canonical error the handlers map to 403.
 // Mirrors Python's ForbiddenError("resource is outside your scope").
 var ErrOutsideScope = errors.New("resource is outside your scope")
@@ -292,6 +354,8 @@ func scopeRowToDimension(scopeType, targetID *string) Scope {
 		return Scope{Enclaves: singletonStr(*targetID)}
 	case "organization":
 		return Scope{Organizations: singletonStr(*targetID)}
+	case "classification":
+		return Scope{Classifications: singletonStr(*targetID)}
 	case "fabric":
 		if id, err := uuid.Parse(*targetID); err == nil {
 			return Scope{FabricIDs: singletonUUID(id)}

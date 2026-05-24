@@ -169,3 +169,114 @@ func TestFindScope_WildcardFallsBackToGlobal(t *testing.T) {
 		t.Errorf("wildcard cap with no scope info should default to global, got %+v", s)
 	}
 }
+
+// ---- PR 61: enclave + classification ----
+
+func TestEnclaveMatches(t *testing.T) {
+	s := Scope{Enclaves: singletonStr("siprnet")}
+	if !s.EnclaveMatches("siprnet") {
+		t.Error("siprnet should match")
+	}
+	if s.EnclaveMatches("niprnet") {
+		t.Error("niprnet should not match")
+	}
+	global := GlobalScope()
+	if !global.EnclaveMatches("anything") {
+		t.Error("global should match any enclave")
+	}
+}
+
+func TestClassificationMatches(t *testing.T) {
+	s := Scope{Classifications: singletonStr("unclassified")}
+	if !s.ClassificationMatches("unclassified") {
+		t.Error("unclassified should match")
+	}
+	if s.ClassificationMatches("secret") {
+		t.Error("secret should not match")
+	}
+}
+
+func TestEnforceEnclave_GlobalAllowsAny(t *testing.T) {
+	p := Principal{Capabilities: []string{"inventory:sites:create"}}
+	tag := "anything"
+	if err := EnforceEnclave(p, &tag, "inventory:sites:create"); err != nil {
+		t.Errorf("global should pass: %v", err)
+	}
+	if err := EnforceEnclave(p, nil, "inventory:sites:create"); err != nil {
+		t.Errorf("global should pass even with nil enclave: %v", err)
+	}
+}
+
+func TestEnforceEnclave_ScopedRefuses(t *testing.T) {
+	p := Principal{
+		Capabilities: []string{"inventory:sites:create"},
+		Scopes: map[string]Scope{
+			"inventory:sites:create": {Enclaves: singletonStr("niprnet")},
+		},
+	}
+	allowed := "niprnet"
+	if err := EnforceEnclave(p, &allowed, "inventory:sites:create"); err != nil {
+		t.Errorf("in-scope enclave should pass: %v", err)
+	}
+	denied := "siprnet"
+	if err := EnforceEnclave(p, &denied, "inventory:sites:create"); !errors.Is(err, ErrOutsideScope) {
+		t.Errorf("out-of-scope enclave should be refused: %v", err)
+	}
+}
+
+func TestEnforceEnclave_ScopedRefusesNilEnclave(t *testing.T) {
+	// PR 61 semantic: nil/empty enclave gates to global. A scoped
+	// principal cannot mutate an un-tagged resource.
+	p := Principal{
+		Capabilities: []string{"inventory:sites:create"},
+		Scopes: map[string]Scope{
+			"inventory:sites:create": {Enclaves: singletonStr("niprnet")},
+		},
+	}
+	if err := EnforceEnclave(p, nil, "inventory:sites:create"); !errors.Is(err, ErrOutsideScope) {
+		t.Errorf("scoped principal should be refused on nil enclave: %v", err)
+	}
+	empty := ""
+	if err := EnforceEnclave(p, &empty, "inventory:sites:create"); !errors.Is(err, ErrOutsideScope) {
+		t.Errorf("scoped principal should be refused on empty enclave: %v", err)
+	}
+}
+
+func TestEnforceClassification_ScopedRefuses(t *testing.T) {
+	p := Principal{
+		Capabilities: []string{"ipam:fabrics:create"},
+		Scopes: map[string]Scope{
+			"ipam:fabrics:create": {Classifications: singletonStr("unclassified")},
+		},
+	}
+	allowed := "unclassified"
+	if err := EnforceClassification(p, &allowed, "ipam:fabrics:create"); err != nil {
+		t.Errorf("in-scope classification should pass: %v", err)
+	}
+	denied := "secret"
+	if err := EnforceClassification(p, &denied, "ipam:fabrics:create"); !errors.Is(err, ErrOutsideScope) {
+		t.Errorf("out-of-scope classification should be refused: %v", err)
+	}
+	if err := EnforceClassification(p, nil, "ipam:fabrics:create"); !errors.Is(err, ErrOutsideScope) {
+		t.Errorf("scoped principal should be refused on nil classification: %v", err)
+	}
+}
+
+func TestResolveUserScopes_ClassificationDim(t *testing.T) {
+	// PR 61 — the resolver now recognizes 'classification' as a scope
+	// dimension. Verify a role_scopes row with scope_type='classification'
+	// flows into Principal.Scopes[cap].Classifications.
+	st := "classification"
+	target := "unclassified"
+	rows := []dbq.ScopedCapabilityRow{
+		{Code: "inventory:sites:create", ScopeType: &st, TargetID: &target},
+	}
+	out := resolveUserScopes(rows)
+	scope, ok := out["inventory:sites:create"]
+	if !ok {
+		t.Fatal("no scope for cap")
+	}
+	if _, has := scope.Classifications["unclassified"]; !has {
+		t.Errorf("classification dim not populated, got %+v", scope.Classifications)
+	}
+}

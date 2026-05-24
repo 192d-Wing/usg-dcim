@@ -33,6 +33,11 @@ class Scope:
     enclaves: frozenset[str] = field(default_factory=frozenset)
     organizations: frozenset[str] = field(default_factory=frozenset)
     fabric_ids: frozenset[UUID] = field(default_factory=frozenset)
+    # PR 61 — classification scope dimension. Restricts a principal to
+    # resources tagged with a matching classification string ("unclassified",
+    # "secret", etc.). Enforcement on the Python side is currently advisory
+    # only; the Go service (otter-go) is the authoritative gate.
+    classifications: frozenset[str] = field(default_factory=frozenset)
 
     def union(self, other: Scope) -> Scope:
         return Scope(
@@ -43,6 +48,7 @@ class Scope:
             enclaves=self.enclaves | other.enclaves,
             organizations=self.organizations | other.organizations,
             fabric_ids=self.fabric_ids | other.fabric_ids,
+            classifications=self.classifications | other.classifications,
         )
 
 
@@ -101,6 +107,8 @@ async def _resolve_mapping_scope(
         return Scope(enclaves=frozenset([target]))
     if dimension is ScopeType.organization:
         return Scope(organizations=frozenset([target]))
+    if dimension is ScopeType.classification:
+        return Scope(classifications=frozenset([target]))
     if dimension is ScopeType.fabric:
         # Local import to dodge a cycle: ipam.Fabric -> base -> security.
         from ..models.ipam import Fabric
@@ -165,6 +173,7 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
     enclaves: set[str] = set()
     orgs: set[str] = set()
     fabric_ids: set[UUID] = set()
+    classifications: set[str] = set()
     is_global = False
     for r in rows:
         match r.scope_type:
@@ -188,6 +197,9 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
             case ScopeType.fabric:
                 if r.target_id:
                     fabric_ids.add(UUID(r.target_id))
+            case ScopeType.classification:
+                if r.target_id:
+                    classifications.add(r.target_id)
     return Scope(
         is_global=is_global,
         region_ids=frozenset(region_ids),
@@ -196,6 +208,7 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
         enclaves=frozenset(enclaves),
         organizations=frozenset(orgs),
         fabric_ids=frozenset(fabric_ids),
+        classifications=frozenset(classifications),
     )
 
 

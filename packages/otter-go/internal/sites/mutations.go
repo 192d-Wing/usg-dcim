@@ -38,6 +38,18 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "region_id, name, code required")
 		return
 	}
+	// PR 61 — caller must own both the enclave and classification they're
+	// tagging the site with. Nil/empty values are gated to global per the
+	// "unlabeled = needs global scope" policy in auth.EnforceEnclave.
+	p, _ := auth.From(r.Context())
+	if err := auth.EnforceEnclave(p, req.Enclave, "inventory:sites:create"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return
+	}
+	if err := auth.EnforceClassification(p, req.Classification, "inventory:sites:create"); err != nil {
+		httpx.Error(w, http.StatusForbidden, err.Error())
+		return
+	}
 	if req.LifecycleState == "" {
 		req.LifecycleState = "active"
 	}
@@ -145,6 +157,15 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
 		return
+	}
+	// PR 61 — caller can't reassign a site into an enclave they don't
+	// own. Classification isn't currently updatable via this endpoint
+	// (set-once at create), so no classification check here.
+	if req.enclaveSet {
+		if err := auth.EnforceEnclave(p, req.Enclave, "inventory:sites:update"); err != nil {
+			httpx.Error(w, http.StatusForbidden, err.Error())
+			return
+		}
 	}
 	out, err := h.Q.UpdateSite(r.Context(), dbq.UpdateSiteParams{
 		ID: id, Name: req.Name,
