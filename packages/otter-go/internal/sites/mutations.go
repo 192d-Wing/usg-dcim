@@ -16,19 +16,20 @@ import (
 )
 
 type createReq struct {
-	RegionID       uuid.UUID `json:"region_id"`
-	Name           string    `json:"name"`
-	Code           string    `json:"code"`
-	Address        *string   `json:"address"`
-	Latitude       *string   `json:"latitude"`
-	Longitude      *string   `json:"longitude"`
-	Timezone       *string   `json:"timezone"`
-	Majcom         *string   `json:"majcom"`
-	Organization   *string   `json:"organization"`
-	MissionOwner   *string   `json:"mission_owner"`
-	Enclave        *string   `json:"enclave"`
-	Classification *string   `json:"classification"`
-	LifecycleState string    `json:"lifecycle_state"`
+	RegionID       uuid.UUID  `json:"region_id"`
+	Name           string     `json:"name"`
+	Code           string     `json:"code"`
+	Address        *string    `json:"address"`
+	Latitude       *string    `json:"latitude"`
+	Longitude      *string    `json:"longitude"`
+	Timezone       *string    `json:"timezone"`
+	Majcom         *string    `json:"majcom"`
+	Organization   *string    `json:"organization"`
+	OrganizationID *uuid.UUID `json:"organization_id"`
+	MissionOwner   *string    `json:"mission_owner"`
+	Enclave        *string    `json:"enclave"`
+	Classification *string    `json:"classification"`
+	LifecycleState string     `json:"lifecycle_state"`
 	MetadataJson   json.RawMessage `json:"metadata_json"`
 }
 
@@ -56,7 +57,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	out, err := h.Q.CreateSite(r.Context(), dbq.CreateSiteParams{
 		RegionID: req.RegionID, Name: req.Name, Code: req.Code,
 		Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude,
-		Timezone: req.Timezone, Majcom: req.Majcom, Organization: req.Organization,
+		Timezone: req.Timezone, Majcom: req.Majcom,
+		Organization: req.Organization, OrganizationID: req.OrganizationID,
 		MissionOwner: req.MissionOwner, Enclave: req.Enclave, Classification: req.Classification,
 		LifecycleState: req.LifecycleState, MetadataJson: req.MetadataJson,
 	})
@@ -76,19 +78,21 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 // affecting unaddressed columns. Mirrors Pydantic
 // model_dump(exclude_unset=True).
 type updateReq struct {
-	Name            *string
-	Address         *string
-	addressSet      bool
-	Majcom          *string
-	majcomSet       bool
-	Organization    *string
-	organizationSet bool
-	MissionOwner    *string
-	missionOwnerSet bool
-	Enclave         *string
-	enclaveSet      bool
-	LifecycleState  *string
-	MetadataJson    json.RawMessage
+	Name              *string
+	Address           *string
+	addressSet        bool
+	Majcom            *string
+	majcomSet         bool
+	Organization      *string
+	organizationSet   bool
+	OrganizationID    *uuid.UUID
+	organizationIDSet bool
+	MissionOwner      *string
+	missionOwnerSet   bool
+	Enclave           *string
+	enclaveSet        bool
+	LifecycleState    *string
+	MetadataJson      json.RawMessage
 }
 
 func (u *updateReq) UnmarshalJSON(data []byte) error {
@@ -116,6 +120,12 @@ func (u *updateReq) UnmarshalJSON(data []byte) error {
 	if v, ok := raw["organization"]; ok {
 		u.organizationSet = true
 		if err := json.Unmarshal(v, &u.Organization); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["organization_id"]; ok {
+		u.organizationIDSet = true
+		if err := json.Unmarshal(v, &u.OrganizationID); err != nil {
 			return err
 		}
 	}
@@ -172,6 +182,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		AddressSet: req.addressSet, Address: req.Address,
 		MajcomSet: req.majcomSet, Majcom: req.Majcom,
 		OrganizationSet: req.organizationSet, Organization: req.Organization,
+		OrganizationIDSet: req.organizationIDSet, OrganizationID: req.OrganizationID,
 		MissionOwnerSet: req.missionOwnerSet, MissionOwner: req.MissionOwner,
 		EnclaveSet: req.enclaveSet, Enclave: req.Enclave,
 		LifecycleState: req.LifecycleState, MetadataJson: req.MetadataJson,

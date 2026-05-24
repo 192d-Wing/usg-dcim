@@ -414,6 +414,7 @@ type Site struct {
 	Timezone        *string   `json:"timezone"`
 	Majcom          *string   `json:"majcom"`
 	Organization    *string   `json:"organization"`
+	OrganizationID  *uuid.UUID `json:"organization_id"`
 	MissionOwner    *string   `json:"mission_owner"`
 	Enclave         *string   `json:"enclave"`
 	Classification  *string   `json:"classification"`

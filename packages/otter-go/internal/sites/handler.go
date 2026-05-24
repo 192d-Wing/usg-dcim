@@ -99,6 +99,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		}
 		params.RegionID = &u
 	}
+	if oid := q.Get("organization_id"); oid != "" {
+		u, err := uuid.Parse(oid)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "organization_id is not a uuid")
+			return
+		}
+		params.OrganizationID = &u
+	}
 
 	items, err := h.Q.ListSites(r.Context(), params)
 	if err != nil {
@@ -111,6 +119,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Majcom:         params.Majcom,
 		Enclave:        params.Enclave,
 		Organization:   params.Organization,
+		OrganizationID: params.OrganizationID,
 		LifecycleState: params.LifecycleState,
 		SiteIds:        scopeSiteIds,
 	})

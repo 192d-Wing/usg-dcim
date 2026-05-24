@@ -60,49 +60,50 @@ func (q *Queries) UpdateRegion(ctx context.Context, arg UpdateRegionParams) (Reg
 // ---- Sites ----
 
 const siteRetCols = `id, region_id, name, code, address, latitude, longitude,
-          timezone, majcom, organization, mission_owner, enclave,
-          classification, lifecycle_state, metadata_json,
+          timezone, majcom, organization, organization_id, mission_owner,
+          enclave, classification, lifecycle_state, metadata_json,
           created_at, updated_at`
 
 func scanSite(row interface{ Scan(...any) error }, s *Site) error {
 	return row.Scan(&s.ID, &s.RegionID, &s.Name, &s.Code, &s.Address, &s.Latitude, &s.Longitude,
-		&s.Timezone, &s.Majcom, &s.Organization, &s.MissionOwner, &s.Enclave,
+		&s.Timezone, &s.Majcom, &s.Organization, &s.OrganizationID, &s.MissionOwner, &s.Enclave,
 		&s.Classification, &s.LifecycleState, &s.MetadataJson,
 		&s.CreatedAt, &s.UpdatedAt)
 }
 
 const createSite = `-- name: CreateSite :one
 INSERT INTO sites (id, region_id, name, code, address, latitude, longitude,
-                   timezone, majcom, organization, mission_owner, enclave,
-                   classification, lifecycle_state, metadata_json,
+                   timezone, majcom, organization, organization_id, mission_owner,
+                   enclave, classification, lifecycle_state, metadata_json,
                    created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6,
         $7, $8, $9, $10, $11,
-        $12, $13::lifecycle_state, COALESCE($14::jsonb, '{}'::jsonb),
+        $12, $13, $14::lifecycle_state, COALESCE($15::jsonb, '{}'::jsonb),
         NOW(), NOW())
 RETURNING ` + siteRetCols
 
 type CreateSiteParams struct {
-	RegionID       uuid.UUID `json:"region_id"`
-	Name           string    `json:"name"`
-	Code           string    `json:"code"`
-	Address        *string   `json:"address"`
-	Latitude       *string   `json:"latitude"`
-	Longitude      *string   `json:"longitude"`
-	Timezone       *string   `json:"timezone"`
-	Majcom         *string   `json:"majcom"`
-	Organization   *string   `json:"organization"`
-	MissionOwner   *string   `json:"mission_owner"`
-	Enclave        *string   `json:"enclave"`
-	Classification *string   `json:"classification"`
-	LifecycleState string    `json:"lifecycle_state"`
-	MetadataJson   []byte    `json:"metadata_json"`
+	RegionID       uuid.UUID  `json:"region_id"`
+	Name           string     `json:"name"`
+	Code           string     `json:"code"`
+	Address        *string    `json:"address"`
+	Latitude       *string    `json:"latitude"`
+	Longitude      *string    `json:"longitude"`
+	Timezone       *string    `json:"timezone"`
+	Majcom         *string    `json:"majcom"`
+	Organization   *string    `json:"organization"`
+	OrganizationID *uuid.UUID `json:"organization_id"`
+	MissionOwner   *string    `json:"mission_owner"`
+	Enclave        *string    `json:"enclave"`
+	Classification *string    `json:"classification"`
+	LifecycleState string     `json:"lifecycle_state"`
+	MetadataJson   []byte     `json:"metadata_json"`
 }
 
 func (q *Queries) CreateSite(ctx context.Context, arg CreateSiteParams) (Site, error) {
 	row := q.db.QueryRow(ctx, createSite,
 		arg.RegionID, arg.Name, arg.Code, arg.Address, arg.Latitude, arg.Longitude,
-		arg.Timezone, arg.Majcom, arg.Organization, arg.MissionOwner, arg.Enclave,
+		arg.Timezone, arg.Majcom, arg.Organization, arg.OrganizationID, arg.MissionOwner, arg.Enclave,
 		arg.Classification, arg.LifecycleState, arg.MetadataJson)
 	var s Site
 	err := scanSite(row, &s)
@@ -115,29 +116,32 @@ SET name           = COALESCE($2::text, name),
     address        = CASE WHEN $3::bool  THEN $4::text  ELSE address END,
     majcom         = CASE WHEN $5::bool  THEN $6::text  ELSE majcom END,
     organization   = CASE WHEN $7::bool  THEN $8::text  ELSE organization END,
-    mission_owner  = CASE WHEN $9::bool  THEN $10::text ELSE mission_owner END,
-    enclave        = CASE WHEN $11::bool THEN $12::text ELSE enclave END,
-    lifecycle_state = COALESCE($13::lifecycle_state, lifecycle_state),
-    metadata_json  = COALESCE($14::jsonb, metadata_json),
+    organization_id = CASE WHEN $9::bool THEN $10::uuid ELSE organization_id END,
+    mission_owner  = CASE WHEN $11::bool THEN $12::text ELSE mission_owner END,
+    enclave        = CASE WHEN $13::bool THEN $14::text ELSE enclave END,
+    lifecycle_state = COALESCE($15::lifecycle_state, lifecycle_state),
+    metadata_json  = COALESCE($16::jsonb, metadata_json),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING ` + siteRetCols
 
 type UpdateSiteParams struct {
-	ID              uuid.UUID `json:"id"`
-	Name            *string   `json:"name"`
-	AddressSet      bool      `json:"address_set"`
-	Address         *string   `json:"address"`
-	MajcomSet       bool      `json:"majcom_set"`
-	Majcom          *string   `json:"majcom"`
-	OrganizationSet bool      `json:"organization_set"`
-	Organization    *string   `json:"organization"`
-	MissionOwnerSet bool      `json:"mission_owner_set"`
-	MissionOwner    *string   `json:"mission_owner"`
-	EnclaveSet      bool      `json:"enclave_set"`
-	Enclave         *string   `json:"enclave"`
-	LifecycleState  *string   `json:"lifecycle_state"`
-	MetadataJson    []byte    `json:"metadata_json"`
+	ID                uuid.UUID  `json:"id"`
+	Name              *string    `json:"name"`
+	AddressSet        bool       `json:"address_set"`
+	Address           *string    `json:"address"`
+	MajcomSet         bool       `json:"majcom_set"`
+	Majcom            *string    `json:"majcom"`
+	OrganizationSet   bool       `json:"organization_set"`
+	Organization      *string    `json:"organization"`
+	OrganizationIDSet bool       `json:"organization_id_set"`
+	OrganizationID    *uuid.UUID `json:"organization_id"`
+	MissionOwnerSet   bool       `json:"mission_owner_set"`
+	MissionOwner      *string    `json:"mission_owner"`
+	EnclaveSet        bool       `json:"enclave_set"`
+	Enclave           *string    `json:"enclave"`
+	LifecycleState    *string    `json:"lifecycle_state"`
+	MetadataJson      []byte     `json:"metadata_json"`
 }
 
 func (q *Queries) UpdateSite(ctx context.Context, arg UpdateSiteParams) (Site, error) {
@@ -146,6 +150,7 @@ func (q *Queries) UpdateSite(ctx context.Context, arg UpdateSiteParams) (Site, e
 		arg.AddressSet, arg.Address,
 		arg.MajcomSet, arg.Majcom,
 		arg.OrganizationSet, arg.Organization,
+		arg.OrganizationIDSet, arg.OrganizationID,
 		arg.MissionOwnerSet, arg.MissionOwner,
 		arg.EnclaveSet, arg.Enclave,
 		arg.LifecycleState, arg.MetadataJson)
