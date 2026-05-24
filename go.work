@@ -4,6 +4,7 @@ use (
 	./packages/badger
 	./packages/beagle
 	./packages/heron
+	./packages/loadgen
 	./packages/magpie
 	./packages/otter-go
 	./packages/shared-go

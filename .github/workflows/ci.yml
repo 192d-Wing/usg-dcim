@@ -105,7 +105,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pkg: [badger, heron, magpie, beagle, otter-go]
+        pkg: [badger, heron, magpie, beagle, otter-go, loadgen]
     defaults:
       run:
         working-directory: packages/${{ matrix.pkg }}
