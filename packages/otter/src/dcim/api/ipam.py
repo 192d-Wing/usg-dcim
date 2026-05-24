@@ -2053,6 +2053,38 @@ async def delete_dhcp_scope(
     await db.commit()
 
 
+@router.get("/dhcp/scopes/{scope_id}/diff")
+async def diff_dhcp_scope(
+    scope_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Drift check: what DCIM would push vs what Kea currently has.
+
+    Read-only (no DB or Kea mutation). Returns status + delta. Status
+    is one of: in_sync, drifted, missing_from_kea, never_pushed, error.
+    The `delta` field is a per-key map of DCIM-vs-Kea values for every
+    field that differs; an empty delta with status=in_sync means the
+    two sides agree on every field DCIM authors.
+    """
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    server = await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:read",
+    )
+    result = await dhcp_push.diff_scope(obj, server)
+    return {
+        "scope_id": result.scope_id,
+        "kea_subnet_id": result.kea_subnet_id,
+        "status": result.status,
+        "dcim_subnet": result.dcim_subnet,
+        "kea_subnet": result.kea_subnet,
+        "delta": result.delta,
+        "error": result.error,
+    }
+
+
 @router.post("/dhcp/scopes/{scope_id}/push")
 async def push_dhcp_scope(
     scope_id: UUID,

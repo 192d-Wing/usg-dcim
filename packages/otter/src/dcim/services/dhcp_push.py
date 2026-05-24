@@ -356,3 +356,169 @@ async def _record_push_status(
     server.last_push_status = status
     server.last_push_error = error[:2048] if error else None
     await db.flush()
+
+
+# ---------- drift detection (PR 75) ----------
+
+
+@dataclass
+class DiffResult:
+    scope_id: str
+    kea_subnet_id: int | None
+    status: str  # "in_sync" | "drifted" | "missing_from_kea" | "never_pushed" | "error"
+    dcim_subnet: dict | None
+    kea_subnet: dict | None
+    delta: dict  # field-name -> {"dcim": ..., "kea": ...}
+    error: str | None
+
+
+# Field-by-field comparison ignores keys Kea adds but DCIM doesn't
+# author. Anything DCIM rendered must match; anything Kea added on
+# top is informational. List-shaped fields are compared as multisets
+# (operator may have re-ordered without changing semantics).
+_LIST_FIELDS = {"pools", "pd-pools", "option-data", "reservations"}
+
+
+def _normalize_for_diff(value):
+    """Recursively normalize dicts/lists for stable comparison.
+
+    Lists become tuples of frozen dicts so set-membership works; dicts
+    become tuples of sorted items so order doesn't matter. Bare scalars
+    pass through. Used inside _diff_subnet_objects only — never round-
+    tripped back to JSON.
+    """
+    if isinstance(value, dict):
+        return tuple(sorted(
+            (k, _normalize_for_diff(v)) for k, v in value.items()
+        ))
+    if isinstance(value, list):
+        return tuple(sorted(
+            (_normalize_for_diff(item) for item in value),
+            key=repr,
+        ))
+    return value
+
+
+def _diff_subnet_objects(dcim: dict, kea: dict) -> dict:
+    """Return the per-key delta between DCIM's rendered subnet and
+    Kea's reported subnet.
+
+    Only keys that DCIM authored show up in the delta — Kea-added
+    fields (timestamps, internal counters, defaulted options) are
+    ignored. A key present in DCIM but missing in Kea is reported as
+    `{"dcim": X, "kea": None}`.
+
+    Empty return dict = no drift.
+    """
+    delta: dict = {}
+    for key, dcim_val in dcim.items():
+        kea_val = kea.get(key)
+        if key in _LIST_FIELDS:
+            if _normalize_for_diff(dcim_val) != _normalize_for_diff(kea_val or []):
+                delta[key] = {"dcim": dcim_val, "kea": kea_val}
+        elif dcim_val != kea_val:
+            delta[key] = {"dcim": dcim_val, "kea": kea_val}
+    return delta
+
+
+def _extract_kea_subnet(resp: Any, ip_family: int) -> dict | None:
+    """Pluck the single subnet object out of Kea's subnet4-get /
+    subnet6-get response. Returns None if the result code says
+    not-found (3) or the shape is malformed."""
+    if not isinstance(resp, list) or not resp:
+        return None
+    entry = resp[0]
+    if not isinstance(entry, dict):
+        return None
+    if entry.get("result") == 3:
+        return None
+    args = entry.get("arguments")
+    if not isinstance(args, dict):
+        return None
+    list_key = "subnet4" if ip_family == 4 else "subnet6"
+    subnets = args.get(list_key)
+    if not isinstance(subnets, list) or not subnets:
+        return None
+    first = subnets[0]
+    return first if isinstance(first, dict) else None
+
+
+async def diff_scope(scope: DhcpScope, server: DhcpServer) -> DiffResult:
+    """Compare what DCIM would render against what Kea currently has.
+
+    Five terminal states:
+      * never_pushed    — scope has no kea_subnet_id; nothing to diff.
+      * missing_from_kea — DCIM has an id but Kea returns result=3
+                          (operator manually deleted, Kea reloaded
+                          without the persisted config, etc.).
+      * in_sync         — diff is empty; DCIM == Kea on every authored field.
+      * drifted         — diff is non-empty; the delta dict says what.
+      * error           — transport failure or unexpected Kea response.
+
+    A successful diff_scope call against a `missing_from_kea` scope
+    is the cue to call push_scope; against `drifted` the operator
+    decides whether to push (overwrite Kea) or accept what's there.
+
+    Caller passes the parent DhcpServer explicitly — keeps this
+    function decoupled from the DB session and mirrors the shape of
+    delete_scope_from_kea.
+    """
+    if scope.kea_subnet_id is None:
+        return DiffResult(
+            scope_id=str(scope.id), kea_subnet_id=None,
+            status="never_pushed", dcim_subnet=None, kea_subnet=None,
+            delta={}, error=None,
+        )
+
+    if scope.ip_family == 4:
+        dcim_subnet = render_kea_subnet4(scope, scope.kea_subnet_id)
+    else:
+        dcim_subnet = render_kea_subnet6(scope, scope.kea_subnet_id)
+
+    client = KeaClient(
+        server.kea_url,
+        username=server.auth_username,
+        password=server.auth_password,
+    )
+
+    try:
+        if scope.ip_family == 4:
+            resp = await client.subnet4_get(scope.kea_subnet_id)
+        else:
+            resp = await client.subnet6_get(scope.kea_subnet_id)
+    except Exception as e:  # noqa: BLE001
+        err = f"{type(e).__name__}: {e}"
+        log.error("dhcp_diff.transport_error", scope_id=str(scope.id), error=err)
+        return DiffResult(
+            scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
+            status="error", dcim_subnet=dcim_subnet, kea_subnet=None,
+            delta={}, error=err,
+        )
+
+    kea_subnet = _extract_kea_subnet(resp, scope.ip_family)
+    if kea_subnet is None:
+        # Check whether Kea reported the "not found" code specifically
+        # (vs a malformed reply we couldn't parse).
+        result_code = (
+            resp[0].get("result") if isinstance(resp, list) and resp
+            and isinstance(resp[0], dict) else None
+        )
+        if result_code == 3:
+            return DiffResult(
+                scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
+                status="missing_from_kea", dcim_subnet=dcim_subnet,
+                kea_subnet=None, delta={}, error=None,
+            )
+        return DiffResult(
+            scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
+            status="error", dcim_subnet=dcim_subnet, kea_subnet=None,
+            delta={}, error=f"unexpected Kea response: {resp!r}"[:1024],
+        )
+
+    delta = _diff_subnet_objects(dcim_subnet, kea_subnet)
+    status = "in_sync" if not delta else "drifted"
+    return DiffResult(
+        scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
+        status=status, dcim_subnet=dcim_subnet, kea_subnet=kea_subnet,
+        delta=delta, error=None,
+    )

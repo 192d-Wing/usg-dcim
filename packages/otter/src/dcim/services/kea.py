@@ -164,6 +164,15 @@ class KeaClient:
             "subnet4-del", ["dhcp4"], arguments={"id": subnet_id},
         )
 
+    async def subnet4_get(self, subnet_id: int) -> Any:
+        """Fetch the live subnet4 object from Kea (PR 75 drift check).
+        Response carries the full subnet definition under
+        `arguments.subnet4[0]`; result=3 means the subnet isn't in
+        Kea even though DCIM has a kea_subnet_id for it (drifted away)."""
+        return await self._post(
+            "subnet4-get", ["dhcp4"], arguments={"id": subnet_id},
+        )
+
     async def subnet6_add(self, subnet: dict) -> Any:
         return await self._post(
             "subnet6-add", ["dhcp6"], arguments={"subnet6": [subnet]},
@@ -177,6 +186,13 @@ class KeaClient:
     async def subnet6_del(self, subnet_id: int) -> Any:
         return await self._post(
             "subnet6-del", ["dhcp6"], arguments={"id": subnet_id},
+        )
+
+    async def subnet6_get(self, subnet_id: int) -> Any:
+        """v6 twin of subnet4_get. Response carries the subnet under
+        `arguments.subnet6[0]`."""
+        return await self._post(
+            "subnet6-get", ["dhcp6"], arguments={"id": subnet_id},
         )
 
     async def config_write(self, services: list[str]) -> Any:
