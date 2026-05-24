@@ -33,6 +33,11 @@ type Querier interface {
 	// principals need these to resolve whether a target site is reachable.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
+
+	// PR 62: scope-filtered LISTs. Expands the caller's region + group +
+	// direct-site scope dimensions to a concrete site_id set in a single
+	// DB call. Powers auth.ScopedSiteFilter.
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -61,6 +66,22 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	limit := parseInt32(q.Get("limit"), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
 
+	// PR 62 — resolve the caller's site scope. Scoped principals see
+	// only sites reachable through their region / site_group / direct-
+	// site dimensions. A scoped principal with no site-reachable
+	// dimensions (enclave-only, fabric-only, etc.) gets an empty page.
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:sites:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, listResponse{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+
 	params := dbq.ListSitesParams{
 		Limit:          limit,
 		Offset:         offset,
@@ -68,6 +89,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Enclave:        strPtr(q.Get("enclave")),
 		Organization:   strPtr(q.Get("organization")),
 		LifecycleState: strPtr(q.Get("lifecycle_state")),
+		SiteIds:        scopeSiteIds,
 	}
 	if rid := q.Get("region_id"); rid != "" {
 		u, err := uuid.Parse(rid)
@@ -90,6 +112,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Enclave:        params.Enclave,
 		Organization:   params.Organization,
 		LifecycleState: params.LifecycleState,
+		SiteIds:        scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)

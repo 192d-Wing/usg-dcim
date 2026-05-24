@@ -19,12 +19,16 @@
 // site "enterprise default" rule), PR 60 (scope-filtered DNS LIST
 // queries — zones, records, servers, anycast-groups, forwarders,
 // catalog-zones, blocklists + entries, views, health-checks,
-// anycast-bindings). Remaining: auth-handler retrofit (api_tokens,
-// user roles), site-scoped LIST filtering (bgp_peers, alert_rules,
-// maintenance_windows, sites/racks/assets), IdP-mapping scope
-// resolver. BGP policy resources (asns/prefix-lists/community-lists/
-// route-maps + entries) are intentionally global — they have no
-// scope FK and cannot be ABAC-scoped without a schema change.
+// anycast-bindings), PR 61 (enclave + classification mutation
+// enforcement on sites + fabrics with nullable-tag = global semantic),
+// PR 62 (scope-filtered site-rooted LIST queries — sites, racks,
+// assets — via DB-backed expansion of region + site_group + direct
+// site dims). Remaining: auth-handler retrofit (api_tokens, user
+// roles), site-scope LIST filtering on the rest (alert_rules,
+// maintenance_windows, bgp_peers, buildings/rooms/rows), IdP-mapping
+// scope resolver. BGP policy resources (asns/prefix-lists/community-
+// lists/route-maps + entries) are intentionally global — they have
+// no scope FK and cannot be ABAC-scoped without a schema change.
 //
 // OIDC-mapping scope resolution (the cross-table code→UUID lookups
 // from _resolve_mapping_scope in Python) is intentionally deferred —
@@ -119,6 +123,73 @@ func (s Scope) FabricIDsInScope() map[uuid.UUID]struct{} {
 		return nil
 	}
 	return s.FabricIDs
+}
+
+// siteExpansionQ is the slim interface ScopedSiteFilter needs: a
+// single expansion query that maps the caller's (direct sites, regions,
+// groups) dimensions to the concrete site_id set they can see. Each
+// site-rooted package's Querier interface satisfies this when it
+// embeds ListSiteIDsForExpansion.
+type siteExpansionQ interface {
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
+}
+
+// ScopedSiteFilter resolves the caller's scope for capCode into a
+// concrete site_id set the handler should pass as scope_site_ids on
+// site-rooted LIST/COUNT queries. The expansion walks all three site-
+// reachable dimensions (direct SiteIDs + sites under any RegionID +
+// sites in any SiteGroupID) via a single SQL query.
+//
+// Returns:
+//   - (nil, false, nil)            — principal is global; pass nil to
+//     skip the filter on the LIST query.
+//   - ([]uuid.UUID{...}, true, nil) — scoped; pass the slice. Empty
+//     slice means "scope can't reach any site" — caller should
+//     short-circuit to an empty page.
+//   - (nil, true, err)             — DB error during expansion.
+//
+// Region/site-group expansion is DB-backed (mirrors how SiteMatches
+// resolves a single target). A scoped principal with only Enclaves /
+// Organizations / FabricIDs / Classifications dimensions and no site-
+// reachable dim gets back an empty allowed set — those dimensions
+// can't expand into a site list.
+func ScopedSiteFilter(ctx context.Context, q siteExpansionQ, p Principal, capCode string) ([]uuid.UUID, bool, error) {
+	s := FindScope(p, capCode)
+	if s == nil || s.IsGlobal {
+		return nil, false, nil
+	}
+	var directs, regions, groups []uuid.UUID
+	if len(s.SiteIDs) > 0 {
+		directs = make([]uuid.UUID, 0, len(s.SiteIDs))
+		for id := range s.SiteIDs {
+			directs = append(directs, id)
+		}
+	}
+	if len(s.RegionIDs) > 0 {
+		regions = make([]uuid.UUID, 0, len(s.RegionIDs))
+		for id := range s.RegionIDs {
+			regions = append(regions, id)
+		}
+	}
+	if len(s.SiteGroupIDs) > 0 {
+		groups = make([]uuid.UUID, 0, len(s.SiteGroupIDs))
+		for id := range s.SiteGroupIDs {
+			groups = append(groups, id)
+		}
+	}
+	if directs == nil && regions == nil && groups == nil {
+		return []uuid.UUID{}, true, nil
+	}
+	ids, err := q.ListSiteIDsForExpansion(ctx, dbq.ListSiteIDsForExpansionParams{
+		DirectSiteIds: directs, RegionIds: regions, GroupIds: groups,
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	if ids == nil {
+		ids = []uuid.UUID{}
+	}
+	return ids, true, nil
 }
 
 // ScopedFabricFilter resolves the caller's scope for capCode and turns

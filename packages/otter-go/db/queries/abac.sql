@@ -142,3 +142,19 @@ SELECT site_scope_id FROM alert_rules WHERE id = $1;
 
 -- name: GetMaintenanceWindowSiteID :one
 SELECT site_id FROM maintenance_windows WHERE id = $1;
+
+-- name: ListSiteIDsForExpansion :many
+-- PR 62 — expand a scoped principal's region + site_group + direct
+-- site dimensions into the concrete set of site IDs they can see.
+-- The three inputs are independently optional; any/all may be NULL.
+-- A row is returned if it matches any non-NULL dimension. (Caller
+-- guarantees at least one dimension is non-NULL; global principals
+-- skip this query entirely.) Used by auth.ScopedSiteFilter to build
+-- the scope_site_ids slice that LIST/COUNT queries on site-rooted
+-- resources filter against.
+SELECT DISTINCT s.id
+FROM sites s
+LEFT JOIN site_group_memberships sgm ON sgm.site_id = s.id
+WHERE (sqlc.narg(direct_site_ids)::uuid[] IS NOT NULL AND s.id        = ANY(sqlc.narg(direct_site_ids)::uuid[]))
+   OR (sqlc.narg(region_ids)::uuid[]      IS NOT NULL AND s.region_id = ANY(sqlc.narg(region_ids)::uuid[]))
+   OR (sqlc.narg(group_ids)::uuid[]       IS NOT NULL AND sgm.group_id = ANY(sqlc.narg(group_ids)::uuid[]));

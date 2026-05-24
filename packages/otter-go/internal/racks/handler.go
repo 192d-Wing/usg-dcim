@@ -29,6 +29,9 @@ type Querier interface {
 	// PR 54: ABAC SiteMatches expansion.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
+
+	// PR 62: scope-filtered LISTs.
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -54,7 +57,18 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(q.Get("limit"), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListRacksParams{Limit: limit, Offset: offset}
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:racks:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, listResponse{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListRacksParams{Limit: limit, Offset: offset, ScopeSiteIds: scopeSiteIds}
 	if v := q.Get("site_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -77,7 +91,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountRacks(r.Context(), dbq.CountRacksParams{SiteID: params.SiteID, RowID: params.RowID})
+	total, err := h.Q.CountRacks(r.Context(), dbq.CountRacksParams{SiteID: params.SiteID, RowID: params.RowID, ScopeSiteIds: scopeSiteIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

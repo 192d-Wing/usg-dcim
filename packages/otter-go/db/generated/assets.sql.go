@@ -26,25 +26,27 @@ WHERE ($3::uuid IS NULL OR site_id            = $3)
   AND ($6::text IS NULL OR lifecycle_state::text = $6)
   AND ($7::text IS NULL OR serial             = $7)
   AND ($8::text IS NULL OR hostname           = $8)
+  AND ($9::uuid[] IS NULL OR site_id          = ANY($9::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListAssetsParams struct {
-	Limit          int32      `json:"limit"`
-	Offset         int32      `json:"offset"`
-	SiteID         *uuid.UUID `json:"site_id"`
-	RackID         *uuid.UUID `json:"rack_id"`
-	Kind           *string    `json:"kind"`
-	LifecycleState *string    `json:"lifecycle_state"`
-	Serial         *string    `json:"serial"`
-	Hostname       *string    `json:"hostname"`
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	SiteID         *uuid.UUID  `json:"site_id"`
+	RackID         *uuid.UUID  `json:"rack_id"`
+	Kind           *string     `json:"kind"`
+	LifecycleState *string     `json:"lifecycle_state"`
+	Serial         *string     `json:"serial"`
+	Hostname       *string     `json:"hostname"`
+	ScopeSiteIds   []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListAssets(ctx context.Context, arg ListAssetsParams) ([]Asset, error) {
 	rows, err := q.db.Query(ctx, listAssets,
 		arg.Limit, arg.Offset, arg.SiteID, arg.RackID,
-		arg.Kind, arg.LifecycleState, arg.Serial, arg.Hostname,
+		arg.Kind, arg.LifecycleState, arg.Serial, arg.Hostname, arg.ScopeSiteIds,
 	)
 	if err != nil {
 		return nil, err
@@ -70,21 +72,23 @@ WHERE ($1::uuid IS NULL OR site_id            = $1)
   AND ($4::text IS NULL OR lifecycle_state::text = $4)
   AND ($5::text IS NULL OR serial             = $5)
   AND ($6::text IS NULL OR hostname           = $6)
+  AND ($7::uuid[] IS NULL OR site_id          = ANY($7::uuid[]))
 `
 
 type CountAssetsParams struct {
-	SiteID         *uuid.UUID `json:"site_id"`
-	RackID         *uuid.UUID `json:"rack_id"`
-	Kind           *string    `json:"kind"`
-	LifecycleState *string    `json:"lifecycle_state"`
-	Serial         *string    `json:"serial"`
-	Hostname       *string    `json:"hostname"`
+	SiteID         *uuid.UUID  `json:"site_id"`
+	RackID         *uuid.UUID  `json:"rack_id"`
+	Kind           *string     `json:"kind"`
+	LifecycleState *string     `json:"lifecycle_state"`
+	Serial         *string     `json:"serial"`
+	Hostname       *string     `json:"hostname"`
+	ScopeSiteIds   []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountAssets(ctx context.Context, arg CountAssetsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAssets,
 		arg.SiteID, arg.RackID, arg.Kind,
-		arg.LifecycleState, arg.Serial, arg.Hostname,
+		arg.LifecycleState, arg.Serial, arg.Hostname, arg.ScopeSiteIds,
 	)
 	var n int64
 	err := row.Scan(&n)

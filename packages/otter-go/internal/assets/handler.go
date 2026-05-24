@@ -39,6 +39,9 @@ type Querier interface {
 	// PR 54: ABAC SiteMatches expansion.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
+
+	// PR 62: scope-filtered LISTs.
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -66,6 +69,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(q.Get("limit"), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:assets:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, listResponse{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
 	params := dbq.ListAssetsParams{
 		Limit:          limit,
 		Offset:         offset,
@@ -73,6 +87,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		LifecycleState: strPtr(q.Get("lifecycle_state")),
 		Serial:         strPtr(q.Get("serial")),
 		Hostname:       strPtr(q.Get("hostname")),
+		ScopeSiteIds:   scopeSiteIds,
 	}
 	if v := q.Get("site_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -99,6 +114,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	total, err := h.Q.CountAssets(r.Context(), dbq.CountAssetsParams{
 		SiteID: params.SiteID, RackID: params.RackID, Kind: params.Kind,
 		LifecycleState: params.LifecycleState, Serial: params.Serial, Hostname: params.Hostname,
+		ScopeSiteIds: scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)

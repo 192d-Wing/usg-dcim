@@ -21,9 +21,10 @@ import (
 // Each method honors a per-test override so a single test can return an
 // error from one query and good data from another.
 type fakeQuerier struct {
-	list  func(ctx context.Context, arg dbq.ListSitesParams) ([]dbq.Site, error)
-	count func(ctx context.Context, arg dbq.CountSitesParams) (int64, error)
-	get   func(ctx context.Context, id uuid.UUID) (dbq.Site, error)
+	list       func(ctx context.Context, arg dbq.ListSitesParams) ([]dbq.Site, error)
+	count      func(ctx context.Context, arg dbq.CountSitesParams) (int64, error)
+	get        func(ctx context.Context, id uuid.UUID) (dbq.Site, error)
+	expandSite func(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 func (f *fakeQuerier) ListSites(ctx context.Context, arg dbq.ListSitesParams) ([]dbq.Site, error) {
@@ -60,6 +61,17 @@ func (f *fakeQuerier) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID
 	return uuid.Nil, nil
 }
 func (f *fakeQuerier) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+// PR 62 — scope-filtered LIST helper. Tests that don't care about scope
+// can let this return nil (treated as "no expansion" by the caller).
+// expandSite is a per-test override so a single test can return a
+// specific set of allowed site IDs.
+func (f *fakeQuerier) ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	if f.expandSite != nil {
+		return f.expandSite(ctx, arg)
+	}
 	return nil, nil
 }
 

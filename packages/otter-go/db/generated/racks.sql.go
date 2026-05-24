@@ -15,19 +15,21 @@ SELECT id, site_id, row_id, name, code, u_height,
 FROM racks
 WHERE ($3::uuid IS NULL OR site_id = $3)
   AND ($4::uuid IS NULL OR row_id  = $4)
+  AND ($5::uuid[] IS NULL OR site_id = ANY($5::uuid[]))
 ORDER BY code
 LIMIT $1 OFFSET $2
 `
 
 type ListRacksParams struct {
-	Limit  int32      `json:"limit"`
-	Offset int32      `json:"offset"`
-	SiteID *uuid.UUID `json:"site_id"`
-	RowID  *uuid.UUID `json:"row_id"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	RowID        *uuid.UUID  `json:"row_id"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListRacks(ctx context.Context, arg ListRacksParams) ([]Rack, error) {
-	rows, err := q.db.Query(ctx, listRacks, arg.Limit, arg.Offset, arg.SiteID, arg.RowID)
+	rows, err := q.db.Query(ctx, listRacks, arg.Limit, arg.Offset, arg.SiteID, arg.RowID, arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -49,15 +51,17 @@ SELECT count(*)::bigint
 FROM racks
 WHERE ($1::uuid IS NULL OR site_id = $1)
   AND ($2::uuid IS NULL OR row_id  = $2)
+  AND ($3::uuid[] IS NULL OR site_id = ANY($3::uuid[]))
 `
 
 type CountRacksParams struct {
-	SiteID *uuid.UUID `json:"site_id"`
-	RowID  *uuid.UUID `json:"row_id"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	RowID        *uuid.UUID  `json:"row_id"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountRacks(ctx context.Context, arg CountRacksParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRacks, arg.SiteID, arg.RowID)
+	row := q.db.QueryRow(ctx, countRacks, arg.SiteID, arg.RowID, arg.ScopeSiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

@@ -321,3 +321,37 @@ func (q *Queries) GetMaintenanceWindowSiteID(ctx context.Context, id uuid.UUID) 
 	err := row.Scan(&sid)
 	return sid, err
 }
+
+const listSiteIDsForExpansion = `-- name: ListSiteIDsForExpansion :many
+SELECT DISTINCT s.id
+FROM sites s
+LEFT JOIN site_group_memberships sgm ON sgm.site_id = s.id
+WHERE ($1::uuid[] IS NOT NULL AND s.id        = ANY($1::uuid[]))
+   OR ($2::uuid[] IS NOT NULL AND s.region_id = ANY($2::uuid[]))
+   OR ($3::uuid[] IS NOT NULL AND sgm.group_id = ANY($3::uuid[]))`
+
+// ListSiteIDsForExpansionParams are the (direct, region, group) input
+// slices. nil for any of them means "this dimension doesn't apply" —
+// the query OR-joins matches from whichever dimensions are non-NULL.
+type ListSiteIDsForExpansionParams struct {
+	DirectSiteIds []uuid.UUID `json:"direct_site_ids"`
+	RegionIds     []uuid.UUID `json:"region_ids"`
+	GroupIds      []uuid.UUID `json:"group_ids"`
+}
+
+func (q *Queries) ListSiteIDsForExpansion(ctx context.Context, arg ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listSiteIDsForExpansion, arg.DirectSiteIds, arg.RegionIds, arg.GroupIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}

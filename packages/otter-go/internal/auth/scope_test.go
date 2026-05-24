@@ -262,6 +262,127 @@ func TestEnforceClassification_ScopedRefuses(t *testing.T) {
 	}
 }
 
+// ---- PR 62: ScopedSiteFilter ----
+
+// expansionFake captures the params passed to ListSiteIDsForExpansion
+// and returns a configurable result set.
+type expansionFake struct {
+	called  bool
+	gotArg  dbq.ListSiteIDsForExpansionParams
+	returns []uuid.UUID
+	err     error
+}
+
+func (e *expansionFake) ListSiteIDsForExpansion(_ context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	e.called = true
+	e.gotArg = arg
+	return e.returns, e.err
+}
+
+func TestScopedSiteFilter_Global_NoCall(t *testing.T) {
+	p := Principal{Capabilities: []string{"inventory:sites:read"}}
+	e := &expansionFake{}
+	ids, scoped, err := ScopedSiteFilter(context.Background(), e, p, "inventory:sites:read")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if scoped {
+		t.Errorf("global principal should not be scoped, got scoped=true")
+	}
+	if ids != nil {
+		t.Errorf("global principal should return nil ids, got %v", ids)
+	}
+	if e.called {
+		t.Errorf("expansion query should not have been called for global principal")
+	}
+}
+
+func TestScopedSiteFilter_SiteOnly(t *testing.T) {
+	siteA := uuid.New()
+	p := Principal{
+		Capabilities: []string{"inventory:sites:read"},
+		Scopes: map[string]Scope{
+			"inventory:sites:read": {SiteIDs: singletonUUID(siteA)},
+		},
+	}
+	e := &expansionFake{returns: []uuid.UUID{siteA}}
+	ids, scoped, err := ScopedSiteFilter(context.Background(), e, p, "inventory:sites:read")
+	if err != nil || !scoped {
+		t.Fatalf("expected scoped=true err=nil, got %v / %v", scoped, err)
+	}
+	if len(ids) != 1 || ids[0] != siteA {
+		t.Errorf("want [%s], got %v", siteA, ids)
+	}
+	if !e.called {
+		t.Errorf("expansion query should have been called")
+	}
+	if len(e.gotArg.DirectSiteIds) != 1 || e.gotArg.DirectSiteIds[0] != siteA {
+		t.Errorf("DirectSiteIds: want [%s], got %v", siteA, e.gotArg.DirectSiteIds)
+	}
+	if e.gotArg.RegionIds != nil || e.gotArg.GroupIds != nil {
+		t.Errorf("non-site dims should be nil, got regions=%v groups=%v",
+			e.gotArg.RegionIds, e.gotArg.GroupIds)
+	}
+}
+
+func TestScopedSiteFilter_NonSiteDim_EmptySet(t *testing.T) {
+	// Principal is scoped on a dimension that can't reach sites
+	// (fabric-only). Helper returns an empty allowed set so the
+	// caller short-circuits without hitting the DB.
+	p := Principal{
+		Capabilities: []string{"inventory:sites:read"},
+		Scopes: map[string]Scope{
+			"inventory:sites:read": {FabricIDs: singletonUUID(uuid.New())},
+		},
+	}
+	e := &expansionFake{}
+	ids, scoped, err := ScopedSiteFilter(context.Background(), e, p, "inventory:sites:read")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !scoped {
+		t.Errorf("non-global principal should be scoped, got scoped=false")
+	}
+	if len(ids) != 0 {
+		t.Errorf("fabric-only principal should expand to empty set, got %v", ids)
+	}
+	if e.called {
+		t.Errorf("expansion query should NOT be called when no site dim present")
+	}
+}
+
+func TestScopedSiteFilter_RegionAndGroupCombined(t *testing.T) {
+	region := uuid.New()
+	group := uuid.New()
+	p := Principal{
+		Capabilities: []string{"inventory:sites:read"},
+		Scopes: map[string]Scope{
+			"inventory:sites:read": {
+				RegionIDs:    singletonUUID(region),
+				SiteGroupIDs: singletonUUID(group),
+			},
+		},
+	}
+	expanded := []uuid.UUID{uuid.New(), uuid.New()}
+	e := &expansionFake{returns: expanded}
+	ids, scoped, err := ScopedSiteFilter(context.Background(), e, p, "inventory:sites:read")
+	if err != nil || !scoped {
+		t.Fatalf("expected scoped=true err=nil, got %v / %v", scoped, err)
+	}
+	if len(ids) != 2 {
+		t.Errorf("want 2 expanded sites, got %v", ids)
+	}
+	if len(e.gotArg.RegionIds) != 1 || e.gotArg.RegionIds[0] != region {
+		t.Errorf("RegionIds: want [%s], got %v", region, e.gotArg.RegionIds)
+	}
+	if len(e.gotArg.GroupIds) != 1 || e.gotArg.GroupIds[0] != group {
+		t.Errorf("GroupIds: want [%s], got %v", group, e.gotArg.GroupIds)
+	}
+	if e.gotArg.DirectSiteIds != nil {
+		t.Errorf("DirectSiteIds should be nil, got %v", e.gotArg.DirectSiteIds)
+	}
+}
+
 func TestResolveUserScopes_ClassificationDim(t *testing.T) {
 	// PR 61 — the resolver now recognizes 'classification' as a scope
 	// dimension. Verify a role_scopes row with scope_type='classification'

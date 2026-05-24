@@ -49,6 +49,12 @@ func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.
 	return nil, nil
 }
 
+// PR 62 — scope expansion. Default returns nil (no expansion); the
+// scoped tests override via scopedFakeQ.
+func (f *fakeQ) ListSiteIDsForExpansion(_ context.Context, _ dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)
