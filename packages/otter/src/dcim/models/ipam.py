@@ -480,3 +480,84 @@ class DhcpServer(UUIDPrimaryKey, Timestamped, Base):
     last_sync_status: Mapped[str | None] = mapped_column(String(32))   # ok|error
     last_sync_error: Mapped[str | None] = mapped_column(String(2048))
     last_sync_lease_count: Mapped[int | None] = mapped_column(Integer)
+
+
+class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
+    """DHCPv4 or DHCPv6 scope/subnet definition for a Kea DhcpServer.
+
+    "Scope" (Microsoft term) = "subnet" (ISC Kea term): the prefix +
+    pools + options + reservations a DHCP server hands out on that
+    network. PR 73 owns the data; a follow-up will push it to Kea via
+    the Control Agent's config-set command and read it back via
+    config-get.
+
+    Single table with `ip_family` (4 or 6) and a Postgres CIDR
+    `prefix` — same shape as the IPAM Subnet table. v6-only fields
+    (pd_pools_json, preferred_lifetime_seconds) are NULLed on v4 rows
+    and guarded by a CHECK constraint at the DB layer.
+
+    JSON columns mirror Kea's `subnet4`/`subnet6` object structure so
+    the future config builder is a near-direct shape projection.
+    """
+
+    __tablename__ = "dhcp_scopes"
+    __table_args__ = (
+        UniqueConstraint("dhcp_server_id", "prefix", name="uq_dhcp_scope_server_prefix"),
+        Index("ix_dhcp_scopes_server", "dhcp_server_id"),
+        Index("ix_dhcp_scopes_family", "ip_family"),
+    )
+
+    dhcp_server_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dhcp_servers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Optional cross-reference to the IPAM Subnet that backs this scope.
+    # Useful for UX ("which IPAM subnet does this scope serve?") and
+    # for future reservation reconciliation against IPAddress rows.
+    subnet_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("subnets.id", ondelete="SET NULL"),
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    ip_family: Mapped[int] = mapped_column(Integer, nullable=False)
+    prefix: Mapped[str] = mapped_column(CIDR, nullable=False)
+    # JSON arrays. Pool entries: {"first": "10.0.0.10", "last": "10.0.0.250"}.
+    # Reservation entries (v4): {"mac": "...", "ip": "...", "hostname": "..."}.
+    # Reservation entries (v6): {"duid": "...", "ip": "...", "hostname": "..."}.
+    pools_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # v6 prefix-delegation pools — null on v4 (CHECK constraint enforces).
+    # Entries: {"prefix": "2001:db8:0:100::/56", "delegated_len": 64}.
+    pd_pools_json: Mapped[list | None] = mapped_column(JSON)
+    # Kea-shape option-data array. Entries:
+    # {"name": "routers", "code": 3, "data": "10.0.0.1"}.
+    options_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    reservations_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    valid_lifetime_seconds: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=3600,
+    )
+    renew_timer_seconds: Mapped[int | None] = mapped_column(Integer)
+    rebind_timer_seconds: Mapped[int | None] = mapped_column(Integer)
+    # v6-only — null on v4 (CHECK constraint enforces).
+    preferred_lifetime_seconds: Mapped[int | None] = mapped_column(Integer)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(String(512))
+
+    # Pydantic-friendly property aliases. The model_validate path in
+    # DhcpScopeOut sees these names; the API layer mutates the *_json
+    # columns directly so no setters are needed.
+    @property
+    def pools(self) -> list:
+        return self.pools_json or []
+
+    @property
+    def pd_pools(self) -> list | None:
+        return self.pd_pools_json
+
+    @property
+    def options(self) -> list:
+        return self.options_json or []
+
+    @property
+    def reservations(self) -> list:
+        return self.reservations_json or []

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from ..models.ipam import (
     BgpAddressFamily,
@@ -305,6 +305,97 @@ class DhcpServerOut(DhcpServerBase):
     last_sync_status: str | None
     last_sync_error: str | None
     last_sync_lease_count: int | None
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- DhcpScope (PR 73) ----------
+# Kea-shaped DHCPv4/v6 subnet definition. The data model is unified
+# (single table with ip_family discriminator) but the schemas guard
+# family-specific fields with validators so v4 callers can't send
+# pd_pools and v6 callers can't omit preferred_lifetime.
+
+class DhcpPool(BaseModel):
+    """One {first, last} address range pool inside a scope."""
+    first: str
+    last: str
+
+
+class DhcpPdPool(BaseModel):
+    """One DHCPv6 prefix-delegation pool. delegated_len is the prefix
+    length handed to clients (e.g. /64); prefix is the supernet the
+    pool delegates from (e.g. 2001:db8::/56)."""
+    prefix: str
+    delegated_len: int
+
+
+class DhcpOption(BaseModel):
+    """Kea option-data entry. Code is the DHCP option number
+    (v4: 1-254; v6: separate space). One of code/name must be set;
+    when both are, name is informational."""
+    code: int | None = None
+    name: str | None = None
+    data: str
+    space: str | None = None  # Kea option space override, rare
+
+
+class DhcpReservation(BaseModel):
+    """One client reservation. v4 uses `mac`; v6 uses `duid`. The API
+    layer rejects rows with the wrong identifier for the family."""
+    mac: str | None = None
+    duid: str | None = None
+    ip: str
+    hostname: str | None = None
+
+
+class DhcpScopeBase(BaseModel):
+    dhcp_server_id: UUID
+    subnet_id: UUID | None = None
+    name: str
+    ip_family: int  # 4 or 6
+    prefix: str
+    pools: list[DhcpPool] = Field(default_factory=list)
+    pd_pools: list[DhcpPdPool] | None = None
+    options: list[DhcpOption] = Field(default_factory=list)
+    reservations: list[DhcpReservation] = Field(default_factory=list)
+    valid_lifetime_seconds: int = 3600
+    renew_timer_seconds: int | None = None
+    rebind_timer_seconds: int | None = None
+    preferred_lifetime_seconds: int | None = None
+    enabled: bool = True
+    description: str | None = None
+
+    @field_validator("ip_family")
+    @classmethod
+    def _family_must_be_4_or_6(cls, v: int) -> int:
+        if v not in (4, 6):
+            raise ValueError("ip_family must be 4 or 6")
+        return v
+
+
+class DhcpScopeCreate(DhcpScopeBase):
+    pass
+
+
+class DhcpScopeUpdate(BaseModel):
+    # ip_family + prefix + dhcp_server_id are immutable post-create.
+    name: str | None = None
+    subnet_id: UUID | None = None
+    pools: list[DhcpPool] | None = None
+    pd_pools: list[DhcpPdPool] | None = None
+    options: list[DhcpOption] | None = None
+    reservations: list[DhcpReservation] | None = None
+    valid_lifetime_seconds: int | None = None
+    renew_timer_seconds: int | None = None
+    rebind_timer_seconds: int | None = None
+    preferred_lifetime_seconds: int | None = None
+    enabled: bool | None = None
+    description: str | None = None
+
+
+class DhcpScopeOut(DhcpScopeBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
     created_at: datetime
     updated_at: datetime
 

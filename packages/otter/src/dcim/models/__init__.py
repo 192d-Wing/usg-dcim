@@ -64,6 +64,7 @@ from .inventory import (
 )
 from .ipam import (
     BgpAddressFamily,
+    DhcpScope,
     DhcpServer,
     Fabric,
     IPAddress,
@@ -125,6 +126,7 @@ __all__ = [
     "CommunityKind",
     "CommunityList",
     "CommunityListEntry",
+    "DhcpScope",
     "DhcpServer",
     "DnsBlocklist",
     "DnsBlocklistAction",

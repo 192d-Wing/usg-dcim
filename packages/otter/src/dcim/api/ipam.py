@@ -33,6 +33,7 @@ from ..errors import ConflictError, NotFoundError, ValidationError
 from ..models.dns import BgpPeer
 from ..models.ipam import (
     BgpAddressFamily,
+    DhcpScope,
     DhcpServer,
     Fabric,
     IPAddress,
@@ -47,6 +48,9 @@ from ..models.ipam import (
 )
 from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.ipam import (
+    DhcpScopeCreate,
+    DhcpScopeOut,
+    DhcpScopeUpdate,
     DhcpServerCreate,
     DhcpServerOut,
     DhcpServerUpdate,
@@ -1833,3 +1837,206 @@ async def sync_dhcp_server_now(
         "leases_seen": result.leases_seen,
         "error": result.error,
     }
+
+
+# ----------------------- DHCP scopes (PR 73) -----------------------
+_DHCP_SCOPE_NOT_FOUND = "dhcp scope not found"
+
+
+def _validate_scope_family(payload: DhcpScopeCreate) -> None:
+    """Reject family/field mismatches the DB CHECK would also catch,
+    but with an actionable message at the API boundary. Mirrors the
+    Kea config-set behavior — v6-only fields must not appear on v4
+    scopes; v4-only identifier `mac` must not appear in v6
+    reservations; symmetric for v6 `duid`."""
+    if payload.ip_family == 4:
+        if payload.pd_pools is not None:
+            raise ValidationError("pd_pools is v6-only")
+        if payload.preferred_lifetime_seconds is not None:
+            raise ValidationError("preferred_lifetime_seconds is v6-only")
+        for r in payload.reservations:
+            if r.duid is not None:
+                raise ValidationError("v4 reservations use `mac`, not `duid`")
+    else:
+        for r in payload.reservations:
+            if r.mac is not None:
+                raise ValidationError("v6 reservations use `duid`, not `mac`")
+
+
+async def _enforce_scope_via_server(
+    db: AsyncSession, principal: Principal, server_id: UUID, cap: str,
+) -> DhcpServer:
+    """Scope inherits the parent DhcpServer's fabric for ABAC. Returns
+    the loaded DhcpServer so the caller can also use it for the FK
+    integrity check on create."""
+    server = await db.get(DhcpServer, server_id)
+    if server is None:
+        raise NotFoundError(_DHCP_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, server.fabric_id, cap,
+    )
+    return server
+
+
+@router.get("/dhcp/servers/{server_id}/scopes", response_model=Page[DhcpScopeOut])
+async def list_dhcp_scopes(
+    server_id: UUID,
+    params: PageParams = Depends(PageParams.from_query),
+    ip_family: int | None = Query(None, ge=4, le=6),
+    enabled: bool | None = Query(None),
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    await _enforce_scope_via_server(db, principal, server_id, "ipam:dhcp-scopes:read")
+    stmt = select(DhcpScope).where(DhcpScope.dhcp_server_id == server_id)
+    if ip_family is not None:
+        if ip_family not in (4, 6):
+            raise ValidationError("ip_family must be 4 or 6")
+        stmt = stmt.where(DhcpScope.ip_family == ip_family)
+    if enabled is not None:
+        stmt = stmt.where(DhcpScope.enabled == enabled)
+    return await paginate(
+        db, stmt, model=DhcpScope, params=params, out_model=DhcpScopeOut,
+    )
+
+
+@router.post(
+    "/dhcp/servers/{server_id}/scopes",
+    response_model=DhcpScopeOut, status_code=201,
+)
+async def create_dhcp_scope(
+    server_id: UUID,
+    payload: DhcpScopeCreate,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    if payload.dhcp_server_id != server_id:
+        raise ValidationError("payload.dhcp_server_id must match URL server_id")
+    await _enforce_scope_via_server(db, principal, server_id, "ipam:dhcp-scopes:create")
+    _validate_scope_family(payload)
+    if payload.subnet_id is not None:
+        subnet = await db.get(Subnet, payload.subnet_id)
+        if subnet is None:
+            raise ValidationError(f"subnet {payload.subnet_id} not found")
+    obj = DhcpScope(
+        dhcp_server_id=server_id,
+        subnet_id=payload.subnet_id,
+        name=payload.name,
+        ip_family=payload.ip_family,
+        prefix=payload.prefix,
+        pools_json=[p.model_dump() for p in payload.pools],
+        pd_pools_json=(
+            [p.model_dump() for p in payload.pd_pools]
+            if payload.pd_pools is not None else None
+        ),
+        options_json=[o.model_dump(exclude_none=True) for o in payload.options],
+        reservations_json=[r.model_dump(exclude_none=True) for r in payload.reservations],
+        valid_lifetime_seconds=payload.valid_lifetime_seconds,
+        renew_timer_seconds=payload.renew_timer_seconds,
+        rebind_timer_seconds=payload.rebind_timer_seconds,
+        preferred_lifetime_seconds=payload.preferred_lifetime_seconds,
+        enabled=payload.enabled,
+        description=payload.description,
+    )
+    db.add(obj)
+    await db.flush()
+    await audit.record(
+        db, principal, action="dhcp_scope.create",
+        target_type="dhcp_scope", target_id=str(obj.id),
+        metadata={
+            "dhcp_server_id": str(server_id),
+            "ip_family": payload.ip_family,
+            "prefix": payload.prefix,
+        },
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return DhcpScopeOut.model_validate(obj)
+
+
+@router.get("/dhcp/scopes/{scope_id}", response_model=DhcpScopeOut)
+async def get_dhcp_scope(
+    scope_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:read",
+    )
+    return DhcpScopeOut.model_validate(obj)
+
+
+@router.patch("/dhcp/scopes/{scope_id}", response_model=DhcpScopeOut)
+async def update_dhcp_scope(
+    scope_id: UUID,
+    payload: DhcpScopeUpdate,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:update")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:update",
+    )
+    # PR 73 — ip_family/prefix/dhcp_server_id are immutable. Mutation
+    # of pd_pools on a v4 scope would re-introduce the v4/v6 mismatch
+    # the DB CHECK guards; reject it at the API.
+    diff = payload.model_dump(exclude_unset=True)
+    if obj.ip_family == 4:
+        if "pd_pools" in diff and diff["pd_pools"] is not None:
+            raise ValidationError("pd_pools is v6-only")
+        if "preferred_lifetime_seconds" in diff and diff["preferred_lifetime_seconds"] is not None:
+            raise ValidationError("preferred_lifetime_seconds is v6-only")
+    # Map flat names to *_json column names; everything else passes
+    # through 1:1.
+    column_map = {
+        "pools": "pools_json",
+        "pd_pools": "pd_pools_json",
+        "options": "options_json",
+        "reservations": "reservations_json",
+    }
+    for k, v in diff.items():
+        col = column_map.get(k, k)
+        if k in column_map and v is not None:
+            setattr(obj, col, [item if isinstance(item, dict) else item.model_dump(exclude_none=True) for item in v])
+        elif k in column_map and v is None:
+            setattr(obj, col, None if col == "pd_pools_json" else [])
+        else:
+            setattr(obj, col, v)
+    await audit.record(
+        db, principal, action="dhcp_scope.update",
+        target_type="dhcp_scope", target_id=str(scope_id),
+        diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return DhcpScopeOut.model_validate(obj)
+
+
+@router.delete("/dhcp/scopes/{scope_id}", status_code=204)
+async def delete_dhcp_scope(
+    scope_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:delete",
+    )
+    await db.execute(delete(DhcpScope).where(DhcpScope.id == scope_id))
+    await audit.record(
+        db, principal, action="dhcp_scope.delete",
+        target_type="dhcp_scope", target_id=str(scope_id),
+        metadata={
+            "dhcp_server_id": str(obj.dhcp_server_id),
+            "ip_family": obj.ip_family,
+            "prefix": obj.prefix,
+        },
+    )
+    await db.commit()
