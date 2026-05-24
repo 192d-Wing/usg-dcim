@@ -486,6 +486,14 @@ class DhcpServer(UUIDPrimaryKey, Timestamped, Base):
     last_push_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_push_status: Mapped[str | None] = mapped_column(String(32))   # ok|error
     last_push_error: Mapped[str | None] = mapped_column(String(2048))
+    # PR 76 — operator-authored base for the bundle endpoint:
+    # {"ctrl-agent": {...}, "dhcp4": {...}, "dhcp6": {...}}.
+    # DCIM overlays subnet4[]/subnet6[] at render time; everything
+    # else passes through verbatim. See migration 0054 for the full
+    # shape contract. Name doesn't carry the `_json` suffix the other
+    # JSON columns use because the wire shape is the column shape —
+    # no property alias dance needed.
+    base_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
 
 class DhcpScope(UUIDPrimaryKey, Timestamped, Base):

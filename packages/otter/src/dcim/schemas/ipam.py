@@ -284,6 +284,10 @@ class DhcpServerBase(BaseModel):
     kea_url: str
     auth_username: str | None = None
     enabled: bool = True
+    # PR 76 — operator-authored base for the bundle assembler.
+    # Structured as {"ctrl-agent": {...}, "dhcp4": {...}, "dhcp6": {...}};
+    # see services/dhcp_bundle.py for the merge contract.
+    base_config: dict = Field(default_factory=dict)
 
 
 class DhcpServerCreate(DhcpServerBase):
@@ -296,6 +300,7 @@ class DhcpServerUpdate(BaseModel):
     auth_username: str | None = None
     auth_password: str | None = None
     enabled: bool | None = None
+    base_config: dict | None = None
 
 
 class DhcpServerOut(DhcpServerBase):

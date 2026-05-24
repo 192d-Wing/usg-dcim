@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -88,6 +88,7 @@ from ..schemas.ipam import (
 from ..security import audit
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
+from ..services import dhcp_bundle
 from ..services import dhcp_push
 from ..services import ipam as ipam_svc
 from ..services import kea as kea_svc
@@ -1803,6 +1804,56 @@ async def delete_dhcp_server(
         target_type="dhcp_server", target_id=str(server_id),
     )
     await db.commit()
+
+
+@router.get("/dhcp/servers/{server_id}/bundle")
+async def get_dhcp_server_bundle(
+    server_id: UUID,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+    principal: Principal = Depends(require_capability("ipam:dhcp-servers:bundle")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a complete Kea config bundle for the dhcp-site chart's
+    bundle-puller to install.
+
+    Shape:
+        {
+            "server_id": "<uuid>",
+            "ctrl_agent": { ... full Kea Control Agent config ... },
+            "dhcp4":      { ..., "subnet4": [...DCIM-rendered...] },
+            "dhcp6":      { ..., "subnet6": [...DCIM-rendered...] },
+            "etag":       "<sha256 hex>"
+        }
+
+    Operator owns everything in ctrl_agent/dhcp4/dhcp6 except the
+    subnet arrays (DCIM authors those from DhcpScope rows). See
+    services/dhcp_bundle.py for the merge contract.
+
+    If-None-Match short-circuit: clients pass the previous etag; if
+    it matches, the API returns 304 with no body. Used by the
+    bundle-puller sidecar to skip disk writes when nothing changed.
+    """
+    server = await db.get(DhcpServer, server_id)
+    if server is None:
+        raise NotFoundError(_DHCP_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, server.fabric_id, "ipam:dhcp-servers:bundle",
+    )
+    scopes = (
+        await db.execute(
+            select(DhcpScope).where(DhcpScope.dhcp_server_id == server_id)
+        )
+    ).scalars().all()
+    bundle = dhcp_bundle.render_kea_bundle(server, scopes)
+    if if_none_match and if_none_match.strip('"') == bundle.etag:
+        return Response(status_code=304)
+    return {
+        "server_id": bundle.server_id,
+        "ctrl_agent": bundle.ctrl_agent,
+        "dhcp4": bundle.dhcp4,
+        "dhcp6": bundle.dhcp6,
+        "etag": bundle.etag,
+    }
 
 
 @router.post("/dhcp/servers/{server_id}/sync")
