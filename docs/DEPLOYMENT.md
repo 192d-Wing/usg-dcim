@@ -217,3 +217,25 @@ Common gotchas:
 - The triggers are tamper-evident at the DDL layer — disabling or dropping them requires superuser DDL, which `pg_audit` will capture if enabled on the cluster.
 - For WORM compliance (FedRAMP / IL5 / NIST 800-53 AU-9): pair the on-database immutability with a scheduled export to an external object store with object-lock retention (S3 + Glacier compliance mode, Azure Blob immutable storage, etc.). The pipeline lives outside the database — a cron job that `COPY (SELECT * FROM audit_log WHERE occurred_at >= last_export) TO STDOUT` and uploads to the immutable bucket.
 - Disaster recovery: the same export feeds the SIEM mention above, so audit data has at least two homes (the DB itself, plus the immutable store) and a tertiary if SIEM persistence is configured.
+
+## Per-org tenancy: identifying sites without an `organization_id`
+
+After migration `20260524_0051_sites_organization_fk` runs (PR 66), `sites.organization_id` is the new FK pointer onto `organizations.id`. The migration backfills it only where the legacy `sites.organization` string already exactly matches an `organizations.name`. Rows with no match keep `organization_id IS NULL`.
+
+To find them and decide what to do:
+
+```sql
+SELECT s.id, s.code, s.name, s.organization AS legacy_string
+FROM   sites s
+WHERE  s.organization IS NOT NULL
+  AND  s.organization_id IS NULL
+ORDER  BY s.organization;
+```
+
+For each unique `legacy_string`, decide:
+
+1. **Create the missing org row.** Insert into `organizations` with proper address + POC fields (these are NOT NULL — they can't be auto-defaulted). Then run the migration's backfill again or just `UPDATE sites SET organization_id = ... WHERE id = ...`.
+2. **Map to an existing org under a different name.** Update the site directly: `UPDATE sites SET organization_id = '<uuid>' WHERE id = ...`. The legacy string is left untouched (informational).
+3. **Leave the site un-orged.** The string column is retained either way; a NULL FK just means "not yet mapped." ABAC organization-scope still works against the string column today.
+
+The legacy `sites.organization` string column will be retired in a follow-up PR once API consumers have migrated to the FK.

@@ -106,7 +106,18 @@ class Site(UUIDPrimaryKey, Timestamped, Base):
     longitude: Mapped[float | None] = mapped_column(Numeric(9, 6))
     timezone: Mapped[str | None] = mapped_column(String(64))
     majcom: Mapped[str | None] = mapped_column(String(64), index=True)
+    # `organization` (legacy string tag) is retained for backward
+    # compatibility with pre-PR-66 API consumers. New code should
+    # read `organization_id` (FK below) instead. A follow-up PR will
+    # retire the string column once the API surface has migrated.
     organization: Mapped[str | None] = mapped_column(String(128), index=True)
+    # PR 66 — nullable FK promotion of the free-form `organization`
+    # string. Backfilled by migration 0051 where the string matched
+    # an `organizations.name`; rows with no match keep this NULL
+    # until an operator creates the missing org row.
+    organization_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id"), index=True,
+    )
     mission_owner: Mapped[str | None] = mapped_column(String(128), index=True)
     enclave: Mapped[str | None] = mapped_column(String(64), index=True)
     classification: Mapped[str | None] = mapped_column(String(32))
