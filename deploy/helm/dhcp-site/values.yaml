@@ -1,0 +1,68 @@
+# Per-DhcpServer values. One release per DhcpServer row.
+# Populated by packages/otter/src/dcim/regiondeploy/dhcp_site.py from
+# the matching DhcpServer model row.
+
+server:
+  id: ""        # DhcpServer.id (uuid)
+  name: ""     # DhcpServer.name; becomes the release suffix
+  fabricId: "" # DhcpServer.fabric_id (uuid; informational label)
+  # If true, the chart also exposes UDP/547 (DHCPv6) on the same LB IP.
+  # DHCPv4 (UDP/67) is intentionally NOT exposed here — see Chart.yaml.
+  dhcpv6: false
+
+image:
+  ctrlAgent:
+    repository: docker.io/internetsystemsconsortium/kea-ctrl-agent
+    tag: "2.6.1"
+  dhcp6:
+    repository: docker.io/internetsystemsconsortium/kea-dhcp6
+    tag: "2.6.1"
+  pullPolicy: IfNotPresent
+
+# Kea Control Agent listener config. The HTTPS port is the URL DCIM
+# stores in DhcpServer.kea_url; auth is HTTP Basic, with credentials
+# resolved from a Secret the operator creates out-of-band.
+ctrlAgent:
+  port: 8000
+  # Kea config json mounted from this ConfigMap. The operator authors
+  # it (DCIM does not generate Kea config in PR 72); chart only
+  # ensures it's mounted at /etc/kea/kea-ctrl-agent.conf.
+  configMapName: kea-ctrl-agent-config
+  configKey: kea-ctrl-agent.conf
+  # Optional HTTPS for the REST endpoint. Without it the operator
+  # MUST front the Service with an ingress/mesh that terminates TLS
+  # — Kea's REST is HTTP-only by default and the basic-auth creds
+  # would otherwise traverse the upstream BGP path in clear text.
+  tls:
+    enabled: false
+    serverCertSecret: ""  # tls.crt + tls.key
+  basicAuth:
+    secretName: kea-ctrl-agent-auth
+    secretKey: auth.csv   # Kea's CSV format: user,password-hash,...
+
+# Service exposure — mirrors dns-site/service.yaml shape.
+service:
+  type: LoadBalancer
+  # AnycastGroup-style addresses for the Kea control plane. Pin
+  # explicitly so DCIM's stored kea_url always resolves to a known IP.
+  anycastIPs: []  # e.g. ["192.0.2.67", "2001:db8:dhcp::67"]
+  labels:
+    dcim.io/bgp-advertise: "true"
+    dcim.io/dhcp-role: "ctrl-agent"
+  annotations: {}
+
+replicaCount: 2
+
+resources:
+  ctrlAgent:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  dhcp6:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 1,    memory: 1Gi }
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10067
+  fsGroup: 10067
+  seccompProfile: { type: RuntimeDefault }

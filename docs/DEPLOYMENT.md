@@ -143,6 +143,31 @@ in the k8s-native path — they remain as audit/policy state. The
 cluster's BGP peer list comes from `regiondeploy/cilium.py` (regional)
 or the umbrella `bgp.peers` values (central).
 
+## Site DHCP (Kea Control Agent) via Cilium BGP (PR 72)
+
+`deploy/helm/dhcp-site/` exposes a Kea Control Agent — the HTTPS REST
+endpoint DCIM stores in `DhcpServer.kea_url` — via a
+`type: LoadBalancer` Service pinned to an anycast IP through
+`io.cilium/lb-ipam-ips`. The `dcim.io/bgp-advertise=true` label causes
+the cluster's `CiliumBGPAdvertisement` to announce the IP to upstream
+routers. DHCPv6 unicast (UDP/547) optionally rides the same Service.
+
+**DHCPv4 (UDP/67) is intentionally not anycast.** DHCPv4 broadcast
+requires DHCP Relay (RFC 1542) at the router; point the relay's
+`giaddr` / helper-address at the chart's anycast IP and Kea hears
+the relayed unicast frame.
+
+Render values from a `DhcpServer` row via
+[`packages/otter/src/dcim/regiondeploy/dhcp_site.py`](../packages/otter/src/dcim/regiondeploy/dhcp_site.py)
+(`render_dhcp_site_values(server, anycast_ips=[...], dhcpv6=...)`).
+See [`deploy/helm/dhcp-site/README.md`](../deploy/helm/dhcp-site/README.md)
+for the install flow.
+
+Kea config (`kea-ctrl-agent.conf`) is operator-owned via a `ConfigMap`
+the chart mounts. A future PR can mirror the DNS bundle pipeline at
+`/api/v1/dhcp/servers/{id}/bundle` so DCIM authors Kea config the way
+it authors Corefiles today.
+
 ## SSO smoke (Keycloak)
 
 For end-to-end OIDC validation against a real issuer, bring up the

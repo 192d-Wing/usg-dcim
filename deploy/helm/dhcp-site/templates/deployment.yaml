@@ -1,0 +1,86 @@
+{{- /*
+  Kea Control Agent pod (and optional kea-dhcp6 sidecar) for one
+  DhcpServer release. The Control Agent is what DCIM polls — it's the
+  primary anycast target; kea-dhcp6 rides the same Service IP for v6
+  unicast lease query.
+
+  Kea config is mounted from a ConfigMap the operator owns. PR 72 does
+  not render Kea config; that's a follow-up that would mirror the DNS
+  bundle pattern (`/api/v1/dhcp/servers/{id}/bundle` etc).
+*/}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dhcpSite.fullname" . }}
+  labels:
+    {{- include "dhcpSite.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "dhcpSite.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dhcpSite.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: kea-ctrl-agent
+          image: "{{ .Values.image.ctrlAgent.repository }}:{{ .Values.image.ctrlAgent.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["-c", "/etc/kea/kea-ctrl-agent.conf"]
+          ports:
+            - { name: ctrl, containerPort: {{ .Values.ctrlAgent.port }}, protocol: TCP }
+          readinessProbe:
+            tcpSocket: { port: ctrl }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: ctrl }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - { name: kea-config, mountPath: /etc/kea, readOnly: true }
+            - { name: kea-auth,   mountPath: /etc/kea-auth, readOnly: true }
+            {{- if .Values.ctrlAgent.tls.enabled }}
+            - { name: kea-tls,    mountPath: /etc/kea-tls, readOnly: true }
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources.ctrlAgent | nindent 12 }}
+        {{- if .Values.server.dhcpv6 }}
+        - name: kea-dhcp6
+          image: "{{ .Values.image.dhcp6.repository }}:{{ .Values.image.dhcp6.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["-c", "/etc/kea/kea-dhcp6.conf"]
+          ports:
+            - { name: dhcpv6, containerPort: 547, protocol: UDP }
+          securityContext:
+            capabilities:
+              add: ["NET_BIND_SERVICE", "NET_RAW"]
+              drop: ["ALL"]
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - { name: kea-config, mountPath: /etc/kea, readOnly: true }
+          resources:
+            {{- toYaml .Values.resources.dhcp6 | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: kea-config
+          configMap:
+            name: {{ .Values.ctrlAgent.configMapName }}
+        - name: kea-auth
+          secret:
+            secretName: {{ .Values.ctrlAgent.basicAuth.secretName }}
+        {{- if .Values.ctrlAgent.tls.enabled }}
+        - name: kea-tls
+          secret:
+            secretName: {{ .Values.ctrlAgent.tls.serverCertSecret }}
+        {{- end }}

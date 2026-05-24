@@ -1,0 +1,39 @@
+{{- /*
+  type=LoadBalancer Service for the Kea Control Agent + optional
+  DHCPv6 unicast. Same selector dance as dns-site:
+  io.cilium/lb-ipam-ips pins the anycast IPs, the bgp-advertise label
+  triggers the umbrella's CiliumBGPAdvertisement.
+
+  DHCPv4 (UDP/67) is intentionally absent — anycast does not work for
+  DHCPv4 broadcast; routers need DHCP Relay (RFC 1542) instead.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dhcpSite.fullname" . }}
+  labels:
+    {{- include "dhcpSite.labels" . | nindent 4 }}
+    {{- range $k, $v := .Values.service.labels }}
+    {{- if $v }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+    {{- end }}
+  annotations:
+    {{- if .Values.service.anycastIPs }}
+    io.cilium/lb-ipam-ips: {{ join "," .Values.service.anycastIPs | quote }}
+    {{- end }}
+    {{- range $k, $v := .Values.service.annotations }}
+    {{- if and $v (ne $k "io.cilium/lb-ipam-ips") }}
+    {{ $k }}: {{ $v | quote }}
+    {{- end }}
+    {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  externalTrafficPolicy: Local
+  ports:
+    - { name: ctrl,   port: {{ .Values.ctrlAgent.port }}, targetPort: ctrl,   protocol: TCP }
+    {{- if .Values.server.dhcpv6 }}
+    - { name: dhcpv6, port: 547,                          targetPort: dhcpv6, protocol: UDP }
+    {{- end }}
+  selector:
+    {{- include "dhcpSite.selectorLabels" . | nindent 4 }}

@@ -1,0 +1,21 @@
+apiVersion: v2
+name: dhcp-site
+description: |
+  Per-DhcpServer Kea Control Agent + DHCPv6 unicast exposure (PR 72).
+  One Helm release per DhcpServer row on the site cluster. A
+  type=LoadBalancer Service is pinned to an anycast IP via Cilium's
+  io.cilium/lb-ipam-ips annotation; the dcim.io/bgp-advertise label
+  causes the umbrella's CiliumBGPAdvertisement (PR 70) to announce it
+  to upstream routers.
+
+  Scope: the *control plane* (Kea Control Agent HTTPS REST, the URL
+  DCIM stores in DhcpServer.kea_url) and DHCPv6 unicast lease query.
+  DHCPv4 broadcast (UDP/67) is NOT made anycast here — that requires
+  DHCP Relay (RFC 1542) at the router, which is router-side config and
+  out of this chart's scope.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: USG DCIM Team
+keywords: [dcim, dhcp, kea, anycast, cilium, bgp]
