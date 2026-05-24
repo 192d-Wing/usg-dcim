@@ -68,18 +68,23 @@ WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- ===== BGP peers (dns-managed) =====
+-- BGP peers are site-rooted (mutation enforcement landed in PR 58 via
+-- EnforceSiteScope). PR 63 adds the matching LIST scope filter — same
+-- shape as inventory racks/assets since site_id is NOT NULL.
 -- name: ListBgpPeers :many
 SELECT id, name, site_id, local_asn_id, peer_asn_id,
        host(peer_ip) AS peer_ip, peer_description,
        tcp_ao_key_chain_id, enabled, created_at, updated_at
 FROM bgp_peers
 WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
 -- name: CountBgpPeers :one
 SELECT count(*)::bigint FROM bgp_peers
-WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id));
+WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]));
 
 -- ===== Anycast BGP bindings =====
 -- 2-hop scope: binding → dns_server → fabric. Matches the create/delete

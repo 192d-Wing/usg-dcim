@@ -53,6 +53,11 @@ func (f *fakeQ) CreateRow(_ context.Context, a dbq.CreateRowParams) (dbq.Row, er
 	return dbq.Row{ID: uuid.New(), RoomID: a.RoomID, Name: a.Name, Code: a.Code}, nil
 }
 
+// PR 63 — site-scope expansion for buildings LIST scope filter.
+func (f *fakeQ) ListSiteIDsForExpansion(_ context.Context, _ dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)

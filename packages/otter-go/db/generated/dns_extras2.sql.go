@@ -256,18 +256,20 @@ SELECT id, name, site_id, local_asn_id, peer_asn_id,
        tcp_ao_key_chain_id, enabled, created_at, updated_at
 FROM bgp_peers
 WHERE ($3::uuid IS NULL OR site_id = $3)
+  AND ($4::uuid[] IS NULL OR site_id = ANY($4::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListBgpPeersParams struct {
-	Limit  int32      `json:"limit"`
-	Offset int32      `json:"offset"`
-	SiteID *uuid.UUID `json:"site_id"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListBgpPeers(ctx context.Context, arg ListBgpPeersParams) ([]BgpPeer, error) {
-	rows, err := q.db.Query(ctx, listBgpPeers, arg.Limit, arg.Offset, arg.SiteID)
+	rows, err := q.db.Query(ctx, listBgpPeers, arg.Limit, arg.Offset, arg.SiteID, arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -288,14 +290,16 @@ func (q *Queries) ListBgpPeers(ctx context.Context, arg ListBgpPeersParams) ([]B
 const countBgpPeers = `-- name: CountBgpPeers :one
 SELECT count(*)::bigint FROM bgp_peers
 WHERE ($1::uuid IS NULL OR site_id = $1)
+  AND ($2::uuid[] IS NULL OR site_id = ANY($2::uuid[]))
 `
 
 type CountBgpPeersParams struct {
-	SiteID *uuid.UUID `json:"site_id"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountBgpPeers(ctx context.Context, arg CountBgpPeersParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countBgpPeers, arg.SiteID)
+	row := q.db.QueryRow(ctx, countBgpPeers, arg.SiteID, arg.ScopeSiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

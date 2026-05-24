@@ -48,6 +48,15 @@ type Querier interface {
 	GetMaintenanceWindowSiteID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
+
+	// PR 63: scope-filtered LISTs. Site-scope expansion to a concrete
+	// site_id set; powers the ScopeSiteIds filter on alerts /
+	// alert_rules / maintenance_windows. The nullable-site "enterprise
+	// default" semantic — site_scope_id / site_id IS NULL means
+	// "applies to every site" — is handled in the SQL (rules + windows
+	// match NULL in addition to the set; alerts.site_id is NOT NULL so
+	// it's the standard shape).
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -84,9 +93,21 @@ func (h *Handler) listAlerts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "alerts:alerts:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, alertsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
 	params := dbq.ListAlertsParams{
 		Limit: limit, Offset: offset,
 		State: strPtr(q.Get("state")), Severity: strPtr(q.Get("severity")),
+		ScopeSiteIds: scopeSiteIds,
 	}
 	if v := q.Get("site_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -104,6 +125,7 @@ func (h *Handler) listAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountAlerts(r.Context(), dbq.CountAlertsParams{
 		SiteID: params.SiteID, State: params.State, Severity: params.Severity,
+		ScopeSiteIds: scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -124,7 +146,19 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListAlertRulesParams{Limit: limit, Offset: offset}
+	// PR 63 — alert_rules.site_scope_id is nullable; NULL = enterprise-
+	// default rule (applies to every site, visible to all scoped admins).
+	// Pass the slice through unconditionally — even an empty allowed
+	// set still surfaces enterprise defaults via the SQL's NULL clause.
+	// No short-circuit here.
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, _, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "alerts:rules:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	params := dbq.ListAlertRulesParams{Limit: limit, Offset: offset, ScopeSiteIds: scopeSiteIds}
 	if v := q.Get("site_scope_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -145,6 +179,7 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 	total, err := h.Q.CountAlertRules(r.Context(), dbq.CountAlertRulesParams{
 		SiteScopeID: params.SiteScopeID, Enabled: params.Enabled,
+		ScopeSiteIds: scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -188,7 +223,17 @@ func (h *Handler) listMaintenanceWindows(w http.ResponseWriter, r *http.Request)
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListMaintenanceWindowsParams{Limit: limit, Offset: offset}
+	// PR 63 — maintenance_windows.site_id is nullable (same enterprise-
+	// default semantic as alert_rules above). Don't short-circuit on
+	// empty scope set.
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, _, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "alerts:maintenance-windows:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	params := dbq.ListMaintenanceWindowsParams{Limit: limit, Offset: offset, ScopeSiteIds: scopeSiteIds}
 
 	if v := q.Get("site_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -222,6 +267,7 @@ func (h *Handler) listMaintenanceWindows(w http.ResponseWriter, r *http.Request)
 	}
 	total, err := h.Q.CountMaintenanceWindows(r.Context(), dbq.CountMaintenanceWindowsParams{
 		SiteID: params.SiteID, ActiveAt: params.ActiveAt, UpcomingAfter: params.UpcomingAfter,
+		ScopeSiteIds: scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)

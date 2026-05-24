@@ -35,12 +35,21 @@ SELECT DISTINCT action FROM audit_log ORDER BY action;
 
 -- ===== Alert Rules =====
 -- name: ListAlertRules :many
+-- scope_site_ids is the PR 63 ABAC LIST filter: NULL = no restriction
+-- (global caller); a non-NULL slice restricts the result to rules whose
+-- site_scope_id is in the set, PLUS rules with site_scope_id IS NULL
+-- (enterprise defaults — apply to every site, so a scoped admin sees
+-- them too). Mutate semantic is restrictive (PR 59 — only global can
+-- mutate null-site rules); read semantic is permissive.
 SELECT id, name, description, metric, operator, threshold, duration_seconds,
        severity::text AS severity, site_scope_id, asset_filter_json, enabled,
        runbook_url, created_at, updated_at
 FROM alert_rules
 WHERE (sqlc.narg(site_scope_id)::uuid IS NULL OR site_scope_id = sqlc.narg(site_scope_id))
   AND (sqlc.narg(enabled)::bool       IS NULL OR enabled       = sqlc.narg(enabled))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL
+       OR site_scope_id IS NULL
+       OR site_scope_id = ANY(sqlc.narg(scope_site_ids)::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2;
 
@@ -48,9 +57,14 @@ LIMIT $1 OFFSET $2;
 SELECT count(*)::bigint
 FROM alert_rules
 WHERE (sqlc.narg(site_scope_id)::uuid IS NULL OR site_scope_id = sqlc.narg(site_scope_id))
-  AND (sqlc.narg(enabled)::bool       IS NULL OR enabled       = sqlc.narg(enabled));
+  AND (sqlc.narg(enabled)::bool       IS NULL OR enabled       = sqlc.narg(enabled))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL
+       OR site_scope_id IS NULL
+       OR site_scope_id = ANY(sqlc.narg(scope_site_ids)::uuid[]));
 
 -- ===== Alerts =====
+-- alerts.site_id is NOT NULL per migration 0002, so the scope filter
+-- is the straightforward fabric-pattern shape.
 -- name: ListAlerts :many
 SELECT id, rule_id, site_id, asset_id, collector_id,
        severity::text AS severity, state::text AS state,
@@ -61,6 +75,7 @@ FROM alerts
 WHERE (sqlc.narg(site_id)::uuid  IS NULL OR site_id  = sqlc.narg(site_id))
   AND (sqlc.narg(state)::text    IS NULL OR state::text    = sqlc.narg(state))
   AND (sqlc.narg(severity)::text IS NULL OR severity::text = sqlc.narg(severity))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]))
 ORDER BY last_seen_at DESC
 LIMIT $1 OFFSET $2;
 
@@ -69,4 +84,5 @@ SELECT count(*)::bigint
 FROM alerts
 WHERE (sqlc.narg(site_id)::uuid  IS NULL OR site_id  = sqlc.narg(site_id))
   AND (sqlc.narg(state)::text    IS NULL OR state::text    = sqlc.narg(state))
-  AND (sqlc.narg(severity)::text IS NULL OR severity::text = sqlc.narg(severity));
+  AND (sqlc.narg(severity)::text IS NULL OR severity::text = sqlc.narg(severity))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]));

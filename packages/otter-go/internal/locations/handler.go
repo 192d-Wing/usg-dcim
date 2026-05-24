@@ -31,6 +31,10 @@ type Querier interface {
 	CreateBuilding(ctx context.Context, arg dbq.CreateBuildingParams) (dbq.Building, error)
 	CreateRoom(ctx context.Context, arg dbq.CreateRoomParams) (dbq.Room, error)
 	CreateRow(ctx context.Context, arg dbq.CreateRowParams) (dbq.Row, error)
+
+	// PR 63: scope-filtered LIST. Expands the caller's region + group +
+	// direct-site scope dimensions to a concrete site_id set.
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -72,7 +76,18 @@ func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(q.Get("limit"), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListBuildingsParams{Limit: limit, Offset: offset}
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:buildings:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, buildingsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListBuildingsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
 	if v := q.Get("site_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -87,7 +102,7 @@ func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountBuildings(r.Context(), dbq.CountBuildingsParams{SiteID: params.SiteID})
+	total, err := h.Q.CountBuildings(r.Context(), dbq.CountBuildingsParams{SiteID: params.SiteID, SiteIds: scopeSiteIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

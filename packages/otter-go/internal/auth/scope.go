@@ -23,12 +23,15 @@
 // enforcement on sites + fabrics with nullable-tag = global semantic),
 // PR 62 (scope-filtered site-rooted LIST queries — sites, racks,
 // assets — via DB-backed expansion of region + site_group + direct
-// site dims). Remaining: auth-handler retrofit (api_tokens, user
-// roles), site-scope LIST filtering on the rest (alert_rules,
-// maintenance_windows, bgp_peers, buildings/rooms/rows), IdP-mapping
-// scope resolver. BGP policy resources (asns/prefix-lists/community-
-// lists/route-maps + entries) are intentionally global — they have
-// no scope FK and cannot be ABAC-scoped without a schema change.
+// site dims), PR 63 (site-scope LISTs for buildings + alerts +
+// alert_rules + maintenance_windows + bgp_peers; rules and windows
+// preserve enterprise-default visibility by also matching NULL
+// site_scope_id / site_id). Remaining: auth-handler retrofit
+// (api_tokens, user roles), rooms/rows LIST filtering (2-hop via
+// buildings), IdP-mapping scope resolver. BGP policy resources
+// (asns/prefix-lists/community-lists/route-maps + entries) are
+// intentionally global — they have no scope FK and cannot be
+// ABAC-scoped without a schema change.
 //
 // OIDC-mapping scope resolution (the cross-table code→UUID lookups
 // from _resolve_mapping_scope in Python) is intentionally deferred —

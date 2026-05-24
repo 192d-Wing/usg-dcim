@@ -39,20 +39,22 @@ FROM maintenance_windows
 WHERE ($3::uuid        IS NULL OR site_id = $3)
   AND ($4::timestamptz IS NULL OR (starts_at <= $4 AND ends_at >= $4))
   AND ($5::timestamptz IS NULL OR ends_at >= $5)
+  AND ($6::uuid[] IS NULL OR site_id IS NULL OR site_id = ANY($6::uuid[]))
 ORDER BY starts_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListMaintenanceWindowsParams struct {
-	Limit         int32      `json:"limit"`
-	Offset        int32      `json:"offset"`
-	SiteID        *uuid.UUID `json:"site_id"`
-	ActiveAt      *time.Time `json:"active_at"`
-	UpcomingAfter *time.Time `json:"upcoming_after"`
+	Limit         int32       `json:"limit"`
+	Offset        int32       `json:"offset"`
+	SiteID        *uuid.UUID  `json:"site_id"`
+	ActiveAt      *time.Time  `json:"active_at"`
+	UpcomingAfter *time.Time  `json:"upcoming_after"`
+	ScopeSiteIds  []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListMaintenanceWindows(ctx context.Context, arg ListMaintenanceWindowsParams) ([]MaintenanceWindow, error) {
-	rows, err := q.db.Query(ctx, listMaintenanceWindows, arg.Limit, arg.Offset, arg.SiteID, arg.ActiveAt, arg.UpcomingAfter)
+	rows, err := q.db.Query(ctx, listMaintenanceWindows, arg.Limit, arg.Offset, arg.SiteID, arg.ActiveAt, arg.UpcomingAfter, arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -76,16 +78,18 @@ FROM maintenance_windows
 WHERE ($1::uuid        IS NULL OR site_id = $1)
   AND ($2::timestamptz IS NULL OR (starts_at <= $2 AND ends_at >= $2))
   AND ($3::timestamptz IS NULL OR ends_at >= $3)
+  AND ($4::uuid[] IS NULL OR site_id IS NULL OR site_id = ANY($4::uuid[]))
 `
 
 type CountMaintenanceWindowsParams struct {
-	SiteID        *uuid.UUID `json:"site_id"`
-	ActiveAt      *time.Time `json:"active_at"`
-	UpcomingAfter *time.Time `json:"upcoming_after"`
+	SiteID        *uuid.UUID  `json:"site_id"`
+	ActiveAt      *time.Time  `json:"active_at"`
+	UpcomingAfter *time.Time  `json:"upcoming_after"`
+	ScopeSiteIds  []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountMaintenanceWindows(ctx context.Context, arg CountMaintenanceWindowsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countMaintenanceWindows, arg.SiteID, arg.ActiveAt, arg.UpcomingAfter)
+	row := q.db.QueryRow(ctx, countMaintenanceWindows, arg.SiteID, arg.ActiveAt, arg.UpcomingAfter, arg.ScopeSiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

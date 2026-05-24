@@ -117,6 +117,9 @@ type Querier interface {
 	GetAnycastBindingDnsServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
+
+	// PR 63: scope-filtered LIST. Site-scope expansion for /dns/bgp-peers.
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -397,7 +400,20 @@ func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListBgpPeersParams{Limit: limit, Offset: offset}
+	// PR 63 — bgp_peers.site_id is NOT NULL (no enterprise-default
+	// semantic), so short-circuit on empty allowed set.
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "dns:bgp-peers:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, bgpPeersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListBgpPeersParams{Limit: limit, Offset: offset, ScopeSiteIds: scopeSiteIds}
 	if v := q.Get("site_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -412,7 +428,7 @@ func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountBgpPeers(r.Context(), dbq.CountBgpPeersParams{SiteID: params.SiteID})
+	total, err := h.Q.CountBgpPeers(r.Context(), dbq.CountBgpPeersParams{SiteID: params.SiteID, ScopeSiteIds: scopeSiteIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

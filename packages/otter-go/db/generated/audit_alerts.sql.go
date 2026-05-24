@@ -130,19 +130,21 @@ SELECT id, name, description, metric, operator, threshold, duration_seconds,
 FROM alert_rules
 WHERE ($3::uuid IS NULL OR site_scope_id = $3)
   AND ($4::bool IS NULL OR enabled       = $4)
+  AND ($5::uuid[] IS NULL OR site_scope_id IS NULL OR site_scope_id = ANY($5::uuid[]))
 ORDER BY name
 LIMIT $1 OFFSET $2
 `
 
 type ListAlertRulesParams struct {
-	Limit       int32      `json:"limit"`
-	Offset      int32      `json:"offset"`
-	SiteScopeID *uuid.UUID `json:"site_scope_id"`
-	Enabled     *bool      `json:"enabled"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	SiteScopeID  *uuid.UUID  `json:"site_scope_id"`
+	Enabled      *bool       `json:"enabled"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListAlertRules(ctx context.Context, arg ListAlertRulesParams) ([]AlertRule, error) {
-	rows, err := q.db.Query(ctx, listAlertRules, arg.Limit, arg.Offset, arg.SiteScopeID, arg.Enabled)
+	rows, err := q.db.Query(ctx, listAlertRules, arg.Limit, arg.Offset, arg.SiteScopeID, arg.Enabled, arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -166,15 +168,17 @@ SELECT count(*)::bigint
 FROM alert_rules
 WHERE ($1::uuid IS NULL OR site_scope_id = $1)
   AND ($2::bool IS NULL OR enabled       = $2)
+  AND ($3::uuid[] IS NULL OR site_scope_id IS NULL OR site_scope_id = ANY($3::uuid[]))
 `
 
 type CountAlertRulesParams struct {
-	SiteScopeID *uuid.UUID `json:"site_scope_id"`
-	Enabled     *bool      `json:"enabled"`
+	SiteScopeID  *uuid.UUID  `json:"site_scope_id"`
+	Enabled      *bool       `json:"enabled"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountAlertRules(ctx context.Context, arg CountAlertRulesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAlertRules, arg.SiteScopeID, arg.Enabled)
+	row := q.db.QueryRow(ctx, countAlertRules, arg.SiteScopeID, arg.Enabled, arg.ScopeSiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -192,20 +196,22 @@ FROM alerts
 WHERE ($3::uuid IS NULL OR site_id        = $3)
   AND ($4::text IS NULL OR state::text    = $4)
   AND ($5::text IS NULL OR severity::text = $5)
+  AND ($6::uuid[] IS NULL OR site_id = ANY($6::uuid[]))
 ORDER BY last_seen_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListAlertsParams struct {
-	Limit    int32      `json:"limit"`
-	Offset   int32      `json:"offset"`
-	SiteID   *uuid.UUID `json:"site_id"`
-	State    *string    `json:"state"`
-	Severity *string    `json:"severity"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	State        *string     `json:"state"`
+	Severity     *string     `json:"severity"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListAlerts(ctx context.Context, arg ListAlertsParams) ([]Alert, error) {
-	rows, err := q.db.Query(ctx, listAlerts, arg.Limit, arg.Offset, arg.SiteID, arg.State, arg.Severity)
+	rows, err := q.db.Query(ctx, listAlerts, arg.Limit, arg.Offset, arg.SiteID, arg.State, arg.Severity, arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -231,16 +237,18 @@ FROM alerts
 WHERE ($1::uuid IS NULL OR site_id        = $1)
   AND ($2::text IS NULL OR state::text    = $2)
   AND ($3::text IS NULL OR severity::text = $3)
+  AND ($4::uuid[] IS NULL OR site_id = ANY($4::uuid[]))
 `
 
 type CountAlertsParams struct {
-	SiteID   *uuid.UUID `json:"site_id"`
-	State    *string    `json:"state"`
-	Severity *string    `json:"severity"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	State        *string     `json:"state"`
+	Severity     *string     `json:"severity"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountAlerts(ctx context.Context, arg CountAlertsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAlerts, arg.SiteID, arg.State, arg.Severity)
+	row := q.db.QueryRow(ctx, countAlerts, arg.SiteID, arg.State, arg.Severity, arg.ScopeSiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
