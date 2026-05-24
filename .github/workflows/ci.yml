@@ -112,7 +112,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5
         with:
           # Matches the toolchain version in each packages/<animal>/go.mod.
           go-version: '1.22'
@@ -151,7 +151,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5
         if: steps.gate.outputs.skip == 'false'
         with:
           go-version: '1.22'
@@ -189,7 +189,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
           cache-dependency-path: packages/wolf/coredns-nsec3sign/go.sum
