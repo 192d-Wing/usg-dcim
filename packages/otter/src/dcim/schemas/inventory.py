@@ -48,6 +48,7 @@ class SiteBase(BaseModel):
     timezone: str | None = None
     majcom: str | None = None
     organization: str | None = None
+    organization_id: UUID | None = None
     mission_owner: str | None = None
     enclave: str | None = None
     classification: str | None = None
@@ -64,6 +65,7 @@ class SiteUpdate(BaseModel):
     address: str | None = None
     majcom: str | None = None
     organization: str | None = None
+    organization_id: UUID | None = None
     mission_owner: str | None = None
     enclave: str | None = None
     lifecycle_state: LifecycleState | None = None

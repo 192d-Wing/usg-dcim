@@ -131,6 +131,7 @@ async def list_sites(
     majcom: str | None = Query(None),
     enclave: str | None = Query(None),
     organization: str | None = Query(None),
+    organization_id: UUID | None = Query(None),
     lifecycle_state: str | None = Query(None),
     principal: Principal = Depends(require_capability("inventory:sites:read")),
     db: AsyncSession = Depends(get_db),
@@ -144,6 +145,8 @@ async def list_sites(
         stmt = stmt.where(Site.enclave == enclave)
     if organization is not None:
         stmt = stmt.where(Site.organization == organization)
+    if organization_id is not None:
+        stmt = stmt.where(Site.organization_id == organization_id)
     if lifecycle_state is not None:
         stmt = stmt.where(Site.lifecycle_state == lifecycle_state)
 
