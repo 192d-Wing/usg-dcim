@@ -19,9 +19,9 @@ dependencies = [
 [project.optional-dependencies]
 # Heavy native deps are opt-in so the agent boots in dev without compiling pysnmp etc.
 snmp = ["pysnmp-lextudio>=6.1"]
-redfish = ["sushy>=5.0"]
+redfish = ["sushy>=5.11.0"]
 ipmi = ["python-ipmi>=0.5"]
-all = ["pysnmp-lextudio>=6.1", "sushy>=5.0", "python-ipmi>=0.5"]
+all = ["pysnmp-lextudio>=6.1", "sushy>=5.11.0", "python-ipmi>=0.5"]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.5"]
 
 [build-system]
