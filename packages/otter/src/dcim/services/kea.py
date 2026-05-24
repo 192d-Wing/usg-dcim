@@ -119,12 +119,17 @@ class KeaClient:
         self.base_url = base_url.rstrip("/")
         self.auth = (username, password) if username and password else None
 
-    async def _post(self, command: str, services: list[str]) -> Any:
+    async def _post(
+        self,
+        command: str,
+        services: list[str],
+        arguments: dict | None = None,
+    ) -> Any:
+        body: dict = {"command": command, "service": services}
+        if arguments is not None:
+            body["arguments"] = arguments
         async with httpx.AsyncClient(timeout=30.0, auth=self.auth) as client:
-            resp = await client.post(
-                self.base_url + "/",
-                json={"command": command, "service": services},
-            )
+            resp = await client.post(self.base_url + "/", json=body)
             resp.raise_for_status()
             return resp.json()
 
@@ -135,6 +140,50 @@ class KeaClient:
     async def list_leases6(self) -> list[dict]:
         body = await self._post("lease6-get-all", ["dhcp6"])
         return _extract_leases(body)
+
+    # ---- Subnet config commands (PR 74). Require Kea's `subnet_cmds`
+    # hook library loaded on the target server. The library ships with
+    # Kea ISC Premium / OSS-from-source builds; verify with
+    # `config-get` → look for libdhcp_subnet_cmds.so in hooks-libraries.
+    # All four methods return Kea's raw response list so the caller
+    # can inspect the `result` code (0=success; 1=error; 2=unsupported;
+    # 3=empty/not-found).
+
+    async def subnet4_add(self, subnet: dict) -> Any:
+        return await self._post(
+            "subnet4-add", ["dhcp4"], arguments={"subnet4": [subnet]},
+        )
+
+    async def subnet4_update(self, subnet: dict) -> Any:
+        return await self._post(
+            "subnet4-update", ["dhcp4"], arguments={"subnet4": [subnet]},
+        )
+
+    async def subnet4_del(self, subnet_id: int) -> Any:
+        return await self._post(
+            "subnet4-del", ["dhcp4"], arguments={"id": subnet_id},
+        )
+
+    async def subnet6_add(self, subnet: dict) -> Any:
+        return await self._post(
+            "subnet6-add", ["dhcp6"], arguments={"subnet6": [subnet]},
+        )
+
+    async def subnet6_update(self, subnet: dict) -> Any:
+        return await self._post(
+            "subnet6-update", ["dhcp6"], arguments={"subnet6": [subnet]},
+        )
+
+    async def subnet6_del(self, subnet_id: int) -> Any:
+        return await self._post(
+            "subnet6-del", ["dhcp6"], arguments={"id": subnet_id},
+        )
+
+    async def config_write(self, services: list[str]) -> Any:
+        """Persist the running config to disk so it survives a Kea
+        restart. PR 74 calls this after a successful subnetN-add/update
+        so the change isn't volatile."""
+        return await self._post("config-write", services)
 
 
 def _extract_leases(resp: Any) -> list[dict]:

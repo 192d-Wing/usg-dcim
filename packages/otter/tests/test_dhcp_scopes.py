@@ -137,11 +137,12 @@ def test_update_with_pools_only_emits_pools_only():
 def test_dhcp_scopes_capability_codes_are_registered():
     # Catches the (easy-to-forget) capabilities.py update — without
     # this row in CAPABILITY_CATALOG, require_capability("ipam:dhcp-scopes:create")
-    # raises at app boot time.
+    # raises at app boot time. `push` was added in PR 74; tests pin
+    # the CRUD set and the push action explicitly.
     assert "dhcp-scopes" in CAPABILITY_CATALOG["ipam"]
-    assert set(CAPABILITY_CATALOG["ipam"]["dhcp-scopes"]) == {
-        "create", "read", "update", "delete",
-    }
+    actions = set(CAPABILITY_CATALOG["ipam"]["dhcp-scopes"])
+    assert {"create", "read", "update", "delete"} <= actions
+    assert "push" in actions
 
 
 # ----- option/pool/reservation type round-trip -----

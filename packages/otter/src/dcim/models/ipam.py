@@ -480,6 +480,12 @@ class DhcpServer(UUIDPrimaryKey, Timestamped, Base):
     last_sync_status: Mapped[str | None] = mapped_column(String(32))   # ok|error
     last_sync_error: Mapped[str | None] = mapped_column(String(2048))
     last_sync_lease_count: Mapped[int | None] = mapped_column(Integer)
+    # PR 74 — config-push state. Separate from last_sync_* (which tracks
+    # the lease-pull direction); collapsing them would obscure which way
+    # a Kea failure points.
+    last_push_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_push_status: Mapped[str | None] = mapped_column(String(32))   # ok|error
+    last_push_error: Mapped[str | None] = mapped_column(String(2048))
 
 
 class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
@@ -542,6 +548,9 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
     preferred_lifetime_seconds: Mapped[int | None] = mapped_column(Integer)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     description: Mapped[str | None] = mapped_column(String(512))
+    # PR 74 — Kea wants numeric subnet IDs. Allocated per-DhcpServer on
+    # first push and pinned for the scope's life. NULL = not yet pushed.
+    kea_subnet_id: Mapped[int | None] = mapped_column(Integer)
 
     # Pydantic-friendly property aliases. The model_validate path in
     # DhcpScopeOut sees these names; the API layer mutates the *_json

@@ -305,6 +305,10 @@ class DhcpServerOut(DhcpServerBase):
     last_sync_status: str | None
     last_sync_error: str | None
     last_sync_lease_count: int | None
+    # PR 74 — config-push state (the opposite direction from last_sync_*).
+    last_push_at: datetime | None = None
+    last_push_status: str | None = None
+    last_push_error: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -396,6 +400,9 @@ class DhcpScopeUpdate(BaseModel):
 class DhcpScopeOut(DhcpScopeBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    # PR 74 — populated on first push, used as the Kea subnet ID for
+    # all subsequent subnet4-update / subnet4-del calls.
+    kea_subnet_id: int | None = None
     created_at: datetime
     updated_at: datetime
 

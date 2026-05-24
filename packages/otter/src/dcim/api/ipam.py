@@ -88,6 +88,7 @@ from ..schemas.ipam import (
 from ..security import audit
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
+from ..services import dhcp_push
 from ..services import ipam as ipam_svc
 from ..services import kea as kea_svc
 from ._pagination import empty_page, paginate
@@ -2026,9 +2027,16 @@ async def delete_dhcp_scope(
     obj = await db.get(DhcpScope, scope_id)
     if obj is None:
         raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
-    await _enforce_scope_via_server(
+    server = await _enforce_scope_via_server(
         db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:delete",
     )
+    # PR 74 — best-effort Kea cleanup before the DB delete. If the
+    # scope was never pushed (kea_subnet_id IS NULL), this is a no-op.
+    # On a Kea-side failure we proceed with the DB delete anyway and
+    # surface the error in the audit log + last_push_* — refusing to
+    # delete a row because Kea is unreachable creates worse messes
+    # (orphaned config that DCIM can't manage).
+    kea_result = await dhcp_push.delete_scope_from_kea(obj, server)
     await db.execute(delete(DhcpScope).where(DhcpScope.id == scope_id))
     await audit.record(
         db, principal, action="dhcp_scope.delete",
@@ -2037,6 +2045,45 @@ async def delete_dhcp_scope(
             "dhcp_server_id": str(obj.dhcp_server_id),
             "ip_family": obj.ip_family,
             "prefix": obj.prefix,
+            "kea_subnet_id": obj.kea_subnet_id,
+            "kea_delete_status": kea_result.status,
+            "kea_delete_error": kea_result.error,
         },
     )
     await db.commit()
+
+
+@router.post("/dhcp/scopes/{scope_id}/push")
+async def push_dhcp_scope(
+    scope_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:push")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Push one scope to its parent Kea Control Agent via the
+    subnet_cmds hook. First push allocates a numeric Kea subnet ID
+    and pins it on the row; subsequent pushes target the same ID
+    with subnetN-update."""
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:push",
+    )
+    result = await dhcp_push.push_scope(db, obj)
+    await audit.record(
+        db, principal, action="dhcp_scope.push",
+        target_type="dhcp_scope", target_id=str(scope_id),
+        metadata={
+            "dhcp_server_id": str(obj.dhcp_server_id),
+            "kea_subnet_id": result.kea_subnet_id,
+            "status": result.status,
+            "error": result.error,
+        },
+    )
+    await db.commit()
+    return {
+        "scope_id": result.scope_id,
+        "kea_subnet_id": result.kea_subnet_id,
+        "status": result.status,
+        "error": result.error,
+    }
