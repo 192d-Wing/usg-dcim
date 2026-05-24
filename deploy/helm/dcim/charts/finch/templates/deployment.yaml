@@ -1,0 +1,35 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "finch.fullname" . }}
+  labels: {{- include "finch.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "finch.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "finch.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: finch
+          image: {{ include "finch.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 80 }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "finch.fullname" . }}
+  labels: {{- include "finch.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+  selector: {{- include "finch.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -31,7 +31,7 @@ backend/src/dcim/
 │                          dns_drop_old_metric_samples
 └── migrations/versions/2026*_dns*.py + nsec3_params.py
 
-collector/src/dcim_collector/
+packages/mole/src/dcim_collector/
 ├── dns_agent.py           Polls /dns/servers/{id}/bundle, writes
 │                          Corefile + zone files + GoBGP yaml,
 │                          signals reload
@@ -44,10 +44,10 @@ frontend/src/components/
                            with DNSSEC / Activity / Preview / Views
                            tabs
 
-infra/coredns-nsec3sign/
+packages/wolf/coredns-nsec3sign/
 └── nsec3sign/             Go module — custom CoreDNS plugin for
                            on-the-fly NSEC3 signing (RFC 5155)
-infra/docker/site-dns/      Compose stack for one site
+deploy/docker/site-dns/      Compose stack for one site
 ```
 
 ## Backend
@@ -167,7 +167,7 @@ Four DNS-related arq jobs in [`worker.py`](../../backend/src/dcim/worker.py):
 
 ## Collector
 
-[`collector/src/dcim_collector/dns_agent.py`](../../collector/src/dcim_collector/dns_agent.py)
+[`packages/mole/src/dcim_collector/dns_agent.py`](../../packages/mole/src/dcim_collector/dns_agent.py)
 adds a third concurrent loop to the collector (alongside
 `_device_loop` and `_drain_loop`):
 
@@ -194,7 +194,7 @@ at `/etc/dcim/token`, mTLS to the central ingest endpoint.
 ## coredns-nsec3sign plugin
 
 The custom CoreDNS plugin under
-[`infra/coredns-nsec3sign/`](../../infra/coredns-nsec3sign/) adds
+[`packages/wolf/coredns-nsec3sign/`](../../packages/wolf/coredns-nsec3sign/) adds
 on-the-fly NSEC3 signing — the missing-from-upstream feature that
 makes NSEC3 zones possible without pre-signing the zone file. Its
 own README + SECURITY-REVIEW.md cover the details; this section is
@@ -218,12 +218,12 @@ nsec3sign/
 
 ### Request flow
 
-1. **`ServeDNS`** ([`nsec3sign.go`](../../infra/coredns-nsec3sign/nsec3sign/nsec3sign.go))
+1. **`ServeDNS`** ([`nsec3sign.go`](../../packages/wolf/coredns-nsec3sign/nsec3sign/nsec3sign.go))
    short-circuits when (a) QNAME is outside configured zones, (b)
    the EDNS0 DO bit is clear, or (c) no keys loaded.
 2. Otherwise intercepts the downstream response via
    `plugin/pkg/nonwriter`.
-3. **`attachDenialProof`** ([`denial.go`](../../infra/coredns-nsec3sign/nsec3sign/denial.go))
+3. **`attachDenialProof`** ([`denial.go`](../../packages/wolf/coredns-nsec3sign/nsec3sign/denial.go))
    classifies via `response.Typify` and attaches NSEC3 records:
    - NXDOMAIN → closest-encloser proof (matching encloser + covering
      next-closer + covering wildcard)
@@ -234,21 +234,21 @@ nsec3sign/
 4. **`attachWildcardProof`** scans answer RRsets for wildcard
    expansions (via `chain.wildcardSource`) and attaches the
    covering NSEC3 for the next-closer name (RFC 5155 §7.2.4).
-5. **`signMessage`** ([`signer.go`](../../infra/coredns-nsec3sign/nsec3sign/signer.go))
+5. **`signMessage`** ([`signer.go`](../../packages/wolf/coredns-nsec3sign/nsec3sign/signer.go))
    walks Answer + Ns, groups by (name, type, class), and emits
    one RRSIG per applicable key. Wildcard-expanded RRsets are
    signed over a cloned RRset with the wildcard owner so
    `miekg/dns.RRSIG.Sign` computes `Labels` correctly; the
    resulting RRSIG's `Hdr.Name` is patched back to the qname.
 6. RRSIGs route through the signature cache
-   ([`sigcache.go`](../../infra/coredns-nsec3sign/nsec3sign/sigcache.go))
+   ([`sigcache.go`](../../packages/wolf/coredns-nsec3sign/nsec3sign/sigcache.go))
    on the hot path — fnv-64a keyed by RRset presentation form,
    evicted at 75% of validity.
 7. Final `WriteMsg` to the real ResponseWriter.
 
 ### Chain population
 
-[`zone.go`](../../infra/coredns-nsec3sign/nsec3sign/zone.go) parses
+[`zone.go`](../../packages/wolf/coredns-nsec3sign/nsec3sign/zone.go) parses
 the same BIND zone file the parent `file` plugin reads (via
 `miekg/dns.ZoneParser`, the same parser `file` uses internally —
 no coupling to CoreDNS internals). `synthesizeENTs` walks each
@@ -284,7 +284,7 @@ less-specific wildcard).
 ### Custom CoreDNS build
 
 The plugin is compiled INTO CoreDNS, not loaded at runtime.
-[`Dockerfile`](../../infra/coredns-nsec3sign/Dockerfile) clones
+[`Dockerfile`](../../packages/wolf/coredns-nsec3sign/Dockerfile) clones
 CoreDNS at the pinned version, splices
 `nsec3sign:github.com/192d-wing/coredns-nsec3sign/nsec3sign` into
 the plugin chain immediately after `dnssec` (the existing NSEC
@@ -355,7 +355,7 @@ harness instead (below).
 ### Plugin
 
 ```bash
-cd infra/coredns-nsec3sign
+cd packages/wolf/coredns-nsec3sign
 go test ./nsec3sign/... -count=1
 ```
 
@@ -374,7 +374,7 @@ framework).
 ### Wire-level smoke
 
 Three harnesses under
-[`infra/coredns-nsec3sign/examples/`](../../infra/coredns-nsec3sign/examples/):
+[`packages/wolf/coredns-nsec3sign/examples/`](../../packages/wolf/coredns-nsec3sign/examples/):
 
 - **`quick-smoke`** — hand-rolled Corefile + zone + keys, useful
   for validating plugin changes in isolation against a locally-
@@ -430,7 +430,7 @@ visually.
 ### Adding a Corefile directive
 
 1. Add the keyword to `directiveParsers` map in
-   [`infra/coredns-nsec3sign/nsec3sign/setup.go`](../../infra/coredns-nsec3sign/nsec3sign/setup.go).
+   [`packages/wolf/coredns-nsec3sign/nsec3sign/setup.go`](../../packages/wolf/coredns-nsec3sign/nsec3sign/setup.go).
 2. Write the handler function (small, validates the arity + type
    + bounds, stores on `Nsec3Sign`).
 3. Add a test case to `TestParseValid` (or `TestParseInvalid`
@@ -455,11 +455,11 @@ docs in one commit. The mechanical steps:
 1. `git ls-remote --tags https://github.com/coredns/coredns` —
    confirm the target tag actually exists.
 2. Bump `ARG COREDNS_VERSION` in
-   [`Dockerfile`](../../infra/coredns-nsec3sign/Dockerfile).
+   [`Dockerfile`](../../packages/wolf/coredns-nsec3sign/Dockerfile).
 3. Bump `COREDNS_VERSION` in
-   [`Makefile`](../../infra/coredns-nsec3sign/Makefile).
+   [`Makefile`](../../packages/wolf/coredns-nsec3sign/Makefile).
 4. Bump `github.com/coredns/coredns` in
-   [`go.mod`](../../infra/coredns-nsec3sign/go.mod).
+   [`go.mod`](../../packages/wolf/coredns-nsec3sign/go.mod).
 5. `go mod tidy` — this resolves the indirect deps and may force
    a Go-toolchain bump if the new CoreDNS pulled in modules
    requiring a newer minimum. Mirror that in `ARG GO_VERSION` on
@@ -489,7 +489,7 @@ all eight wire-level scenarios still pass.
   named `_*`. Take an `AsyncSession`.
 - **API surface** in `api/dns.py` — every mutation audited, every
   handler small enough to read in one screen.
-- **Plugin chain** in `infra/coredns-nsec3sign/nsec3sign/` —
+- **Plugin chain** in `packages/wolf/coredns-nsec3sign/nsec3sign/` —
   separate Go module, vendors against CoreDNS via a `replace`
   directive at build time. No Python.
 - **Frontend** is single-file by design (`dns-tab.tsx`) — the
@@ -502,6 +502,6 @@ all eight wire-level scenarios still pass.
 - Architecture decisions: [../design/dns-integration.md](../design/dns-integration.md)
 - Deployment + secrets: [admin-guide.md](admin-guide.md)
 - UI workflows: [operator-guide.md](operator-guide.md)
-- Plugin internals: [../../infra/coredns-nsec3sign/README.md](../../infra/coredns-nsec3sign/README.md)
-- Plugin security review: [../../infra/coredns-nsec3sign/SECURITY-REVIEW.md](../../infra/coredns-nsec3sign/SECURITY-REVIEW.md)
+- Plugin internals: [../../packages/wolf/coredns-nsec3sign/README.md](../../packages/wolf/coredns-nsec3sign/README.md)
+- Plugin security review: [../../packages/wolf/coredns-nsec3sign/SECURITY-REVIEW.md](../../packages/wolf/coredns-nsec3sign/SECURITY-REVIEW.md)
 - API reference (live): <http://localhost:8000/docs#tag/dns>

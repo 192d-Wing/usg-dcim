@@ -1,0 +1,15 @@
+# Build context: REPO ROOT — magpie depends on packages/shared-go via
+# an in-tree replace directive.
+FROM golang:1.22-alpine AS build
+WORKDIR /src
+COPY packages/shared-go ./packages/shared-go
+COPY packages/magpie    ./packages/magpie
+WORKDIR /src/packages/magpie
+RUN go mod download
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/magpie .
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /out/magpie /magpie
+EXPOSE 8101
+USER nonroot:nonroot
+ENTRYPOINT ["/magpie"]

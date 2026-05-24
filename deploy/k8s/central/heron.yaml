@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: heron
+  namespace: dcim
+spec:
+  selector:
+    app: heron
+  ports:
+    - port: 8100
+      targetPort: 8100
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: heron
+  namespace: dcim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: heron
+  template:
+    metadata:
+      labels:
+        app: heron
+    spec:
+      containers:
+        - name: heron
+          image: localhost/dcim-heron:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8100
+          env:
+            - name: DCIM_POSTGRES_DSN_RAW
+              value: postgres://dcim:dcim@postgres:5432/dcim
+            - name: DCIM_TELEMETRY_INDEX_PREFIX
+              value: dcim-telemetry
+            - name: INGEST_ADDR
+              value: ":8100"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8100
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8100
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m

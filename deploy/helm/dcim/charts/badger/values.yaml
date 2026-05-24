@@ -1,0 +1,11 @@
+# Site collector. Disabled by default — central chart does not deploy
+# badger pods; sites run their own under deploy/k8s/site-base/ or compose.
+enabled: false
+replicaCount: 1
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 1,    memory: 1Gi }
+# Path inside the container where the SQLite buffer lives. Kept stable
+# for site PV/PVC compatibility — do not rename without a data migration.
+bufferPath: /var/lib/dcim-collector
+configMap: dcim-badger-config

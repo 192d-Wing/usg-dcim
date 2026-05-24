@@ -1,0 +1,79 @@
+# Overlay that swaps the recursive resolver from CoreDNS to Hickory.
+#
+# Run alongside the base compose:
+#   docker compose -p site42 \
+#     -f deploy/docker/site-dns/docker-compose.yml \
+#     -f deploy/docker/site-dns/docker-compose.hickory.yml \
+#     up -d
+#
+# Phase 2 of the Hickory migration (.claude/plans/hickory-migration.md).
+# The authoritative pod stays on CoreDNS — only the recursive moves.
+#
+# Before flipping, set the fabric's recursive_engine to "hickory" in
+# central (PATCH /api/v1/ipam/fabrics/{id}). The collector reads the
+# bundle's engine hint and writes `config.toml` (instead of `Corefile`)
+# into the recursive output_dir. Reload signal is SIGHUP rather than
+# SIGUSR1; the collector sends the right one automatically.
+
+services:
+  coredns-recursive:
+    # Custom Hickory build with the `prometheus-metrics` Cargo
+    # feature enabled — exposes /metrics for the collector to scrape.
+    # The upstream `hickorydns/hickory-dns:latest` image is built
+    # without that feature, so it has no observability surface
+    # (verified: nmap shows only port 53 open). The custom image is a
+    # drop-in replacement otherwise; switch via the `HICKORY_IMAGE`
+    # env var if you want to test against upstream temporarily.
+    # See packages/wolf/hickory-prom/ for the Dockerfile + build instructions.
+    image: ${HICKORY_IMAGE:-ghcr.io/192d-wing/hickory-prom:v0.26.0-2}
+    pid: "host"
+    user: "0:0"
+    networks:
+      dns-net:
+        ipv4_address: 172.30.42.20
+    # Reachable on the dns-net bridge at 172.30.42.20:53 for sibling
+    # containers AND on the host IP supplied via DNS_RECURSIVE_BIND_IP
+    # for external test machines. Default is `127.0.0.1` so a generic
+    # `docker compose up` never tries to bind a LAN IP that may not be
+    # assigned to this host. Operators export the var (or set it in a
+    # local .env file) when they want to expose port 53 to the LAN:
+    #
+    #   DNS_RECURSIVE_BIND_IP=10.0.100.35 docker compose ... up -d
+    #
+    # `!override` replaces the base compose's `10.0.100.5:53` mapping
+    # outright — Compose merges ports as a list by default, so without
+    # the tag Docker would try both binds and fail on the unassigned
+    # base IP. Production sites carry the anycast IP via the gobgp
+    # sidecar with host networking and don't use this mapping at all.
+    ports: !override
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:53:53/udp"
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:53:53/tcp"
+      # DoT (RFC 7858) + DoH (RFC 8484). Only effective when the
+      # central api has DCIM_DNS_HICKORY_DOT_ENABLED /
+      # DCIM_DNS_HICKORY_DOH_ENABLED set (otherwise Hickory doesn't
+      # bind these inside the container and the host ports just
+      # dangle harmlessly).
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:853:853/tcp"
+      - "${DNS_RECURSIVE_BIND_IP:-127.0.0.1}:443:443/tcp"
+    # `-c` points at the rendered TOML; `--zone-dir` lets Hickory
+    # resolve relative zone-file paths inside the bundle (we don't
+    # use it today for the recursive but it's harmless).
+    # The image's entrypoint is already `hickory-dns`, so the command
+    # is just the args. `--zone-dir` rebases relative zone-file paths
+    # in the config (harmless for forward-only setups, kept for when
+    # we add RPZ Primary zones).
+    command:
+      - "-c"
+      - "/var/lib/dcim-dns/recursive/config.toml"
+      - "--zonedir"
+      - "/var/lib/dcim-dns/recursive/zones"
+    volumes:
+      - dns-state:/var/lib/dcim-dns
+      # DoT / DoH TLS material. The ./tls/ directory is gitignored
+      # (operators provision their own cert + key per environment);
+      # the central api renders the in-container path into the
+      # Hickory config when DCIM_DNS_HICKORY_TLS_CERT_PATH /
+      # DCIM_DNS_HICKORY_TLS_KEY_PATH are set.
+      - ./tls:/etc/dcim-dns:ro
+    restart: unless-stopped
+    depends_on: [collector]

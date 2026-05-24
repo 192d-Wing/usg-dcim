@@ -1,0 +1,14 @@
+version: '3'
+
+# Tasks for beagle. Invoke as 'task beagle:<name>' from repo root.
+
+tasks:
+  build:
+    desc: go build
+    cmds: [go build ./...]
+  vet:
+    desc: go vet
+    cmds: [go vet ./...]
+  test:
+    desc: go test
+    cmds: [go test -count=1 ./...]

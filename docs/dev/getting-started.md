@@ -52,17 +52,17 @@ Add these entries to `C:\Windows\System32\drivers\etc\hosts` (run Notepad as Adm
 
 This builds seven images locally using `podman build`:
 
-- `dcim-api:dev` — FastAPI backend + Alembic
-- `dcim-frontend:dev` — React UI (nginx)
-- `dcim-go-collector:dev` — Site collector agent
-- `dcim-go-ingest:dev` — High-volume telemetry receiver
-- `dcim-go-alerts:dev` — Alert evaluation loop
-- `dcim-go-dns-probe:dev` — DNS health prober
+- `dcim-otter:dev` — FastAPI backend + Alembic
+- `dcim-finch:dev` — React UI (nginx)
+- `dcim-badger:dev` — Site collector agent
+- `dcim-heron:dev` — High-volume telemetry receiver
+- `dcim-magpie:dev` — Alert evaluation loop
+- `dcim-beagle:dev` — DNS health prober
 
 ### 2. Deploy to Kubernetes
 
 ```powershell
-kubectl apply -k infra/k8s/central/
+kubectl apply -k deploy/k8s/central/
 ```
 
 Watch pods come up (takes ~2 minutes on first run — Keycloak is slow):
@@ -77,9 +77,9 @@ All pods should reach `Running`:
 NAME                          READY   STATUS    RESTARTS
 api-xxxxx                     1/1     Running   0
 frontend-xxxxx                1/1     Running   0
-go-alerts-xxxxx               1/1     Running   0
-go-dns-probe-xxxxx            1/1     Running   0
-go-ingest-xxxxx               1/1     Running   0
+magpie-xxxxx               1/1     Running   0
+beagle-xxxxx            1/1     Running   0
+heron-xxxxx               1/1     Running   0
 keycloak-xxxxx                1/1     Running   0
 postgres-xxxxx                1/1     Running   0
 redis-xxxxx                   1/1     Running   0
@@ -158,8 +158,8 @@ kubectl create secret generic collector-enrollment -n dcim-site1 `
   --from-literal=site_id=<SITE_ID>
 
 kubectl create secret generic hickory-tls -n dcim-site1 `
-  --from-file=tls.crt=infra/docker/site-dns/tls/tls.crt.pem `
-  --from-file=tls.key=infra/docker/site-dns/tls/tls.key.pem
+  --from-file=tls.crt=deploy/docker/site-dns/tls/tls.crt.pem `
+  --from-file=tls.key=deploy/docker/site-dns/tls/tls.key.pem
 ```
 
 Repeat with `dcim-site2` for CONUS-002.
@@ -167,8 +167,8 @@ Repeat with `dcim-site2` for CONUS-002.
 ### 3. Deploy the site stacks
 
 ```powershell
-kubectl apply -k infra/k8s/site1/
-kubectl apply -k infra/k8s/site2/
+kubectl apply -k deploy/k8s/site1/
+kubectl apply -k deploy/k8s/site2/
 ```
 
 After ~30 seconds both collectors appear as **healthy** in the UI under **Site collectors**.
@@ -229,13 +229,13 @@ After changing backend or frontend code, rebuild the affected image and redeploy
 
 ```powershell
 # Rebuild just the API image
-podman build -t dcim-api:dev backend
+podman build -t dcim-otter:dev backend
 
 # Roll the deployment to pick up the new image
 kubectl rollout restart deployment/api -n dcim
 
 # Rebuild and restart the frontend
-podman build -t dcim-frontend:dev frontend
+podman build -t dcim-finch:dev frontend
 kubectl rollout restart deployment/frontend -n dcim
 ```
 

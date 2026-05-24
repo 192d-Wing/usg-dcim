@@ -1,4 +1,4 @@
-.PHONY: help sync up down logs build migrate seed test lint fmt collector frontend backend worker clean
+.PHONY: help sync up down logs build migrate seed test lint fmt collector finch frontend otter backend worker clean
 
 help:
 	@echo "USG DCIM dev tasks (Python via uv)"
@@ -11,62 +11,66 @@ help:
 	@echo "  make test         backend pytest + frontend vitest"
 	@echo "  make lint         ruff + eslint"
 	@echo "  make fmt          ruff format + prettier"
-	@echo "  make backend      run API locally on :8000"
+	@echo "  make otter        run API (otter) locally on :8000   [alias: backend]"
 	@echo "  make worker       run arq worker locally"
-	@echo "  make collector    run sample collector locally"
-	@echo "  make frontend     vite dev server on :5173"
+	@echo "  make collector    run sample collector (mole, deprecated) locally"
+	@echo "  make finch        vite dev server (finch) on :5173    [alias: frontend]"
 
 sync:
 	uv sync --all-packages --all-extras
 
 up:
-	podman compose -f infra/docker/docker-compose.yml up -d --build
+	podman compose -f deploy/docker/docker-compose.yml up -d --build
 
 down:
-	podman compose -f infra/docker/docker-compose.yml down
+	podman compose -f deploy/docker/docker-compose.yml down
 
 logs:
-	podman compose -f infra/docker/docker-compose.yml logs -f
+	podman compose -f deploy/docker/docker-compose.yml logs -f
 
 build:
-	podman compose -f infra/docker/docker-compose.yml build
+	podman compose -f deploy/docker/docker-compose.yml build
 
 migrate:
-	podman compose -f infra/docker/docker-compose.yml exec api alembic upgrade head
+	podman compose -f deploy/docker/docker-compose.yml exec api alembic upgrade head
 
 seed:
-	podman compose -f infra/docker/docker-compose.yml exec api python -m dcim.scripts.seed_demo
+	podman compose -f deploy/docker/docker-compose.yml exec api python -m dcim.scripts.seed_demo
 
 migrate-local:
-	uv run --project backend alembic -c backend/alembic.ini upgrade head
+	uv run --project packages/otter alembic -c packages/otter/alembic.ini upgrade head
 
 seed-local:
-	uv run --project backend python -m dcim.scripts.seed_demo
+	uv run --project packages/otter python -m dcim.scripts.seed_demo
 
 test:
-	uv run --project backend pytest backend/tests -q
-	cd frontend && npm test --silent
+	uv run --project packages/otter pytest packages/otter/tests -q
+	cd packages/finch && npm test --silent
 
 lint:
-	uv run --project backend ruff check backend
-	cd frontend && npm run lint
+	uv run --project packages/otter ruff check packages/otter
+	cd packages/finch && npm run lint
 
 fmt:
-	uv run --project backend ruff format backend
-	cd frontend && npm run fmt
+	uv run --project packages/otter ruff format packages/otter
+	cd packages/finch && npm run fmt
 
-backend:
-	uv run --project backend uvicorn dcim.main:app --reload --port 8000 --host 0.0.0.0
+otter:
+	uv run --project packages/otter uvicorn dcim.main:app --reload --port 8000 --host 0.0.0.0
+
+backend: otter
 
 worker:
-	uv run --project backend arq dcim.worker.WorkerSettings
+	uv run --project packages/otter arq dcim.worker.WorkerSettings
 
 collector:
-	uv run --project collector dcim-collector --config collector/sample-config.yaml
+	uv run --project packages/mole dcim-collector --config packages/mole/sample-config.yaml
 
-frontend:
-	cd frontend && npm install && npm run dev
+finch:
+	cd packages/finch && npm install && npm run dev
+
+frontend: finch
 
 clean:
-	rm -rf .venv backend/.pytest_cache backend/.ruff_cache backend/.mypy_cache
-	rm -rf frontend/node_modules frontend/dist
+	rm -rf .venv packages/otter/.pytest_cache packages/otter/.ruff_cache packages/otter/.mypy_cache
+	rm -rf packages/finch/node_modules packages/finch/dist

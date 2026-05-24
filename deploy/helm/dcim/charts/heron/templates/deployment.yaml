@@ -1,0 +1,74 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "heron.fullname" . }}
+  labels: {{- include "heron.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "heron.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "heron.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      containers:
+        - name: heron
+          image: {{ include "heron.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - { name: https, containerPort: 8443 }
+            - { name: admin, containerPort: {{ .Values.service.adminPort }} }
+          env:
+            - { name: INGEST_ADDR, value: ":8443" }
+            - { name: HERON_ADMIN_ADDR, value: ":{{ .Values.service.adminPort }}" }
+            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ .Values.global.postgresql.dsn | quote }} }
+            {{- if .Values.mtls.enabled }}
+            - { name: INGEST_TLS_CERT, value: "/etc/heron/tls/tls.crt" }
+            - { name: INGEST_TLS_KEY,  value: "/etc/heron/tls/tls.key" }
+            - { name: INGEST_TLS_CLIENT_CA, value: "/etc/heron/client-ca/ca.crt" }
+            - { name: INGEST_TLS_REQUIRE_CLIENT_CERT, value: {{ .Values.mtls.requireClientCert | quote }} }
+            {{- end }}
+          {{- if .Values.mtls.enabled }}
+          volumeMounts:
+            - { name: server-tls,    mountPath: /etc/heron/tls,        readOnly: true }
+            - { name: client-ca,     mountPath: /etc/heron/client-ca,  readOnly: true }
+          {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: admin
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.mtls.enabled }}
+      volumes:
+        - name: server-tls
+          secret:
+            secretName: {{ .Values.mtls.serverCertSecret }}
+        - name: client-ca
+          secret:
+            secretName: {{ .Values.mtls.clientCABundleSecret }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "heron.fullname" . }}
+  labels: {{- include "heron.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - { name: https, port: {{ .Values.service.port }},      targetPort: https }
+    - { name: admin, port: {{ .Values.service.adminPort }}, targetPort: admin }
+  selector: {{- include "heron.selectorLabels" . | nindent 4 }}
+{{- end }}

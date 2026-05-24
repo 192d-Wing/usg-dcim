@@ -1,0 +1,69 @@
+# Local k3d overrides — strips production assumptions (HA datastores,
+# Prometheus operator, mTLS) so `helm install` succeeds on a laptop
+# cluster started with:
+#
+#   k3d cluster create dcim --port "8080:80@loadbalancer"
+#
+# Pair with the public ghcr.io image tags built by CI.
+
+global:
+  image:
+    registry: ghcr.io/192d-wing/usg-dcim
+    pullPolicy: IfNotPresent
+  postgresql:
+    external: false
+    dsn: "postgresql+asyncpg://dcim:dcim@postgres:5432/dcim"
+  redis:
+    external: false
+    dsn: "redis://redis:6379/0"
+  config:
+    jwtSecret: "k3d-dev-only-not-for-prod"
+    collectorTokenSecret: "k3d-dev-only-not-for-prod"
+
+otter:
+  replicaCount: 1
+  autoscaling: { enabled: false }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
+
+otter-worker:
+  replicaCount: 1
+  autoscaling: { enabled: false }
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
+
+heron:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
+  mtls:
+    enabled: false
+
+finch:
+  replicaCount: 1
+
+magpie:
+  enabled: false
+
+beagle:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: traefik
+  hosts:
+    - host: dcim.local
+      paths:
+        - { path: /,    pathType: Prefix, backend: finch }
+        - { path: /api, pathType: Prefix, backend: otter }
+  tls: []
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+
+networkPolicy:
+  enabled: false

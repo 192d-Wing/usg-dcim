@@ -73,31 +73,38 @@ This is the single source of truth. Update it as decisions evolve.
 
 ## 2. Decision log
 
-| Area                  | Decision                                                  |
-| --------------------- | --------------------------------------------------------- |
-| Cluster bootstrap     | kubeadm + cloud-init via UEFI HTTP Boot over IPv6         |
-| PXE serving           | Tinkerbell (Smee/Tink/Hegel/Rufio) on central, IPv6-only  |
-| BMC control           | Redfish via Rufio (Tinkerbell-native)                     |
-| Orchestration         | Celery worker on central, state machine, SSE event stream |
-| Progress UX           | Stage tree + live logs via SSE                            |
-| CNI / LB              | Cilium **1.19.3** with native BGP                         |
-| LB mode               | SNAT default; DSR opt-in per deployment                   |
-| Address family        | IPv6-only pods/services/internal                          |
-| Edge model            | NAT46 LB (pattern A); NAT64+DNS64 opt-in                  |
-| DHCP                  | Kea DHCP with REST control-agent                          |
-| Auth DNS              | CoreDNS (existing chart)                                  |
-| Recursive DNS         | Hickory (existing chart); DNS64 zone when pattern B on    |
-| Network               | Single IPv6 VLAN end-to-end (provisioning + production)   |
-| Central v6 enablement | **Prerequisite** workstream (Phase 0)                     |
-| IPAM v6 schema        | v6 columns alongside v4 (no overloading)                  |
-| Pre-flight            | Hard gate; all checks must pass to enable Start           |
-| Secrets               | k8s Secrets on central; DB stores secret refs             |
-| Multi-cluster mgmt    | Kubeconfig-per-region (Secret); CAPI deferred             |
+| Area                  | Decision                                                    |
+| --------------------- | ----------------------------------------------------------- |
+| Node OS               | Flatcar Container Linux (LTS channel)                       |
+| Cluster bootstrap     | kubeadm + Ignition via UEFI HTTP Boot over IPv6             |
+| PXE serving           | Tinkerbell (Smee/Tink/Hegel/Rufio) on central, IPv6-only    |
+| BMC control           | Redfish via Rufio (Tinkerbell-native)                       |
+| Orchestration         | Celery worker on central, state machine, SSE event stream   |
+| Progress UX           | Stage tree + live logs via SSE                              |
+| CNI / LB              | Cilium **1.19.3** with native BGP                           |
+| LB mode               | SNAT default; DSR opt-in per deployment                     |
+| Address family        | IPv6-only pods/services/internal                            |
+| Edge model            | NAT46 LB (pattern A); NAT64+DNS64 opt-in                    |
+| DHCP                  | Kea DHCP with REST control-agent                            |
+| Auth DNS              | CoreDNS (existing chart)                                    |
+| Recursive DNS         | Hickory (existing chart); DNS64 zone when pattern B on      |
+| Network               | Single IPv6 VLAN end-to-end (provisioning + production)     |
+| Central v6 enablement | **Prerequisite** workstream (Phase 0)                       |
+| IPAM v6 schema        | No changes — existing CIDR/INET columns are family-agnostic |
+| Pre-flight            | Hard gate; all checks must pass to enable Start             |
+| Secrets               | k8s Secrets on central; DB stores secret refs               |
+| Multi-cluster mgmt    | Kubeconfig-per-region (Secret); CAPI deferred               |
 
 ### Rationale (one-line each)
 
 - **kubeadm over k3s/CAPI**: matches existing operator knowledge; k3s edge
   bias not needed; CAPI infra cost not justified at current site count.
+- **Flatcar Container Linux (LTS)**: immutable, Ignition-native (zero-glue
+  fit with Tinkerbell/Hegel), CNCF Incubating governance (not single-vendor),
+  ~18-month LTS channel suitable for remote bare-metal sites that should not
+  ride a biweekly update treadmill. `locksmith` coordinates reboots via etcd
+  lock for safe in-cluster updates. Chosen over Fedora CoreOS (no LTS) and
+  RHCOS (OpenShift-only, not viable with kubeadm).
 - **Tinkerbell**: actively developed (CNCF), k8s-native CRDs (Hardware,
   Template, Workflow), workflow model maps cleanly onto our state machine.
   Replaces Matchbox which is effectively in maintenance-only mode.
@@ -122,6 +129,183 @@ This is the single source of truth. Update it as decisions evolve.
   (unlike Vault), DB still owns the relationships.
 - **Kubeconfig-per-region**: simplest model that works; CAPI introduces a
   whole control-plane lifecycle abstraction that isn't justified yet.
+
+---
+
+## 3.0 Phase 0a — Smee DHCPv6 support (prerequisite)
+
+The Region Deploy plan locks in single-IPv6-VLAN provisioning. **Upstream
+Tinkerbell Smee does not support DHCPv6 today** — confirmed by maintainer
+on smee#433 (closed 2024-04-29, _"no plans to implement DHCPv6"_) and
+restated in the open roadmap proposal tinkerbell/roadmap#44 (last updated
+2026-04-27). The roadmap proposal is still in the discussion phase, not
+implementation.
+
+**Repo consolidation note (2025):** the `tinkerbell/smee`, `tinkerbell/tink`,
+`tinkerbell/hegel`, `tinkerbell/rufio`, and `tinkerbell/charts` repos were
+deprecated and merged into the single
+[`tinkerbell/tinkerbell`](https://github.com/tinkerbell/tinkerbell) monorepo
+(roadmap [#41](https://github.com/tinkerbell/roadmap/issues/41)). Anyone
+following older PRs or docs that reference the per-service repos is looking
+at stale information — the active codebase is the monorepo.
+
+To keep the architecture decision we want, we are developing DHCPv6 +
+UEFI HTTP Boot v6 support in a fork of the **monorepo**:
+
+- **Local working tree:** `~/projects/tinkerbell-monorepo/` (sibling to
+  `usg-dcim`, mirroring the existing `hickory-dns` pattern).
+- **GitHub fork:** `github.com/1456055067/tinkerbell` as `origin`;
+  upstream `tinkerbell/tinkerbell` is `upstream`.
+- **Working branch:** `feat/dhcpv6` — one squashed port commit `fc1008a`
+  that lifts the spike's six commits onto the new layout.
+- **Container image:** `ghcr.io/1456055067/tinkerbell:dev-dhcpv6`
+  (public). Built from `Dockerfile.tinkerbell` after a
+  `GOOS=linux GOARCH=amd64 go build ./cmd/tinkerbell`.
+
+The earlier spike fork at `github.com/1456055067/smee` (six commits on
+`feat/dhcpv6`) is retained as design history but is not the upstream
+contribution path — its parent repo is archived.
+
+### Scope (per audit 2026-05-15)
+
+Smee internals are layered. The DHCP server (`smee/internal/dhcp/server/`) is
+~112 LOC; the production reservation handler
+(`smee/internal/dhcp/handler/reservation/`) is ~411 LOC of v4-shaped logic.
+`insomniacslk/dhcp` (already vendored) ships a `dhcpv6/server6` package, so
+the protocol layer is done for us. The work is the netboot decision logic in
+v6 shape, parallel to the existing v4 code path:
+
+| Workstream                                                                            | Effort         |
+| ------------------------------------------------------------------------------------- | -------------- |
+| `internal/dhcp/server/dhcp6.go` + UDP listener                                        | ~3 days        |
+| `data.PacketV6` / `dhcp.InfoV6` parallel types                                        | ~2 days        |
+| `reservation.HandlerV6` (Solicit→Advertise→Request→Reply + UEFI HTTP Boot v6 options) | ~2 weeks       |
+| Vendor-class parsing + arch detection for v6 (Option 16)                              | ~3 days        |
+| OTel attribute encoder for v6                                                         | ~2 days        |
+| Helm chart: v6 binds, dual-listener wiring                                            | ~2 days        |
+| Hook OS DHCPv6 + SLAAC initramfs config (`tinkerbell/hook` companion change)          | ~3 days        |
+| Tests (unit + integration with v6 client harness)                                     | ~1.5 weeks     |
+| **Subtotal — PoC**                                                                    | **~5 weeks**   |
+| Upstream-quality polish (docs, design write-up, reviewer rounds)                      | +2–4 weeks     |
+| **Total — upstream-mergeable**                                                        | **~7–9 weeks** |
+
+### Strategy
+
+- **Parallel-types refactor pattern**, not generic refactor. Mirrors how
+  `insomniacslk/dhcp` itself separates `dhcpv4` and `dhcpv6` namespaces.
+  Upstream-mergeable; minimal blast radius.
+- **Stateless DHCPv6 only.** No address assignment — clients use SLAAC.
+  Matches roadmap #44 proposal and our IPAM stance (Smee should not be an
+  address allocator).
+- **UEFI HTTP Boot v6 is the only target boot path.** No DHCPv6+TFTP+iPXE
+  legacy path; modern hardware only. Pre-flight check already gates on
+  this (see §7 `nodes.uefi_http_boot_v6_capable`).
+
+### Status snapshot (2026-05-15)
+
+| Workstream item                                                                        | Status                                                                                                                      |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `dhcp_v6.go` (PacketV6 type)                                                           | ✅ in `fc1008a`                                                                                                             |
+| `info_v6.go` (InfoV6 + BootURL)                                                        | ✅ in `fc1008a`                                                                                                             |
+| `server/dhcp6.go` (v6 listener)                                                        | ✅ in `fc1008a`                                                                                                             |
+| `handler/reservation/handler_v6.go` (Solicit/Request/Release + Option 59)              | ✅ in `fc1008a`                                                                                                             |
+| `smee.go` Config.DHCPv6 + serving goroutine in Start()                                 | ✅ in `fc1008a`                                                                                                             |
+| `cmd/tinkerbell/flag/smee.go` — CLI flags for DHCPv6                                   | ✅ `--dhcp-v6-{enabled,bind-addr,bind-port,bind-interface}` wired                                                           |
+| OTel attribute encoder for v6 (full parallel encoder)                                  | ⏳ partial; inline minimal in handler                                                                                       |
+| Hook OS DHCPv6 + SLAAC initramfs (`tinkerbell/hook` — NOT consolidated, separate fork) | ✅ source in [`1456055067/hook`](https://github.com/1456055067/hook/tree/feat/dhcpv6) commit `f9f8a7b`; image build pending |
+| Real UEFI HTTP Boot v6 integration test (QEMU + EDK2 OVMF)                             | ⏳                                                                                                                          |
+
+### Acceptance criteria (Phase 0a)
+
+- A v6-only QEMU node boots via DHCPv6 → UEFI HTTP Boot → iPXE → Hook OS
+  → Tink Worker check-in, end-to-end on a kind cluster with Tinkerbell
+  running the fork image.
+- All existing v4 tests still pass; no regressions in upstream behavior.
+- Helm chart cleanly toggles between v4-only, v6-only, and dual-stack
+  listener modes.
+
+### Upstream coordination
+
+- Post audit + design to roadmap#44 once initial spike confirms the
+  parallel-types approach is viable.
+- Aim for upstream merge; carry the fork in the meantime so region-deploy
+  PR 3 isn't blocked on upstream review timelines.
+
+### Blocking relationship
+
+- **Blocks:** PR 3 (Tinkerbell stack install). PR 3's Helm values
+  reference fork-only features.
+- **Does not block:** Phase 0 (central v6), region-deploy PRs 1–2 and 4+
+  in terms of code that doesn't touch the provisioning network.
+
+---
+
+## 3a. Kubeconfig workstream (cross-cutting blocker)
+
+Single workstream that unblocks the apply paths for stages 8 / 9 / 10
+plus the four `external_*` verify checks. Without it the orchestrator
+has no way to reach the regional cluster post-`kubeadm init`.
+
+### Pieces
+
+1. **Workflow Template addition** — a `kubeconfig-write` action that
+   runs on the first control-plane node after `kubeadm init`
+   completes. Reads `/etc/kubernetes/admin.conf` and POSTs it to
+   central via the callback endpoint below. Lives in
+   `backend/src/dcim/regiondeploy/crd.py`'s template renderer.
+
+2. **Central callback endpoint** — ✅ scaffolded.
+   `POST /api/v1/region-deployments/{id}/kubeconfig/callback`
+   accepts `{node_id, kubeconfig}`, validates the deployment is in
+   `provisioning`/`joining`, sets `kubeconfig_secret_ref` to the
+   placeholder name, and emits a `joining`-stage event. The actual
+   Secret-write to central's `tinkerbell` namespace is owed work
+   (item 3).
+
+3. **k8s client + RBAC** — the api/worker service account needs a
+   ClusterRole binding to write Secrets in the `tinkerbell`
+   namespace, plus a thin httpx wrapper (or `kubernetes-asyncio`)
+   to drive the create call. Without RBAC the Secret-write fails;
+   with it the callback endpoint becomes the real persistence
+   path.
+
+4. **Orchestrator joining stage** — reads the
+   `tinkerbell/kubeconfig-{id}` Secret, hands a kubeconfig file
+   reference to subsequent stages. Today's stub becomes real once
+   item 3 lands.
+
+5. **Helm + kubectl in the orchestrator** — Helm client wired to
+   the kubeconfig from item 4; stages 8/9/10's render-only handlers
+   gain an apply branch behind a feature flag. Once that's stable
+   for one site, the flag goes away.
+
+### Auth note on the callback endpoint
+
+The callback is deliberately NOT behind `require_capability` — the
+Tink Worker action runs from a freshly-booted node with no DCIM
+token. Today's hardening is "deployment must be in
+provisioning/joining + path-scoped deployment id" (the node only
+knows its own id, baked into the Ignition payload).
+
+Once item 3 lands and Secret writes are real, we mint a per-
+deployment one-shot bootstrap token at deploy-start and bake it
+into the Workflow template. The callback then requires that
+token. Tracked as a follow-up to item 3.
+
+### Status (2026-05-15)
+
+| Item                                                | Status                                    |
+| --------------------------------------------------- | ----------------------------------------- |
+| 1. Workflow Template `kubeconfig-write` action      | ⏳ pending                                |
+| 2. Callback endpoint                                | ✅ scaffolded — receipt + placeholder ref |
+| 3. k8s client + RBAC                                | ⏳ pending                                |
+| 4. Real joining-stage Secret read                   | ⏳ pending                                |
+| 5. Helm + kubectl client + apply branches in 8/9/10 | ⏳ pending                                |
+
+Effort estimate: ~2 days of focused work for items 1+3+4; another
+~2 days for item 5 plus the apply branch wiring. Test depth is the
+real bottleneck — full end-to-end exercises need real BMC
+hardware or a QEMU+EDK2 OVMF rig.
 
 ---
 
@@ -257,16 +441,23 @@ Indexed on `(deployment_id, id)` for efficient SSE catch-up.
 | `status`          | enum    | `pending`, `installing`, `ready`, `failed`       |
 | `last_error`      | text    |                                                  |
 
-### IPAM v6 column additions
+### IPAM schema — no changes required
 
-Add to existing prefix/network models:
+Audit finding (2026-05-15): the existing IPAM models in
+`backend/src/dcim/models/ipam.py` already use PostgreSQL `CIDR` and `INET`
+column types throughout (`Supernet.prefix`, `Subnet.prefix`, `Subnet.gateway`,
+`IPAddress.address`, `Vtep.loopback_ip`). These types store v4 and v6
+transparently in the same column; the original plan's "v6 columns alongside
+v4" recommendation was based on an incorrect assumption and is dropped.
 
-- `prefix_v6 CIDR` (alongside `prefix_v4 CIDR` if present)
-- `gateway_v6 INET`
-- `family_capabilities` enum: `v4_only`, `v6_only`, `dual_stack`
+What we **may** want later is a **tagging** layer so pre-flight can answer
+"give me a v6 prefix at this site tagged as eligible for pod CIDR." The
+existing `Supernet.purpose` / `Subnet.purpose` free-form `String` fields can
+carry this. If queries get awkward, formalize them into an enum then.
 
-Validators enforce that v6 columns only hold v6 values (and vice versa).
-Migration backfills `family_capabilities` from existing data.
+Decision deferred to **PR 6 (pre-flight)** — by then we'll know what the
+checks actually need to query, and we can add tagging with a concrete
+motivating use case rather than speculatively.
 
 ---
 
@@ -396,25 +587,26 @@ from Postgres before going live.
 Defined as a JSON-schema'd list. Each check is a backend function returning
 `{passed: bool, fix_hint: str | null}`.
 
-| Key                               | What it verifies                                           |
-| --------------------------------- | ---------------------------------------------------------- |
-| `site.has_v6_pod_prefix`          | Site has a v6 prefix tagged for pod CIDR                   |
-| `site.has_v6_svc_prefix`          | Site has v6 svc prefix                                     |
-| `site.has_v6_lb_pool`             | Site has v6 LB pool                                        |
-| `site.has_v6_mgmt`                | Site has v6 mgmt /64 with room for all nodes               |
-| `site.has_v6_provisioning_prefix` | v6 provisioning prefix + DHCPv6 range present              |
-| `site.has_edge_v4_pool`           | v4 pool for NAT46 LB allocated                             |
-| `nodes.uefi_http_boot_v6_capable` | Per-node dry-run: BMC reports UEFI HTTP Boot v6 capability |
-| `nodes.bmc_reachable`             | Redfish `/redfish/v1/` 200 on each node                    |
-| `nodes.bmc_credentials_valid`     | Auth succeeds on each node                                 |
-| `nodes.distinct_macs`             | No duplicate MACs in inventory                             |
-| `bgp.peers_configured`            | At least one BGP peer with v6 capability flag              |
-| `bgp.peer_reachable`              | TCP/179 over v6 reaches each peer from central (warn-only) |
-| `dns.upstream_v6_resolvable`      | Upstream DNS answers AAAA over v6                          |
-| `central.v6_ready`                | Central cluster is v6-enabled (Phase 0 done)               |
-| `tinkerbell.healthy`              | Smee, Tink, Hegel, Rufio all reporting Ready on central    |
-| `tinkerbell.ipxe_v6_artifacts`    | Smee serves v6-capable iPXE binaries for x86_64 UEFI       |
-| `images.available`                | Required container images exist in registry                |
+| Key                                 | What it verifies                                              |
+| ----------------------------------- | ------------------------------------------------------------- |
+| `site.has_v6_pod_prefix`            | Site has a v6 prefix tagged for pod CIDR                      |
+| `site.has_v6_svc_prefix`            | Site has v6 svc prefix                                        |
+| `site.has_v6_lb_pool`               | Site has v6 LB pool                                           |
+| `site.has_v6_mgmt`                  | Site has v6 mgmt /64 with room for all nodes                  |
+| `site.has_v6_provisioning_prefix`   | v6 provisioning prefix + DHCPv6 range present                 |
+| `site.has_edge_v4_pool`             | v4 pool for NAT46 LB allocated                                |
+| `nodes.uefi_http_boot_v6_capable`   | Per-node dry-run: BMC reports UEFI HTTP Boot v6 capability    |
+| `nodes.bmc_reachable`               | Redfish `/redfish/v1/` 200 on each node                       |
+| `nodes.bmc_credentials_valid`       | Auth succeeds on each node                                    |
+| `nodes.distinct_macs`               | No duplicate MACs in inventory                                |
+| `bgp.peers_configured`              | At least one BGP peer with v6 capability flag                 |
+| `bgp.peer_reachable`                | TCP/179 over v6 reaches each peer from central (warn-only)    |
+| `dns.upstream_v6_resolvable`        | Upstream DNS answers AAAA over v6                             |
+| `central.v6_ready`                  | Central cluster is v6-enabled (Phase 0 done)                  |
+| `tinkerbell.healthy`                | Smee, Tink, Hegel, Rufio all reporting Ready on central       |
+| `tinkerbell.ipxe_v6_artifacts`      | Smee serves v6-capable iPXE binaries for x86_64 UEFI          |
+| `tinkerbell.flatcar_image_mirrored` | Flatcar LTS image (matching pinned version) is cached locally |
+| `images.available`                  | Required container images exist in registry                   |
 
 UI renders these as a checklist; **Start** is disabled until `ready=true`.
 
@@ -422,15 +614,16 @@ UI renders these as a checklist; **Start** is disabled until `ready=true`.
 
 ## 8. Helm chart inventory
 
-New charts/components added under `infra/`:
+New charts/components added under `deploy/`:
 
 | Path                                       | Purpose                                                                                            |
 | ------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| `infra/helm/tinkerbell/`                   | Tinkerbell stack: Smee, Tink, Hegel, Rufio (upstream chart + values overrides for v6-only)         |
-| `infra/helm/cilium/values.yaml`            | Pinned Cilium 1.19.3 values; chart pulled from upstream                                            |
-| `infra/helm/kea/`                          | Kea DHCPv6 chart (host-network on production VLAN; v6 control-agent REST)                          |
-| `infra/helm/region-edge/`                  | NAT46 LB config (CiliumLoadBalancerIPPool + Service template)                                      |
-| `infra/helm/nat64/`                        | Jool/tayga gateway + CoreDNS DNS64 (opt-in)                                                        |
+| `deploy/k8s/central/flatcar-mirror/`        | Cached Flatcar LTS PXE/HTTP-Boot images (kernel, initramfs, rootfs) served from central            |
+| `deploy/helm/tinkerbell/`                   | Tinkerbell stack: Smee, Tink, Hegel, Rufio (upstream chart + values overrides for v6-only)         |
+| `deploy/helm/cilium/values.yaml`            | Pinned Cilium 1.19.3 values; chart pulled from upstream                                            |
+| `deploy/helm/kea/`                          | Kea DHCPv6 chart (host-network on production VLAN; v6 control-agent REST)                          |
+| `deploy/helm/region-edge/`                  | NAT46 LB config (CiliumLoadBalancerIPPool + Service template)                                      |
+| `deploy/helm/nat64/`                        | Jool/tayga gateway + CoreDNS DNS64 (opt-in)                                                        |
 | `backend/src/dcim/regiondeploy/templates/` | Jinja templates that render Tinkerbell `Hardware`, `Template`, `Workflow` CRDs + ignition payloads |
 
 Existing charts (`coredns-auth`, `hickory-recursive`, `go-collector`) are
@@ -562,7 +755,7 @@ Sized so each PR is reviewable in < ~1 day and independently deployable.
 
 | PR  | Scope                                                                                                              |
 | --- | ------------------------------------------------------------------------------------------------------------------ |
-| 1   | Migrations: `region_deployment*` tables + IPAM v6 columns + `family_capabilities` backfill                         |
+| 1   | Migration: `region_deployment*` tables + enums. No IPAM changes (existing CIDR/INET columns are family-agnostic).  |
 | 2   | SQLAlchemy models + Pydantic schemas + read-only API (`GET` endpoints) + empty pages skeleton                      |
 | 3   | Tinkerbell stack Helm install on central (Smee/Tink/Hegel/Rufio) tuned for IPv6-only + DHCPv6                      |
 | 4   | Tinkerbell CRD generators in `backend/src/dcim/regiondeploy/`: Hardware/Template/Workflow + BMCMachine (Rufio)     |
@@ -585,18 +778,20 @@ Sized so each PR is reviewable in < ~1 day and independently deployable.
 
 ## 13. Open risks & mitigations
 
-| Risk                                                                       | Mitigation                                                                                                                                                                                            |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vendor middlebox quirks on IPv6 traffic                                    | First real-site deploy is a discovery exercise; budget time for triage. Hubble + tcpdump.                                                                                                             |
-| UEFI HTTP Boot v6 firmware bugs on some hardware                           | Pre-flight `nodes.uefi_http_boot_v6_capable` check is a hard gate; hardware that fails is ineligible. First-site rollout will surface vendor/firmware quirks — budget time. No v4 fallback by design. |
-| Operator unfamiliarity with v6 (`ping`, `kubectl get nodes -o wide`, etc.) | Ship runbook + cheat-sheet; consider `dcim` CLI subcommand that hides v6 specifics.                                                                                                                   |
-| Site router can't speak v6 MP-BGP                                          | Pre-flight check `bgp.peers_configured` flags this; site is ineligible until fixed.                                                                                                                   |
-| Redfish dialect differences across vendors                                 | `sushy` handles most; abstract per-vendor quirks behind `bmc.py` with conformance tests.                                                                                                              |
-| BMC creds in k8s Secrets leak via misconfigured RBAC                       | Dedicated namespace per deploy with tight RoleBindings; rotate creds post-deploy.                                                                                                                     |
-| Long-running Celery task blocks worker                                     | Dedicate a worker queue (`region-deploy`) with its own pool; deploys never queue behind it.                                                                                                           |
-| SSE through proxies dropping long-lived connections                        | Heartbeat events every 15s; UI auto-reconnects with `Last-Event-ID` catch-up.                                                                                                                         |
-| Cilium 1.19.3 BGP regressions                                              | Pin patch via values file (one-line bump); upstream upgrade only after central tests pass.                                                                                                            |
-| Pre-flight false-positives block legitimate deploys                        | Each check has a `fix_hint`; reviewable list; checks themselves are versioned (`check_v1`).                                                                                                           |
+| Risk                                                                       | Mitigation                                                                                                                                                                                                     |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vendor middlebox quirks on IPv6 traffic                                    | First real-site deploy is a discovery exercise; budget time for triage. Hubble + tcpdump.                                                                                                                      |
+| Flatcar `update-engine` reboots node mid-workload                          | Disable per-node auto-update; drive OS upgrades from a central operator (Kured / FLUO). `locksmith` is configured for `etcd-lock` strategy as a belt-and-braces default. Documented in node ignition template. |
+| Flatcar LTS line goes EOL or vendor drops project                          | CNCF Incubating status mitigates; quarterly review of upstream cadence. Fallback plan: FCOS or Ubuntu LTS — both consume Ignition templates with modest changes.                                               |
+| UEFI HTTP Boot v6 firmware bugs on some hardware                           | Pre-flight `nodes.uefi_http_boot_v6_capable` check is a hard gate; hardware that fails is ineligible. First-site rollout will surface vendor/firmware quirks — budget time. No v4 fallback by design.          |
+| Operator unfamiliarity with v6 (`ping`, `kubectl get nodes -o wide`, etc.) | Ship runbook + cheat-sheet; consider `dcim` CLI subcommand that hides v6 specifics.                                                                                                                            |
+| Site router can't speak v6 MP-BGP                                          | Pre-flight check `bgp.peers_configured` flags this; site is ineligible until fixed.                                                                                                                            |
+| Redfish dialect differences across vendors                                 | `sushy` handles most; abstract per-vendor quirks behind `bmc.py` with conformance tests.                                                                                                                       |
+| BMC creds in k8s Secrets leak via misconfigured RBAC                       | Dedicated namespace per deploy with tight RoleBindings; rotate creds post-deploy.                                                                                                                              |
+| Long-running Celery task blocks worker                                     | Dedicate a worker queue (`region-deploy`) with its own pool; deploys never queue behind it.                                                                                                                    |
+| SSE through proxies dropping long-lived connections                        | Heartbeat events every 15s; UI auto-reconnects with `Last-Event-ID` catch-up.                                                                                                                                  |
+| Cilium 1.19.3 BGP regressions                                              | Pin patch via values file (one-line bump); upstream upgrade only after central tests pass.                                                                                                                     |
+| Pre-flight false-positives block legitimate deploys                        | Each check has a `fix_hint`; reviewable list; checks themselves are versioned (`check_v1`).                                                                                                                    |
 
 ---
 
@@ -612,6 +807,13 @@ Sized so each PR is reviewable in < ~1 day and independently deployable.
 - **SNAT** — load balancer mode where the LB node rewrites the client IP to
   its own before forwarding to the pod. Safe everywhere; pod loses real
   client IP.
+- **Flatcar Container Linux** — CNCF Incubating immutable, Ignition-driven
+  Linux distribution; successor to CoreOS Container Linux. We pin the **LTS
+  channel** for predictable ~18-month support windows at remote sites.
+- **Ignition** — first-boot provisioning system (config format + binary)
+  used by Flatcar / FCOS / RHCOS. Tinkerbell's Hegel serves the rendered
+  Ignition JSON; the node's initramfs applies it before pivoting to the
+  real root.
 - **Tinkerbell** — CNCF bare-metal provisioning stack. Components used:
   - **Smee** — DHCP/DHCPv6 + iPXE + TFTP/HTTP boot server.
   - **Tink** — workflow engine; `Hardware`, `Template`, `Workflow` CRDs.

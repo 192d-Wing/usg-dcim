@@ -1,0 +1,34 @@
+# Local-dev collector pointed at the dockerized API + the snmpsim service.
+# After `make seed`, enroll a collector via POST /api/v1/collectors/enroll
+# and replace the placeholder UUIDs below.
+collector_id: 00000000-0000-0000-0000-0000000000aa
+site_id: 00000000-0000-0000-0000-0000000000bb
+ingest_url: http://otter:8000
+# Route telemetry batches to the Go ingest service; everything else
+# (heartbeats, DNS bundle polling, health-check posts) keeps going
+# through the Python api at ingest_url. Using the FQDN (instead of
+# the docker DNS name `go-ingest`) lets out-of-compose collectors
+# dial the same URL — the compose collector reaches it via the
+# host gateway, external collectors via the upstream DNS record.
+telemetry_url: http://go-ingest.infra.prod.dcim.mil:8100
+heartbeat_interval_seconds: 30
+buffer_path: /var/lib/dcim-collector/buffer.db
+mtls:
+  enabled: false
+api_token_file: null
+devices:
+  # Sample SNMP device pointed at the snmpsim container. Replace asset_id
+  # with a real Asset.id after `make seed`. snmpsim ships a default
+  # SNMPv2-MIB sample under the `public` community, so sysUpTime + sysDescr
+  # come back without any extra config.
+  - asset_id: 00000000-0000-0000-0000-0000000000cc
+    kind: server
+    driver: snmp
+    poll_interval_seconds: 30
+    snmp:
+      host: snmpsim
+      port: 1161
+      community: public
+      version: "2c"
+      oids:
+        sys.uptime.ticks: 1.3.6.1.2.1.1.3.0

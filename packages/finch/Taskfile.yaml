@@ -1,0 +1,37 @@
+version: '3'
+
+# Tasks for the finch package (React + Vite dashboard). Invoke from repo
+# root via `task finch:<name>`. The include in ../../Taskfile.yaml sets
+# dir to this package, so commands run with cwd=packages/finch.
+
+tasks:
+  dev:
+    desc: Start the Vite dev server on :5173
+    cmds:
+      - npm install
+      - npm run dev
+
+  test:
+    desc: Run vitest
+    cmds:
+      - npm test --silent
+
+  lint:
+    desc: Run eslint
+    cmds:
+      - npm run lint
+
+  fmt:
+    desc: Run prettier
+    cmds:
+      - npm run fmt
+
+  build:
+    desc: Production build (vite build)
+    cmds:
+      - npm run build
+
+  typecheck:
+    desc: Run tsc --noEmit
+    cmds:
+      - npx tsc --noEmit -p tsconfig.json

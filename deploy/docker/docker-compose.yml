@@ -1,0 +1,275 @@
+# Local-dev stack for USG DCIM. Production runs on Kubernetes via the Helm chart in deploy/helm.
+services:
+  postgres:
+    # TimescaleDB image (PG16 + timescaledb extension preinstalled). Telemetry
+    # samples live in a hypertable created by the 0045 migration; everything
+    # else uses stock Postgres.
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: dcim
+      POSTGRES_PASSWORD: dcim
+      POSTGRES_DB: dcim
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dcim"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  # OpenTelemetry collector — local-dev sink for spans emitted by the
+  # api + worker when `DCIM_OTEL_ENABLED=true`. Minimal config: accept
+  # OTLP HTTP on 4318 (gRPC on 4317), log every span to stdout via the
+  # `debug` exporter. Production points DCIM_OTEL_EXPORTER_ENDPOINT at
+  # an existing collector instead. Opt-in profile so the default `up`
+  # doesn't pull a 200 MB image for no reason.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    profiles: ["otel"]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "55679:55679" # zpages
+
+  # Keycloak — local OIDC issuer for end-to-end SSO testing.
+  # Preseeded realm `dcim` with client `dcim-spa` is imported on first start.
+  # Admin UI at http://localhost:8080 (admin / admin).
+  #
+  # KC_HOSTNAME advertises a URL reachable from both the browser AND the
+  # api container. `host.docker.internal` is provided by Docker Desktop
+  # on both sides; on Linux Docker it requires the extra_hosts entry on
+  # the api service below. STRICT=false lets the admin UI still work
+  # over http://localhost:8080 for convenience.
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    profiles: ["sso"]   # opt-in: `docker compose --profile sso up`
+    command:
+      - "start-dev"
+      - "--import-realm"
+      - "--http-port=8080"
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      # Front-channel URL (issuer + tokens + OIDC discovery): must
+      # match what the api container expects in the `iss` claim.
+      # host.docker.internal resolves on both sides under Docker
+      # Desktop (Windows/Mac) and via the api service's extra_hosts
+      # entry on Linux.
+      KC_HOSTNAME: http://keycloak.prod.dev.mil:8080
+      KC_HOSTNAME_ADMIN: http://keycloak.prod.dev.mil:8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "false"
+    ports: ["8080:8080"]
+    volumes:
+      - ./keycloak-realm.json:/opt/keycloak/data/import/dcim-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/realms/master || exit 1"]
+      interval: 10s
+      retries: 12
+
+  # snmpsim — synthetic SNMP agent so the collector loop has something
+  # real to poll without needing actual rack hardware. lextudio is the
+  # actively maintained fork of the original snmpsim project; tandrup's
+  # image is unmaintained as of 2022.
+  snmpsim:
+    image: lextudio/snmpsim:latest
+    profiles: ["collector"]
+    ports: ["1161:1161/udp"]
+    command:
+      - "--agent-udpv4-endpoint=0.0.0.0:1161"
+      - "--data-dir=/usr/local/snmpsim/data"
+    healthcheck:
+      test: ["CMD-SHELL", "ps -ef | grep -v grep | grep snmpsim-command-responder || exit 1"]
+      interval: 10s
+      retries: 6
+
+  otter:
+    build:
+      context: ../../packages/otter
+      dockerfile: Containerfile
+    environment:
+      DCIM_ENV: dev
+      DCIM_LOG_JSON: "false"
+      DCIM_POSTGRES_DSN: postgresql+asyncpg://dcim:dcim@postgres:5432/dcim
+      DCIM_REDIS_DSN: redis://redis:6379/0
+      DCIM_CORS_ORIGINS: '["http://dcim.prod.dev.mil", "http://localhost:5173"]'
+      DCIM_COLLECTOR_MTLS_REQUIRED: "false"
+      # Issuer URL must match what Keycloak puts in the `iss` claim
+      # (controlled by KC_HOSTNAME on the keycloak service). Using
+      # host.docker.internal here means the browser hits the same URL
+      # it sees in the discovery doc, and the api container also reaches
+      # Keycloak via the host gateway — no localhost vs container-name
+      # mismatch. Inactive unless the `sso` profile is up.
+      DCIM_OIDC_ISSUER: http://keycloak.prod.dev.mil:8080/realms/dcim
+      DCIM_OIDC_CLIENT_ID: dcim-spa
+      DCIM_OIDC_CLIENT_SECRET: dev-secret-change-me
+      DCIM_OIDC_REDIRECT_URI: http://dcim.prod.dev.mil/login/callback
+      # DNSSEC private-key encryption secret. New DnsKey rows get
+      # Fernet-encrypted at rest when this is set. Pass through from
+      # the shell env so the dev .env can keep an existing key (or
+      # generate one with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # ). Optional in dev; required for any real production zone.
+      DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
+      # DoT / DoH on the Hickory recursive. Cert + key paths are the
+      # in-container paths Hickory reads (the site-dns Hickory overlay
+      # mounts the operator's `tls/` directory onto /etc/dcim-dns).
+      # Off-by-default disable flags ride env vars so flipping
+      # encrypted DNS on/off is a redeploy of api alone, not a code
+      # change. Empty cert/key paths short-circuit the renderer
+      # regardless of the enable flags.
+      DCIM_DNS_HICKORY_DOT_ENABLED: "true"
+      DCIM_DNS_HICKORY_DOH_ENABLED: "true"
+      DCIM_DNS_HICKORY_TLS_CERT_PATH: /etc/dcim-dns/tls.crt.pem
+      DCIM_DNS_HICKORY_TLS_KEY_PATH: /etc/dcim-dns/tls.key.pem
+      # Render `allow_networks_strict = true` into the recursive's
+      # TOML so `allow_networks` acts as a firewall-style strict
+      # allowlist instead of the upstream carve-out default. Default
+      # OFF because the field is rejected on parse by Hickory builds
+      # that pre-date the strict-allowlist patch (upstream PR
+      # pending). Operators on `hickory-prom:v0.26.0-strict-dev` or
+      # later can flip this on per-deployment — typically via a
+      # shell env override on the api service or a compose.override.
+      DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT: "${DCIM_DNS_HICKORY_ALLOW_NETWORKS_STRICT:-false}"
+      # OpenTelemetry traces. Off by default; enable with
+      # `DCIM_OTEL_ENABLED=true podman compose --profile otel up`.
+      DCIM_OTEL_ENABLED: "${DCIM_OTEL_ENABLED:-false}"
+      DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
+      DCIM_OTEL_SERVICE_NAME: dcim-otter
+      DCIM_OTEL_ENVIRONMENT: dev
+    ports: ["8000:8000"]
+    extra_hosts:
+      # On Docker Desktop this is automatic; declared explicitly for
+      # Linux Docker so the api container can reach Keycloak at the
+      # same host.docker.internal:8080 URL the browser uses.
+      - "host.docker.internal:host-gateway"
+      # Custom dev hostnames — lets the api container resolve
+      # keycloak.prod.dev.mil for back-channel token exchange.
+      - "keycloak.prod.dev.mil:host-gateway"
+      - "dcim.prod.dev.mil:host-gateway"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  otter-worker:
+    build:
+      context: ../../packages/otter
+      dockerfile: Containerfile
+    command: ["arq", "dcim.worker.WorkerSettings"]
+    environment:
+      DCIM_ENV: dev
+      DCIM_LOG_JSON: "false"
+      DCIM_POSTGRES_DSN: postgresql+asyncpg://dcim:dcim@postgres:5432/dcim
+      DCIM_REDIS_DSN: redis://redis:6379/0
+      # Worker shares the DNSSEC secret with the api so the ZSK
+      # rotation cron can decrypt + re-encrypt without round-tripping
+      # through central. Same shell-env passthrough as api above.
+      DCIM_DNS_DNSSEC_SECRET: ${DCIM_DNS_DNSSEC_SECRET:-}
+      DCIM_OTEL_ENABLED: "${DCIM_OTEL_ENABLED:-false}"
+      DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
+      DCIM_OTEL_SERVICE_NAME: dcim-otter-worker
+      DCIM_OTEL_ENVIRONMENT: dev
+    # NET_RAW lets the worker open ICMP sockets for the DNS
+    # health-check engine's `icmp` protocol probes. Without it the
+    # probe falls back to unprivileged SOCK_DGRAM ICMP, which only
+    # works if the host's `net.ipv4.ping_group_range` covers the
+    # worker container's GID — not a guarantee on Docker Desktop.
+    cap_add:
+      - NET_RAW
+    depends_on:
+      otter: { condition: service_started }
+
+  finch:
+    build:
+      context: ../../packages/finch
+      dockerfile: Containerfile
+    ports: ["80:80"]
+    depends_on: [otter]
+
+  # ---- Go services (Tier 1 perf migrations) ----
+  # All three default to off; bring them up with `--profile go-services`.
+  # When enabled, point collectors at go-ingest:8100 instead of api:8000
+  # for /v1/ingest/telemetry — same wire format, same auth model.
+  heron:
+    build:
+      context: ../..
+      dockerfile: packages/heron/Containerfile
+    profiles: ["go-services"]
+    environment:
+      DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
+      INGEST_ADDR: ":8100"
+    ports: ["8100:8100"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  magpie:
+    build:
+      context: ../..
+      dockerfile: packages/magpie/Containerfile
+    profiles: ["go-services"]
+    environment:
+      DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
+      DCIM_REDIS_DSN: redis://redis:6379/0
+      DCIM_COLLECTOR_STALE_SECONDS: "600"
+      ALERTS_EVAL_INTERVAL: "30s"
+      ALERTS_SWEEP_INTERVAL: "30s"
+      ALERTS_MAX_PARALLEL: "16"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+
+  beagle:
+    build:
+      context: ../..
+      dockerfile: packages/beagle/Containerfile
+    profiles: ["go-services"]
+    environment:
+      DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@postgres:5432/dcim
+      DNS_PROBE_TICK: "30s"
+      DNS_PROBE_CONCURRENCY: "64"
+    # NET_RAW for privileged ICMP. Without it the prober uses unprivileged
+    # SOCK_DGRAM (works on Linux with net.ipv4.ping_group_range covering
+    # the container GID) and falls back to TCP/HTTP probes otherwise.
+    cap_add:
+      - NET_RAW
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # collector service uses packages/badger. The Python collector
+  # (../../collector) is deprecated and kept in tree as reference / for
+  # emergency rollback; flip the build context back to it and re-add
+  # PYTHONUNBUFFERED if you need to revert mid-cutover. CMD argument
+  # `-config` points at the same /etc/dcim/collector.yaml the Python
+  # binary read, and the YAML surface is byte-compatible per Phase 1–4.
+  badger:
+    build:
+      context: ../../packages/badger
+      dockerfile: Containerfile
+    profiles: ["collector"]   # opt-in: `docker compose --profile collector up`
+    command: ["-config", "/etc/dcim/collector.yaml"]
+    volumes:
+      - ./collector-config.yaml:/etc/dcim/collector.yaml:ro
+      - collector-buffer:/var/lib/dcim-collector
+    extra_hosts:
+      # Route the FQDN at host-gateway so the compose collector dials
+      # the same URL the out-of-compose site collectors use. Avoids
+      # depending on the host's upstream DNS being reachable from the
+      # docker network — same pattern as keycloak.prod.dev.mil on api.
+      - "go-ingest.infra.prod.dcim.mil:host-gateway"
+    depends_on:
+      otter: { condition: service_started }
+      snmpsim: { condition: service_started }
+
+volumes:
+  pgdata:
+  collector-buffer:

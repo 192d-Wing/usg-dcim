@@ -1,0 +1,177 @@
+# Default values for the dcim umbrella chart.
+# Override with `helm install dcim deploy/helm/dcim -f my-values.yaml`.
+#
+# The umbrella owns cross-cutting concerns (ingress, networkpolicy, shared
+# secrets, migrations Job) and bundles one subchart per animal under
+# `charts/`. Per-animal blocks are passed through to the matching subchart
+# (Helm merges `otter:` into the otter subchart's `.Values`, etc.).
+#
+# Shared values under `global:` are auto-propagated to every subchart.
+
+global:
+  image:
+    registry: ghcr.io/usg-dcim
+    pullPolicy: IfNotPresent
+    tag: "0.1.0"
+
+  postgresql:
+    external: true
+    dsn: "postgresql+asyncpg://dcim:CHANGE_ME@postgres-ha:5432/dcim"
+
+  redis:
+    external: true
+    dsn: "redis://redis-ha:6379/0"
+
+  config:
+    jwtSecret:                "PROVIDE_VIA_SECRET"
+    collectorTokenSecret:     "PROVIDE_VIA_SECRET"
+    collectorStaleSeconds:    600
+    alertEvalIntervalSeconds: 30
+    oidc:
+      issuer: ""
+      clientId: ""
+      clientSecretRef: ""
+    saml:
+      metadataUrl: ""
+
+  otel:
+    enabled: false
+    exporterEndpoint: https://otel-collector.observability.svc.cluster.local:4318
+    environment: prod
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    fsGroup: 10001
+    seccompProfile: { type: RuntimeDefault }
+
+  # Prometheus ServiceMonitor scraping. Subcharts emit a ServiceMonitor
+  # for their admin port when enabled is true. Requires the
+  # prometheus-operator CRDs to be installed in the cluster.
+  monitoring:
+    serviceMonitor:
+      enabled: false
+      # Namespace where the Prometheus instance lives — set to the
+      # operator's release namespace so it can discover the SMs.
+      namespace: monitoring
+      interval: 30s
+      scrapeTimeout: 10s
+      # Extra labels merged onto every ServiceMonitor; commonly used to
+      # match a Prometheus instance's serviceMonitorSelector. Example:
+      #   release: kube-prometheus-stack
+      labels: {}
+
+# Per-animal subchart values (passed through to charts/<animal>/).
+
+otter:
+  enabled: true
+  replicaCount: 3
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: 1,    memory: 2Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+  service:
+    type: ClusterIP
+    port: 8000
+
+otter-worker:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits:   { cpu: 1,    memory: 2Gi }
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    queueDepthTarget: 50
+  # Grant CAP_NET_RAW so the worker can run ICMP health-check probes
+  # (RFC 792 echo). With CAP_NET_RAW disabled AND ping_group_range too
+  # narrow, the probe returns status=unknown with a "icmp socket requires
+  # CAP_NET_RAW or net.ipv4.ping_group_range" error and the UI flags it.
+  capNetRaw: true
+
+finch:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests: { cpu: 50m,  memory: 128Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
+  service:
+    type: ClusterIP
+    port: 80
+
+heron:
+  enabled: true
+  replicaCount: 3
+  resources:
+    requests: { cpu: 500m, memory: 1Gi }
+    limits:   { cpu: 2,    memory: 4Gi }
+  service:
+    type: ClusterIP
+    port: 8443
+  mtls:
+    enabled: true
+    caBundleSecret: dcim-collector-ca
+
+magpie:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+
+beagle:
+  enabled: true
+  replicaCount: 1
+  resources:
+    requests: { cpu: 50m,  memory: 64Mi }
+    limits:   { cpu: 200m, memory: 256Mi }
+  # NET_RAW for privileged ICMP. Without it the prober uses unprivileged
+  # SOCK_DGRAM (works on Linux with net.ipv4.ping_group_range covering
+  # the container GID) and falls back to TCP/HTTP probes otherwise.
+  capNetRaw: true
+
+# Site collector (badger) is opt-in: by default the central chart does
+# not deploy a collector pod. Sites run their own collector outside the
+# central namespace via deploy/k8s/site-base/ or compose.
+badger:
+  enabled: false
+  replicaCount: 1
+
+# ---- Umbrella-level resources (ingress, networkpolicy, secrets, migrations) ----
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: dcim.example.mil
+      paths:
+        - path: /
+          pathType: Prefix
+          backend: finch
+        - path: /api
+          pathType: Prefix
+          backend: otter
+  tls:
+    - secretName: dcim-tls
+      hosts: [dcim.example.mil]
+
+objectStorage:
+  endpoint: "https://s3.example.mil"
+  bucket: dcim-reports
+  credentialsSecret: dcim-s3-creds
+
+migrations:
+  runOnInstall: true
+  runOnUpgrade: true
+
+networkPolicy:
+  enabled: true
+
+# (Per-instance monitoring settings live under `global.monitoring` above
+# so subcharts can read them via Helm's global-merge.)

@@ -46,7 +46,7 @@ What's shipped on `main`:
 
 - Fabric → VRF → Supernet (nestable) → Subnet → IPAddress with per-VRF uniqueness, purpose inheritance, IPv6, free-space finder, IP grid, global IP search.
 - Kea DHCP lease ingest.
-- VXLAN/GENEVE overlay tracking (Overlay → VNI → VTEP), subnet→L2-VNI binding.
+- VXLAN/GENEVE overlay tracking (Overlay → VNI → VTEP), subnet→L2-VNI binding, inline VTEP↔VNI membership editor on the Overlays tab.
 - Drag-and-drop subnet reparenting in the supernet tree.
 
 ### DNS
@@ -67,15 +67,17 @@ What's shipped on `main`:
 - API token issuance UI: list, issue (one-time plaintext reveal), revoke; capability-gated.
 - Bulk CSV import: assets, subnets, IP addresses — drag-drop → parse → validate → preview → import with per-row outcome.
 - Decommission workflow: impact preview (power connections + downstream loss-of-power), sanitization note, name-confirmation, audit trail.
-- Audit log viewer: server-paged table with filters (action, site, target_type, target_id, actor_label) and per-row detail with diff_json.
+- Audit log viewer: server-paged table with filters (action, site, target_type, target_id, actor_label, since / until date range) and per-row detail with diff_json.
+- Maintenance window asset filter: `asset_filter_json` predicate applied during alert suppression — operators can suppress on `kind`, `manufacturer`, `model`, `rack_id`, `lifecycle_state` instead of the whole site. Schema validates the key set; fail-safe miss on typos.
 
 ### Production hardening (formerly Phase 2)
 
 - GitHub Actions CI: ruff + pytest (backend), vitest (frontend), container builds, Helm lint, alembic up→down→up reversibility gate.
 - Real OIDC against Keycloak (with pre-seeded realm in compose): code exchange, JWKS validation, nonce + at_hash, refresh-token rotation, RFC 8176 `amr` MFA.
 - Notifications service with webhook / Slack / email adapters and per-channel routing.
-- Helm chart at `infra/helm/dcim/` (api, worker, ingest, frontend, migrations job, NetworkPolicy templates, `values-k3d.yaml`).
+- Helm chart at `deploy/helm/dcim/` (api, worker, ingest, frontend, migrations job, NetworkPolicy templates, `values-k3d.yaml`).
 - Prometheus middleware in `backend/src/dcim/metrics.py` (HTTP histograms + business counters: telemetry samples, alerts fired, eval runs).
+- OpenTelemetry traces for api + worker (off by default; enable via `DCIM_OTEL_ENABLED=true`). FastAPI / asyncpg / httpx auto-instrumented, OTLP/HTTP exporter, local-dev collector behind the `otel` compose profile.
 - Frontend bundle split: `React.lazy` per route + `manualChunks` for Refine/RQ/Cloudscape in `vite.config.ts`.
 - Dependabot across uv / npm / gomod / docker / actions; CodeQL workflow for Python/JS/Go.
 
@@ -91,16 +93,14 @@ What's shipped on `main`:
 
 Items that fall out of recently shipped work. None of these gate the next phase.
 
+All three remaining items are blocked on upstream releases. They each have a documented in-tree workaround; revisit when upstream ships.
+
 | Area | Item | Notes |
 |---|---|---|
-| Observability | OpenTelemetry traces | Prometheus metrics shipped; OTel instrumentation on the API and worker is still missing. Add `opentelemetry-instrumentation-fastapi` + a collector exporter in compose/Helm. |
-| Hickory DNS | `allow_networks_strict` upstream PR merge | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `infra/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
+| Hickory DNS | `allow_networks_strict` upstream PR merge | Live pilot on `hickory-prom:v0.26.0-2` accepts the ACL config but the carve-out semantics aren't what operators expect when both allow + deny are non-empty. DCIM-side wiring already passes the strict flag through. PR drafted as commit `0bdf8cd61` on branch `fix/access-allowlist-bypassed-when-deny-nonempty` and submitted upstream. When merged + released, bump `packages/wolf/hickory-prom/` to the new tag and drop the `Dockerfile.local` workaround. |
 | BIND interop | `primaries` catalog property support | DCIM emits RFC 9432 §4.2.3 `primaries.<member_id>.zones A/AAAA` records, but BIND 9.20.22 only honors `coo` / `ext` properties — member zones provision as stubs without primaries. Knot DNS 3.4+ and PowerDNS 4.7+ already honor the records. Wait for BIND; until then operators using BIND must declare member zones manually in named.conf. |
 | DNS QPS | Per-second rate limiting on the recursive | Hickory 0.26 has no native QPS limiter. The 0037 CIDR ACLs only gate *who* can ask, not *how fast*. Real options today are out-of-band: nftables hashlimit on the recursive host or a dnsdist sidecar. Revisit when upstream lands a token-bucket. |
-| IPAM polish | VTEP ↔ VNI memberships UI | Backend `/ipam/vtep-memberships` endpoint exists, but the Overlays tab lists VTEPs and VNIs as separate tables with no way to wire them together. Add advertised-VNI / advertised-by columns with add/remove. |
-| Alerting | Maintenance window asset filter | `asset_filter_json` is a stub. Today operators must suppress at site granularity during planned work; should accept a JSON predicate (e.g. `{"kind": ["pdu"], "row_id": "..."}`) and apply it in the dedup/suppression check. |
-| Alerting | Audit-log date range filter | Filters cover action / site / target / actor; no explicit `since`/`until`. Add a date-range picker over the existing `created_at` index. |
-| Collector loop | Swap `tandrup/snmpsim` for `snmpsim-lextudio` | Functional today but not the variant the original plan called for; lextudio is the actively maintained fork. |
+| Alerting | "Every reading violates" vs MAX(value) semantics | The threshold check uses MAX(value) per asset within `duration_seconds` — fires if *any* reading in the window violates. The file's top comment says "violated for the entire duration", which would imply MIN for `>` and MAX for `<`. Pick one interpretation, document it, and align the SQL. Pre-existing from before the OpenSearch migration; noted in #47. |
 
 ---
 

@@ -1,0 +1,138 @@
+# Tinkerbell chart values — region-deploy provisioning layer.
+#
+# Targets the consolidated monorepo Helm chart at
+#   tinkerbell/tinkerbell/helm/tinkerbell
+# (NOT the older `tinkerbell/charts/stack` umbrella, which was deprecated
+# alongside the per-service repos in mid-2025; see roadmap#41.)
+#
+# Install:
+#   helm install tinkerbell oci://ghcr.io/tinkerbell/charts/tinkerbell \
+#     -n tinkerbell --create-namespace \
+#     -f deploy/helm/tinkerbell/values.yaml \
+#     --set publicIP=<central LB IP>
+#
+# Pinning notes:
+#   - Chart targets monorepo tinkerbell/tinkerbell ≥ v0.23.0
+#     (refresh the version pin as new chart releases land).
+#   - Image: REQUIRES the fork at github.com/1456055067/tinkerbell
+#     (branch feat/dhcpv6) until upstream lands DHCPv6 support — see
+#     tinkerbell/roadmap#44 and docs/dev/region-deploy.md §3.0 Phase 0a.
+#     Upstream `ghcr.io/tinkerbell/tinkerbell:*` images do NOT support
+#     DHCPv6.
+#
+#   To produce a fresh image from the fork:
+#     cd ~/projects/tinkerbell-monorepo && git checkout feat/dhcpv6
+#     GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+#       go build -ldflags="-s -w" -o out/tinkerbell-linux-amd64 ./cmd/tinkerbell
+#     podman build -t ghcr.io/1456055067/tinkerbell:dev-dhcpv6 \
+#       -f Dockerfile.tinkerbell --build-arg TARGETOS=linux \
+#       --build-arg TARGETARCH=amd64 --platform=linux/amd64 .
+#     podman push ghcr.io/1456055067/tinkerbell:dev-dhcpv6
+#
+# Address-family stance: this configuration assumes the central cluster
+# is dual-stack (see Phase 0 in region-deploy.md). Smee binds the v4
+# listener on the legacy provisioning VLAN (still required for non-UEFI
+# clients) AND the new v6 listener on `[::]:547` for UEFI HTTP Boot v6.
+# Sites whose hardware is uniformly UEFI HTTP Boot v6-capable can disable
+# the v4 listener via deployment.envs.smee.dhcpEnabled: false.
+
+# ─── publicIP ──────────────────────────────────────────────────────────
+# REQUIRED. Set at install time via --set publicIP=… — there is no sane
+# default for a multi-site central cluster. Cilium 1.19.3 advertises this
+# IP via BGP; the chart's Service uses `lbClass: kube-vip.io/...` by
+# default, override for Cilium below.
+publicIP: ""
+
+# ─── Image (FORK) ──────────────────────────────────────────────────────
+deployment:
+  image: ghcr.io/1456055067/tinkerbell
+  imagePullPolicy: IfNotPresent
+  imageTag: dev-dhcpv6
+
+  # Bind on the host network so the DHCP listener can see broadcasts on
+  # the production VLAN. Matches Tinkerbell's documented production
+  # pattern; non-host-net deployments require a DHCP relay.
+  hostNetwork: true
+
+  # Multicast-relay init container — needed for v4 broadcast DHCP when
+  # hostNetwork=true. Default macvlan mode works on standard Linux NICs.
+  init:
+    enabled: true
+
+  # ─── Service feature gates ──────────────────────────────────────────
+  # Keep only what region-deploy needs. UI/Tootles/Secondstar are
+  # disabled — region-deploy drives Tinkerbell via the API server CRDs,
+  # not the standalone Tinkerbell UI.
+  envs:
+    globals:
+      backend: "kube"
+      enableCRDMigrations: true
+      enableRufioController: true
+      enableSecondstar: false
+      enableSmee: true
+      enableTootles: false
+      enableTinkServer: true
+      enableTinkController: true
+      enableUI: false
+      logLevel: 0
+      # publicIpv4 falls back to the top-level publicIP at chart-render
+      # time when left empty; we keep it explicit so an operator
+      # overriding publicIP also has to think about this.
+      publicIpv4: ""
+
+    # ─── Smee (DHCP/iPXE/HTTP) ──────────────────────────────────────
+    smee:
+      # DHCPv4 stays enabled — legacy / non-UEFI clients still need it.
+      # Sites with uniformly UEFI HTTP Boot v6 capable hardware can flip
+      # this to false per-environment.
+      dhcpEnabled: true
+      dhcpMode: "reservation" # reservation only; only mode v6 supports today
+      dhcpBindAddr: "" # falls back to "0.0.0.0"
+      dhcpBindInterface: "" # OVERRIDE per environment (e.g. "eth0")
+      dhcpIpxeHttpScriptPrependMac: true
+
+      # TFTP / Syslog stay v4-only — UEFI HTTP Boot v6 doesn't use TFTP,
+      # and legacy syslog clients don't speak v6.
+      tftpServerEnabled: true
+      syslogEnabled: true
+
+      # iPXE HTTP — v6 clients fetch the same iPXE binary as v4 over
+      # the same HTTP listener (which binds dual-stack via the chart's
+      # default Service config).
+      ipxeHttpBinaryEnabled: true
+      ipxeHttpScriptEnabled: true
+
+  # ─── DHCPv6 wiring (FORK ONLY) ──────────────────────────────────────
+  # Pass-through to the fork's --dhcp-v6-* CLI flags via the chart's
+  # additionalArgs hook. The fork accepts the same v6-* flag style as
+  # the v4 flags it parallels.
+  #
+  # Required overrides per environment:
+  #   - `--dhcp-v6-bind-interface=<NIC>`: the interface the listener
+  #     joins multicast groups (ff02::1:2, ff05::1:3) on. Required
+  #     when binding the wildcard on port 547.
+  additionalArgs:
+    - "--dhcp-v6-enabled"
+    # - "--dhcp-v6-bind-addr=::"        # default; omit unless overriding
+    # - "--dhcp-v6-bind-port=547"       # default; omit unless overriding
+    - "--dhcp-v6-bind-interface=eth0" # OVERRIDE per environment
+
+# ─── Service ─────────────────────────────────────────────────────────
+service:
+  # Cilium 1.19.3 advertises the LB IP via BGP through its own pool
+  # mechanism — leave loadBalancerIP unset so the Cilium pool drives
+  # assignment rather than forcing a static IP at install time. Drop
+  # the kube-vip class for the same reason.
+  lbClass: ""
+  loadBalancerIP: ""
+
+# ─── trustedProxies ──────────────────────────────────────────────────
+# REQUIRED for the iPXE HTTP script handler to honour X-Forwarded-For
+# from in-cluster traffic. Set at install time via
+#   --set "trustedProxies={$(kubectl get nodes -o jsonpath='{.items[*].spec.podCIDR}' | tr ' ' ',')}"
+trustedProxies: []
+
+# ─── artifactsFileServer ─────────────────────────────────────────────
+# REQUIRED for HookOS image hosting. Set at install time to the LB
+# IP/port of whatever HookOS file server is reachable from sites.
+artifactsFileServer: ""

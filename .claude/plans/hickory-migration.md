@@ -88,7 +88,7 @@ work in Phase 2 lets operators actually run it.
 
 ### Phase 2 — Site stack option (1 day)
 
-- New `infra/docker/site-dns-hickory/docker-compose.yml` swapping
+- New `deploy/docker/site-dns-hickory/docker-compose.yml` swapping
   `coredns-recursive` for `hickory-dns/hickory-dns`.
 - Collector's `dns_agent` recognizes the bundle format and writes
   `<output>/config.toml` instead of `Corefile` when the engine is

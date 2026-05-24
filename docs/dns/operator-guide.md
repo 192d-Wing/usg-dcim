@@ -371,7 +371,7 @@ Bulk import is supported — paste a list of patterns into the
 
 Before pointing production traffic at a freshly-signed zone, run
 the [comprehensive-test
-harness](../../infra/coredns-nsec3sign/examples/comprehensive-test/)
+harness](../../packages/wolf/coredns-nsec3sign/examples/comprehensive-test/)
 against your auth pod. It boots the deployed image against a
 hand-rolled zone exercising every code path the plugin handles —
 positive answers, NXDOMAIN, NODATA, wildcard expansion, empty
@@ -392,7 +392,7 @@ Use it as the sanity check after:
 
 The harness uses its own throwaway zone (`example.test.`) so it
 doesn't touch production data. Walk-through is in the
-[harness README](../../infra/coredns-nsec3sign/examples/comprehensive-test/README.md).
+[harness README](../../packages/wolf/coredns-nsec3sign/examples/comprehensive-test/README.md).
 
 ## Common troubleshooting
 
@@ -506,7 +506,7 @@ wired but the window saw zero queries").
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Dashboard shows 0 QPS on a server with traffic | Collector's prom scrape failing | `docker compose -p siteN logs collector \| grep dns_metrics_cycle_failed` — typical causes: `metrics_url` wrong, Hickory binary built without `prometheus-metrics` |
-| Hickory recursive: `qps_now: null` | Scrape disabled or Hickory upstream image lacking metrics | Confirm `metrics_enabled: true` on the recursive in `collector.yaml`. If using the upstream `hickorydns/hickory-dns` image, swap to `ghcr.io/192d-wing/hickory-prom:v0.26.0-1` (see `infra/hickory-prom/`) |
+| Hickory recursive: `qps_now: null` | Scrape disabled or Hickory upstream image lacking metrics | Confirm `metrics_enabled: true` on the recursive in `collector.yaml`. If using the upstream `hickorydns/hickory-dns` image, swap to `ghcr.io/192d-wing/hickory-prom:v0.26.0-1` (see `packages/wolf/hickory-prom/`) |
 | Top queried names says "No per-name data yet" | dnstap not wired on any server | Confirm `DCIM_DNS_DNSTAP_ENABLED=true` on the api container AND `dnstap_socket` set on at least one auth entry in `collector.yaml` |
 | Top queried names is empty list | dnstap wired, no traffic in window | Generate test traffic: `dig @<auth-ip> -p 53 <zone> SOA` |
 | `resolver_reloaded=false` on Hickory bundle apply | Hickory's pidfile missing | Already fixed in collector via `/proc/<pid>/comm` fallback; if still failing, confirm site stack runs `pid: host` on both collector + recursive containers |
@@ -524,8 +524,8 @@ curl -X PATCH /api/v1/ipam/fabrics/$FABRIC_ID \
 
 # Then layer the Hickory overlay on the site stack:
 docker compose -p siteN \
-  -f infra/docker/site-dns/docker-compose.yml \
-  -f infra/docker/site-dns/docker-compose.hickory.yml \
+  -f deploy/docker/site-dns/docker-compose.yml \
+  -f deploy/docker/site-dns/docker-compose.hickory.yml \
   up -d --force-recreate coredns-recursive
 ```
 
@@ -560,7 +560,7 @@ Hickory pod alongside the existing plain DNS on :53.
 with `tls-ring` + `https-ring` Cargo features (the v0.26.0-1 image
 shipped before this feature lands rejects `tls_listen_port` on
 parse). Pull `ghcr.io/192d-wing/hickory-prom:latest` or rebuild
-from `infra/hickory-prom/` if you maintain your own registry.
+from `packages/wolf/hickory-prom/` if you maintain your own registry.
 
 **Cert format:** Hickory wants the certificate chain + private key
 concatenated into a single PEM file. Mount it into the recursive

@@ -1,0 +1,14 @@
+enabled: true
+replicaCount: 1
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+service:
+  # Magpie has no traffic-bearing port — this Service only exists so a
+  # ServiceMonitor can scrape /metrics off the admin port.
+  adminPort: 8101
+config:
+  staleSeconds: 600
+  evalInterval: 30s
+  sweepInterval: 30s
+  maxParallel: 16

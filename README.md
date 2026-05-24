@@ -18,14 +18,21 @@ A multi-site DCIM with:
 
 ```
 usg-dcim/
-├── backend/           FastAPI app, models, routers, workers, auth, alerting
-├── collector/         Site collector agent (SNMP/Redfish/Modbus/REST/IPMI/syslog)
-├── frontend/          React + TypeScript + Vite dashboard
-├── infra/
-│   ├── docker/        Local dev compose
-│   └── helm/          Kubernetes/Helm chart for production
-├── docs/              Architecture, deployment, API guides
-└── Makefile           Top-level dev tasks
+├── packages/                  Animal-named components (see WORKSPACE.md)
+│   ├── otter/                 FastAPI app — central API, workers, auth, alerting
+│   ├── finch/                 React + TypeScript + Vite dashboard
+│   ├── badger/                Go SNMP/Redfish/Modbus/REST/IPMI site collector
+│   ├── heron/                 Go telemetry ingest service
+│   ├── magpie/                Go alert evaluation service
+│   ├── beagle/                Go DNS health probe
+│   ├── mole/                  Legacy Python collector (deprecated)
+│   └── wolf/                  CoreDNS NSEC3 plugin + Hickory Prometheus exporter
+├── deploy/
+│   ├── docker/                Local dev compose
+│   ├── helm/                  Kubernetes/Helm chart for production
+│   └── k8s/                   Raw manifests / kustomize bases
+├── docs/                      Architecture, deployment, API guides
+└── Makefile                   Top-level dev tasks
 ```
 
 ## Quick start (local dev)

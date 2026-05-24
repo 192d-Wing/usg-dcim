@@ -1,6 +1,7 @@
-# Top-level uv workspace. `uv sync` from here resolves backend + collector together.
+# Top-level uv workspace. `uv sync` resolves all Python packages together.
+# Animal map: otter = central API (was backend), mole = legacy collector (deprecated).
 [tool.uv.workspace]
-members = ["backend", "collector"]
+members = ["packages/otter", "packages/mole"]
 
 [tool.uv]
 # Pin a single Python interpreter across the workspace.

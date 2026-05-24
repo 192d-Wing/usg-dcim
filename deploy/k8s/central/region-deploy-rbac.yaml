@@ -1,0 +1,78 @@
+# RBAC: cross-namespace access for the region-deploy orchestrator.
+#
+# The dcim api + worker pods (namespace `dcim`) drive the
+# region-deploy state machine. Several stages need to write into the
+# `tinkerbell` namespace (where Smee/Tink/Hegel/Rufio live):
+#
+#   * kubeconfig callback   creates a Secret named
+#                           `kubeconfig-<deployment-id>` after a node
+#                           POSTs its admin.conf back to central.
+#   * render stage (future) applies Tinkerbell + Rufio CRDs
+#                           (Hardware/Template/Workflow + BMCMachine)
+#                           into `tinkerbell`.
+#   * BMC creds (future)    creates per-node `bmc-creds-*` Secrets
+#                           that Rufio's authSecretRef points at.
+#
+# Two manifests, split by scope:
+#
+#   1. ClusterRole `dcim-region-deploy` — the cluster-wide capability
+#      set. Cluster-scoped because some Tinkerbell resources are
+#      cluster-scoped (Hardware in v1alpha1) and binding a Role from
+#      a different namespace requires the cluster-level definition.
+#
+#   2. RoleBinding `dcim-region-deploy` in `tinkerbell` — gives the
+#      `default` SA in `dcim` namespace the rights *only* in the
+#      `tinkerbell` namespace. A ClusterRoleBinding would have been
+#      simpler but unnecessarily broad — region-deploy doesn't
+#      touch any other namespace.
+#
+# When upstream Tinkerbell publishes its own region-deploy
+# controller (or we ship a Helm sub-chart for these RBAC rules),
+# this file's resources move there. For now it sits alongside the
+# rest of the central-cluster manifests.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dcim-region-deploy
+  labels:
+    app.kubernetes.io/name: dcim
+    app.kubernetes.io/component: region-deploy
+rules:
+  # Secrets in the tinkerbell namespace — kubeconfig + BMC creds.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "update", "patch", "delete"]
+  # Tinkerbell CRs — region-deploy's render stage applies these.
+  - apiGroups: ["tinkerbell.org"]
+    resources: ["hardware", "templates", "workflows"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Rufio CRs — region-deploy creates Machine + Job per node.
+  - apiGroups: ["bmc.tinkerbell.org"]
+    resources: ["machines", "jobs", "tasks"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Status reads on the above — Rufio + Tink controllers write to
+  # the /status sub-resource, the orchestrator polls it.
+  - apiGroups: ["tinkerbell.org"]
+    resources: ["workflows/status", "hardware/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["bmc.tinkerbell.org"]
+    resources: ["machines/status", "jobs/status", "tasks/status"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dcim-region-deploy
+  namespace: tinkerbell
+  labels:
+    app.kubernetes.io/name: dcim
+    app.kubernetes.io/component: region-deploy
+subjects:
+  - kind: ServiceAccount
+    name: default
+    namespace: dcim
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dcim-region-deploy

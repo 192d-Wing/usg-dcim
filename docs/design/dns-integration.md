@@ -125,17 +125,17 @@ Same patterns as `api/ipam.py` (`Page`/`PageParams`, audit on every write, capab
 
 ## Collector
 
-[`collector/src/dcim_collector/main.py`](../../collector/src/dcim_collector/main.py) gains a third concurrent loop alongside `_device_loop` and `_drain_loop`:
+[`packages/mole/src/dcim_collector/main.py`](../../packages/mole/src/dcim_collector/main.py) gains a third concurrent loop alongside `_device_loop` and `_drain_loop`:
 
-- **`_dns_agent_loop`** in new [`collector/src/dcim_collector/dns_agent.py`](../../collector/src/dcim_collector/dns_agent.py):
+- **`_dns_agent_loop`** in new [`packages/mole/src/dcim_collector/dns_agent.py`](../../packages/mole/src/dcim_collector/dns_agent.py):
   1. Every `dns_poll_interval` (default 30 s), call `GET /dns/servers/{id}/bundle?etag=<last>`. Etag-match → no-op.
   2. Atomically write `Corefile`, each `zones/<name>.zone`, and `gobgp.yaml` to the shared volume.
   3. `kill -SIGUSR1 <coredns-pid>` to hot-reload CoreDNS, `kill -SIGHUP <gobgp-pid>` for GoBGP. PIDs from a shared pidfile each container drops.
   4. `POST /dns/servers/{id}/render-status` with success/failure.
 
-Auth model unchanged — reuses the existing `MtlsConfig` from [`collector/src/dcim_collector/config.py`](../../collector/src/dcim_collector/config.py).
+Auth model unchanged — reuses the existing `MtlsConfig` from [`packages/mole/src/dcim_collector/config.py`](../../packages/mole/src/dcim_collector/config.py).
 
-### Site bundle — [`infra/docker/site-dns/docker-compose.yml`](../../infra/docker/site-dns/docker-compose.yml)
+### Site bundle — [`deploy/docker/site-dns/docker-compose.yml`](../../deploy/docker/site-dns/docker-compose.yml)
 
 The operator brings this up at each site. Services:
 
@@ -170,7 +170,7 @@ End-to-end smoke against the existing compose stack:
 6. `pytest backend/tests/services/test_dns_render.py` for the pure render functions.
 7. UI: open IPAM → DNS tab → add a zone → add a manual CNAME → verify the zone preview reflects it.
 
-Local site-bundle smoke (deferred follow-up): bring up `infra/docker/site-dns/docker-compose.yml` against the local stack with a fake leaf peer (another GoBGP container as the BGP peer); `dig @<anycast-ip> leaf-01.site42.prod.dcim.mil` should return the expected A record.
+Local site-bundle smoke (deferred follow-up): bring up `deploy/docker/site-dns/docker-compose.yml` against the local stack with a fake leaf peer (another GoBGP container as the BGP peer); `dig @<anycast-ip> leaf-01.site42.prod.dcim.mil` should return the expected A record.
 
 ## Out of scope (defer)
 

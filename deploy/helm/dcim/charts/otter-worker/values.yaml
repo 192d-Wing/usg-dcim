@@ -1,0 +1,11 @@
+enabled: true
+replicaCount: 2
+resources:
+  requests: { cpu: 250m, memory: 512Mi }
+  limits:   { cpu: 1,    memory: 2Gi }
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  queueDepthTarget: 50
+capNetRaw: true

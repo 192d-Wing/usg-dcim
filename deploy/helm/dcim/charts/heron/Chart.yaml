@@ -1,0 +1,6 @@
+apiVersion: v2
+name: heron
+description: Telemetry ingest. Currently runs the otter (Python) image under uvicorn on :8443 with mTLS; the Go binary at packages/heron is a Phase-1 perf port and not yet wired into this chart.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

@@ -1,0 +1,31 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "badger.fullname" . }}
+  labels: {{- include "badger.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "badger.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "badger.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: badger
+          image: {{ include "badger.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          args: ["-config", "/etc/dcim/collector.yaml"]
+          volumeMounts:
+            - { name: config, mountPath: /etc/dcim, readOnly: true }
+            - { name: buffer, mountPath: {{ .Values.bufferPath | quote }} }
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Values.configMap }}
+        - name: buffer
+          emptyDir: {}
+{{- end }}

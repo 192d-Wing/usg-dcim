@@ -42,6 +42,12 @@ secrets/
 # Build artifacts
 build/
 *.tgz
+# Go binaries built locally (one per packages/<animal>)
+*.exe
+/badger
+/heron
+/magpie
+/beagle
 
 # TypeScript incremental build cache
 *.tsbuildinfo

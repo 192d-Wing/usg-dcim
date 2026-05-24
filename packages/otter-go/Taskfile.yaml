@@ -1,0 +1,23 @@
+version: '3'
+
+# Tasks for otter-go. Invoke as 'task otter-go:<name>' from repo root.
+
+tasks:
+  build:
+    desc: go build
+    cmds: [go build ./...]
+  vet:
+    desc: go vet
+    cmds: [go vet ./...]
+  test:
+    desc: go test
+    cmds: [go test -count=1 ./...]
+  run:
+    desc: Run otter-go locally on :8001 (avoid clash with otter on :8000)
+    cmds:
+      - OTTER_GO_ADDR=:8001 go run ./cmd/otter-go
+  sqlc:
+    desc: Regenerate db/generated from db/queries via sqlc
+    dir: ../../packages/otter-go/db
+    cmds:
+      - sqlc generate

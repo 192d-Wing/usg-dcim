@@ -1,0 +1,6 @@
+apiVersion: v2
+name: finch
+description: React + Vite dashboard. See packages/finch/.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
