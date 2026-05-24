@@ -2170,3 +2170,82 @@ async def push_dhcp_scope(
         "status": result.status,
         "error": result.error,
     }
+
+
+def _push_result_dict(r) -> dict:
+    return {
+        "scope_id": r.scope_id,
+        "kea_subnet_id": r.kea_subnet_id,
+        "status": r.status,
+        "error": r.error,
+    }
+
+
+def _diff_result_dict(r) -> dict:
+    return {
+        "scope_id": r.scope_id,
+        "kea_subnet_id": r.kea_subnet_id,
+        "status": r.status,
+        "dcim_subnet": r.dcim_subnet,
+        "kea_subnet": r.kea_subnet,
+        "delta": r.delta,
+        "error": r.error,
+    }
+
+
+@router.post("/dhcp/servers/{server_id}/scopes/push-all")
+async def push_all_dhcp_scopes(
+    server_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:push")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Push every enabled scope on this server to Kea, serially.
+
+    Single audit entry covers the whole batch; per-scope failures
+    appear in `results` but do not fail the HTTP request — 200 with
+    a summary is the normal response, errored scopes show up in the
+    counts.
+    """
+    server = await _enforce_scope_via_server(
+        db, principal, server_id, "ipam:dhcp-scopes:push",
+    )
+    report = await dhcp_push.push_all_scopes(db, server)
+    await audit.record(
+        db, principal, action="dhcp_scope.push_all",
+        target_type="dhcp_server", target_id=str(server_id),
+        metadata={
+            "total": report.total,
+            "counts": report.counts,
+        },
+    )
+    await db.commit()
+    return {
+        "server_id": report.server_id,
+        "total": report.total,
+        "counts": report.counts,
+        "results": [_push_result_dict(r) for r in report.results],
+    }
+
+
+@router.get("/dhcp/servers/{server_id}/scopes/diff-all")
+async def diff_all_dhcp_scopes(
+    server_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Drift-check every scope on this server (including disabled).
+
+    Each result carries the full DiffResult including delta + raw
+    Kea subnet, so for fleets with many scopes prefer the per-scope
+    endpoint to keep response size bounded.
+    """
+    server = await _enforce_scope_via_server(
+        db, principal, server_id, "ipam:dhcp-scopes:read",
+    )
+    report = await dhcp_push.diff_all_scopes(db, server)
+    return {
+        "server_id": report.server_id,
+        "total": report.total,
+        "counts": report.counts,
+        "results": [_diff_result_dict(r) for r in report.results],
+    }

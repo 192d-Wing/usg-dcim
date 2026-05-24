@@ -522,3 +522,102 @@ async def diff_scope(scope: DhcpScope, server: DhcpServer) -> DiffResult:
         status=status, dcim_subnet=dcim_subnet, kea_subnet=kea_subnet,
         delta=delta, error=None,
     )
+
+
+# ---------- bulk operations (PR 77) ----------
+
+
+@dataclass
+class BulkPushReport:
+    server_id: str
+    total: int
+    counts: dict[str, int]
+    results: list[PushResult]
+
+
+@dataclass
+class BulkDiffReport:
+    server_id: str
+    total: int
+    counts: dict[str, int]
+    results: list[DiffResult]
+
+
+# Status taxonomies are pinned here so the API handler doesn't have
+# to enumerate them. Adding a new status (e.g. "skipped") means
+# extending these lists + handling in _tally.
+_PUSH_STATUSES = ("ok", "error", "unsupported")
+_DIFF_STATUSES = ("in_sync", "drifted", "missing_from_kea", "never_pushed", "error")
+
+
+def _tally(statuses: list[str], known: tuple[str, ...]) -> dict[str, int]:
+    """Aggregate observed statuses into a fixed-key count map. Unknown
+    statuses (shouldn't happen but guards against future drift) land
+    in an `other` bucket so the operator notices them."""
+    counts: dict[str, int] = dict.fromkeys(known, 0)
+    other = 0
+    for s in statuses:
+        if s in counts:
+            counts[s] += 1
+        else:
+            other += 1
+    if other:
+        counts["other"] = other
+    return counts
+
+
+async def push_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkPushReport:
+    """Push every enabled scope on `server` serially.
+
+    Serial (not parallel): _allocate_kea_subnet_id reads from the DB
+    to pick the next free integer, so two concurrent first-pushes
+    could both pick id=1 and conflict on Kea's side. The serial
+    loop sidesteps that without needing a lock. For ~tens of scopes
+    this is fine; thousands of scopes is a future-PR concern.
+
+    Errors on individual scopes don't abort the batch. Each scope's
+    result lands in the returned list; the caller decides what to
+    surface to the operator.
+    """
+    scopes = (
+        await db.execute(
+            select(DhcpScope)
+            .where(DhcpScope.dhcp_server_id == server.id)
+            .where(DhcpScope.enabled.is_(True))
+        )
+    ).scalars().all()
+    results: list[PushResult] = []
+    for scope in scopes:
+        results.append(await push_scope(db, scope))
+    return BulkPushReport(
+        server_id=str(server.id),
+        total=len(results),
+        counts=_tally([r.status for r in results], _PUSH_STATUSES),
+        results=results,
+    )
+
+
+async def diff_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkDiffReport:
+    """Drift-check every scope on `server` — including disabled ones,
+    since drift on a disabled scope is still informational (operator
+    may have flipped enabled=False locally while Kea still serves it).
+
+    Serial like push_all_scopes. Each result carries the full
+    DiffResult including delta + dcim_subnet + kea_subnet, so a
+    fleet with N scopes returns N*(rendered+kea) bytes — operators
+    with many scopes should call the per-scope endpoint instead.
+    """
+    scopes = (
+        await db.execute(
+            select(DhcpScope).where(DhcpScope.dhcp_server_id == server.id)
+        )
+    ).scalars().all()
+    results: list[DiffResult] = []
+    for scope in scopes:
+        results.append(await diff_scope(scope, server))
+    return BulkDiffReport(
+        server_id=str(server.id),
+        total=len(results),
+        counts=_tally([r.status for r in results], _DIFF_STATUSES),
+        results=results,
+    )
