@@ -64,9 +64,20 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "heron.fullname" . }}
-  labels: {{- include "heron.labels" . | nindent 4 }}
+  labels:
+    {{- include "heron.labels" . | nindent 4 }}
+    {{- with .Values.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
+  {{- with .Values.service.loadBalancerClass }}
+  loadBalancerClass: {{ . }}
+  {{- end }}
   ports:
     - { name: https, port: {{ .Values.service.port }},      targetPort: https }
     - { name: admin, port: {{ .Values.service.adminPort }}, targetPort: admin }

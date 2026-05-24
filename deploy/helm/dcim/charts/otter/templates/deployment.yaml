@@ -50,9 +50,20 @@ apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "otter.fullname" . }}
-  labels: {{- include "otter.labels" . | nindent 4 }}
+  labels:
+    {{- include "otter.labels" . | nindent 4 }}
+    {{- with .Values.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.service.type }}
+  {{- with .Values.service.loadBalancerClass }}
+  loadBalancerClass: {{ . }}
+  {{- end }}
   ports:
     - port: {{ .Values.service.port }}
       targetPort: http

@@ -66,6 +66,61 @@ helm upgrade --install dcim deploy/helm/dcim \
 
 See `deploy/helm/dcim/values.yaml` for the full surface.
 
+### Cilium BGP exposure (optional)
+
+Set `bgp.enabled=true` and the chart emits four Cilium CRDs to advertise
+`type: LoadBalancer` Service IPs to upstream routers:
+
+- `CiliumBGPPeerConfig` — shared timers + AFI/SAFI families
+- `CiliumBGPClusterConfig` — local ASN + peer list
+- `CiliumBGPAdvertisement` — Service-label selector + `LoadBalancerIP`
+- `CiliumLoadBalancerIPPool` — IP range(s) Cilium hands out
+
+Minimum opt-in values:
+
+```yaml
+bgp:
+  enabled: true
+  localASN: 65000
+  peers:
+    - { name: rtr-a, address: "2001:db8:1::1", asn: 65001 }
+    - { name: rtr-b, address: "2001:db8:1::2", asn: 65001 }
+  ipPools:
+    - name: public-v6
+      blocks:
+        - { cidr: "2001:db8:1:ffff::/120" }
+
+otter:
+  service:
+    type: LoadBalancer
+    labels:
+      dcim.io/bgp-advertise: "true"   # NOTE: quote the string
+finch:
+  service:
+    type: LoadBalancer
+    labels:
+      dcim.io/bgp-advertise: "true"
+heron:
+  service:
+    type: LoadBalancer
+    labels:
+      dcim.io/bgp-advertise: "true"
+```
+
+The CRD apiVersion is `cilium.io/v2alpha1` — same as the regional
+cluster renderer in
+[`packages/otter/src/dcim/regiondeploy/cilium.py`](../packages/otter/src/dcim/regiondeploy/cilium.py)
+so central and regional clusters speak the same dialect; bump in
+lockstep with that file when Cilium graduates the API.
+
+Quote `"true"` (and any other label value) — unquoted YAML `true`
+becomes a boolean and Kubernetes rejects the Service label.
+
+The default `bgp.advertise.selectorLabels` is
+`{ dcim.io/bgp-advertise: "true" }`. Override it to advertise a
+different label key, or `selectorLabels: {}` to advertise every LB
+Service in the namespace.
+
 ## SSO smoke (Keycloak)
 
 For end-to-end OIDC validation against a real issuer, bring up the

@@ -1,0 +1,101 @@
+{{- /*
+  Cilium BGP exposure for the central DCIM control plane (PR 70).
+
+  When `bgp.enabled` is true, this template emits the four Cilium CRDs
+  needed to advertise type=LoadBalancer Service IPs to upstream routers:
+
+    1. CiliumBGPPeerConfig       — shared timers + AFI/SAFI families
+    2. CiliumBGPClusterConfig    — local ASN + list of peers
+    3. CiliumBGPAdvertisement    — what to advertise (LB IPs via selector)
+    4. CiliumLoadBalancerIPPool  — IP range Cilium hands out for LB Services
+
+  Cilium 1.16+ promotes these to cilium.io/v2; we stay on v2alpha1 to
+  match the renderer in regiondeploy/cilium.py so central and regional
+  clusters speak the same CRD dialect. Bump in lockstep with that file.
+
+  This is a NO-OP unless `bgp.enabled=true`. The status quo (ClusterIP
+  behind nginx-ingress) keeps working as long as the operator does not
+  flip the subchart service.type to LoadBalancer.
+*/}}
+{{- if .Values.bgp.enabled }}
+{{- $bgp := .Values.bgp -}}
+{{- $name := include "dcim.fullname" . -}}
+{{- $labels := include "dcim.labels" . -}}
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPPeerConfig
+metadata:
+  name: {{ $name }}-peer-config
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  timers:
+    holdTimeSeconds: {{ $bgp.timers.holdSeconds | default 9 }}
+    keepAliveTimeSeconds: {{ $bgp.timers.keepAliveSeconds | default 3 }}
+  gracefulRestart:
+    enabled: true
+    restartTimeSeconds: {{ $bgp.gracefulRestartSeconds | default 120 }}
+  families:
+    {{- range $bgp.families }}
+    - afi: {{ .afi }}
+      safi: {{ .safi }}
+    {{- end }}
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPClusterConfig
+metadata:
+  name: {{ $name }}-cluster
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  nodeSelector:
+    matchLabels: {}
+  bgpInstances:
+    - name: {{ $name }}-bgp
+      localASN: {{ $bgp.localASN | int }}
+      peers:
+        {{- range $i, $p := $bgp.peers }}
+        - name: {{ $p.name | default (printf "peer-%d" $i) }}
+          peerASN: {{ $p.asn | int }}
+          peerAddress: {{ $p.address | quote }}
+          peerConfigRef:
+            name: {{ $name }}-peer-config
+        {{- end }}
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumBGPAdvertisement
+metadata:
+  name: {{ $name }}-advert
+  labels:
+    {{- $labels | nindent 4 }}
+    advertise: services
+spec:
+  advertisements:
+    - advertisementType: Service
+      {{- with $bgp.advertise.selectorLabels }}
+      selector:
+        matchLabels:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}
+      service:
+        addresses:
+          - LoadBalancerIP
+{{- range $bgp.ipPools }}
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: {{ $name }}-{{ .name }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  blocks:
+    {{- range .blocks }}
+    - cidr: {{ .cidr | quote }}
+    {{- end }}
+  {{- with .serviceSelector }}
+  serviceSelector:
+    matchLabels:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+{{- end }}
+{{- end }}

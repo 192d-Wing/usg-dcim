@@ -77,6 +77,11 @@ otter:
   service:
     type: ClusterIP
     port: 8000
+    # Set type=LoadBalancer + add the dcim.io/bgp-advertise label to
+    # publish via Cilium BGP when bgp.enabled=true at the umbrella.
+    labels: {}
+    annotations: {}
+    loadBalancerClass: ""
 
 otter-worker:
   enabled: true
@@ -104,6 +109,9 @@ finch:
   service:
     type: ClusterIP
     port: 80
+    labels: {}
+    annotations: {}
+    loadBalancerClass: ""
 
 heron:
   enabled: true
@@ -114,6 +122,9 @@ heron:
   service:
     type: ClusterIP
     port: 8443
+    labels: {}
+    annotations: {}
+    loadBalancerClass: ""
   mtls:
     enabled: true
     caBundleSecret: dcim-collector-ca
@@ -175,3 +186,43 @@ networkPolicy:
 
 # (Per-instance monitoring settings live under `global.monitoring` above
 # so subcharts can read them via Helm's global-merge.)
+
+# ---- Cilium BGP exposure (PR 70) ----
+# Opt-in: when bgp.enabled=true, the umbrella emits the four Cilium CRDs
+# (CiliumBGPPeerConfig / CiliumBGPClusterConfig / CiliumBGPAdvertisement /
+# CiliumLoadBalancerIPPool) needed to advertise type=LoadBalancer Service
+# IPs to upstream routers. The status quo (ClusterIP behind nginx-ingress)
+# keeps working unchanged; flip a subchart's service.type to LoadBalancer
+# AND attach the advertise selector label to publish that Service.
+bgp:
+  enabled: false
+  # Local ASN of this cluster. Peers' ASNs go in `peers[].asn`.
+  localASN: 65000
+  # Upstream routers. Each peer joins the bgpInstances[0].peers list.
+  peers: []
+    # - { name: rtr-a, address: "2001:db8:1::1", asn: 65001 }
+    # - { name: rtr-b, address: "2001:db8:1::2", asn: 65001 }
+  timers:
+    holdSeconds: 9
+    keepAliveSeconds: 3
+  gracefulRestartSeconds: 120
+  # AFI/SAFI families enabled per peer. v6-unicast first matches the
+  # regional-cluster default (regiondeploy/cilium.py); add v4-unicast
+  # for dual-stack clusters.
+  families:
+    - { afi: ipv6, safi: unicast }
+  # Which Services to advertise. Default selector keys on a single label
+  # operators stamp onto the Services they want advertised. Subchart
+  # service blocks carry a matching `service.labels` map.
+  advertise:
+    selectorLabels:
+      dcim.io/bgp-advertise: "true"
+  # IP pools Cilium hands out to type=LoadBalancer Services. Multiple
+  # pools are supported (e.g. one v6 public, one v4 transition pool);
+  # each can scope itself to a subset of Services via serviceSelector.
+  ipPools: []
+    # - name: public-v6
+    #   blocks:
+    #     - { cidr: "2001:db8:1:ffff::/120" }
+    #   serviceSelector:
+    #     dcim.io/bgp-advertise: "true"
