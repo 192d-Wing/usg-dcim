@@ -210,3 +210,10 @@ Common gotchas:
 - All container images must be mirrored to an internal registry. The chart accepts `image.repository` overrides for every component.
 - Collector binaries can be packaged as RPM/DEB for offline install.
 - Audit logs are configurable to ship to an external SIEM (Splunk, Elastic, Sentinel) via syslog or HTTP.
+
+## Audit log immutability + WORM export
+
+- Migration `20260524_0050_audit_log_immutable` installs `BEFORE UPDATE` and `BEFORE DELETE` triggers on `audit_log`. Any attempt by the application (or any non-superuser connection) to modify or delete a row raises `42501 insufficient_privilege`. This is on by default; no operator action required to enable.
+- The triggers are tamper-evident at the DDL layer — disabling or dropping them requires superuser DDL, which `pg_audit` will capture if enabled on the cluster.
+- For WORM compliance (FedRAMP / IL5 / NIST 800-53 AU-9): pair the on-database immutability with a scheduled export to an external object store with object-lock retention (S3 + Glacier compliance mode, Azure Blob immutable storage, etc.). The pipeline lives outside the database — a cron job that `COPY (SELECT * FROM audit_log WHERE occurred_at >= last_export) TO STDOUT` and uploads to the immutable bucket.
+- Disaster recovery: the same export feeds the SIEM mention above, so audit data has at least two homes (the DB itself, plus the immutable store) and a tertiary if SIEM persistence is configured.
