@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.auth import OidcRoleMapping, Role, RoleScope, ScopeType, User, UserRole
 from ..models.inventory import Region, Site, SiteGroup, SiteGroupMembership
+from ..models.organization import Organization
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,13 @@ class Scope:
     site_ids: frozenset[UUID] = field(default_factory=frozenset)
     site_group_ids: frozenset[UUID] = field(default_factory=frozenset)
     enclaves: frozenset[str] = field(default_factory=frozenset)
+    # Legacy free-form organization string. PR 69 introduces the FK-keyed
+    # twin `organization_ids` below; both are checked in site_matches_scope
+    # so existing string-keyed bindings keep working while new bindings
+    # can target an organizations.id UUID directly. Retire after the
+    # sites.organization string column is dropped.
     organizations: frozenset[str] = field(default_factory=frozenset)
+    organization_ids: frozenset[UUID] = field(default_factory=frozenset)
     fabric_ids: frozenset[UUID] = field(default_factory=frozenset)
     # PR 61 — classification scope dimension. Restricts a principal to
     # resources tagged with a matching classification string ("unclassified",
@@ -47,6 +54,7 @@ class Scope:
             site_group_ids=self.site_group_ids | other.site_group_ids,
             enclaves=self.enclaves | other.enclaves,
             organizations=self.organizations | other.organizations,
+            organization_ids=self.organization_ids | other.organization_ids,
             fabric_ids=self.fabric_ids | other.fabric_ids,
             classifications=self.classifications | other.classifications,
         )
@@ -106,6 +114,28 @@ async def _resolve_mapping_scope(
     if dimension is ScopeType.enclave:
         return Scope(enclaves=frozenset([target]))
     if dimension is ScopeType.organization:
+        # PR 69 — prefer FK binding. Try the target as an
+        # organizations.id UUID first; fall back to organizations.name
+        # lookup; finally fall back to legacy string-keyed scope
+        # against sites.organization. Strict UUID parse → name lookup
+        # → string match means existing IdP role mappings that store
+        # an org name as scope_target keep working unchanged.
+        try:
+            org_uuid = UUID(target)
+        except (TypeError, ValueError):
+            org_uuid = None
+        if org_uuid is not None:
+            row = (await db.execute(
+                select(Organization.id).where(Organization.id == org_uuid)
+            )).scalar_one_or_none()
+            if row is not None:
+                return Scope(organization_ids=frozenset([row]))
+            return None
+        row = (await db.execute(
+            select(Organization.id).where(Organization.name == target)
+        )).scalar_one_or_none()
+        if row is not None:
+            return Scope(organization_ids=frozenset([row]))
         return Scope(organizations=frozenset([target]))
     if dimension is ScopeType.classification:
         return Scope(classifications=frozenset([target]))
@@ -172,6 +202,7 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
     group_ids: set[UUID] = set()
     enclaves: set[str] = set()
     orgs: set[str] = set()
+    org_ids: set[UUID] = set()
     fabric_ids: set[UUID] = set()
     classifications: set[str] = set()
     is_global = False
@@ -192,8 +223,14 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
                 if r.target_id:
                     enclaves.add(r.target_id)
             case ScopeType.organization:
+                # PR 69 — target_id parses as UUID -> FK binding into
+                # organization_ids; otherwise fall back to legacy
+                # string match in organizations (against sites.organization).
                 if r.target_id:
-                    orgs.add(r.target_id)
+                    try:
+                        org_ids.add(UUID(r.target_id))
+                    except ValueError:
+                        orgs.add(r.target_id)
             case ScopeType.fabric:
                 if r.target_id:
                     fabric_ids.add(UUID(r.target_id))
@@ -207,6 +244,7 @@ async def _scope_from_assignment(db: AsyncSession, assignment_id: UUID) -> Scope
         site_group_ids=frozenset(group_ids),
         enclaves=frozenset(enclaves),
         organizations=frozenset(orgs),
+        organization_ids=frozenset(org_ids),
         fabric_ids=frozenset(fabric_ids),
         classifications=frozenset(classifications),
     )
@@ -225,6 +263,12 @@ async def site_matches_scope(db: AsyncSession, scope: Scope, site_id: UUID) -> b
     if site.region_id in scope.region_ids:
         return True
     if site.enclave and site.enclave in scope.enclaves:
+        return True
+    # PR 69 — FK-keyed organization scope check. Sites that have been
+    # backfilled into the organizations table via sites.organization_id
+    # match here; sites still on the legacy string column fall through
+    # to the string check below.
+    if site.organization_id and site.organization_id in scope.organization_ids:
         return True
     if site.organization and site.organization in scope.organizations:
         return True

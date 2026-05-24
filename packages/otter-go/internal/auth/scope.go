@@ -53,12 +53,19 @@ import (
 // matches everything. Mixed scopes match any target listed in any
 // non-empty dimension set.
 type Scope struct {
-	IsGlobal        bool
-	RegionIDs       map[uuid.UUID]struct{}
-	SiteIDs         map[uuid.UUID]struct{}
-	SiteGroupIDs    map[uuid.UUID]struct{}
-	Enclaves        map[string]struct{}
+	IsGlobal     bool
+	RegionIDs    map[uuid.UUID]struct{}
+	SiteIDs      map[uuid.UUID]struct{}
+	SiteGroupIDs map[uuid.UUID]struct{}
+	Enclaves     map[string]struct{}
+	// Organizations is the legacy free-form string dimension keyed on
+	// sites.organization. PR 69 introduces OrganizationIDs (UUID set
+	// keyed on the new sites.organization_id FK). Both are recorded;
+	// neither is enforced in otter-go today (the consumer lives in
+	// Python's site_matches_scope) — kept here for structural parity
+	// so the Go service is ready to enforce when the FK pivot lands.
 	Organizations   map[string]struct{}
+	OrganizationIDs map[uuid.UUID]struct{}
 	Classifications map[string]struct{}
 	FabricIDs       map[uuid.UUID]struct{}
 }
@@ -80,6 +87,7 @@ func (s Scope) Union(other Scope) Scope {
 		SiteGroupIDs:    mergeUUIDSet(s.SiteGroupIDs, other.SiteGroupIDs),
 		Enclaves:        mergeStrSet(s.Enclaves, other.Enclaves),
 		Organizations:   mergeStrSet(s.Organizations, other.Organizations),
+		OrganizationIDs: mergeUUIDSet(s.OrganizationIDs, other.OrganizationIDs),
 		Classifications: mergeStrSet(s.Classifications, other.Classifications),
 		FabricIDs:       mergeUUIDSet(s.FabricIDs, other.FabricIDs),
 	}
@@ -427,6 +435,12 @@ func scopeRowToDimension(scopeType, targetID *string) Scope {
 	case "enclave":
 		return Scope{Enclaves: singletonStr(*targetID)}
 	case "organization":
+		// PR 69 — target parses as UUID → FK binding; else legacy
+		// string (matched against sites.organization). Mirrors
+		// Python _scope_from_assignment.
+		if id, err := uuid.Parse(*targetID); err == nil {
+			return Scope{OrganizationIDs: singletonUUID(id)}
+		}
 		return Scope{Organizations: singletonStr(*targetID)}
 	case "classification":
 		return Scope{Classifications: singletonStr(*targetID)}
