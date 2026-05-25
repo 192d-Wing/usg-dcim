@@ -494,6 +494,12 @@ class DhcpServer(UUIDPrimaryKey, Timestamped, Base):
     # JSON columns use because the wire shape is the column shape —
     # no property alias dance needed.
     base_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # PR 79 — opt-in: when TRUE, the API schedules a background
+    # push_scope after every DhcpScope create/update on this server.
+    # DELETE keeps its inline subnet-del call (no row left to push
+    # after the response returns). Default FALSE = explicit-push
+    # workflow PR 74 shipped.
+    auto_push: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class DhcpScope(UUIDPrimaryKey, Timestamped, Base):

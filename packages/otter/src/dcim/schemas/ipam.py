@@ -288,6 +288,9 @@ class DhcpServerBase(BaseModel):
     # Structured as {"ctrl-agent": {...}, "dhcp4": {...}, "dhcp6": {...}};
     # see services/dhcp_bundle.py for the merge contract.
     base_config: dict = Field(default_factory=dict)
+    # PR 79 — opt-in: when True, the API schedules a background
+    # push_scope after every DhcpScope create/update on this server.
+    auto_push: bool = False
 
 
 class DhcpServerCreate(DhcpServerBase):
@@ -301,6 +304,7 @@ class DhcpServerUpdate(BaseModel):
     auth_password: str | None = None
     enabled: bool | None = None
     base_config: dict | None = None
+    auto_push: bool | None = None
 
 
 class DhcpServerOut(DhcpServerBase):

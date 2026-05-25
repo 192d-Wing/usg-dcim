@@ -492,6 +492,66 @@ async def _record_push_status(
     await db.flush()
 
 
+# ---------- background auto-push (PR 79) ----------
+
+
+def should_auto_push(server: DhcpServer | None, scope: DhcpScope | None = None) -> bool:
+    """Gate the auto-push decision in one place.
+
+    Returns True iff the server exists, is enabled, has auto_push set,
+    and (when a scope is provided) the scope is enabled. Disabled
+    scopes shouldn't be in Kea, so pushing them on auto would
+    contradict their state — let the operator flip enabled=True if
+    they want the scope live.
+
+    Pure: no DB I/O. Called from the API handlers before scheduling
+    a BackgroundTask, and from unit tests directly.
+    """
+    if server is None or not server.enabled or not server.auto_push:
+        return False
+    if scope is not None and not scope.enabled:
+        return False
+    return True
+
+
+async def auto_push_scope_in_background(scope_id) -> None:
+    """Run as a FastAPI BackgroundTask: open a fresh session, reload
+    the scope, push to Kea, log on failure.
+
+    A fresh session is required — the request's session has already
+    been closed by the time BackgroundTasks fires. Errors are caught
+    and logged (and persisted to dhcp_servers.last_push_* by
+    push_scope itself); we never re-raise from a background task
+    because there's no caller to surface to.
+    """
+    # Local import dodges a circular import: services/dhcp_push.py is
+    # imported by api/ipam.py, which is imported during app create —
+    # importing from ..db at module-load time would couple the import
+    # graph more tightly than needed.
+    from ..db import async_session
+
+    async with async_session() as db:
+        scope = await db.get(DhcpScope, scope_id)
+        if scope is None:
+            log.info("dhcp_auto_push.scope_gone", scope_id=str(scope_id))
+            return
+        try:
+            result = await push_scope(db, scope)
+        except Exception as e:  # noqa: BLE001 — background task swallows
+            log.error(
+                "dhcp_auto_push.unexpected",
+                scope_id=str(scope_id), error=f"{type(e).__name__}: {e}",
+            )
+            await db.rollback()
+            return
+        if result.status != "ok":
+            log.warning(
+                "dhcp_auto_push.bad_status",
+                scope_id=str(scope_id), status=result.status, error=result.error,
+            )
+        await db.commit()
+
+
 # ---------- drift detection (PR 75) ----------
 
 

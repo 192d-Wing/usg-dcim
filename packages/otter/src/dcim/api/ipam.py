@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1975,12 +1975,15 @@ async def list_dhcp_scopes(
 async def create_dhcp_scope(
     server_id: UUID,
     payload: DhcpScopeCreate,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_capability("ipam:dhcp-scopes:create")),
     db: AsyncSession = Depends(get_db),
 ):
     if payload.dhcp_server_id != server_id:
         raise ValidationError("payload.dhcp_server_id must match URL server_id")
-    await _enforce_scope_via_server(db, principal, server_id, "ipam:dhcp-scopes:create")
+    server = await _enforce_scope_via_server(
+        db, principal, server_id, "ipam:dhcp-scopes:create",
+    )
     _validate_scope_family(payload)
     if payload.subnet_id is not None:
         subnet = await db.get(Subnet, payload.subnet_id)
@@ -2033,6 +2036,14 @@ async def create_dhcp_scope(
     )
     await db.commit()
     await db.refresh(obj)
+    # PR 79 — auto-push schedules the Kea push as a background task
+    # after the response. should_auto_push gates on server.enabled +
+    # server.auto_push + scope.enabled, so a disabled server or
+    # scope is a no-op without the handler having to branch.
+    if dhcp_push.should_auto_push(server, obj):
+        background_tasks.add_task(
+            dhcp_push.auto_push_scope_in_background, obj.id,
+        )
     return DhcpScopeOut.model_validate(obj)
 
 
@@ -2055,13 +2066,14 @@ async def get_dhcp_scope(
 async def update_dhcp_scope(
     scope_id: UUID,
     payload: DhcpScopeUpdate,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_capability("ipam:dhcp-scopes:update")),
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DhcpScope, scope_id)
     if obj is None:
         raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
-    await _enforce_scope_via_server(
+    server = await _enforce_scope_via_server(
         db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:update",
     )
     # PR 73 — ip_family/prefix/dhcp_server_id are immutable. Mutation
@@ -2108,6 +2120,13 @@ async def update_dhcp_scope(
     )
     await db.commit()
     await db.refresh(obj)
+    # PR 79 — auto-push schedules a background re-push so Kea catches
+    # the update without an explicit POST .../push call. Same gate
+    # as create — disabled server or disabled scope skips.
+    if dhcp_push.should_auto_push(server, obj):
+        background_tasks.add_task(
+            dhcp_push.auto_push_scope_in_background, obj.id,
+        )
     return DhcpScopeOut.model_validate(obj)
 
 
