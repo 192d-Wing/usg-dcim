@@ -286,6 +286,14 @@ async def sync_reservations(
             continue
         res_mac = _normalize_mac(r.get("mac"))
         res_duid = _normalize_duid(r.get("duid"))
+        # PR 105 — propagate the reservation's hostname onto the
+        # IPAddress row. The dns_sync_from_ipam cron projects every
+        # IPAddress with dns_name set into the matching forward zone
+        # as an A/AAAA + PTR pair (services/dns.py), so populating
+        # this field closes the reservation ↔ DNS sync loop without
+        # PR 105 needing to author DnsRecord rows directly. Empty /
+        # whitespace-only hostnames are treated as "no name".
+        res_hostname = (r.get("hostname") or "").strip() or None
         match = ip_index.get(norm)
         if match is None:
             # Unbacked — insert a fresh reservation row. PR 88/94:
@@ -300,6 +308,7 @@ async def sync_reservations(
                 source=IpAddressSource.reservation,
                 dhcp_mac=res_mac,
                 dhcp_duid=res_duid,
+                dns_name=res_hostname,
             )
             db.add(row)
             upserted += 1
@@ -348,6 +357,14 @@ async def sync_reservations(
                 match.dhcp_mac = res_mac
             if res_duid and not row_duid:
                 match.dhcp_duid = res_duid
+            # PR 105 — backfill dns_name when the reservation declares
+            # a hostname but the lease didn't record one. Don't
+            # overwrite an existing dns_name: an operator may have
+            # set it manually (or DDNS upstream may have a different
+            # FQDN already in flight), and silently replacing it
+            # would churn DNS records on every sync.
+            if res_hostname and not match.dns_name:
+                match.dns_name = res_hostname
             promoted += 1
             entries.append({
                 "reservation_ip": norm, "decision": "promoted",

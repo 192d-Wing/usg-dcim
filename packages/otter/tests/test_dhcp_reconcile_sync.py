@@ -306,3 +306,102 @@ def test_v6_matching_duid_promotes_successfully():
     report = _run(sync_reservations(sess, scope, [dhcp_row]))
     assert report.promoted == 1
     assert report.skipped_duid_mismatch == 0
+
+
+# ----- PR 105: hostname → dns_name propagation -----
+
+def _ip_with_dns(addr: str, source: str, dns_name: str | None) -> _IPRow:
+    row = _IPRow(id=uuid4(), address=addr, source=_Src(source))
+    row.dhcp_mac = None
+    row.dhcp_duid = None
+    row.dns_name = dns_name
+    return row
+
+
+def test_upsert_carries_reservation_hostname_onto_new_row():
+    # PR 105 — the reservation's hostname maps to IPAddress.dns_name
+    # so the DDNS projector (services/dns.sync_ipam_records_for_zone)
+    # picks it up and emits an A/AAAA + PTR pair in the matching
+    # forward zone on its next sync cycle.
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{
+            "mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.99",
+            "hostname": "host1.lab.example.com",
+        }],
+    )
+    sess = _FakeSession()
+    report = _run(sync_reservations(sess, scope, []))
+    assert report.upserted == 1
+    new_row = sess.added[0]
+    assert new_row.dns_name == "host1.lab.example.com"
+
+
+def test_upsert_without_hostname_leaves_dns_name_null():
+    # No hostname in the reservation → don't fabricate one. The
+    # projector skips rows with dns_name IS NULL, so the address
+    # exists in IPAM without a DNS record (matches the operator's
+    # intent: "reserve this IP for this MAC but I'll handle DNS
+    # separately").
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.99"}],
+    )
+    sess = _FakeSession()
+    _run(sync_reservations(sess, scope, []))
+    assert sess.added[0].dns_name is None
+
+
+def test_upsert_blank_hostname_treated_as_null():
+    # Operators paste empty strings from spreadsheets all the time.
+    # An empty / whitespace-only hostname becomes NULL so the
+    # projector doesn't try to emit a record with name="".
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{
+            "mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.99",
+            "hostname": "   ",
+        }],
+    )
+    sess = _FakeSession()
+    _run(sync_reservations(sess, scope, []))
+    assert sess.added[0].dns_name is None
+
+
+def test_promote_backfills_dns_name_when_lease_lacks_it():
+    # Lease landed in IPAM via DHCP without a name; reservation
+    # later authored a hostname. Promote AND backfill so the next
+    # DDNS sync cycle emits the A record.
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{
+            "mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5",
+            "hostname": "printer-lab.example.com",
+        }],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_dns("10.0.0.5", IpAddressSource.dhcp.value, None)
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 1
+    assert dhcp_row.dns_name == "printer-lab.example.com"
+
+
+def test_promote_does_not_overwrite_existing_dns_name():
+    # An operator (or DDNS upstream) already set a name on the
+    # IPAddress row. Silently overwriting on every reconcile would
+    # churn DNS records and surprise the operator — leave it alone.
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{
+            "mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5",
+            "hostname": "new-name.lab.example.com",
+        }],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_dns(
+        "10.0.0.5", IpAddressSource.dhcp.value, "existing.lab.example.com",
+    )
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 1
+    # Existing name preserved; reservation's hostname ignored.
+    assert dhcp_row.dns_name == "existing.lab.example.com"
