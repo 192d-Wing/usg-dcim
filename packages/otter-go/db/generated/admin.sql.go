@@ -385,6 +385,154 @@ func (q *Queries) DeleteRoleScopesForAssignment(ctx context.Context, assignmentI
 	return err
 }
 
+// ---- OIDC role mappings (PR 77) ----
+
+// OidcRoleMappingRow is the wire shape for an IdP→DCIM role mapping.
+type OidcRoleMappingRow struct {
+	ID             uuid.UUID `json:"id"`
+	IdpRole        string    `json:"idp_role"`
+	ClaimSource    string    `json:"claim_source"`
+	DcimRoleID     uuid.UUID `json:"dcim_role_id"`
+	Description    *string   `json:"description"`
+	ScopeDimension *string   `json:"scope_dimension"`
+	ScopeTarget    *string   `json:"scope_target"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+const oidcMapCols = `id, idp_role, claim_source, dcim_role_id, description,
+       scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at`
+
+func scanOidcMap(row interface{ Scan(...any) error }, m *OidcRoleMappingRow) error {
+	return row.Scan(&m.ID, &m.IdpRole, &m.ClaimSource, &m.DcimRoleID, &m.Description,
+		&m.ScopeDimension, &m.ScopeTarget, &m.CreatedAt, &m.UpdatedAt)
+}
+
+const listOidcRoleMappings = `SELECT ` + oidcMapCols + `
+FROM oidc_role_mappings
+ORDER BY idp_role
+LIMIT $1 OFFSET $2`
+
+type ListOidcRoleMappingsParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListOidcRoleMappings(ctx context.Context, arg ListOidcRoleMappingsParams) ([]OidcRoleMappingRow, error) {
+	rows, err := q.db.Query(ctx, listOidcRoleMappings, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []OidcRoleMappingRow{}
+	for rows.Next() {
+		var m OidcRoleMappingRow
+		if err := scanOidcMap(rows, &m); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+const countOidcRoleMappings = `SELECT count(*)::bigint FROM oidc_role_mappings`
+
+func (q *Queries) CountOidcRoleMappings(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countOidcRoleMappings)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
+const getOidcRoleMapping = `SELECT ` + oidcMapCols + ` FROM oidc_role_mappings WHERE id = $1`
+
+func (q *Queries) GetOidcRoleMapping(ctx context.Context, id uuid.UUID) (OidcRoleMappingRow, error) {
+	row := q.db.QueryRow(ctx, getOidcRoleMapping, id)
+	var m OidcRoleMappingRow
+	err := scanOidcMap(row, &m)
+	return m, err
+}
+
+const getOidcRoleMappingByIdpRole = `SELECT ` + oidcMapCols + ` FROM oidc_role_mappings WHERE idp_role = $1`
+
+func (q *Queries) GetOidcRoleMappingByIdpRole(ctx context.Context, idpRole string) (OidcRoleMappingRow, error) {
+	row := q.db.QueryRow(ctx, getOidcRoleMappingByIdpRole, idpRole)
+	var m OidcRoleMappingRow
+	err := scanOidcMap(row, &m)
+	return m, err
+}
+
+const createOidcRoleMapping = `INSERT INTO oidc_role_mappings (id, idp_role, claim_source, dcim_role_id,
+                                description, scope_dimension, scope_target,
+                                created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::scope_type, $6, NOW(), NOW())
+RETURNING ` + oidcMapCols
+
+type CreateOidcRoleMappingParams struct {
+	IdpRole        string    `json:"idp_role"`
+	ClaimSource    string    `json:"claim_source"`
+	DcimRoleID     uuid.UUID `json:"dcim_role_id"`
+	Description    *string   `json:"description"`
+	ScopeDimension *string   `json:"scope_dimension"`
+	ScopeTarget    *string   `json:"scope_target"`
+}
+
+func (q *Queries) CreateOidcRoleMapping(ctx context.Context, arg CreateOidcRoleMappingParams) (OidcRoleMappingRow, error) {
+	row := q.db.QueryRow(ctx, createOidcRoleMapping,
+		arg.IdpRole, arg.ClaimSource, arg.DcimRoleID,
+		arg.Description, arg.ScopeDimension, arg.ScopeTarget)
+	var m OidcRoleMappingRow
+	err := scanOidcMap(row, &m)
+	return m, err
+}
+
+const updateOidcRoleMapping = `UPDATE oidc_role_mappings
+SET claim_source    = COALESCE($2::text, claim_source),
+    dcim_role_id    = COALESCE($3::uuid, dcim_role_id),
+    description     = CASE WHEN $4::bool THEN $5::text ELSE description END,
+    scope_dimension = CASE WHEN $6::bool THEN $7::scope_type ELSE scope_dimension END,
+    scope_target    = CASE
+        WHEN $6::bool AND $7::scope_type IS NULL THEN NULL
+        WHEN $8::bool THEN $9::text
+        ELSE scope_target
+    END,
+    updated_at      = NOW()
+WHERE id = $1
+RETURNING ` + oidcMapCols
+
+type UpdateOidcRoleMappingParams struct {
+	ID             uuid.UUID  `json:"id"`
+	ClaimSource    *string    `json:"claim_source"`
+	DcimRoleID     *uuid.UUID `json:"dcim_role_id"`
+	DescriptionSet bool       `json:"description_set"`
+	Description    *string    `json:"description"`
+	ScopeDimSet    bool       `json:"scope_dim_set"`
+	ScopeDimension *string    `json:"scope_dimension"`
+	ScopeTargetSet bool       `json:"scope_target_set"`
+	ScopeTarget    *string    `json:"scope_target"`
+}
+
+func (q *Queries) UpdateOidcRoleMapping(ctx context.Context, arg UpdateOidcRoleMappingParams) (OidcRoleMappingRow, error) {
+	row := q.db.QueryRow(ctx, updateOidcRoleMapping,
+		arg.ID, arg.ClaimSource, arg.DcimRoleID,
+		arg.DescriptionSet, arg.Description,
+		arg.ScopeDimSet, arg.ScopeDimension,
+		arg.ScopeTargetSet, arg.ScopeTarget)
+	var m OidcRoleMappingRow
+	err := scanOidcMap(row, &m)
+	return m, err
+}
+
+const deleteOidcRoleMapping = `DELETE FROM oidc_role_mappings WHERE id = $1`
+
+func (q *Queries) DeleteOidcRoleMapping(ctx context.Context, id uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, deleteOidcRoleMapping, id)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 const getRoleNamesByIDs = `SELECT id, name FROM roles WHERE id = ANY($1::uuid[])`
 
 func (q *Queries) GetRoleNamesByIDs(ctx context.Context, ids []uuid.UUID) ([]RoleNameRow, error) {

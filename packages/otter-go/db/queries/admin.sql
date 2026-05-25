@@ -139,6 +139,62 @@ DELETE FROM role_scopes WHERE assignment_id = $1;
 -- response includes role_name without a per-row GetRole.
 SELECT id, name FROM roles WHERE id = ANY($1::uuid[]);
 
+-- ===== OIDC Role Mappings =====
+-- PR 77 — CRUD for the IdP role → DCIM role table that the OIDC
+-- login flow consults to materialize a Principal's capabilities.
+
+-- name: ListOidcRoleMappings :many
+SELECT id, idp_role, claim_source, dcim_role_id, description,
+       scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at
+FROM oidc_role_mappings
+ORDER BY idp_role
+LIMIT $1 OFFSET $2;
+
+-- name: CountOidcRoleMappings :one
+SELECT count(*)::bigint FROM oidc_role_mappings;
+
+-- name: GetOidcRoleMapping :one
+SELECT id, idp_role, claim_source, dcim_role_id, description,
+       scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at
+FROM oidc_role_mappings WHERE id = $1;
+
+-- name: GetOidcRoleMappingByIdpRole :one
+-- Pre-check used by the create handler for the dup-409 path.
+SELECT id, idp_role, claim_source, dcim_role_id, description,
+       scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at
+FROM oidc_role_mappings WHERE idp_role = $1;
+
+-- name: CreateOidcRoleMapping :one
+INSERT INTO oidc_role_mappings (id, idp_role, claim_source, dcim_role_id,
+                                description, scope_dimension, scope_target,
+                                created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::scope_type, $6, NOW(), NOW())
+RETURNING id, idp_role, claim_source, dcim_role_id, description,
+          scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at;
+
+-- name: UpdateOidcRoleMapping :one
+-- All five mutable fields are individually opt-in so callers can
+-- patch a single column without resending the rest. scope_dimension
+-- clears scope_target too (CASE) since target is meaningless
+-- without a dimension.
+UPDATE oidc_role_mappings
+SET claim_source    = COALESCE(sqlc.narg(claim_source)::text, claim_source),
+    dcim_role_id    = COALESCE(sqlc.narg(dcim_role_id)::uuid, dcim_role_id),
+    description     = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
+    scope_dimension = CASE WHEN sqlc.arg(scope_dim_set)::bool THEN sqlc.narg(scope_dimension)::scope_type ELSE scope_dimension END,
+    scope_target    = CASE
+        WHEN sqlc.arg(scope_dim_set)::bool AND sqlc.narg(scope_dimension)::scope_type IS NULL THEN NULL
+        WHEN sqlc.arg(scope_target_set)::bool THEN sqlc.narg(scope_target)::text
+        ELSE scope_target
+    END,
+    updated_at      = NOW()
+WHERE id = $1
+RETURNING id, idp_role, claim_source, dcim_role_id, description,
+          scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at;
+
+-- name: DeleteOidcRoleMapping :exec
+DELETE FROM oidc_role_mappings WHERE id = $1;
+
 -- name: UpdateAdminUser :one
 -- PR 74 — admin update covers display_name + is_active only
 -- (matches Python UserUpdate schema). email is immutable in the

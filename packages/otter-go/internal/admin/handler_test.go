@@ -53,6 +53,18 @@ type fakeQ struct {
 	roleNamesByID       map[uuid.UUID]string
 	gotAssignmentCreate [2]uuid.UUID
 	gotScopeCreates     []dbq.CreateRoleScopeParams
+
+	// OIDC mappings
+	oidcList         []dbq.OidcRoleMappingRow
+	oidcCount        int64
+	oidcByID         map[uuid.UUID]dbq.OidcRoleMappingRow
+	oidcByIdpRole    map[string]dbq.OidcRoleMappingRow
+	oidcCreateOut    dbq.OidcRoleMappingRow
+	oidcUpdateOut    dbq.OidcRoleMappingRow
+	oidcUpdateErr    error
+	oidcDeleteRows   int64
+	gotOidcCreate    dbq.CreateOidcRoleMappingParams
+	gotOidcUpdate    dbq.UpdateOidcRoleMappingParams
 }
 
 func (f *fakeQ) ListAdminUsers(_ context.Context, _ dbq.ListAdminUsersParams) ([]dbq.User, error) {
@@ -175,6 +187,64 @@ func (f *fakeQ) GetRoleNamesByIDs(_ context.Context, ids []uuid.UUID) ([]dbq.Rol
 		}
 	}
 	return out, nil
+}
+
+// ---- OIDC mapping stubs (PR 77) ----
+
+func (f *fakeQ) ListOidcRoleMappings(_ context.Context, _ dbq.ListOidcRoleMappingsParams) ([]dbq.OidcRoleMappingRow, error) {
+	return f.oidcList, nil
+}
+func (f *fakeQ) CountOidcRoleMappings(_ context.Context) (int64, error) {
+	return f.oidcCount, nil
+}
+func (f *fakeQ) GetOidcRoleMapping(_ context.Context, id uuid.UUID) (dbq.OidcRoleMappingRow, error) {
+	if f.oidcByID != nil {
+		if m, ok := f.oidcByID[id]; ok {
+			return m, nil
+		}
+	}
+	return dbq.OidcRoleMappingRow{}, pgx.ErrNoRows
+}
+func (f *fakeQ) GetOidcRoleMappingByIdpRole(_ context.Context, idpRole string) (dbq.OidcRoleMappingRow, error) {
+	if f.oidcByIdpRole != nil {
+		if m, ok := f.oidcByIdpRole[idpRole]; ok {
+			return m, nil
+		}
+	}
+	return dbq.OidcRoleMappingRow{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateOidcRoleMapping(_ context.Context, a dbq.CreateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error) {
+	f.gotOidcCreate = a
+	out := dbq.OidcRoleMappingRow{
+		ID: uuid.New(), IdpRole: a.IdpRole, ClaimSource: a.ClaimSource,
+		DcimRoleID: a.DcimRoleID, Description: a.Description,
+		ScopeDimension: a.ScopeDimension, ScopeTarget: a.ScopeTarget,
+	}
+	if (f.oidcCreateOut.ID != uuid.UUID{}) {
+		out = f.oidcCreateOut
+	}
+	return out, nil
+}
+func (f *fakeQ) UpdateOidcRoleMapping(_ context.Context, a dbq.UpdateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error) {
+	f.gotOidcUpdate = a
+	if f.oidcUpdateErr != nil {
+		return dbq.OidcRoleMappingRow{}, f.oidcUpdateErr
+	}
+	out := f.oidcUpdateOut
+	if (out.ID == uuid.UUID{}) {
+		out = dbq.OidcRoleMappingRow{ID: a.ID, ClaimSource: defaultString(a.ClaimSource, "")}
+	}
+	return out, nil
+}
+func (f *fakeQ) DeleteOidcRoleMapping(_ context.Context, _ uuid.UUID) (int64, error) {
+	return f.oidcDeleteRows, nil
+}
+
+func defaultString(p *string, d string) string {
+	if p != nil {
+		return *p
+	}
+	return d
 }
 
 // audit.Recorder satisfied via the dbq stub on the live build —

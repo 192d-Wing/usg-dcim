@@ -55,6 +55,14 @@ type Querier interface {
 	CreateRoleScope(ctx context.Context, arg dbq.CreateRoleScopeParams) (dbq.RoleScopeRow, error)
 	DeleteRoleScopesForAssignment(ctx context.Context, assignmentID uuid.UUID) error
 	GetRoleNamesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.RoleNameRow, error)
+
+	ListOidcRoleMappings(ctx context.Context, arg dbq.ListOidcRoleMappingsParams) ([]dbq.OidcRoleMappingRow, error)
+	CountOidcRoleMappings(ctx context.Context) (int64, error)
+	GetOidcRoleMapping(ctx context.Context, id uuid.UUID) (dbq.OidcRoleMappingRow, error)
+	GetOidcRoleMappingByIdpRole(ctx context.Context, idpRole string) (dbq.OidcRoleMappingRow, error)
+	CreateOidcRoleMapping(ctx context.Context, arg dbq.CreateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error)
+	UpdateOidcRoleMapping(ctx context.Context, arg dbq.UpdateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error)
+	DeleteOidcRoleMapping(ctx context.Context, id uuid.UUID) (int64, error)
 }
 
 type Handler struct {
@@ -76,6 +84,11 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("admin:users:read")).Get("/users/{id}/assignments", h.listUserAssignments)
 		r.With(auth.RequireCapability("admin:users:update")).Post("/assignments", h.createAssignment)
 		r.With(auth.RequireCapability("admin:users:update")).Delete("/assignments/{id}", h.deleteAssignment)
+
+		r.With(auth.RequireCapability("admin:oidc-mappings:read")).Get("/oidc-role-mappings", h.listOidcMappings)
+		r.With(auth.RequireCapability("admin:oidc-mappings:create")).Post("/oidc-role-mappings", h.createOidcMapping)
+		r.With(auth.RequireCapability("admin:oidc-mappings:update")).Patch("/oidc-role-mappings/{id}", h.updateOidcMapping)
+		r.With(auth.RequireCapability("admin:oidc-mappings:delete")).Delete("/oidc-role-mappings/{id}", h.deleteOidcMapping)
 	})
 }
 
