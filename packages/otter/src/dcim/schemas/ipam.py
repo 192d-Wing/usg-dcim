@@ -385,6 +385,9 @@ class DhcpScopeBase(BaseModel):
     preferred_lifetime_seconds: int | None = None
     enabled: bool = True
     description: str | None = None
+    # PR 95 — opt-in per-scope override of the server's auto_push.
+    # NULL inherits server.auto_push; TRUE forces; FALSE suppresses.
+    auto_push_override: bool | None = None
 
     @field_validator("ip_family")
     @classmethod
@@ -413,6 +416,9 @@ class DhcpScopeUpdate(BaseModel):
     preferred_lifetime_seconds: int | None = None
     enabled: bool | None = None
     description: str | None = None
+    # PR 95 — update path uses exclude_unset semantics; passing
+    # `null` explicitly clears the override (back to inherit).
+    auto_push_override: bool | None = None
 
 
 class DhcpScopeOut(DhcpScopeBase):
@@ -426,6 +432,9 @@ class DhcpScopeOut(DhcpScopeBase):
     last_diff_at: datetime | None = None
     last_diff_status: str | None = None
     last_diff_delta: dict | None = None
+    # PR 95 — per-scope auto-push override + soft-delete tombstone.
+    auto_push_override: bool | None = None
+    deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

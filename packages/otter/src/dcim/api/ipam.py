@@ -22,6 +22,7 @@ who's posting (UI, scripts, sync jobs).
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Response
@@ -1858,7 +1859,9 @@ async def get_dhcp_server_bundle(
         return server.bundle_cache_json
     scopes = (
         await db.execute(
-            select(DhcpScope).where(DhcpScope.dhcp_server_id == server_id)
+            select(DhcpScope)
+            .where(DhcpScope.dhcp_server_id == server_id)
+            .where(DhcpScope.deleted_at.is_(None))  # PR 95
         )
     ).scalars().all()
     # PR 78 — preload referenced templates so the renderer can merge
@@ -1966,11 +1969,17 @@ async def list_dhcp_scopes(
     ip_family: int | None = Query(None, ge=4, le=6),
     enabled: bool | None = Query(None),
     diff_status: str | None = Query(None),
+    include_deleted: bool = Query(False),
     principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
     db: AsyncSession = Depends(get_db),
 ):
     await _enforce_scope_via_server(db, principal, server_id, "ipam:dhcp-scopes:read")
     stmt = select(DhcpScope).where(DhcpScope.dhcp_server_id == server_id)
+    # PR 95 — soft-deleted scopes are hidden by default; operators
+    # pass ?include_deleted=true to see tombstoned rows (e.g. for
+    # restore workflow).
+    if not include_deleted:
+        stmt = stmt.where(DhcpScope.deleted_at.is_(None))
     if ip_family is not None:
         if ip_family not in (4, 6):
             raise ValidationError("ip_family must be 4 or 6")
@@ -2043,6 +2052,7 @@ async def create_dhcp_scope(
         rebind_timer_seconds=payload.rebind_timer_seconds,
         preferred_lifetime_seconds=payload.preferred_lifetime_seconds,
         enabled=payload.enabled,
+        auto_push_override=payload.auto_push_override,
         description=payload.description,
     )
     db.add(obj)
@@ -2171,7 +2181,10 @@ async def delete_dhcp_scope(
     db: AsyncSession = Depends(get_db),
 ):
     obj = await db.get(DhcpScope, scope_id)
-    if obj is None:
+    if obj is None or obj.deleted_at is not None:
+        # PR 95 — already-soft-deleted rows return 404 like a hard
+        # delete would. Operators use ?include_deleted=true on LIST
+        # to see them and POST .../restore to undo.
         raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
     server = await _enforce_scope_via_server(
         db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:delete",
@@ -2184,7 +2197,11 @@ async def delete_dhcp_scope(
     # delete a row because Kea is unreachable creates worse messes
     # (orphaned config that DCIM can't manage).
     kea_result = await dhcp_push.delete_scope_from_kea(obj, server)
-    await db.execute(delete(DhcpScope).where(DhcpScope.id == scope_id))
+    # PR 95 — soft-delete: tombstone the row instead of dropping it.
+    # The Kea side is still cleaned (PR 74) so the scope stops
+    # serving leases immediately; restore re-pushes via the explicit
+    # POST .../push endpoint.
+    obj.deleted_at = datetime.now(UTC)
     await audit.record(
         db, principal, action="dhcp_scope.delete",
         target_type="dhcp_scope", target_id=str(scope_id),
@@ -2195,11 +2212,57 @@ async def delete_dhcp_scope(
             "kea_subnet_id": obj.kea_subnet_id,
             "kea_delete_status": kea_result.status,
             "kea_delete_error": kea_result.error,
+            "soft_delete": True,
         },
     )
     await db.commit()
     # PR 83 — bundle cache refresh after delete.
     background_tasks.add_task(dhcp_push.enqueue_bundle_rerender, server_id)
+
+
+@router.post("/dhcp/scopes/{scope_id}/restore", response_model=DhcpScopeOut)
+async def restore_dhcp_scope(
+    scope_id: UUID,
+    background_tasks: BackgroundTasks,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    """PR 95 — undo a soft-delete.
+
+    Clears `deleted_at`. Does NOT re-push to Kea — the operator runs
+    POST /dhcp/scopes/{id}/push explicitly to put the subnet back
+    (the PR 74 delete already removed it from Kea). Capability stays
+    on :delete since the operator who could remove it should be the
+    one who can put it back.
+    """
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    if obj.deleted_at is None:
+        raise ValidationError("scope is not soft-deleted; nothing to restore")
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:delete",
+    )
+    obj.deleted_at = None
+    # Kea is out-of-sync after restore (subnet was deleted on
+    # soft-delete); operator runs POST .../push explicitly.
+    await audit.record(
+        db, principal, action="dhcp_scope.restore",
+        target_type="dhcp_scope", target_id=str(scope_id),
+        metadata={
+            "dhcp_server_id": str(obj.dhcp_server_id),
+            "ip_family": obj.ip_family,
+            "prefix": obj.prefix,
+        },
+    )
+    await db.commit()
+    # PR 83 — bundle cache refresh; the scope is back in the LIST and
+    # belongs in the bundle (if enabled).
+    background_tasks.add_task(
+        dhcp_push.enqueue_bundle_rerender, obj.dhcp_server_id,
+    )
+    await db.refresh(obj)
+    return DhcpScopeOut.model_validate(obj)
 
 
 def _reconcile_entry_dict(e) -> dict:
@@ -2564,7 +2627,9 @@ async def dhcp_drift_summary(
     server_ids = {s.id for s in servers}
     scope_rows = (
         await db.execute(
-            select(DhcpScope).where(DhcpScope.dhcp_server_id.in_(server_ids))
+            select(DhcpScope)
+            .where(DhcpScope.dhcp_server_id.in_(server_ids))
+            .where(DhcpScope.deleted_at.is_(None))  # PR 95 — exclude soft-deleted
         )
     ).scalars().all()
     scopes_by_server: dict = {}

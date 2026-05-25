@@ -506,20 +506,39 @@ async def _record_push_status(
 def should_auto_push(server: DhcpServer | None, scope: DhcpScope | None = None) -> bool:
     """Gate the auto-push decision in one place.
 
-    Returns True iff the server exists, is enabled, has auto_push set,
-    and (when a scope is provided) the scope is enabled. Disabled
-    scopes shouldn't be in Kea, so pushing them on auto would
-    contradict their state — let the operator flip enabled=True if
-    they want the scope live.
+    Returns True iff:
+      * server exists, is enabled, and (PR 95) either server.auto_push
+        is True OR scope.auto_push_override is True;
+      * scope (when provided) is enabled and not soft-deleted;
+      * scope.auto_push_override is not False (which suppresses
+        regardless of the server-level setting).
+
+    Override matrix (PR 95):
+        server.auto_push  scope.auto_push_override   → push?
+        F                 NULL                       → no (inherit)
+        F                 TRUE                       → yes (force)
+        F                 FALSE                      → no (explicit off)
+        T                 NULL                       → yes (inherit)
+        T                 TRUE                       → yes
+        T                 FALSE                      → no (suppress)
 
     Pure: no DB I/O. Called from the API handlers before scheduling
     a BackgroundTask, and from unit tests directly.
     """
-    if server is None or not server.enabled or not server.auto_push:
+    if server is None or not server.enabled:
         return False
-    if scope is not None and not scope.enabled:
-        return False
-    return True
+    if scope is not None:
+        if not scope.enabled:
+            return False
+        if getattr(scope, "deleted_at", None) is not None:
+            return False
+        override = getattr(scope, "auto_push_override", None)
+        if override is True:
+            return True
+        if override is False:
+            return False
+    # No override (or no scope passed) → defer to server flag.
+    return bool(server.auto_push)
 
 
 async def enqueue_bundle_rerender(server_id) -> bool:
@@ -586,6 +605,7 @@ async def schedule_template_fanout_pushes(
         .join(DhcpServer, DhcpServer.id == DhcpScope.dhcp_server_id)
         .where(DhcpScope.template_id == template_id)
         .where(DhcpScope.enabled.is_(True))
+        .where(DhcpScope.deleted_at.is_(None))  # PR 95 — skip soft-deleted
         .where(DhcpServer.enabled.is_(True))
         .where(DhcpServer.auto_push.is_(True))
     )
@@ -889,6 +909,7 @@ async def push_drifted_scopes(
             select(DhcpScope)
             .where(DhcpScope.dhcp_server_id == server.id)
             .where(DhcpScope.enabled.is_(True))
+            .where(DhcpScope.deleted_at.is_(None))  # PR 95
             .where(DhcpScope.last_diff_status == "drifted")
         )
     ).scalars().all()
@@ -921,6 +942,7 @@ async def push_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkPushRepor
             select(DhcpScope)
             .where(DhcpScope.dhcp_server_id == server.id)
             .where(DhcpScope.enabled.is_(True))
+            .where(DhcpScope.deleted_at.is_(None))  # PR 95
         )
     ).scalars().all()
     results: list[PushResult] = []
@@ -946,7 +968,9 @@ async def diff_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkDiffRepor
     """
     scopes = (
         await db.execute(
-            select(DhcpScope).where(DhcpScope.dhcp_server_id == server.id)
+            select(DhcpScope)
+            .where(DhcpScope.dhcp_server_id == server.id)
+            .where(DhcpScope.deleted_at.is_(None))  # PR 95
         )
     ).scalars().all()
     # PR 78 — preload referenced templates in one round-trip so the

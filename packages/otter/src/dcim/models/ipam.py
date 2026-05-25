@@ -591,6 +591,15 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
     last_diff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_diff_status: Mapped[str | None] = mapped_column(String(32))
     last_diff_delta_json: Mapped[dict | None] = mapped_column(JSON)
+    # PR 95 — per-scope auto_push override. NULL inherits the parent
+    # server's auto_push flag; TRUE forces auto-push even on a
+    # server with auto_push=FALSE; FALSE suppresses auto-push even
+    # when the server has it on.
+    auto_push_override: Mapped[bool | None] = mapped_column(Boolean)
+    # PR 95 — soft-delete tombstone. NULL = live; non-NULL =
+    # deleted at that timestamp. LIST hides tombstoned rows by
+    # default; POST /scopes/{id}/restore clears the timestamp.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Pydantic-friendly property aliases. The model_validate path in
     # DhcpScopeOut sees these names; the API layer mutates the *_json
