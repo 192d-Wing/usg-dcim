@@ -202,3 +202,74 @@ func (q *Queries) ListSubnetPrefixesBySupernet(ctx context.Context, supernetID u
 	}
 	return out, rows.Err()
 }
+
+const listSupernetsForCarver = `-- name: ListSupernetsForCarver :many
+SELECT id, fabric_id, vrf_id,
+       host(prefix) || '/' || masklen(prefix) AS prefix,
+       name, purpose
+FROM supernets
+WHERE ($1::uuid IS NULL OR id        = $1)
+  AND ($2::uuid IS NULL OR fabric_id = $2)
+  AND ($3::uuid IS NULL OR vrf_id    = $3)
+ORDER BY prefix
+`
+
+type ListSupernetsForCarverParams struct {
+	SupernetID *uuid.UUID `json:"supernet_id"`
+	FabricID   *uuid.UUID `json:"fabric_id"`
+	VrfID      *uuid.UUID `json:"vrf_id"`
+}
+
+type SupernetForCarverRow struct {
+	ID       uuid.UUID `json:"id"`
+	FabricID uuid.UUID `json:"fabric_id"`
+	VrfID    uuid.UUID `json:"vrf_id"`
+	Prefix   string    `json:"prefix"`
+	Name     *string   `json:"name"`
+	Purpose  *string   `json:"purpose"`
+}
+
+func (q *Queries) ListSupernetsForCarver(ctx context.Context, arg ListSupernetsForCarverParams) ([]SupernetForCarverRow, error) {
+	rows, err := q.db.Query(ctx, listSupernetsForCarver, arg.SupernetID, arg.FabricID, arg.VrfID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SupernetForCarverRow{}
+	for rows.Next() {
+		var s SupernetForCarverRow
+		if err := rows.Scan(&s.ID, &s.FabricID, &s.VrfID, &s.Prefix, &s.Name, &s.Purpose); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+const listSubnetPrefixesBySupernets = `-- name: ListSubnetPrefixesBySupernets :many
+SELECT supernet_id, host(prefix) || '/' || masklen(prefix) AS prefix
+FROM subnets
+WHERE supernet_id = ANY($1::uuid[])
+`
+
+type SubnetPrefixBySupernetRow struct {
+	SupernetID uuid.UUID `json:"supernet_id"`
+	Prefix     string    `json:"prefix"`
+}
+
+func (q *Queries) ListSubnetPrefixesBySupernets(ctx context.Context, supernetIDs []uuid.UUID) ([]SubnetPrefixBySupernetRow, error) {
+	rows, err := q.db.Query(ctx, listSubnetPrefixesBySupernets, supernetIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SubnetPrefixBySupernetRow{}
+	for rows.Next() {
+		var r SubnetPrefixBySupernetRow
+		if err := rows.Scan(&r.SupernetID, &r.Prefix); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

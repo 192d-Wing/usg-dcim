@@ -64,6 +64,12 @@ func (f *fakeQ) ListSubnetsForFreeSpace(_ context.Context, _ dbq.ListSubnetsForF
 func (f *fakeQ) ListAddressesInSubnets(_ context.Context, _ []uuid.UUID) ([]dbq.AddressInSubnetRow, error) {
 	return nil, nil
 }
+func (f *fakeQ) ListSupernetsForCarver(_ context.Context, _ dbq.ListSupernetsForCarverParams) ([]dbq.SupernetForCarverRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListSubnetPrefixesBySupernets(_ context.Context, _ []uuid.UUID) ([]dbq.SubnetPrefixBySupernetRow, error) {
+	return nil, nil
+}
 
 func (f *fakeQ) ListFabrics(_ context.Context, a dbq.ListFabricsParams) ([]dbq.Fabric, error) {
 	f.lastFabric = a

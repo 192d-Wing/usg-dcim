@@ -77,3 +77,25 @@ WHERE id = $1;
 SELECT host(prefix) || '/' || masklen(prefix) AS prefix
 FROM subnets
 WHERE supernet_id = $1;
+
+-- name: ListSupernetsForCarver :many
+-- PR 66 — free-space/prefixes scans every supernet matching the
+-- fabric/vrf/id filter (unpaginated) and runs the CIDR carver
+-- against each. Returns just the columns the response shape needs.
+SELECT id, fabric_id, vrf_id,
+       host(prefix) || '/' || masklen(prefix) AS prefix,
+       name, purpose
+FROM supernets
+WHERE (sqlc.narg(supernet_id)::uuid IS NULL OR id        = sqlc.narg(supernet_id))
+  AND (sqlc.narg(fabric_id)::uuid   IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(vrf_id)::uuid      IS NULL OR vrf_id    = sqlc.narg(vrf_id))
+ORDER BY prefix;
+
+-- name: ListSubnetPrefixesBySupernets :many
+-- PR 66 — bulk per-supernet child-subnet prefix fetch. One round-
+-- trip instead of N+1; the handler buckets by supernet_id in-
+-- process. The carver needs the existing subnet prefixes to filter
+-- candidates that would overlap.
+SELECT supernet_id, host(prefix) || '/' || masklen(prefix) AS prefix
+FROM subnets
+WHERE supernet_id = ANY($1::uuid[]);

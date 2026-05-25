@@ -14,6 +14,7 @@ package ipam
 
 import (
 	"net/http"
+	"net/netip"
 	"sort"
 	"strings"
 
@@ -191,4 +192,158 @@ func optStr(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// ---- PR 66: /ipam/free-space/prefixes ----
+
+type freeSpacePrefixCandidate struct {
+	SupernetID     string   `json:"supernet_id"`
+	SupernetPrefix string   `json:"supernet_prefix"`
+	SupernetName   *string  `json:"supernet_name"`
+	FabricID       string   `json:"fabric_id"`
+	VrfID          string   `json:"vrf_id"`
+	Purpose        *string  `json:"purpose"`
+	Candidates     []string `json:"candidates"`
+	Count          int      `json:"count"`
+}
+
+type freeSpacePrefixQuery struct {
+	PrefixSize int     `json:"prefix_size"`
+	FabricID   *string `json:"fabric_id"`
+	VrfID      *string `json:"vrf_id"`
+	SupernetID *string `json:"supernet_id"`
+	Family     *string `json:"family"`
+}
+
+type freeSpacePrefixResponse struct {
+	Query     freeSpacePrefixQuery       `json:"query"`
+	Supernets []freeSpacePrefixCandidate `json:"supernets"`
+}
+
+func (h *Handler) getFreeSpacePrefixes(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	rawSize := q.Get("prefix_size")
+	if rawSize == "" {
+		httpx.Error(w, http.StatusBadRequest, "prefix_size is required")
+		return
+	}
+	prefixSize := int(parseInt32(rawSize, 0, 1, 128))
+	if prefixSize < 1 || prefixSize > 128 {
+		httpx.Error(w, http.StatusBadRequest, "prefix_size must be between 1 and 128")
+		return
+	}
+	params := dbq.ListSupernetsForCarverParams{}
+	if v := q.Get("fabric_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "fabric_id is not a uuid")
+			return
+		}
+		params.FabricID = &id
+	}
+	if v := q.Get("vrf_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "vrf_id is not a uuid")
+			return
+		}
+		params.VrfID = &id
+	}
+	if v := q.Get("supernet_id"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, "supernet_id is not a uuid")
+			return
+		}
+		params.SupernetID = &id
+	}
+	family := q.Get("family")
+	if family != "" && family != "v4" && family != "v6" {
+		httpx.Error(w, http.StatusBadRequest, "family must be v4 or v6")
+		return
+	}
+	limitPerSupernet := parseInt32(q.Get("limit_per_supernet"), 20, 1, 200)
+
+	supernets, err := h.Q.ListSupernetsForCarver(r.Context(), params)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// Family pre-filter before the bulk subnet fetch — skip
+	// children of supernets we'd drop anyway.
+	keep := make([]dbq.SupernetForCarverRow, 0, len(supernets))
+	for _, s := range supernets {
+		if familyMatches(s.Prefix, family) {
+			keep = append(keep, s)
+		}
+	}
+	ids := make([]uuid.UUID, len(keep))
+	for i, s := range keep {
+		ids[i] = s.ID
+	}
+	allocRows, err := h.Q.ListSubnetPrefixesBySupernets(r.Context(), ids)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	alloc := make(map[uuid.UUID][]string, len(keep))
+	for _, a := range allocRows {
+		alloc[a.SupernetID] = append(alloc[a.SupernetID], a.Prefix)
+	}
+
+	out := make([]freeSpacePrefixCandidate, 0, len(keep))
+	for _, sn := range keep {
+		parent, perr := netip.ParsePrefix(sn.Prefix)
+		if perr != nil {
+			continue
+		}
+		// Family-bound size: v4 caps at 32, v6 at 128.
+		maxSize := 32
+		if !parent.Addr().Is4() {
+			maxSize = 128
+		}
+		if prefixSize > maxSize {
+			continue
+		}
+		occupied := make([]netip.Prefix, 0, len(alloc[sn.ID]))
+		for _, a := range alloc[sn.ID] {
+			if p, err := netip.ParsePrefix(a); err == nil {
+				occupied = append(occupied, p)
+			}
+		}
+		cands := findFreePrefixesInSupernet(parent, prefixSize, occupied, int(limitPerSupernet))
+		if len(cands) == 0 {
+			continue
+		}
+		out = append(out, freeSpacePrefixCandidate{
+			SupernetID:     sn.ID.String(),
+			SupernetPrefix: sn.Prefix,
+			SupernetName:   sn.Name,
+			FabricID:       sn.FabricID.String(),
+			VrfID:          sn.VrfID.String(),
+			Purpose:        sn.Purpose,
+			Candidates:     cands,
+			Count:          len(cands),
+		})
+	}
+
+	resp := freeSpacePrefixResponse{
+		Query:     freeSpacePrefixQuery{PrefixSize: prefixSize, Family: optStr(family)},
+		Supernets: out,
+	}
+	if params.FabricID != nil {
+		s := params.FabricID.String()
+		resp.Query.FabricID = &s
+	}
+	if params.VrfID != nil {
+		s := params.VrfID.String()
+		resp.Query.VrfID = &s
+	}
+	if params.SupernetID != nil {
+		s := params.SupernetID.String()
+		resp.Query.SupernetID = &s
+	}
+	httpx.JSON(w, http.StatusOK, resp)
 }
