@@ -334,6 +334,25 @@ DELETE FROM dns_keys WHERE id = $1;
 -- RRSIG output and the zone goes back to unsigned.
 UPDATE dns_keys SET retired_at = NOW() WHERE zone_id = $1 AND retired_at IS NULL;
 
+-- name: DeleteAllDnsKeysForZone :many
+-- Hard-delete every key for a zone. Returns the deleted rows so the
+-- audit record can list retired key tags. Used by disable-dnssec.
+DELETE FROM dns_keys WHERE zone_id = $1
+RETURNING id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+          private_pem, public_key_b64, key_tag, active_from, retired_at,
+          created_at, updated_at;
+
+-- name: GetDnsKey :one
+SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+       private_pem, public_key_b64, key_tag, active_from, retired_at,
+       created_at, updated_at
+FROM dns_keys WHERE id = $1;
+
+-- name: TouchDnsZone :exec
+-- Bump updated_at so the SOA serial moves and downstream resolvers
+-- pick up the change on their next refresh.
+UPDATE dns_zones SET updated_at = NOW() WHERE id = $1;
+
 -- ===== DnsKey reads (PR 79) =====
 -- DNSSEC key list + DS-record derivation are pure reads. The key-
 -- generation/rotation surface (POST /enable-dnssec, /rotate-key/{role},

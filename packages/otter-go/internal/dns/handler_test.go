@@ -186,6 +186,15 @@ func (f *fakeQ) DeleteDnsKey(_ context.Context, _ uuid.UUID) (int64, error) {
 func (f *fakeQ) RetireAllDnsKeysForZone(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
+func (f *fakeQ) DeleteAllDnsKeysForZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) GetDnsKey(_ context.Context, _ uuid.UUID) (dbq.DnsKeyRow, error) {
+	return dbq.DnsKeyRow{}, pgx.ErrNoRows
+}
+func (f *fakeQ) TouchDnsZone(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 1, nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }

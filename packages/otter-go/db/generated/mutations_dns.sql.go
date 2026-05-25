@@ -873,6 +873,54 @@ func (q *Queries) RetireAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID)
 	return tag.RowsAffected(), nil
 }
 
+const deleteAllDnsKeysForZone = `DELETE FROM dns_keys WHERE zone_id = $1
+RETURNING id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+          private_pem, public_key_b64, key_tag, active_from, retired_at,
+          created_at, updated_at`
+
+func (q *Queries) DeleteAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) ([]DnsKeyRow, error) {
+	rows, err := q.db.Query(ctx, deleteAllDnsKeysForZone, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsKeyRow{}
+	for rows.Next() {
+		var k DnsKeyRow
+		if err := rows.Scan(&k.ID, &k.ZoneID, &k.CatalogID, &k.Role, &k.Algorithm,
+			&k.PrivatePem, &k.PublicKeyB64, &k.KeyTag, &k.ActiveFrom, &k.RetiredAt,
+			&k.CreatedAt, &k.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+const getDnsKey = `SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+       private_pem, public_key_b64, key_tag, active_from, retired_at,
+       created_at, updated_at
+FROM dns_keys WHERE id = $1`
+
+func (q *Queries) GetDnsKey(ctx context.Context, id uuid.UUID) (DnsKeyRow, error) {
+	row := q.db.QueryRow(ctx, getDnsKey, id)
+	var k DnsKeyRow
+	err := row.Scan(&k.ID, &k.ZoneID, &k.CatalogID, &k.Role, &k.Algorithm,
+		&k.PrivatePem, &k.PublicKeyB64, &k.KeyTag, &k.ActiveFrom, &k.RetiredAt,
+		&k.CreatedAt, &k.UpdatedAt)
+	return k, err
+}
+
+const touchDnsZone = `UPDATE dns_zones SET updated_at = NOW() WHERE id = $1`
+
+func (q *Queries) TouchDnsZone(ctx context.Context, id uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, touchDnsZone, id)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // ---- DnsKey reads (PR 79) ----
 
 // DnsKeyRow is the wire shape for one DNSSEC key.
