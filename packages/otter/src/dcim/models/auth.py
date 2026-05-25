@@ -116,7 +116,10 @@ class OidcRoleMapping(UUIDPrimaryKey, Timestamped, Base):
       * site       → scope_target matches Site.code
       * site_group → scope_target matches SiteGroup.code
       * enclave    → scope_target is the literal string on Site.enclave
-      * organization → scope_target is Site.organization
+      * organization → scope_target is organizations.id (UUID) or
+                       organizations.name (resolver auto-promotes name → id).
+                       Pre-PR-92 callers used Site.organization string; that
+                       column is dropped and the path is no longer honored.
     """
 
     __tablename__ = "oidc_role_mappings"

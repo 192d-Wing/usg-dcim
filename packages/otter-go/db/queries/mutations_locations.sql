@@ -13,21 +13,20 @@ WHERE id = $1
 RETURNING id, name, code, description, created_at, updated_at;
 
 -- ===== Sites =====
--- PR 67 — organization_id is the new FK pointer onto organizations.id
--- (PR 66). It rides alongside the legacy `organization` string for now;
--- a future PR will retire the string column once API consumers have
--- migrated.
+-- PR 92 retired the legacy `organization` string column; new and
+-- existing callers use organization_id (UUID FK to organizations.id)
+-- exclusively.
 -- name: CreateSite :one
 INSERT INTO sites (id, region_id, name, code, address, latitude, longitude,
-                   timezone, majcom, organization, organization_id, mission_owner,
+                   timezone, majcom, organization_id, mission_owner,
                    enclave, classification, lifecycle_state, metadata_json,
                    created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10, $11,
-        $12, $13, $14::lifecycle_state, COALESCE($15::jsonb, '{}'::jsonb),
+        $7, $8, $9, $10,
+        $11, $12, $13::lifecycle_state, COALESCE($14::jsonb, '{}'::jsonb),
         NOW(), NOW())
 RETURNING id, region_id, name, code, address, latitude, longitude,
-          timezone, majcom, organization, organization_id, mission_owner,
+          timezone, majcom, organization_id, mission_owner,
           enclave, classification, lifecycle_state, metadata_json,
           created_at, updated_at;
 
@@ -36,7 +35,6 @@ UPDATE sites
 SET name           = COALESCE(sqlc.narg(name)::text, name),
     address        = CASE WHEN sqlc.arg(address_set)::bool          THEN sqlc.narg(address)::text          ELSE address END,
     majcom         = CASE WHEN sqlc.arg(majcom_set)::bool           THEN sqlc.narg(majcom)::text           ELSE majcom END,
-    organization   = CASE WHEN sqlc.arg(organization_set)::bool     THEN sqlc.narg(organization)::text     ELSE organization END,
     organization_id = CASE WHEN sqlc.arg(organization_id_set)::bool THEN sqlc.narg(organization_id)::uuid  ELSE organization_id END,
     mission_owner  = CASE WHEN sqlc.arg(mission_owner_set)::bool    THEN sqlc.narg(mission_owner)::text    ELSE mission_owner END,
     enclave        = CASE WHEN sqlc.arg(enclave_set)::bool          THEN sqlc.narg(enclave)::text          ELSE enclave END,
@@ -45,7 +43,7 @@ SET name           = COALESCE(sqlc.narg(name)::text, name),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING id, region_id, name, code, address, latitude, longitude,
-          timezone, majcom, organization, organization_id, mission_owner,
+          timezone, majcom, organization_id, mission_owner,
           enclave, classification, lifecycle_state, metadata_json,
           created_at, updated_at;
 

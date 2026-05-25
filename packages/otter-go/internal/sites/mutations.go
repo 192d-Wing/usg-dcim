@@ -24,7 +24,6 @@ type createReq struct {
 	Longitude      *string    `json:"longitude"`
 	Timezone       *string    `json:"timezone"`
 	Majcom         *string    `json:"majcom"`
-	Organization   *string    `json:"organization"`
 	OrganizationID *uuid.UUID `json:"organization_id"`
 	MissionOwner   *string    `json:"mission_owner"`
 	Enclave        *string    `json:"enclave"`
@@ -58,7 +57,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		RegionID: req.RegionID, Name: req.Name, Code: req.Code,
 		Address: req.Address, Latitude: req.Latitude, Longitude: req.Longitude,
 		Timezone: req.Timezone, Majcom: req.Majcom,
-		Organization: req.Organization, OrganizationID: req.OrganizationID,
+		OrganizationID: req.OrganizationID,
 		MissionOwner: req.MissionOwner, Enclave: req.Enclave, Classification: req.Classification,
 		LifecycleState: req.LifecycleState, MetadataJson: req.MetadataJson,
 	})
@@ -83,8 +82,6 @@ type updateReq struct {
 	addressSet        bool
 	Majcom            *string
 	majcomSet         bool
-	Organization      *string
-	organizationSet   bool
 	OrganizationID    *uuid.UUID
 	organizationIDSet bool
 	MissionOwner      *string
@@ -114,12 +111,6 @@ func (u *updateReq) UnmarshalJSON(data []byte) error {
 	if v, ok := raw["majcom"]; ok {
 		u.majcomSet = true
 		if err := json.Unmarshal(v, &u.Majcom); err != nil {
-			return err
-		}
-	}
-	if v, ok := raw["organization"]; ok {
-		u.organizationSet = true
-		if err := json.Unmarshal(v, &u.Organization); err != nil {
 			return err
 		}
 	}
@@ -181,7 +172,6 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		ID: id, Name: req.Name,
 		AddressSet: req.addressSet, Address: req.Address,
 		MajcomSet: req.majcomSet, Majcom: req.Majcom,
-		OrganizationSet: req.organizationSet, Organization: req.Organization,
 		OrganizationIDSet: req.organizationIDSet, OrganizationID: req.OrganizationID,
 		MissionOwnerSet: req.missionOwnerSet, MissionOwner: req.MissionOwner,
 		EnclaveSet: req.enclaveSet, Enclave: req.Enclave,

@@ -88,7 +88,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Offset:         offset,
 		Majcom:         strPtr(q.Get("majcom")),
 		Enclave:        strPtr(q.Get("enclave")),
-		Organization:   strPtr(q.Get("organization")),
 		LifecycleState: strPtr(q.Get("lifecycle_state")),
 		SiteIds:        scopeSiteIds,
 	}
@@ -119,7 +118,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		RegionID:       params.RegionID,
 		Majcom:         params.Majcom,
 		Enclave:        params.Enclave,
-		Organization:   params.Organization,
 		OrganizationID: params.OrganizationID,
 		LifecycleState: params.LifecycleState,
 		SiteIds:        scopeSiteIds,

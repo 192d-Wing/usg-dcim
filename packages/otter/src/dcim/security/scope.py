@@ -264,13 +264,12 @@ async def site_matches_scope(db: AsyncSession, scope: Scope, site_id: UUID) -> b
         return True
     if site.enclave and site.enclave in scope.enclaves:
         return True
-    # PR 69 — FK-keyed organization scope check. Sites that have been
-    # backfilled into the organizations table via sites.organization_id
-    # match here; sites still on the legacy string column fall through
-    # to the string check below.
+    # PR 69 + PR 92 — FK-keyed organization scope check. The legacy
+    # `site.organization in scope.organizations` string match was
+    # removed when sites.organization (the column) was dropped. Bindings
+    # in scope.organizations are now inert; operators migrate them to
+    # organization_ids before relying on the dimension.
     if site.organization_id and site.organization_id in scope.organization_ids:
-        return True
-    if site.organization and site.organization in scope.organizations:
         return True
     if scope.site_group_ids:
         memberships = (

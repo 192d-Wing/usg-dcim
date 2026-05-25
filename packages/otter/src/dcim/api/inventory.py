@@ -130,7 +130,8 @@ async def list_sites(
     region_id: UUID | None = Query(None),
     majcom: str | None = Query(None),
     enclave: str | None = Query(None),
-    organization: str | None = Query(None),
+    # PR 92 — legacy `organization` query param removed. Callers
+    # filter by `organization_id` (UUID) exclusively.
     organization_id: UUID | None = Query(None),
     lifecycle_state: str | None = Query(None),
     principal: Principal = Depends(require_capability("inventory:sites:read")),
@@ -143,8 +144,6 @@ async def list_sites(
         stmt = stmt.where(Site.majcom == majcom)
     if enclave is not None:
         stmt = stmt.where(Site.enclave == enclave)
-    if organization is not None:
-        stmt = stmt.where(Site.organization == organization)
     if organization_id is not None:
         stmt = stmt.where(Site.organization_id == organization_id)
     if lifecycle_state is not None:

@@ -134,7 +134,7 @@ func TestListSites_FiltersThreaded(t *testing.T) {
 		},
 	}
 	url := "/sites?region_id=" + regionID.String() +
-		"&majcom=AFMC&enclave=siprnet&organization=192d&lifecycle_state=active" +
+		"&majcom=AFMC&enclave=siprnet&lifecycle_state=active" +
 		"&limit=25&offset=100"
 	rec := do(t, mount(f), "GET", url)
 	if rec.Code != 200 {

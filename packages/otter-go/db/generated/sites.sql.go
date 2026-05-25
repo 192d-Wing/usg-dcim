@@ -11,17 +11,16 @@ import (
 
 const listSites = `-- name: ListSites :many
 SELECT id, region_id, name, code, address, latitude, longitude,
-       timezone, majcom, organization, organization_id, mission_owner,
+       timezone, majcom, organization_id, mission_owner,
        enclave, classification, lifecycle_state, metadata_json,
        created_at, updated_at
 FROM sites
 WHERE ($3::uuid       IS NULL OR region_id       = $3)
   AND ($4::text       IS NULL OR majcom          = $4)
   AND ($5::text       IS NULL OR enclave         = $5)
-  AND ($6::text       IS NULL OR organization    = $6)
-  AND ($7::uuid       IS NULL OR organization_id = $7)
-  AND ($8::text       IS NULL OR lifecycle_state::text = $8)
-  AND ($9::uuid[]     IS NULL OR id              = ANY($9::uuid[]))
+  AND ($6::uuid       IS NULL OR organization_id = $6)
+  AND ($7::text       IS NULL OR lifecycle_state::text = $7)
+  AND ($8::uuid[]     IS NULL OR id              = ANY($8::uuid[]))
 ORDER BY code
 LIMIT $1 OFFSET $2
 `
@@ -32,7 +31,6 @@ type ListSitesParams struct {
 	RegionID       *uuid.UUID  `json:"region_id"`
 	Majcom         *string     `json:"majcom"`
 	Enclave        *string     `json:"enclave"`
-	Organization   *string     `json:"organization"`
 	OrganizationID *uuid.UUID  `json:"organization_id"`
 	LifecycleState *string     `json:"lifecycle_state"`
 	SiteIds        []uuid.UUID `json:"site_ids"`
@@ -42,7 +40,7 @@ func (q *Queries) ListSites(ctx context.Context, arg ListSitesParams) ([]Site, e
 	rows, err := q.db.Query(ctx, listSites,
 		arg.Limit, arg.Offset,
 		arg.RegionID, arg.Majcom, arg.Enclave,
-		arg.Organization, arg.OrganizationID, arg.LifecycleState, arg.SiteIds,
+		arg.OrganizationID, arg.LifecycleState, arg.SiteIds,
 	)
 	if err != nil {
 		return nil, err
@@ -54,7 +52,7 @@ func (q *Queries) ListSites(ctx context.Context, arg ListSitesParams) ([]Site, e
 		if err := rows.Scan(
 			&s.ID, &s.RegionID, &s.Name, &s.Code, &s.Address,
 			&s.Latitude, &s.Longitude, &s.Timezone, &s.Majcom,
-			&s.Organization, &s.OrganizationID, &s.MissionOwner, &s.Enclave,
+			&s.OrganizationID, &s.MissionOwner, &s.Enclave,
 			&s.Classification, &s.LifecycleState, &s.MetadataJson,
 			&s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
@@ -71,17 +69,15 @@ FROM sites
 WHERE ($1::uuid       IS NULL OR region_id       = $1)
   AND ($2::text       IS NULL OR majcom          = $2)
   AND ($3::text       IS NULL OR enclave         = $3)
-  AND ($4::text       IS NULL OR organization    = $4)
-  AND ($5::uuid       IS NULL OR organization_id = $5)
-  AND ($6::text       IS NULL OR lifecycle_state::text = $6)
-  AND ($7::uuid[]     IS NULL OR id              = ANY($7::uuid[]))
+  AND ($4::uuid       IS NULL OR organization_id = $4)
+  AND ($5::text       IS NULL OR lifecycle_state::text = $5)
+  AND ($6::uuid[]     IS NULL OR id              = ANY($6::uuid[]))
 `
 
 type CountSitesParams struct {
 	RegionID       *uuid.UUID  `json:"region_id"`
 	Majcom         *string     `json:"majcom"`
 	Enclave        *string     `json:"enclave"`
-	Organization   *string     `json:"organization"`
 	OrganizationID *uuid.UUID  `json:"organization_id"`
 	LifecycleState *string     `json:"lifecycle_state"`
 	SiteIds        []uuid.UUID `json:"site_ids"`
@@ -90,7 +86,7 @@ type CountSitesParams struct {
 func (q *Queries) CountSites(ctx context.Context, arg CountSitesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countSites,
 		arg.RegionID, arg.Majcom, arg.Enclave,
-		arg.Organization, arg.OrganizationID, arg.LifecycleState, arg.SiteIds,
+		arg.OrganizationID, arg.LifecycleState, arg.SiteIds,
 	)
 	var n int64
 	err := row.Scan(&n)
@@ -99,7 +95,7 @@ func (q *Queries) CountSites(ctx context.Context, arg CountSitesParams) (int64, 
 
 const getSite = `-- name: GetSite :one
 SELECT id, region_id, name, code, address, latitude, longitude,
-       timezone, majcom, organization, organization_id, mission_owner,
+       timezone, majcom, organization_id, mission_owner,
        enclave, classification, lifecycle_state, metadata_json,
        created_at, updated_at
 FROM sites
@@ -112,7 +108,7 @@ func (q *Queries) GetSite(ctx context.Context, id uuid.UUID) (Site, error) {
 	err := row.Scan(
 		&s.ID, &s.RegionID, &s.Name, &s.Code, &s.Address,
 		&s.Latitude, &s.Longitude, &s.Timezone, &s.Majcom,
-		&s.Organization, &s.OrganizationID, &s.MissionOwner, &s.Enclave,
+		&s.OrganizationID, &s.MissionOwner, &s.Enclave,
 		&s.Classification, &s.LifecycleState, &s.MetadataJson,
 		&s.CreatedAt, &s.UpdatedAt,
 	)

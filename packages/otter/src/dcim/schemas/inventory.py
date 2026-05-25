@@ -47,7 +47,9 @@ class SiteBase(BaseModel):
     longitude: float | None = None
     timezone: str | None = None
     majcom: str | None = None
-    organization: str | None = None
+    # PR 92 — legacy `organization` string field removed; clients
+    # now use organization_id exclusively. Backfill any pre-PR-92
+    # callers via `organizations.name` lookup before upgrade.
     organization_id: UUID | None = None
     mission_owner: str | None = None
     enclave: str | None = None
@@ -64,7 +66,6 @@ class SiteUpdate(BaseModel):
     name: str | None = None
     address: str | None = None
     majcom: str | None = None
-    organization: str | None = None
     organization_id: UUID | None = None
     mission_owner: str | None = None
     enclave: str | None = None
