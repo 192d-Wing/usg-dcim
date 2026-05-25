@@ -261,3 +261,26 @@ func scanIPAddress(s scanRow, a *IPAddress) error {
 		&a.Role, &a.Status, &a.Source, &a.DnsName, &a.Description,
 		&a.DhcpLeaseExpiresAt, &a.DhcpMac, &a.CreatedAt, &a.UpdatedAt)
 }
+
+const listAddressStringsInSubnet = `-- name: ListAddressStringsInSubnet :many
+SELECT host(address) AS address
+FROM ip_addresses
+WHERE subnet_id = $1
+`
+
+func (q *Queries) ListAddressStringsInSubnet(ctx context.Context, subnetID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listAddressStringsInSubnet, subnetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

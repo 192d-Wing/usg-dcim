@@ -61,6 +61,58 @@ func networkCapacity(prefix string) (int64, error) {
 	return n, nil
 }
 
+// nextFreeAddress returns the first host address in `prefix` that
+// isn't in `used`, or nil if every host is taken (or the prefix is
+// unparseable). Mirrors services.ipam.next_free_address:
+//
+//   - /31 and /127 are point-to-point — every address is a host
+//   - /32 and /128 — the single address is the host
+//   - otherwise skip network + broadcast
+//
+// Iteration is bounded by `min(capacity, len(used)+1)` — by
+// pigeonhole, after len(used)+1 candidates one must be free. Keeps
+// wide v6 lookups fast in the common case where used is small.
+func nextFreeAddress(prefix string, used []string) *string {
+	p, err := netip.ParsePrefix(strings.TrimSpace(prefix))
+	if err != nil {
+		return nil
+	}
+	usedSet := make(map[netip.Addr]struct{}, len(used))
+	for _, u := range used {
+		if a, err := netip.ParseAddr(strings.TrimSpace(u)); err == nil {
+			usedSet[a] = struct{}{}
+		}
+	}
+	bits := p.Bits()
+	addr := p.Addr()
+	isPtPOrHost := (addr.Is4() && bits >= 31) || (!addr.Is4() && bits >= 127)
+	cap, err := networkCapacity(prefix)
+	if err != nil || cap <= 0 {
+		return nil
+	}
+	cand := addr
+	if !isPtPOrHost {
+		cand = cand.Next() // skip network address
+	}
+	// Bound iteration by pigeonhole — at most len(used)+1 probes
+	// in the worst case, capped by total capacity for tiny prefixes.
+	maxProbes := int64(len(used)) + 1
+	if maxProbes > cap {
+		maxProbes = cap
+	}
+	for i := int64(0); i < maxProbes; i++ {
+		if _, taken := usedSet[cand]; !taken {
+			s := cand.String()
+			return &s
+		}
+		cand = cand.Next()
+		if !cand.IsValid() {
+			break
+		}
+	}
+	return nil
+}
+
 // supernetUtilization is the response shape for
 // GET /ipam/supernets/{id}/utilization. Mirrors the Python handler's
 // JSON keys (and float-with-2-decimal percent semantics) so the
@@ -73,6 +125,67 @@ type supernetUtilization struct {
 	Free                     int64   `json:"free"`
 	Percent                  float64 `json:"percent"`
 	SubnetCount              int     `json:"subnet_count"`
+}
+
+// subnetUtilization mirrors SubnetUtilization in packages/otter
+// (schemas/ipam.py). NextAvailable is a pointer so the wire shape
+// distinguishes "no free address" (null) from "" (which Python
+// would never emit).
+type subnetUtilization struct {
+	SubnetID      string  `json:"subnet_id"`
+	Prefix        string  `json:"prefix"`
+	Capacity      int64   `json:"capacity"`
+	Allocated     int     `json:"allocated"`
+	Free          int64   `json:"free"`
+	Percent       float64 `json:"percent"`
+	NextAvailable *string `json:"next_available"`
+}
+
+func (h *Handler) getSubnetUtilization(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		return
+	}
+	sn, err := h.Q.GetSubnet(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "subnet not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	used, err := h.Q.ListAddressStringsInSubnet(r.Context(), id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	capacity, err := networkCapacity(sn.Prefix)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "subnet prefix unparseable")
+		return
+	}
+	allocated := len(used)
+	free := capacity - int64(allocated)
+	if free < 0 {
+		free = 0
+	}
+	pct := 0.0
+	if capacity > 0 {
+		pct = math.Round(10000.0*float64(allocated)/float64(capacity)) / 100.0
+	}
+	httpx.JSON(w, http.StatusOK, subnetUtilization{
+		SubnetID:      id.String(),
+		Prefix:        sn.Prefix,
+		Capacity:      capacity,
+		Allocated:     allocated,
+		Free:          free,
+		Percent:       pct,
+		NextAvailable: nextFreeAddress(sn.Prefix, used),
+	})
 }
 
 func (h *Handler) getSupernetUtilization(w http.ResponseWriter, r *http.Request) {

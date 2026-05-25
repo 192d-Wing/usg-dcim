@@ -55,6 +55,9 @@ func (f *fakeQ) CountIPAddresses(_ context.Context, _ dbq.CountIPAddressesParams
 func (f *fakeQ) GetIPAddress(_ context.Context, _ uuid.UUID) (dbq.IPAddress, error) {
 	return dbq.IPAddress{}, pgx.ErrNoRows
 }
+func (f *fakeQ) ListAddressStringsInSubnet(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
 
 func (f *fakeQ) ListFabrics(_ context.Context, a dbq.ListFabricsParams) ([]dbq.Fabric, error) {
 	f.lastFabric = a

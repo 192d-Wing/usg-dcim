@@ -90,3 +90,12 @@ SELECT id, subnet_id, asset_id, host(address) AS address,
        created_at, updated_at
 FROM ip_addresses
 WHERE id = $1;
+
+-- name: ListAddressStringsInSubnet :many
+-- PR 64 — subnet utilization reads only the address column. Projecting
+-- the single column keeps the read fast on busy subnets and matches
+-- the Python services.ipam.used_addresses_in_subnet shape: one row
+-- per allocated address, stripped of the /N mask.
+SELECT host(address) AS address
+FROM ip_addresses
+WHERE subnet_id = $1;
