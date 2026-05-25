@@ -6,6 +6,7 @@ package dbq
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -768,6 +769,89 @@ const deleteDnsHealthCheck = `DELETE FROM dns_health_checks WHERE id = $1`
 func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteDnsHealthCheck, id)
 	return err
+}
+
+// ---- DnsServerMetricsSample (PR 78) ----
+
+// DnsMetricsSampleRow is the wire shape for one metrics sample.
+type DnsMetricsSampleRow struct {
+	ID              uuid.UUID       `json:"id"`
+	ServerID        uuid.UUID       `json:"server_id"`
+	ObservedAt      time.Time       `json:"observed_at"`
+	IntervalSeconds int32           `json:"interval_seconds"`
+	Queries         int64           `json:"queries"`
+	Nxdomain        int64           `json:"nxdomain"`
+	Servfail        int64           `json:"servfail"`
+	Noerror         int64           `json:"noerror"`
+	P50Ms           *float64        `json:"p50_ms"`
+	P95Ms           *float64        `json:"p95_ms"`
+	TopNames        json.RawMessage `json:"top_names"`
+}
+
+const createDnsServerMetricsSample = `INSERT INTO dns_server_metrics_samples (
+    id, server_id, observed_at, interval_seconds,
+    queries, nxdomain, servfail, noerror,
+    p50_ms, p95_ms, top_names, created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, COALESCE($2::timestamptz, NOW()), $3,
+    $4, $5, $6, $7, $8, $9, $10::jsonb, NOW(), NOW()
+)
+RETURNING id, server_id, observed_at, interval_seconds,
+          queries, nxdomain, servfail, noerror,
+          p50_ms, p95_ms, top_names`
+
+type CreateDnsServerMetricsSampleParams struct {
+	ServerID        uuid.UUID       `json:"server_id"`
+	ObservedAt      *time.Time      `json:"observed_at"`
+	IntervalSeconds int32           `json:"interval_seconds"`
+	Queries         int64           `json:"queries"`
+	Nxdomain        int64           `json:"nxdomain"`
+	Servfail        int64           `json:"servfail"`
+	Noerror         int64           `json:"noerror"`
+	P50Ms           *float64        `json:"p50_ms"`
+	P95Ms           *float64        `json:"p95_ms"`
+	TopNames        json.RawMessage `json:"top_names"`
+}
+
+func scanDnsMetricsSample(row interface{ Scan(...any) error }, s *DnsMetricsSampleRow) error {
+	return row.Scan(&s.ID, &s.ServerID, &s.ObservedAt, &s.IntervalSeconds,
+		&s.Queries, &s.Nxdomain, &s.Servfail, &s.Noerror,
+		&s.P50Ms, &s.P95Ms, &s.TopNames)
+}
+
+func (q *Queries) CreateDnsServerMetricsSample(ctx context.Context, arg CreateDnsServerMetricsSampleParams) (DnsMetricsSampleRow, error) {
+	row := q.db.QueryRow(ctx, createDnsServerMetricsSample,
+		arg.ServerID, arg.ObservedAt, arg.IntervalSeconds,
+		arg.Queries, arg.Nxdomain, arg.Servfail, arg.Noerror,
+		arg.P50Ms, arg.P95Ms, arg.TopNames)
+	var s DnsMetricsSampleRow
+	err := scanDnsMetricsSample(row, &s)
+	return s, err
+}
+
+const listDnsServerMetricsSamples = `SELECT id, server_id, observed_at, interval_seconds,
+       queries, nxdomain, servfail, noerror,
+       p50_ms, p95_ms, top_names
+FROM dns_server_metrics_samples
+WHERE server_id = $1 AND observed_at >= $2
+ORDER BY observed_at ASC`
+
+func (q *Queries) ListDnsServerMetricsSamples(ctx context.Context, serverID uuid.UUID, cutoff time.Time) ([]DnsMetricsSampleRow, error) {
+	rows, err := q.db.Query(ctx, listDnsServerMetricsSamples, serverID, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsMetricsSampleRow{}
+	for rows.Next() {
+		var s DnsMetricsSampleRow
+		if err := scanDnsMetricsSample(rows, &s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }
 
 const setDnsServerRenderStatus = `-- name: SetDnsServerRenderStatus :exec

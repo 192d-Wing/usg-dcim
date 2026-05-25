@@ -283,6 +283,38 @@ SET last_render_at = NOW(),
     coredns_version = COALESCE($5, coredns_version)
 WHERE id = $1;
 
+-- ===== DnsServerMetricsSample (PR 78) =====
+-- Per-interval delta sample posted by the dns-collector on every
+-- scrape. Stored as raw rows; aggregation happens in the dashboard
+-- handler with PostgreSQL window functions (not in this migration).
+
+-- name: CreateDnsServerMetricsSample :one
+INSERT INTO dns_server_metrics_samples (
+    id, server_id, observed_at, interval_seconds,
+    queries, nxdomain, servfail, noerror,
+    p50_ms, p95_ms, top_names, created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, COALESCE($2::timestamptz, NOW()), $3,
+    $4, $5, $6, $7, $8, $9, $10::jsonb, NOW(), NOW()
+)
+RETURNING id, server_id, observed_at, interval_seconds,
+          queries, nxdomain, servfail, noerror,
+          p50_ms, p95_ms, top_names;
+
+-- name: ListDnsServerMetricsSamples :many
+-- Recent samples for one server, oldest-first so the UI can chart
+-- them directly. Caller passes the cutoff so the time-arithmetic
+-- happens in Go (cleaner test surface than building intervals
+-- with `INTERVAL '$2 minutes'`).
+SELECT id, server_id, observed_at, interval_seconds,
+       queries, nxdomain, servfail, noerror,
+       p50_ms, p95_ms, top_names
+FROM dns_server_metrics_samples
+WHERE server_id = $1
+  AND observed_at >= $2
+ORDER BY observed_at ASC;
+
 -- name: SetDnsHealthCheckResult :exec
 -- PR 72 — collector callback after running one probe. Status,
 -- last_checked_at, last_error are the only mutable fields. Audit

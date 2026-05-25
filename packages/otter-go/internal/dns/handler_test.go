@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -149,6 +150,18 @@ func (f *fakeQ) SetDnsHealthCheckResult(_ context.Context, _ uuid.UUID, _ string
 }
 func (f *fakeQ) SetDnsServerRenderStatus(_ context.Context, _ dbq.SetDnsServerRenderStatusParams) (int64, error) {
 	return 1, nil
+}
+func (f *fakeQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsMetricsSampleRow, error) {
+	return dbq.DnsMetricsSampleRow{
+		ID: uuid.New(), ServerID: a.ServerID,
+		IntervalSeconds: a.IntervalSeconds,
+		Queries:         a.Queries, Nxdomain: a.Nxdomain,
+		Servfail: a.Servfail, Noerror: a.Noerror,
+		P50Ms: a.P50Ms, P95Ms: a.P95Ms, TopNames: a.TopNames,
+	}, nil
+}
+func (f *fakeQ) ListDnsServerMetricsSamples(_ context.Context, _ uuid.UUID, _ time.Time) ([]dbq.DnsMetricsSampleRow, error) {
+	return nil, nil
 }
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil

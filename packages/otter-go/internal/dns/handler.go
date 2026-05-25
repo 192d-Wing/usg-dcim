@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -64,6 +65,8 @@ type Querier interface {
 	ListAllRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsRecordForRender, error)
 	SetDnsHealthCheckResult(ctx context.Context, id uuid.UUID, status string, lastError *string) (int64, error)
 	SetDnsServerRenderStatus(ctx context.Context, arg dbq.SetDnsServerRenderStatusParams) (int64, error)
+	CreateDnsServerMetricsSample(ctx context.Context, arg dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsMetricsSampleRow, error)
+	ListDnsServerMetricsSamples(ctx context.Context, serverID uuid.UUID, cutoff time.Time) ([]dbq.DnsMetricsSampleRow, error)
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
@@ -186,6 +189,8 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:servers:update")).Patch("/servers/{id}", h.updateServer)
 		r.With(auth.RequireCapability("dns:servers:delete")).Delete("/servers/{id}", h.deleteServer)
 		r.With(auth.RequireCapability("dns:servers:update")).Post("/servers/{id}/render-status", h.postServerRenderStatus)
+		r.With(auth.RequireCapability("dns:servers:update")).Post("/servers/{id}/metrics", h.postServerMetrics)
+		r.With(auth.RequireCapability("dns:servers:read")).Get("/servers/{id}/metrics", h.listServerMetrics)
 
 		r.With(auth.RequireCapability("dns:anycast-groups:create")).Post("/anycast-groups", h.createAnycastGroup)
 		r.With(auth.RequireCapability("dns:anycast-groups:update")).Patch("/anycast-groups/{id}", h.updateAnycastGroup)
