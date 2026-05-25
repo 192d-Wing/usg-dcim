@@ -115,7 +115,21 @@ func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(q.Get("limit"), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListRoomsParams{Limit: limit, Offset: offset}
+	// PR 96 — 2-hop ABAC: room → building → site. ScopedSiteFilter
+	// expands the principal's site dims into a concrete site_id set;
+	// the SQL JOIN against buildings filters rooms by parent site.
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:rooms:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, roomsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListRoomsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
 	if v := q.Get("building_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -130,7 +144,9 @@ func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountRooms(r.Context(), dbq.CountRoomsParams{BuildingID: params.BuildingID})
+	total, err := h.Q.CountRooms(r.Context(), dbq.CountRoomsParams{
+		BuildingID: params.BuildingID, SiteIds: scopeSiteIds,
+	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -143,7 +159,19 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(q.Get("limit"), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
-	params := dbq.ListRowsParams{Limit: limit, Offset: offset}
+	// PR 96 — 3-hop ABAC: row → room → building → site.
+	p, _ := auth.From(r.Context())
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:rows:read")
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(scopeSiteIds) == 0 {
+		httpx.JSON(w, http.StatusOK, rowsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
+	params := dbq.ListRowsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
 	if v := q.Get("room_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -158,7 +186,9 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountRows(r.Context(), dbq.CountRowsParams{RoomID: params.RoomID})
+	total, err := h.Q.CountRows(r.Context(), dbq.CountRowsParams{
+		RoomID: params.RoomID, SiteIds: scopeSiteIds,
+	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

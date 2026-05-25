@@ -66,21 +66,30 @@ func (q *Queries) CountBuildings(ctx context.Context, arg CountBuildingsParams) 
 // ---- Rooms ----
 
 const listRooms = `-- name: ListRooms :many
-SELECT id, building_id, name, code, floor_area_sqft, created_at, updated_at
-FROM rooms
-WHERE ($3::uuid IS NULL OR building_id = $3)
-ORDER BY code
+SELECT r.id, r.building_id, r.name, r.code, r.floor_area_sqft,
+       r.created_at, r.updated_at
+FROM rooms r
+JOIN buildings b ON b.id = r.building_id
+WHERE ($3::uuid IS NULL OR r.building_id = $3)
+  AND ($4::uuid[] IS NULL OR b.site_id = ANY($4::uuid[]))
+ORDER BY r.code
 LIMIT $1 OFFSET $2
 `
 
+// ListRoomsParams: PR 96 adds SiteIds for the 2-hop ABAC expansion
+// (room → building → site → scope). Nil = no filter (global
+// principal); empty slice = scope can't reach any site (caller
+// short-circuits to empty page).
 type ListRoomsParams struct {
-	Limit      int32      `json:"limit"`
-	Offset     int32      `json:"offset"`
-	BuildingID *uuid.UUID `json:"building_id"`
+	Limit      int32       `json:"limit"`
+	Offset     int32       `json:"offset"`
+	BuildingID *uuid.UUID  `json:"building_id"`
+	SiteIds    []uuid.UUID `json:"site_ids"`
 }
 
 func (q *Queries) ListRooms(ctx context.Context, arg ListRoomsParams) ([]Room, error) {
-	rows, err := q.db.Query(ctx, listRooms, arg.Limit, arg.Offset, arg.BuildingID)
+	rows, err := q.db.Query(ctx, listRooms,
+		arg.Limit, arg.Offset, arg.BuildingID, arg.SiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -98,16 +107,19 @@ func (q *Queries) ListRooms(ctx context.Context, arg ListRoomsParams) ([]Room, e
 
 const countRooms = `-- name: CountRooms :one
 SELECT count(*)::bigint
-FROM rooms
-WHERE ($1::uuid IS NULL OR building_id = $1)
+FROM rooms r
+JOIN buildings b ON b.id = r.building_id
+WHERE ($1::uuid IS NULL OR r.building_id = $1)
+  AND ($2::uuid[] IS NULL OR b.site_id = ANY($2::uuid[]))
 `
 
 type CountRoomsParams struct {
-	BuildingID *uuid.UUID `json:"building_id"`
+	BuildingID *uuid.UUID  `json:"building_id"`
+	SiteIds    []uuid.UUID `json:"site_ids"`
 }
 
 func (q *Queries) CountRooms(ctx context.Context, arg CountRoomsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRooms, arg.BuildingID)
+	row := q.db.QueryRow(ctx, countRooms, arg.BuildingID, arg.SiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
@@ -116,21 +128,26 @@ func (q *Queries) CountRooms(ctx context.Context, arg CountRoomsParams) (int64, 
 // ---- Rows ----
 
 const listRows = `-- name: ListRows :many
-SELECT id, room_id, name, code, created_at, updated_at
-FROM rows
-WHERE ($3::uuid IS NULL OR room_id = $3)
-ORDER BY code
+SELECT r.id, r.room_id, r.name, r.code, r.created_at, r.updated_at
+FROM rows r
+JOIN rooms rm ON rm.id = r.room_id
+JOIN buildings b ON b.id = rm.building_id
+WHERE ($3::uuid IS NULL OR r.room_id = $3)
+  AND ($4::uuid[] IS NULL OR b.site_id = ANY($4::uuid[]))
+ORDER BY r.code
 LIMIT $1 OFFSET $2
 `
 
 type ListRowsParams struct {
-	Limit  int32      `json:"limit"`
-	Offset int32      `json:"offset"`
-	RoomID *uuid.UUID `json:"room_id"`
+	Limit  int32       `json:"limit"`
+	Offset int32       `json:"offset"`
+	RoomID *uuid.UUID  `json:"room_id"`
+	SiteIds []uuid.UUID `json:"site_ids"`
 }
 
 func (q *Queries) ListRows(ctx context.Context, arg ListRowsParams) ([]Row, error) {
-	rows, err := q.db.Query(ctx, listRows, arg.Limit, arg.Offset, arg.RoomID)
+	rows, err := q.db.Query(ctx, listRows,
+		arg.Limit, arg.Offset, arg.RoomID, arg.SiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -148,16 +165,20 @@ func (q *Queries) ListRows(ctx context.Context, arg ListRowsParams) ([]Row, erro
 
 const countRows = `-- name: CountRows :one
 SELECT count(*)::bigint
-FROM rows
-WHERE ($1::uuid IS NULL OR room_id = $1)
+FROM rows r
+JOIN rooms rm ON rm.id = r.room_id
+JOIN buildings b ON b.id = rm.building_id
+WHERE ($1::uuid IS NULL OR r.room_id = $1)
+  AND ($2::uuid[] IS NULL OR b.site_id = ANY($2::uuid[]))
 `
 
 type CountRowsParams struct {
-	RoomID *uuid.UUID `json:"room_id"`
+	RoomID *uuid.UUID  `json:"room_id"`
+	SiteIds []uuid.UUID `json:"site_ids"`
 }
 
 func (q *Queries) CountRows(ctx context.Context, arg CountRowsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRows, arg.RoomID)
+	row := q.db.QueryRow(ctx, countRows, arg.RoomID, arg.SiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

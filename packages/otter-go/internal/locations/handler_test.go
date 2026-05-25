@@ -121,3 +121,43 @@ func TestListBuildings_DefaultLimit(t *testing.T) {
 		t.Errorf("default page params wrong: %+v", f.lastB)
 	}
 }
+
+// ----- PR 96: rooms / rows pick up the ABAC SiteIds expansion -----
+
+func TestListRooms_PassesSiteIdsForGlobalPrincipal(t *testing.T) {
+	// Global principal (no scopes) → ScopedSiteFilter returns nil,
+	// scoped=false. The handler passes SiteIds=nil to the LIST,
+	// which the SQL treats as "no filter."
+	f := &fakeQ{}
+	do(t, mount(f), "/rooms")
+	if f.lastR.SiteIds != nil {
+		t.Errorf("global principal should see nil SiteIds, got %v", f.lastR.SiteIds)
+	}
+}
+
+func TestListRows_PassesSiteIdsForGlobalPrincipal(t *testing.T) {
+	f := &fakeQ{}
+	do(t, mount(f), "/rows")
+	if f.lastRow.SiteIds != nil {
+		t.Errorf("global principal should see nil SiteIds, got %v", f.lastRow.SiteIds)
+	}
+}
+
+func TestListRoomsParams_HasSiteIds(t *testing.T) {
+	// Wiring contract — the generated param struct must carry the
+	// SiteIds slice the handler threads through. If sqlc regen
+	// drops it, this catches the drift.
+	var p dbq.ListRoomsParams
+	p.SiteIds = []uuid.UUID{uuid.New()}
+	if len(p.SiteIds) != 1 {
+		t.Error("ListRoomsParams.SiteIds not present")
+	}
+}
+
+func TestListRowsParams_HasSiteIds(t *testing.T) {
+	var p dbq.ListRowsParams
+	p.SiteIds = []uuid.UUID{uuid.New()}
+	if len(p.SiteIds) != 1 {
+		t.Error("ListRowsParams.SiteIds not present")
+	}
+}
