@@ -1771,6 +1771,7 @@ async def create_dhcp_server(
 async def update_dhcp_server(
     server_id: UUID,
     payload: DhcpServerUpdate,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_capability("ipam:dhcp-servers:update")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1785,12 +1786,28 @@ async def update_dhcp_server(
     redacted = {k: ("***" if k == "auth_password" else v) for k, v in diff.items()}
     for k, v in diff.items():
         setattr(obj, k, v)
+    # PR 103 — base_config feeds directly into the cached bundle, so
+    # an edit must invalidate the cache; otherwise the dhcp-site
+    # puller serves stale JSON on its next poll. Clear the cache
+    # columns inline (cheap, atomic with the same commit) and enqueue
+    # a re-render so the next bundle GET hits warm cache. Other field
+    # edits (name, kea_url, auth_*, enabled, auto_push) don't change
+    # the rendered Kea config so they don't need invalidation.
+    base_config_changed = "base_config" in diff
+    if base_config_changed:
+        obj.bundle_cache_at = None
+        obj.bundle_cache_etag = None
+        obj.bundle_cache_json = None
     await audit.record(
         db, principal, action="dhcp_server.update", target_type="dhcp_server",
         target_id=str(server_id), diff=redacted,
     )
     await db.commit()
     await db.refresh(obj)
+    if base_config_changed:
+        background_tasks.add_task(
+            dhcp_push.enqueue_bundle_rerender, obj.id,
+        )
     return obj
 
 
