@@ -138,6 +138,78 @@ async def rerender_dhcp_bundle(_ctx, server_id: str) -> dict:
     }
 
 
+async def ipam_utilization_sweep(_ctx) -> dict:
+    """PR 99 — populate IPAM utilization gauges across every Subnet
+    and Supernet. Three SELECTs:
+      1. all Subnets (id, fabric_id, prefix, supernet_id)
+      2. per-subnet IPAddress count where status in (active, reserved)
+      3. all Supernets (id, fabric_id, prefix)
+    Then a single in-memory fold via services/ipam_metrics helpers.
+    """
+    from sqlalchemy import func
+
+    from . import metrics
+    from .models.ipam import IPAddress, IpAddressStatus, Subnet, Supernet
+    from .services import ipam_metrics as ipam_metrics_svc
+
+    started = datetime.now(UTC)
+    subnets_emitted = 0
+    supernets_emitted = 0
+    async with async_session() as db:
+        subnets = (await db.execute(select(Subnet))).scalars().all()
+        count_rows = (
+            await db.execute(
+                select(IPAddress.subnet_id, func.count(IPAddress.id))
+                .where(IPAddress.status.in_([
+                    IpAddressStatus.active, IpAddressStatus.reserved,
+                ]))
+                .group_by(IPAddress.subnet_id)
+            )
+        ).all()
+        used_by_subnet: dict = dict(count_rows)
+        carved_by_supernet: dict = {}
+        for s in subnets:
+            util = ipam_metrics_svc.compute_subnet_utilization(
+                subnet_id=str(s.id),
+                fabric_id=str(s.fabric_id),
+                prefix=str(s.prefix),
+                used_count=used_by_subnet.get(s.id, 0),
+            )
+            metrics.ipam_subnet_free_percent.labels(
+                fabric_id=util.fabric_id, subnet_id=util.subnet_id,
+            ).set(util.free_percent)
+            subnets_emitted += 1
+            # Roll up child capacities into per-supernet carved
+            # totals so the supernet pass doesn't re-walk addresses.
+            carved_by_supernet[s.supernet_id] = (
+                carved_by_supernet.get(s.supernet_id, 0) + util.capacity
+            )
+
+        supernets = (await db.execute(select(Supernet))).scalars().all()
+        for sn in supernets:
+            util = ipam_metrics_svc.compute_supernet_utilization(
+                supernet_id=str(sn.id),
+                fabric_id=str(sn.fabric_id),
+                prefix=str(sn.prefix),
+                carved_capacity=carved_by_supernet.get(sn.id, 0),
+            )
+            metrics.ipam_supernet_free_percent.labels(
+                fabric_id=util.fabric_id, supernet_id=util.supernet_id,
+            ).set(util.free_percent)
+            supernets_emitted += 1
+    elapsed = (datetime.now(UTC) - started).total_seconds()
+    log.info(
+        "ipam_utilization_sweep.done",
+        subnets=subnets_emitted, supernets=supernets_emitted,
+        elapsed_s=round(elapsed, 3),
+    )
+    return {
+        "subnets_emitted": subnets_emitted,
+        "supernets_emitted": supernets_emitted,
+        "elapsed_s": elapsed,
+    }
+
+
 async def dhcp_drift_check(_ctx) -> dict:
     """PR 81 — refresh persisted drift state across every enabled
     DhcpServer. Calls services.dhcp_push.diff_all_scopes once per
@@ -380,6 +452,7 @@ class WorkerSettings:
         evaluate_alerts, sweep_collectors, dns_health_checks,
         freshness_sweep,
         dhcp_sync, dhcp_age_out, dhcp_drift_check, rerender_dhcp_bundle,
+        ipam_utilization_sweep,
         dns_sync_from_ipam,
         dns_rotate_zsks, dns_purge_metrics,
         notify_bridge,
@@ -404,6 +477,12 @@ class WorkerSettings:
         # enabled DhcpServer; for tens of servers with tens of scopes
         # each, well under a minute.
         cron(dhcp_drift_check, minute={9, 24, 39, 54}),
+        # PR 99 — IPAM utilization gauges. Every 5 min at :13/:18/...
+        # offset from the drift check + dhcp_sync so the worker
+        # doesn't pile up on a single minute boundary. Three SELECTs
+        # against the indexed columns; well under a second on
+        # realistic fleets.
+        cron(ipam_utilization_sweep, minute=set(range(3, 60, 5))),
         # DNS IPAM-projection: 5 minutes offset from DHCP so a freshly-
         # ingested lease has time to land before its DNS record renders.
         cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))),

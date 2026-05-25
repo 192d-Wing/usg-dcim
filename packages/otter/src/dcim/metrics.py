@@ -155,6 +155,34 @@ dhcp_kea_call_seconds = Histogram(
     buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
 )
 
+# --- IPAM utilization gauges (PR 99) ---
+# Populated by worker.ipam_utilization_sweep on a periodic cadence;
+# point-in-time fraction of free address space.
+#
+# Subnet free%: 100 * (capacity - used) / capacity where capacity is
+# the prefix's host count (v4 deducts network + broadcast; v6 deducts
+# 2 by convention) and used counts active+reserved IPAddress rows.
+# Operators alert when free% < 20 (subnet near exhaustion).
+#
+# Supernet free%: 100 * (capacity - sum(child subnet capacities))
+# / capacity. Tracks carving headroom — how much of the aggregate
+# block hasn't been allocated to a subnet yet. Operators alert when
+# free% < 10 (supernet near carved-out).
+#
+# Cardinality: bounded by the row counts of subnets + supernets. A
+# fabric with 1000 subnets gets 1000 series, which is fine for any
+# realistic Prometheus deployment.
+ipam_subnet_free_percent = Gauge(
+    "dcim_ipam_subnet_free_percent",
+    "Per-subnet percentage of allocatable addresses still free.",
+    ["fabric_id", "subnet_id"],
+)
+ipam_supernet_free_percent = Gauge(
+    "dcim_ipam_supernet_free_percent",
+    "Per-supernet percentage of address space not yet carved into subnets.",
+    ["fabric_id", "supernet_id"],
+)
+
 
 _UNMATCHED_ROUTE = "<unmatched>"
 
