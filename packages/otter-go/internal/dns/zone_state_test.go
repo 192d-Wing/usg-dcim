@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,7 @@ type fakeZoneStateQ struct {
 	zone        dbq.DnsZone
 	zoneErr     error
 	fabricIDErr error
+	zoneRecords []dbq.DnsRecordForRender
 }
 
 func (f *fakeZoneStateQ) GetDnsZone(_ context.Context, _ uuid.UUID) (dbq.DnsZone, error) {
@@ -35,6 +37,10 @@ func (f *fakeZoneStateQ) GetDnsZone(_ context.Context, _ uuid.UUID) (dbq.DnsZone
 
 func (f *fakeZoneStateQ) GetDnsZoneFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return uuid.Nil, f.fabricIDErr
+}
+
+func (f *fakeZoneStateQ) ListAllRecordsInZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsRecordForRender, error) {
+	return f.zoneRecords, nil
 }
 
 func mountZS(f *fakeZoneStateQ) http.Handler {
@@ -261,5 +267,77 @@ func TestClearZoneNsec3_NotFoundIs404(t *testing.T) {
 	rec := authed(t, mountZS(f), "DELETE", "/dns/zones/"+id.String()+"/nsec3", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// ---- PR 71: preview ----
+
+func TestPreviewZone_ReturnsBindTextAndRecordCount(t *testing.T) {
+	id := uuid.New()
+	rec1, _ := json.Marshal(map[string]any{"target": "10.0.0.1"})
+	f := &fakeZoneStateQ{
+		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com", DefaultTTL: 60,
+			SoaMname: "ns1", SoaRname: "hostmaster", SoaRefresh: 900, SoaRetry: 900, SoaExpire: 1800, SoaMinimum: 60},
+		zoneRecords: []dbq.DnsRecordForRender{
+			{ID: uuid.New(), Name: "www", Type: "A", Data: rec1},
+		},
+	}
+	rec := authed(t, mountZS(f), "GET", "/dns/zones/"+id.String()+"/preview", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		ZoneID      string `json:"zone_id"`
+		Name        string `json:"name"`
+		Text        string `json:"text"`
+		RecordCount int    `json:"record_count"`
+	}
+	_ = json.NewDecoder(rec.Body).Decode(&resp)
+	if resp.ZoneID != id.String() {
+		t.Errorf("zone_id = %q", resp.ZoneID)
+	}
+	if resp.Name != "example.com" {
+		t.Errorf("name = %q", resp.Name)
+	}
+	if resp.RecordCount != 1 {
+		t.Errorf("record_count = %d, want 1", resp.RecordCount)
+	}
+	if !strings.Contains(resp.Text, "$ORIGIN example.com.") {
+		t.Errorf("text missing $ORIGIN: %q", resp.Text)
+	}
+	if !strings.Contains(resp.Text, "www\t60\tIN\tA\t10.0.0.1") {
+		t.Errorf("text missing record line: %q", resp.Text)
+	}
+}
+
+func TestPreviewZone_NotFoundIs404(t *testing.T) {
+	f := &fakeZoneStateQ{zoneErr: pgx.ErrNoRows}
+	rec := authed(t, mountZS(f), "GET", "/dns/zones/"+uuid.New().String()+"/preview", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestPreviewZone_BadRecordIs422(t *testing.T) {
+	// A record with an unknown type slipped into the DB — the
+	// renderer surfaces it instead of silently dropping. Helps
+	// operators catch a bad migration or hand-INSERT.
+	id := uuid.New()
+	f := &fakeZoneStateQ{
+		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com", DefaultTTL: 60},
+		zoneRecords: []dbq.DnsRecordForRender{
+			{ID: uuid.New(), Name: "x", Type: "DNSKEY", Data: json.RawMessage(`{}`)},
+		},
+	}
+	rec := authed(t, mountZS(f), "GET", "/dns/zones/"+id.String()+"/preview", nil)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", rec.Code)
+	}
+}
+
+func TestPreviewZone_BadUUIDIs400(t *testing.T) {
+	rec := authed(t, mountZS(&fakeZoneStateQ{}), "GET", "/dns/zones/not-a-uuid/preview", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }

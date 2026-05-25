@@ -48,6 +48,15 @@ RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
           default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
           nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
 
+-- name: ListAllRecordsInZone :many
+-- PR 71 — preview reads every record in the zone (unpaginated)
+-- and sorts by (name, type) for diffable output. Returns just the
+-- columns the renderer needs.
+SELECT id, name, type::text AS type, ttl, data
+FROM dns_records
+WHERE zone_id = $1
+ORDER BY name, type;
+
 -- name: SetDnsZoneNsec3 :one
 -- PR 70 — set NSEC3 params on a signed zone. Salt is hex string
 -- (validated by handler) or NULL to mean "renderer picks a fresh

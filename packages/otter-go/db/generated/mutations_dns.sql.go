@@ -5,6 +5,7 @@ package dbq
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 )
@@ -106,6 +107,38 @@ const deleteDnsZone = `DELETE FROM dns_zones WHERE id = $1`
 func (q *Queries) DeleteDnsZone(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteDnsZone, id)
 	return err
+}
+
+const listAllRecordsInZone = `-- name: ListAllRecordsInZone :many
+SELECT id, name, type::text AS type, ttl, data
+FROM dns_records
+WHERE zone_id = $1
+ORDER BY name, type
+`
+
+type DnsRecordForRender struct {
+	ID   uuid.UUID       `json:"id"`
+	Name string          `json:"name"`
+	Type string          `json:"type"`
+	TTL  *int32          `json:"ttl"`
+	Data json.RawMessage `json:"data"`
+}
+
+func (q *Queries) ListAllRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]DnsRecordForRender, error) {
+	rows, err := q.db.Query(ctx, listAllRecordsInZone, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsRecordForRender{}
+	for rows.Next() {
+		var r DnsRecordForRender
+		if err := rows.Scan(&r.ID, &r.Name, &r.Type, &r.TTL, &r.Data); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 const setDnsZoneFrozen = `-- name: SetDnsZoneFrozen :one

@@ -138,6 +138,52 @@ func (h *Handler) setZoneNsec3(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
+// previewZone renders the zone + every record into BIND text.
+// Reads are the same shape as the Python handler: zone fetch +
+// unpaginated record list, run through the pure renderer.
+//
+// PR 71. Tested in renderer_test.go (pure rendering) +
+// zone_state_test.go (handler glue).
+func (h *Handler) previewZone(w http.ResponseWriter, r *http.Request) {
+	id, ok := idFromURL(w, r, "id")
+	if !ok {
+		return
+	}
+	zone, err := h.Q.GetDnsZone(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "zone not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if !h.enforceFabric(w, r, zone.FabricID, "dns:zones:read") {
+		return
+	}
+	records, err := h.Q.ListAllRecordsInZone(r.Context(), id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	text, err := renderZoneFile(zone, records)
+	if err != nil {
+		// Malformed record data — surface to the operator rather
+		// than silently dropping the row. The single-record GET
+		// will show which record has bad data.
+		httpx.Error(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"zone_id":      id.String(),
+		"name":         zone.Name,
+		"text":         text,
+		"record_count": len(records),
+	})
+}
+
 func (h *Handler) clearZoneNsec3(w http.ResponseWriter, r *http.Request) {
 	id, ok := idFromURL(w, r, "id")
 	if !ok {

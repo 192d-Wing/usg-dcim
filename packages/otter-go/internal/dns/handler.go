@@ -61,6 +61,7 @@ type Querier interface {
 	DeleteDnsZone(ctx context.Context, id uuid.UUID) error
 	SetDnsZoneFrozen(ctx context.Context, id uuid.UUID, frozen bool) (dbq.DnsZone, error)
 	SetDnsZoneNsec3(ctx context.Context, arg dbq.SetDnsZoneNsec3Params) (dbq.DnsZone, error)
+	ListAllRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsRecordForRender, error)
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
@@ -173,6 +174,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:zones:update")).Post("/zones/{id}/unfreeze", h.unfreezeZone)
 		r.With(auth.RequireCapability("dns:zones:update")).Post("/zones/{id}/nsec3", h.setZoneNsec3)
 		r.With(auth.RequireCapability("dns:zones:update")).Delete("/zones/{id}/nsec3", h.clearZoneNsec3)
+		r.With(auth.RequireCapability("dns:zones:read")).Get("/zones/{id}/preview", h.previewZone)
 
 		r.With(auth.RequireCapability("dns:records:create")).Post("/records", h.createRecord)
 		r.With(auth.RequireCapability("dns:records:update")).Patch("/records/{id}", h.updateRecord)
