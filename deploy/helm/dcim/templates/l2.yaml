@@ -1,0 +1,72 @@
+{{- /*
+  Cilium L2 announcement fallback for sites without BGP-capable
+  upstream routers (PR 89).
+
+  When `l2.enabled` is true, this template emits two Cilium CRDs:
+
+    1. CiliumL2AnnouncementPolicy — gratuitous-ARP / NDP advertise
+                                    Service LB IPs onto a chosen L2
+                                    network. Subset of nodes is the
+                                    speaker; failover is automatic.
+    2. CiliumLoadBalancerIPPool   — same shape as bgp.ipPools; the
+                                    pool gives out IPs the L2 policy
+                                    announces.
+
+  Mutually exclusive with `bgp.enabled` — the template aborts when
+  both are set so an operator can't accidentally double-advertise
+  the same Service IP. Status quo (ClusterIP behind nginx-ingress)
+  is unchanged when both are false.
+
+  Selector logic mirrors the BGP template: a Service must carry the
+  `dcim.io/bgp-advertise` label (kept under that name so dns-site /
+  dhcp-site charts don't need a second label for L2 mode) and be
+  type=LoadBalancer for Cilium to pick it up.
+*/}}
+{{- if and .Values.bgp.enabled .Values.l2.enabled -}}
+{{- fail "bgp.enabled and l2.enabled are mutually exclusive — pick one announcement mode" -}}
+{{- end -}}
+{{- if .Values.l2.enabled }}
+{{- $l2 := .Values.l2 -}}
+{{- $name := include "dcim.fullname" . -}}
+{{- $labels := include "dcim.labels" . -}}
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: {{ $name }}-l2-policy
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  serviceSelector:
+    matchLabels:
+      {{- toYaml ($l2.advertise.selectorLabels) | nindent 6 }}
+  {{- with $l2.nodeSelector }}
+  nodeSelector:
+    matchLabels:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+  {{- with $l2.interfaces }}
+  interfaces:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  externalIPs: {{ $l2.externalIPs | default false }}
+  loadBalancerIPs: {{ $l2.loadBalancerIPs | default true }}
+{{- range $l2.ipPools }}
+---
+apiVersion: cilium.io/v2alpha1
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: {{ $name }}-{{ .name }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  blocks:
+    {{- range .blocks }}
+    - cidr: {{ .cidr | quote }}
+    {{- end }}
+  {{- with .serviceSelector }}
+  serviceSelector:
+    matchLabels:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+{{- end }}
+{{- end }}

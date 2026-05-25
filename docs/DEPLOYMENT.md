@@ -121,6 +121,48 @@ The default `bgp.advertise.selectorLabels` is
 different label key, or `selectorLabels: {}` to advertise every LB
 Service in the namespace.
 
+### Cilium L2 announcement fallback (PR 89)
+
+For sites whose upstream is L2-only (no BGP-capable router), set
+`l2.enabled=true` instead of `bgp.enabled`. The two are mutually
+exclusive — setting both fails `helm template` so an operator
+can't accidentally double-advertise.
+
+L2 mode emits two CRDs:
+
+- `CiliumL2AnnouncementPolicy` — gratuitous-ARP / NDP advertises
+  LoadBalancer Service IPs onto the chosen L2 segment.
+- `CiliumLoadBalancerIPPool` — same shape as `bgp.ipPools`; the
+  pool gives out IPs the L2 policy announces.
+
+The selector label is the **same** as BGP mode
+(`dcim.io/bgp-advertise: "true"`) so flipping `bgp.enabled →
+l2.enabled` swaps the announcement mechanism without touching the
+Service definitions in the subcharts or the `dns-site` /
+`dhcp-site` charts.
+
+Minimum opt-in values:
+
+```yaml
+bgp:
+  enabled: false   # ensure BGP is OFF
+l2:
+  enabled: true
+  ipPools:
+    - name: lab-lan
+      blocks:
+        - { cidr: "192.168.10.240/29" }
+  # Optional: pin to a subset of nodes that face the L2 segment.
+  nodeSelector:
+    role.dcim.io/lb-speaker: "true"
+
+otter:
+  service:
+    type: LoadBalancer
+    labels:
+      dcim.io/bgp-advertise: "true"   # same label, different upstream
+```
+
 ## Site DNS via Cilium BGP (PR 71)
 
 `deploy/helm/dns-site/` deploys one CoreDNS pod per `DnsServer` row on

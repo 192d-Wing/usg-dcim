@@ -226,3 +226,36 @@ bgp:
     #     - { cidr: "2001:db8:1:ffff::/120" }
     #   serviceSelector:
     #     dcim.io/bgp-advertise: "true"
+
+# ---- Cilium L2 announcement fallback (PR 89) ----
+# For sites whose upstream is L2-only (no BGP-capable router). Mutually
+# exclusive with bgp.enabled — setting both fails Helm rendering so
+# operators can't accidentally double-advertise. Both default false:
+# the chart's status quo (ClusterIP behind nginx-ingress) is unchanged.
+#
+# Cilium gratuitous-ARP / NDP from a subset of nodes onto a chosen L2
+# segment. Same selector label as BGP (`dcim.io/bgp-advertise: "true"`)
+# so the dns-site / dhcp-site charts don't need a second label for L2
+# mode — flipping bgp.enabled → l2.enabled at the umbrella swaps the
+# advertise mechanism without touching the Service definitions.
+l2:
+  enabled: false
+  # Which nodes speak L2. Empty = every node; for racks with a
+  # dedicated upstream-facing node set, pin via labels.
+  nodeSelector: {}
+    # role.dcim.io/lb-speaker: "true"
+  # Which interfaces emit gratuitous-ARP. Empty = Cilium picks
+  # automatically based on routing.
+  interfaces: []
+    # - "^eth0$"
+  # Announce externalIPs Services too? Default: only LB IPs.
+  externalIPs: false
+  loadBalancerIPs: true
+  advertise:
+    selectorLabels:
+      dcim.io/bgp-advertise: "true"
+  # IP pools Cilium hands out for L2-announced Services.
+  ipPools: []
+    # - name: lab-lan
+    #   blocks:
+    #     - { cidr: "192.168.10.240/29" }
