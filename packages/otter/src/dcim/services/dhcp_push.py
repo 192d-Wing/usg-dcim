@@ -29,7 +29,7 @@ What this module does NOT do (yet):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -840,6 +840,12 @@ class BulkDiffReport:
     total: int
     counts: dict[str, int]
     results: list[DiffResult]
+    # PR 86 — status transitions observed during this diff pass.
+    # Each entry: {scope_id, prefix, from_status, to_status}. Empty
+    # when no scope's status changed since its previous diff (cold
+    # start: every scope's prior is None, so every result is a
+    # transition None→<status>).
+    transitions: list[dict] = field(default_factory=list)
 
 
 # Status taxonomies are pinned here so the API handler doesn't have
@@ -956,16 +962,31 @@ async def diff_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkDiffRepor
         ).scalars().all()
         templates_by_id = {t.id: t for t in rows}
     results: list[DiffResult] = []
+    transitions: list[dict] = []
     for scope in scopes:
+        # PR 86 — snapshot the prior status BEFORE persist_diff_state
+        # overwrites it. None on cold start; comparing None != "in_sync"
+        # surfaces the initial diff as a transition too, which is what
+        # the alert dispatcher wants (operator hears about drift it
+        # didn't know about, even on first cron run).
+        prior_status = scope.last_diff_status
         template = templates_by_id.get(scope.template_id) if scope.template_id else None
         result = await diff_scope(scope, server, template)
         # PR 80 — persist the drift state on each row so LIST and
         # push-drifted see fresh data without a second round-trip.
         persist_diff_state(scope, result)
+        if prior_status != result.status:
+            transitions.append({
+                "scope_id": str(scope.id),
+                "prefix": str(scope.prefix),
+                "from_status": prior_status,
+                "to_status": result.status,
+            })
         results.append(result)
     return BulkDiffReport(
         server_id=str(server.id),
         total=len(results),
         counts=_tally([r.status for r in results], _DIFF_STATUSES),
         results=results,
+        transitions=transitions,
     )

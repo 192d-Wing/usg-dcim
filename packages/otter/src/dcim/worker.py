@@ -150,11 +150,12 @@ async def dhcp_drift_check(_ctx) -> dict:
     read whatever this leaves on the rows.
     """
     from .models.ipam import DhcpServer  # local — same defer pattern as dhcp_sync
-    from .services import dhcp_push as dhcp_push_svc
+    from .services import dhcp_alerts, dhcp_push as dhcp_push_svc
 
     started = datetime.now(UTC)
     per_server: dict[str, dict] = {}
     errors = 0
+    total_alerts_fired = 0
     async with async_session() as db:
         servers = (
             await db.execute(
@@ -164,9 +165,18 @@ async def dhcp_drift_check(_ctx) -> dict:
         for srv in servers:
             try:
                 report = await dhcp_push_svc.diff_all_scopes(db, srv)
+                # PR 86 — surface newly-drifted scopes via the alert
+                # notification channels (Slack / email / webhook).
+                # Failures inside the dispatcher are caught + logged
+                # there; this call won't raise.
+                alert_summary = await dhcp_alerts.notify_drift_transitions(
+                    db, srv, report.transitions,
+                )
+                total_alerts_fired += alert_summary.get("fired", 0)
                 per_server[str(srv.id)] = {
                     "total": report.total,
                     "counts": report.counts,
+                    "alerts": alert_summary,
                 }
             except Exception as e:  # noqa: BLE001 — log + continue
                 errors += 1
@@ -179,11 +189,14 @@ async def dhcp_drift_check(_ctx) -> dict:
     elapsed = (datetime.now(UTC) - started).total_seconds()
     log.info(
         "dhcp_drift_check.done",
-        servers=len(per_server), errors=errors, elapsed_s=round(elapsed, 3),
+        servers=len(per_server), errors=errors,
+        alerts_fired=total_alerts_fired,
+        elapsed_s=round(elapsed, 3),
     )
     return {
         "servers": len(per_server),
         "errors": errors,
+        "alerts_fired": total_alerts_fired,
         "elapsed_s": elapsed,
         "per_server": per_server,
     }
