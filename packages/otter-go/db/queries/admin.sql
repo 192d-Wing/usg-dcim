@@ -80,6 +80,65 @@ DELETE FROM roles WHERE id = $1 AND is_system = FALSE;
 -- include the number in the 409 response if useful.
 SELECT count(*)::bigint FROM user_roles WHERE role_id = $1;
 
+-- ===== Role assignments (user_roles + role_scopes) =====
+-- PR 76 — assignments + scope rows.
+
+-- name: ListUserAssignments :many
+SELECT id, user_id, role_id, created_at, updated_at
+FROM user_roles
+WHERE user_id = $1
+ORDER BY created_at;
+
+-- name: GetUserRole :one
+SELECT id, user_id, role_id, created_at, updated_at
+FROM user_roles WHERE id = $1;
+
+-- name: FindUserRoleByUserAndRole :one
+-- Pre-check used by the API for the dup-409 path.
+SELECT id, user_id, role_id, created_at, updated_at
+FROM user_roles
+WHERE user_id = $1 AND role_id = $2
+LIMIT 1;
+
+-- name: CreateUserRole :one
+INSERT INTO user_roles (id, user_id, role_id, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, NOW(), NOW())
+RETURNING id, user_id, role_id, created_at, updated_at;
+
+-- name: DeleteUserRole :exec
+-- role_scopes are deleted manually before this; we don't rely on FK
+-- cascade because the schema declares no ON DELETE behavior for the
+-- assignment_id FK.
+DELETE FROM user_roles WHERE id = $1;
+
+-- name: ListRoleScopesByAssignment :many
+SELECT id, assignment_id, scope_type::text AS scope_type, target_id
+FROM role_scopes
+WHERE assignment_id = $1
+ORDER BY created_at;
+
+-- name: ListRoleScopesByAssignments :many
+-- Bulk version for the list endpoint: one round-trip for N
+-- assignments' scopes, bucketed in-process. Avoids N+1 on
+-- /admin/users/{id}/assignments.
+SELECT id, assignment_id, scope_type::text AS scope_type, target_id
+FROM role_scopes
+WHERE assignment_id = ANY($1::uuid[])
+ORDER BY assignment_id, created_at;
+
+-- name: CreateRoleScope :one
+INSERT INTO role_scopes (id, assignment_id, scope_type, target_id, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2::scope_type, $3, NOW(), NOW())
+RETURNING id, assignment_id, scope_type::text AS scope_type, target_id;
+
+-- name: DeleteRoleScopesForAssignment :exec
+DELETE FROM role_scopes WHERE assignment_id = $1;
+
+-- name: GetRoleNamesByIDs :many
+-- Hydration helper: many-to-one role lookup so the assignment-list
+-- response includes role_name without a per-row GetRole.
+SELECT id, name FROM roles WHERE id = ANY($1::uuid[]);
+
 -- name: UpdateAdminUser :one
 -- PR 74 — admin update covers display_name + is_active only
 -- (matches Python UserUpdate schema). email is immutable in the

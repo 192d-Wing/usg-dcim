@@ -44,6 +44,17 @@ type Querier interface {
 	UpdateAdminRole(ctx context.Context, arg dbq.UpdateAdminRoleParams) (dbq.Role, error)
 	DeleteAdminRole(ctx context.Context, id uuid.UUID) (int64, error)
 	CountUserRolesForRole(ctx context.Context, roleID uuid.UUID) (int64, error)
+
+	ListUserAssignments(ctx context.Context, userID uuid.UUID) ([]dbq.UserRoleRow, error)
+	GetUserRole(ctx context.Context, id uuid.UUID) (dbq.UserRoleRow, error)
+	FindUserRoleByUserAndRole(ctx context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error)
+	CreateUserRole(ctx context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error)
+	DeleteUserRole(ctx context.Context, id uuid.UUID) (int64, error)
+	ListRoleScopesByAssignment(ctx context.Context, assignmentID uuid.UUID) ([]dbq.RoleScopeRow, error)
+	ListRoleScopesByAssignments(ctx context.Context, ids []uuid.UUID) ([]dbq.RoleScopeRow, error)
+	CreateRoleScope(ctx context.Context, arg dbq.CreateRoleScopeParams) (dbq.RoleScopeRow, error)
+	DeleteRoleScopesForAssignment(ctx context.Context, assignmentID uuid.UUID) error
+	GetRoleNamesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.RoleNameRow, error)
 }
 
 type Handler struct {
@@ -61,6 +72,10 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("admin:roles:create")).Post("/roles", h.createRole)
 		r.With(auth.RequireCapability("admin:roles:update")).Patch("/roles/{id}", h.updateRole)
 		r.With(auth.RequireCapability("admin:roles:delete")).Delete("/roles/{id}", h.deleteRole)
+
+		r.With(auth.RequireCapability("admin:users:read")).Get("/users/{id}/assignments", h.listUserAssignments)
+		r.With(auth.RequireCapability("admin:users:update")).Post("/assignments", h.createAssignment)
+		r.With(auth.RequireCapability("admin:users:update")).Delete("/assignments/{id}", h.deleteAssignment)
 	})
 }
 

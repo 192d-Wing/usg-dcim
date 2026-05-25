@@ -6,6 +6,7 @@ package dbq
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -232,4 +233,173 @@ func (q *Queries) CountUserRolesForRole(ctx context.Context, roleID uuid.UUID) (
 	var n int64
 	err := row.Scan(&n)
 	return n, err
+}
+
+// ---- Role assignments (PR 76) ----
+
+// UserRoleRow is the wire shape for an assignment join row.
+type UserRoleRow struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	RoleID    uuid.UUID `json:"role_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// RoleScopeRow is one scope row hanging off an assignment.
+type RoleScopeRow struct {
+	ID           uuid.UUID `json:"id"`
+	AssignmentID uuid.UUID `json:"assignment_id"`
+	ScopeType    string    `json:"scope_type"`
+	TargetID     *string   `json:"target_id"`
+}
+
+// RoleNameRow is a (id, name) projection used by the hydration helper.
+type RoleNameRow struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+const listUserAssignments = `SELECT id, user_id, role_id, created_at, updated_at
+FROM user_roles WHERE user_id = $1 ORDER BY created_at`
+
+func (q *Queries) ListUserAssignments(ctx context.Context, userID uuid.UUID) ([]UserRoleRow, error) {
+	rows, err := q.db.Query(ctx, listUserAssignments, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []UserRoleRow{}
+	for rows.Next() {
+		var u UserRoleRow
+		if err := rows.Scan(&u.ID, &u.UserID, &u.RoleID, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+
+const getUserRole = `SELECT id, user_id, role_id, created_at, updated_at
+FROM user_roles WHERE id = $1`
+
+func (q *Queries) GetUserRole(ctx context.Context, id uuid.UUID) (UserRoleRow, error) {
+	row := q.db.QueryRow(ctx, getUserRole, id)
+	var u UserRoleRow
+	err := row.Scan(&u.ID, &u.UserID, &u.RoleID, &u.CreatedAt, &u.UpdatedAt)
+	return u, err
+}
+
+const findUserRoleByUserAndRole = `SELECT id, user_id, role_id, created_at, updated_at
+FROM user_roles WHERE user_id = $1 AND role_id = $2 LIMIT 1`
+
+func (q *Queries) FindUserRoleByUserAndRole(ctx context.Context, userID, roleID uuid.UUID) (UserRoleRow, error) {
+	row := q.db.QueryRow(ctx, findUserRoleByUserAndRole, userID, roleID)
+	var u UserRoleRow
+	err := row.Scan(&u.ID, &u.UserID, &u.RoleID, &u.CreatedAt, &u.UpdatedAt)
+	return u, err
+}
+
+const createUserRole = `INSERT INTO user_roles (id, user_id, role_id, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, NOW(), NOW())
+RETURNING id, user_id, role_id, created_at, updated_at`
+
+func (q *Queries) CreateUserRole(ctx context.Context, userID, roleID uuid.UUID) (UserRoleRow, error) {
+	row := q.db.QueryRow(ctx, createUserRole, userID, roleID)
+	var u UserRoleRow
+	err := row.Scan(&u.ID, &u.UserID, &u.RoleID, &u.CreatedAt, &u.UpdatedAt)
+	return u, err
+}
+
+const deleteUserRole = `DELETE FROM user_roles WHERE id = $1`
+
+func (q *Queries) DeleteUserRole(ctx context.Context, id uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, deleteUserRole, id)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+const listRoleScopesByAssignment = `SELECT id, assignment_id, scope_type::text AS scope_type, target_id
+FROM role_scopes WHERE assignment_id = $1 ORDER BY created_at`
+
+func (q *Queries) ListRoleScopesByAssignment(ctx context.Context, assignmentID uuid.UUID) ([]RoleScopeRow, error) {
+	rows, err := q.db.Query(ctx, listRoleScopesByAssignment, assignmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RoleScopeRow{}
+	for rows.Next() {
+		var s RoleScopeRow
+		if err := rows.Scan(&s.ID, &s.AssignmentID, &s.ScopeType, &s.TargetID); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+const listRoleScopesByAssignments = `SELECT id, assignment_id, scope_type::text AS scope_type, target_id
+FROM role_scopes WHERE assignment_id = ANY($1::uuid[]) ORDER BY assignment_id, created_at`
+
+func (q *Queries) ListRoleScopesByAssignments(ctx context.Context, ids []uuid.UUID) ([]RoleScopeRow, error) {
+	rows, err := q.db.Query(ctx, listRoleScopesByAssignments, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RoleScopeRow{}
+	for rows.Next() {
+		var s RoleScopeRow
+		if err := rows.Scan(&s.ID, &s.AssignmentID, &s.ScopeType, &s.TargetID); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+const createRoleScope = `INSERT INTO role_scopes (id, assignment_id, scope_type, target_id, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2::scope_type, $3, NOW(), NOW())
+RETURNING id, assignment_id, scope_type::text AS scope_type, target_id`
+
+type CreateRoleScopeParams struct {
+	AssignmentID uuid.UUID `json:"assignment_id"`
+	ScopeType    string    `json:"scope_type"`
+	TargetID     *string   `json:"target_id"`
+}
+
+func (q *Queries) CreateRoleScope(ctx context.Context, arg CreateRoleScopeParams) (RoleScopeRow, error) {
+	row := q.db.QueryRow(ctx, createRoleScope, arg.AssignmentID, arg.ScopeType, arg.TargetID)
+	var s RoleScopeRow
+	err := row.Scan(&s.ID, &s.AssignmentID, &s.ScopeType, &s.TargetID)
+	return s, err
+}
+
+const deleteRoleScopesForAssignment = `DELETE FROM role_scopes WHERE assignment_id = $1`
+
+func (q *Queries) DeleteRoleScopesForAssignment(ctx context.Context, assignmentID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRoleScopesForAssignment, assignmentID)
+	return err
+}
+
+const getRoleNamesByIDs = `SELECT id, name FROM roles WHERE id = ANY($1::uuid[])`
+
+func (q *Queries) GetRoleNamesByIDs(ctx context.Context, ids []uuid.UUID) ([]RoleNameRow, error) {
+	rows, err := q.db.Query(ctx, getRoleNamesByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RoleNameRow{}
+	for rows.Next() {
+		var n RoleNameRow
+		if err := rows.Scan(&n.ID, &n.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }

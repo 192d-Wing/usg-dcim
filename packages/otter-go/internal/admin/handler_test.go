@@ -44,6 +44,15 @@ type fakeQ struct {
 	deleteRoleErr     error
 	gotRoleCreate     dbq.CreateAdminRoleParams
 	gotRoleUpdate     dbq.UpdateAdminRoleParams
+
+	// Assignments
+	assignments         []dbq.UserRoleRow
+	assignmentByID      map[uuid.UUID]dbq.UserRoleRow
+	dupAssignment       map[[2]uuid.UUID]dbq.UserRoleRow
+	scopesByAssignment  []dbq.RoleScopeRow
+	roleNamesByID       map[uuid.UUID]string
+	gotAssignmentCreate [2]uuid.UUID
+	gotScopeCreates     []dbq.CreateRoleScopeParams
 }
 
 func (f *fakeQ) ListAdminUsers(_ context.Context, _ dbq.ListAdminUsersParams) ([]dbq.User, error) {
@@ -117,6 +126,55 @@ func (f *fakeQ) DeleteAdminRole(_ context.Context, _ uuid.UUID) (int64, error) {
 }
 func (f *fakeQ) CountUserRolesForRole(_ context.Context, _ uuid.UUID) (int64, error) {
 	return f.roleAssignedCount, nil
+}
+
+// ---- Assignment stubs (PR 76) ----
+
+func (f *fakeQ) ListUserAssignments(_ context.Context, _ uuid.UUID) ([]dbq.UserRoleRow, error) {
+	return f.assignments, nil
+}
+func (f *fakeQ) GetUserRole(_ context.Context, id uuid.UUID) (dbq.UserRoleRow, error) {
+	if f.assignmentByID != nil {
+		if a, ok := f.assignmentByID[id]; ok {
+			return a, nil
+		}
+	}
+	return dbq.UserRoleRow{}, pgx.ErrNoRows
+}
+func (f *fakeQ) FindUserRoleByUserAndRole(_ context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error) {
+	if a, ok := f.dupAssignment[[2]uuid.UUID{userID, roleID}]; ok {
+		return a, nil
+	}
+	return dbq.UserRoleRow{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateUserRole(_ context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error) {
+	f.gotAssignmentCreate = [2]uuid.UUID{userID, roleID}
+	return dbq.UserRoleRow{ID: uuid.New(), UserID: userID, RoleID: roleID}, nil
+}
+func (f *fakeQ) DeleteUserRole(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 1, nil
+}
+func (f *fakeQ) ListRoleScopesByAssignment(_ context.Context, _ uuid.UUID) ([]dbq.RoleScopeRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListRoleScopesByAssignments(_ context.Context, _ []uuid.UUID) ([]dbq.RoleScopeRow, error) {
+	return f.scopesByAssignment, nil
+}
+func (f *fakeQ) CreateRoleScope(_ context.Context, a dbq.CreateRoleScopeParams) (dbq.RoleScopeRow, error) {
+	f.gotScopeCreates = append(f.gotScopeCreates, a)
+	return dbq.RoleScopeRow{ID: uuid.New(), AssignmentID: a.AssignmentID, ScopeType: a.ScopeType, TargetID: a.TargetID}, nil
+}
+func (f *fakeQ) DeleteRoleScopesForAssignment(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+func (f *fakeQ) GetRoleNamesByIDs(_ context.Context, ids []uuid.UUID) ([]dbq.RoleNameRow, error) {
+	out := []dbq.RoleNameRow{}
+	for _, id := range ids {
+		if n, ok := f.roleNamesByID[id]; ok {
+			out = append(out, dbq.RoleNameRow{ID: id, Name: n})
+		}
+	}
+	return out, nil
 }
 
 // audit.Recorder satisfied via the dbq stub on the live build —
