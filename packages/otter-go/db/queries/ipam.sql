@@ -99,3 +99,25 @@ WHERE id = $1;
 SELECT host(address) AS address
 FROM ip_addresses
 WHERE subnet_id = $1;
+
+-- name: ListSubnetsForFreeSpace :many
+-- PR 65 — free-space/in-subnets reads every matching subnet
+-- (unpaginated) and filters in-process by family + free count.
+-- Matches the Python handler's db.execute(stmt).scalars().all()
+-- — no LIMIT. Returns just the columns the response shape needs.
+SELECT id, fabric_id, vrf_id, site_id,
+       host(prefix) || '/' || masklen(prefix) AS prefix,
+       name, purpose
+FROM subnets
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(vrf_id)::uuid    IS NULL OR vrf_id    = sqlc.narg(vrf_id))
+ORDER BY prefix;
+
+-- name: ListAddressesInSubnets :many
+-- PR 65 — bulk per-subnet address counting. One round-trip instead
+-- of N+1; the handler buckets by subnet_id in-process. Used by
+-- free-space/in-subnets to compute allocated + next_available for
+-- many subnets in a single query.
+SELECT subnet_id, host(address) AS address
+FROM ip_addresses
+WHERE subnet_id = ANY($1::uuid[]);

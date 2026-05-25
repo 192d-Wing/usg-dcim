@@ -32,6 +32,8 @@ type Querier interface {
 	CountIPAddresses(ctx context.Context, arg dbq.CountIPAddressesParams) (int64, error)
 	GetIPAddress(ctx context.Context, id uuid.UUID) (dbq.IPAddress, error)
 	ListAddressStringsInSubnet(ctx context.Context, subnetID uuid.UUID) ([]string, error)
+	ListSubnetsForFreeSpace(ctx context.Context, arg dbq.ListSubnetsForFreeSpaceParams) ([]dbq.SubnetForFreeSpaceRow, error)
+	ListAddressesInSubnets(ctx context.Context, subnetIDs []uuid.UUID) ([]dbq.AddressInSubnetRow, error)
 
 	ListFabrics(ctx context.Context, arg dbq.ListFabricsParams) ([]dbq.Fabric, error)
 	CountFabrics(ctx context.Context, arg dbq.CountFabricsParams) (int64, error)
@@ -156,6 +158,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/supernets", h.listSupernets)
 		r.Get("/supernets/{id}", h.getSupernet)
 		r.Get("/supernets/{id}/utilization", h.getSupernetUtilization)
+		r.Get("/free-space/in-subnets", h.getFreeSpaceInSubnets)
 		r.Get("/overlays", h.listOverlays)
 		r.Get("/vnis", h.listVnis)
 		r.Get("/vteps", h.listVteps)

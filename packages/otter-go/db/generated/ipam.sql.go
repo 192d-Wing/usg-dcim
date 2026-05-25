@@ -284,3 +284,73 @@ func (q *Queries) ListAddressStringsInSubnet(ctx context.Context, subnetID uuid.
 	}
 	return out, rows.Err()
 }
+
+const listSubnetsForFreeSpace = `-- name: ListSubnetsForFreeSpace :many
+SELECT id, fabric_id, vrf_id, site_id,
+       host(prefix) || '/' || masklen(prefix) AS prefix,
+       name, purpose
+FROM subnets
+WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::uuid IS NULL OR vrf_id    = $2)
+ORDER BY prefix
+`
+
+type ListSubnetsForFreeSpaceParams struct {
+	FabricID *uuid.UUID `json:"fabric_id"`
+	VrfID    *uuid.UUID `json:"vrf_id"`
+}
+
+type SubnetForFreeSpaceRow struct {
+	ID       uuid.UUID  `json:"id"`
+	FabricID uuid.UUID  `json:"fabric_id"`
+	VrfID    uuid.UUID  `json:"vrf_id"`
+	SiteID   *uuid.UUID `json:"site_id"`
+	Prefix   string     `json:"prefix"`
+	Name     *string    `json:"name"`
+	Purpose  *string    `json:"purpose"`
+}
+
+func (q *Queries) ListSubnetsForFreeSpace(ctx context.Context, arg ListSubnetsForFreeSpaceParams) ([]SubnetForFreeSpaceRow, error) {
+	rows, err := q.db.Query(ctx, listSubnetsForFreeSpace, arg.FabricID, arg.VrfID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SubnetForFreeSpaceRow{}
+	for rows.Next() {
+		var s SubnetForFreeSpaceRow
+		if err := rows.Scan(&s.ID, &s.FabricID, &s.VrfID, &s.SiteID, &s.Prefix, &s.Name, &s.Purpose); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+const listAddressesInSubnets = `-- name: ListAddressesInSubnets :many
+SELECT subnet_id, host(address) AS address
+FROM ip_addresses
+WHERE subnet_id = ANY($1::uuid[])
+`
+
+type AddressInSubnetRow struct {
+	SubnetID uuid.UUID `json:"subnet_id"`
+	Address  string    `json:"address"`
+}
+
+func (q *Queries) ListAddressesInSubnets(ctx context.Context, subnetIDs []uuid.UUID) ([]AddressInSubnetRow, error) {
+	rows, err := q.db.Query(ctx, listAddressesInSubnets, subnetIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AddressInSubnetRow{}
+	for rows.Next() {
+		var r AddressInSubnetRow
+		if err := rows.Scan(&r.SubnetID, &r.Address); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

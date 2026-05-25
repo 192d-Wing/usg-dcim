@@ -58,6 +58,12 @@ func (f *fakeQ) GetIPAddress(_ context.Context, _ uuid.UUID) (dbq.IPAddress, err
 func (f *fakeQ) ListAddressStringsInSubnet(_ context.Context, _ uuid.UUID) ([]string, error) {
 	return nil, nil
 }
+func (f *fakeQ) ListSubnetsForFreeSpace(_ context.Context, _ dbq.ListSubnetsForFreeSpaceParams) ([]dbq.SubnetForFreeSpaceRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListAddressesInSubnets(_ context.Context, _ []uuid.UUID) ([]dbq.AddressInSubnetRow, error) {
+	return nil, nil
+}
 
 func (f *fakeQ) ListFabrics(_ context.Context, a dbq.ListFabricsParams) ([]dbq.Fabric, error) {
 	f.lastFabric = a
