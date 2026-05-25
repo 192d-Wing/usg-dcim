@@ -36,6 +36,7 @@ from ..models.dns import BgpPeer
 from ..models.ipam import (
     BgpAddressFamily,
     DhcpScope,
+    DhcpScopePushHistory,
     DhcpScopeTemplate,
     DhcpServer,
     Fabric,
@@ -2245,7 +2246,7 @@ async def delete_dhcp_scope(
     # surface the error in the audit log + last_push_* — refusing to
     # delete a row because Kea is unreachable creates worse messes
     # (orphaned config that DCIM can't manage).
-    kea_result = await dhcp_push.delete_scope_from_kea(obj, server)
+    kea_result = await dhcp_push.delete_scope_from_kea(obj, server, db=db)
     # PR 95 — soft-delete: tombstone the row instead of dropping it.
     # The Kea side is still cleaned (PR 74) so the scope stops
     # serving leases immediately; restore re-pushes via the explicit
@@ -2469,6 +2470,51 @@ async def diff_dhcp_scope(
         "kea_subnet": result.kea_subnet,
         "delta": result.delta,
         "error": result.error,
+    }
+
+
+@router.get("/dhcp/scopes/{scope_id}/push-history")
+async def list_dhcp_scope_push_history(
+    scope_id: UUID,
+    limit: int = Query(50, ge=1, le=500),
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """PR 104 — return recent push/delete attempts for a scope.
+
+    Append-only log captured by services/dhcp_push on every Kea RPC.
+    Ordered newest-first; `limit` caps the response size so the UI
+    isn't forced to paginate for the common "show recent activity"
+    case. Re-use the (scope_id, attempted_at DESC) index added in
+    migration 0064 — the DESC ordering matches index direction so
+    the query is index-only.
+    """
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:read",
+    )
+    rows = (await db.execute(
+        select(DhcpScopePushHistory)
+        .where(DhcpScopePushHistory.scope_id == scope_id)
+        .order_by(DhcpScopePushHistory.attempted_at.desc())
+        .limit(limit)
+    )).scalars().all()
+    return {
+        "scope_id": str(scope_id),
+        "entries": [
+            {
+                "id": str(r.id),
+                "operation": r.operation,
+                "kea_subnet_id": r.kea_subnet_id,
+                "status": r.status,
+                "error": r.error,
+                "duration_ms": r.duration_ms,
+                "attempted_at": r.attempted_at.isoformat() if r.attempted_at else None,
+            }
+            for r in rows
+        ],
     }
 
 

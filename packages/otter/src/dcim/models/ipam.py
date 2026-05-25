@@ -30,6 +30,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import CIDR, INET
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
@@ -626,6 +627,52 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
         # columns on this table; wire shape drops it for symmetry with
         # last_diff_at / last_diff_status.
         return self.last_diff_delta_json
+
+
+class DhcpScopePushHistory(UUIDPrimaryKey, Base):
+    """PR 104 — append-only attempt log for Kea pushes/deletes.
+
+    DhcpScope.last_push_* would only give the latest state; this
+    table records every attempt so the UI can show "last N pushes
+    for this scope" and the API can compute rolling success rates
+    per fabric / server. server_id is denormalized off scope so
+    server-wide history queries don't pay the join cost.
+
+    See migration 0064 for column types and constraints.
+    """
+
+    __tablename__ = "dhcp_scope_push_history"
+    __table_args__ = (
+        Index(
+            "ix_dhcp_scope_push_history_scope",
+            "scope_id", "attempted_at",
+        ),
+        Index(
+            "ix_dhcp_scope_push_history_server",
+            "server_id", "attempted_at",
+        ),
+    )
+
+    scope_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dhcp_scopes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    server_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dhcp_servers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    operation: Mapped[str] = mapped_column(String(16), nullable=False)
+    kea_subnet_id: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(String(2048))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    attempted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
 
 
 class DhcpScopeTemplate(UUIDPrimaryKey, Timestamped, Base):

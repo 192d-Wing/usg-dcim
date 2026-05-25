@@ -41,7 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import metrics
-from ..models.ipam import DhcpScope, DhcpScopeTemplate, DhcpServer
+from ..models.ipam import DhcpScope, DhcpScopePushHistory, DhcpScopeTemplate, DhcpServer
 from .kea import KeaClient
 
 
@@ -410,10 +410,15 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
         )
 
     is_update = scope.kea_subnet_id is not None
+    operation = "update" if is_update else "add"
     if not is_update:
         scope.kea_subnet_id = await _allocate_kea_subnet_id(
             db, server_id=server.id,
         )
+    # PR 104 — capture wall-clock so the history row records how long
+    # the attempt actually took. Starts before rendering so the row
+    # reflects total push latency, not just the Kea RPC.
+    push_start = time.perf_counter()
 
     # PR 78 — merge template defaults under scope overrides before
     # rendering. The renderer stays pure; the merge happens here so
@@ -455,6 +460,12 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
             timer.status = status  # noqa: B010 — context manager holder
             log.error("dhcp_push.transport_error", scope_id=str(scope.id), error=err)
             await _record_push_status(db, server, status, err)
+            # PR 104 — record before the id rollback so the history
+            # row preserves which kea_subnet_id was being attempted.
+            await _record_push_history(
+                db, scope, server, operation, status, err,
+                int((time.perf_counter() - push_start) * 1000),
+            )
             # Roll back the optimistic id allocation if this was a first
             # push that never made it to Kea — leaves the scope in its
             # pre-push state so a retry doesn't burn an id.
@@ -467,6 +478,8 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
 
         status, err = _interpret_kea_response(resp)
         timer.status = status  # noqa: B010
+    duration_ms = int((time.perf_counter() - push_start) * 1000)
+    await _record_push_history(db, scope, server, operation, status, err, duration_ms)
     if status != "ok" and not is_update:
         # Same rollback as the transport-error branch: id wasn't
         # actually claimed in Kea.
@@ -487,13 +500,20 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
     )
 
 
-async def delete_scope_from_kea(scope: DhcpScope, server: DhcpServer) -> PushResult:
+async def delete_scope_from_kea(
+    scope: DhcpScope, server: DhcpServer,
+    db: AsyncSession | None = None,
+) -> PushResult:
     """Best-effort Kea-side cleanup before a DCIM DELETE. Returns ok
     if the scope was never pushed (kea_subnet_id IS NULL) — nothing
     to clean up.
 
     Kept separate from push_scope so the DELETE endpoint can pass-or-
-    log without entangling the DB write back into Kea state."""
+    log without entangling the DB write back into Kea state.
+
+    `db` is optional for backwards compatibility with PR 74 callers
+    that don't have a session in hand; when present, PR 104 records
+    a push-history row for the attempt."""
     if scope.kea_subnet_id is None:
         return PushResult(
             scope_id=str(scope.id), kea_subnet_id=None,
@@ -508,6 +528,7 @@ async def delete_scope_from_kea(scope: DhcpScope, server: DhcpServer) -> PushRes
     # operation label so dashboards can distinguish add/update RPCs
     # (typically slow on busy servers) from delete RPCs (usually
     # cheap).
+    delete_start = time.perf_counter()
     with _kea_call_timer(str(server.id), "delete") as timer:
         try:
             if scope.ip_family == 4:
@@ -518,12 +539,23 @@ async def delete_scope_from_kea(scope: DhcpScope, server: DhcpServer) -> PushRes
                 await client.config_write(["dhcp6"])
         except Exception as e:  # noqa: BLE001
             timer.status = "error"  # noqa: B010
+            err = f"{type(e).__name__}: {e}"
+            duration_ms = int((time.perf_counter() - delete_start) * 1000)
+            if db is not None:
+                await _record_push_history(
+                    db, scope, server, "delete", "error", err, duration_ms,
+                )
             return PushResult(
                 scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
-                status="error", error=f"{type(e).__name__}: {e}", raw=None,
+                status="error", error=err, raw=None,
             )
         status, err = _interpret_kea_response(resp)
         timer.status = status  # noqa: B010
+    duration_ms = int((time.perf_counter() - delete_start) * 1000)
+    if db is not None:
+        await _record_push_history(
+            db, scope, server, "delete", status, err, duration_ms,
+        )
     return PushResult(
         scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
         status=status, error=err, raw=resp,
@@ -536,6 +568,33 @@ async def _record_push_status(
     server.last_push_at = datetime.now(UTC)
     server.last_push_status = status
     server.last_push_error = error[:2048] if error else None
+    await db.flush()
+
+
+async def _record_push_history(
+    db: AsyncSession,
+    scope: DhcpScope,
+    server: DhcpServer,
+    operation: str,
+    status: str,
+    error: str | None,
+    duration_ms: int | None,
+) -> None:
+    """PR 104 — append one row to dhcp_scope_push_history per attempt.
+
+    Append-only, no commit here: the caller batches the history row
+    with its outer transaction so a rolled-back push doesn't leak a
+    success row. error is truncated to fit the column.
+    """
+    db.add(DhcpScopePushHistory(
+        scope_id=scope.id,
+        server_id=server.id,
+        operation=operation,
+        kea_subnet_id=scope.kea_subnet_id,
+        status=status,
+        error=error[:2048] if error else None,
+        duration_ms=duration_ms,
+    ))
     await db.flush()
 
 
