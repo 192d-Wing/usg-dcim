@@ -179,3 +179,26 @@ func (q *Queries) GetSupernet(ctx context.Context, id uuid.UUID) (Supernet, erro
 		&s.Prefix, &s.Name, &s.Description, &s.Purpose, &s.CreatedAt, &s.UpdatedAt)
 	return s, err
 }
+
+const listSubnetPrefixesBySupernet = `-- name: ListSubnetPrefixesBySupernet :many
+SELECT host(prefix) || '/' || masklen(prefix) AS prefix
+FROM subnets
+WHERE supernet_id = $1
+`
+
+func (q *Queries) ListSubnetPrefixesBySupernet(ctx context.Context, supernetID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listSubnetPrefixesBySupernet, supernetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}

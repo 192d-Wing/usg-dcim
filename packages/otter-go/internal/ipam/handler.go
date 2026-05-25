@@ -38,6 +38,7 @@ type Querier interface {
 	ListSupernets(ctx context.Context, arg dbq.ListSupernetsParams) ([]dbq.Supernet, error)
 	CountSupernets(ctx context.Context, arg dbq.CountSupernetsParams) (int64, error)
 	GetSupernet(ctx context.Context, id uuid.UUID) (dbq.Supernet, error)
+	ListSubnetPrefixesBySupernet(ctx context.Context, supernetID uuid.UUID) ([]string, error)
 
 	ListOverlays(ctx context.Context, arg dbq.ListOverlaysParams) ([]dbq.Overlay, error)
 	CountOverlays(ctx context.Context, arg dbq.CountOverlaysParams) (int64, error)
@@ -152,6 +153,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/fabrics/{id}", h.getFabric)
 		r.Get("/supernets", h.listSupernets)
 		r.Get("/supernets/{id}", h.getSupernet)
+		r.Get("/supernets/{id}/utilization", h.getSupernetUtilization)
 		r.Get("/overlays", h.listOverlays)
 		r.Get("/vnis", h.listVnis)
 		r.Get("/vteps", h.listVteps)

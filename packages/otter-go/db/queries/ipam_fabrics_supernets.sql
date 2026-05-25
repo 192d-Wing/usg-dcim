@@ -68,3 +68,12 @@ SELECT id, fabric_id, vrf_id, parent_supernet_id, site_id,
        name, description, purpose, created_at, updated_at
 FROM supernets
 WHERE id = $1;
+
+-- name: ListSubnetPrefixesBySupernet :many
+-- PR 63 — utilization endpoint reads only the prefix column (no need
+-- to hydrate the full Subnet row). One-column projection keeps the
+-- supernet utilization read fast even when the supernet has many
+-- children. Used by getSupernetUtilization in internal/ipam.
+SELECT host(prefix) || '/' || masklen(prefix) AS prefix
+FROM subnets
+WHERE supernet_id = $1;

@@ -76,6 +76,9 @@ func (f *fakeQ) CountSupernets(_ context.Context, _ dbq.CountSupernetsParams) (i
 func (f *fakeQ) GetSupernet(_ context.Context, _ uuid.UUID) (dbq.Supernet, error) {
 	return dbq.Supernet{}, pgx.ErrNoRows
 }
+func (f *fakeQ) ListSubnetPrefixesBySupernet(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
