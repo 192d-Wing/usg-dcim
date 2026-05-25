@@ -174,3 +174,74 @@ def test_dhcp_scopes_reconcile_sync_capability_registered():
     from dcim.security.capabilities import CAPABILITY_CATALOG
     actions = set(CAPABILITY_CATALOG["ipam"]["dhcp-scopes"])
     assert "reconcile-sync" in actions
+
+
+# ----- PR 88: MAC binding on sync -----
+
+def _ip_with_mac(addr: str, source: str, mac: str | None) -> _IPRow:
+    row = _IPRow(id=uuid4(), address=addr, source=_Src(source))
+    row.dhcp_mac = mac
+    return row
+
+
+def test_upsert_carries_reservation_mac_onto_new_row():
+    # PR 88 — new source=reservation rows record the reservation's
+    # MAC so reconcile and future syncs treat them as already-bound.
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.99"}],
+    )
+    sess = _FakeSession()
+    report = _run(sync_reservations(sess, scope, []))
+    assert report.upserted == 1
+    new_row = sess.added[0]
+    # normalize_mac canonicalizes any input form.
+    assert new_row.dhcp_mac == "aa:bb:cc:dd:ee:ff"
+
+
+def test_mac_mismatch_skips_promote(monkeypatch_unused=None):
+    # PR 88 — promotion respects the MAC binding. If the lease at
+    # this IP is bound to a different client than the reservation
+    # expects, we refuse to promote and surface skipped_mac_mismatch
+    # so the operator resolves manually.
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5"}],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_mac("10.0.0.5", IpAddressSource.dhcp.value, "11:22:33:44:55:66")
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 0
+    assert report.skipped_mac_mismatch == 1
+    # Row is unchanged — not promoted to reservation despite IP match.
+    assert dhcp_row.source.value == IpAddressSource.dhcp.value
+
+
+def test_promote_backfills_dhcp_mac_when_lease_lacks_it():
+    # Lease ingested before MAC was known (NULL on dhcp_mac) +
+    # reservation declares a MAC → promote AND backfill the MAC so
+    # the row roundtrips cleanly on the next reconcile pass.
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5"}],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_mac("10.0.0.5", IpAddressSource.dhcp.value, None)
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 1
+    assert dhcp_row.source == IpAddressSource.reservation
+    assert dhcp_row.dhcp_mac == "aa:bb:cc:dd:ee:ff"
+
+
+def test_promote_matching_mac_succeeds():
+    # Sanity check the happy path: MAC matches, lease promotes.
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5"}],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_mac("10.0.0.5", IpAddressSource.dhcp.value, "aa-bb-cc-dd-ee-ff")
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 1
+    assert report.skipped_mac_mismatch == 0
+    assert dhcp_row.source == IpAddressSource.reservation

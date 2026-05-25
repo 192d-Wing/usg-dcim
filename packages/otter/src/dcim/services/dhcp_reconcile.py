@@ -75,6 +75,22 @@ def _normalize_ip(ip: str) -> str | None:
         return None
 
 
+def _normalize_mac(mac: str | None) -> str | None:
+    """Canonicalize a MAC for comparison (PR 88).
+
+    Accepts colon, dash, dot, or no separator. Lowercases the hex.
+    Returns None if the input isn't 12 hex characters once stripped.
+    Used both to compare reservation MAC against IPAddress.dhcp_mac
+    and to store on upsert in a stable form.
+    """
+    if not mac:
+        return None
+    cleaned = "".join(c for c in mac.lower() if c in "0123456789abcdef")
+    if len(cleaned) != 12:
+        return None
+    return ":".join(cleaned[i:i + 2] for i in range(0, 12, 2))
+
+
 def reconcile_scope(scope, ip_rows: list[IPAddress]) -> ReconcileReport:
     """Build a ReconcileReport for `scope` against the IPAddress rows
     already loaded for the linked subnet.
@@ -122,19 +138,33 @@ def reconcile_scope(scope, ip_rows: list[IPAddress]) -> ReconcileReport:
                 ip_source=src,
                 note="IPAddress is static — reservation would hand out an already-claimed IP",
             ))
-        else:
-            # dhcp or reservation source — counts as clean. dhcp
-            # specifically means the lease has been observed; the
-            # MAC on the IPAddress row should match the reservation
-            # but we don't enforce that here (the reservation may
-            # have been added pre-lease).
+            continue
+        # PR 88 — MAC binding check. If the reservation declares a MAC
+        # (v4) and the matching IPAddress carries one too, they must
+        # agree. The reservation is bound to a specific client; if
+        # IPAM thinks the IP is bound to a different MAC, that's a
+        # silent mismatch the operator should hear about.
+        res_mac = _normalize_mac(r.get("mac"))
+        row_mac = _normalize_mac(getattr(match, "dhcp_mac", None))
+        if res_mac and row_mac and res_mac != row_mac:
             entries.append(ReconcileEntry(
                 reservation_ip=norm, identifier=ident,
-                status="clean", ip_address_id=str(match.id),
+                status="mac_mismatch", ip_address_id=str(match.id),
                 ip_source=src,
+                note=(
+                    f"reservation expects mac={res_mac} but IPAddress "
+                    f"has mac={row_mac}"
+                ),
             ))
+            continue
+        # dhcp or reservation source with matching (or unknown) MAC.
+        entries.append(ReconcileEntry(
+            reservation_ip=norm, identifier=ident,
+            status="clean", ip_address_id=str(match.id),
+            ip_source=src,
+        ))
 
-    counts = {"clean": 0, "collision": 0, "unbacked": 0}
+    counts = {"clean": 0, "collision": 0, "unbacked": 0, "mac_mismatch": 0}
     for e in entries:
         counts[e.status] = counts.get(e.status, 0) + 1
 
@@ -158,6 +188,7 @@ class SyncReport:
     promoted: int      # existing dhcp-source rows flipped to reservation
     skipped_collision: int  # static-source rows left alone
     skipped_clean: int      # already source=reservation (or dhcp) — no change
+    skipped_mac_mismatch: int  # PR 88 — lease MAC ≠ reservation MAC
     skipped_no_subnet: int  # scope.subnet_id is NULL
     entries: list[dict]
 
@@ -188,7 +219,7 @@ async def sync_reservations(
         return SyncReport(
             scope_id=str(scope.id), subnet_id=None,
             upserted=0, promoted=0, skipped_collision=0,
-            skipped_clean=0,
+            skipped_clean=0, skipped_mac_mismatch=0,
             skipped_no_subnet=len(scope.reservations_json or []),
             entries=[
                 {"reservation_ip": (r.get("ip") or ""), "decision": "skipped_no_subnet"}
@@ -202,7 +233,7 @@ async def sync_reservations(
         if key is not None:
             ip_index[key] = row
 
-    upserted = promoted = skipped_collision = skipped_clean = 0
+    upserted = promoted = skipped_collision = skipped_clean = skipped_mac_mismatch = 0
     entries: list[dict] = []
     for r in scope.reservations_json or []:
         raw_ip = r.get("ip", "")
@@ -210,15 +241,20 @@ async def sync_reservations(
         if norm is None:
             entries.append({"reservation_ip": raw_ip, "decision": "skipped_unparseable"})
             continue
+        res_mac = _normalize_mac(r.get("mac"))
         match = ip_index.get(norm)
         if match is None:
-            # Unbacked — insert a fresh reservation row.
+            # Unbacked — insert a fresh reservation row. PR 88: also
+            # carry the reservation's MAC onto the new row's dhcp_mac
+            # so future syncs treat it as already-bound and the row
+            # roundtrips through reconcile cleanly.
             row = IPAddress(
                 subnet_id=scope.subnet_id,
                 address=norm,
                 role=IpAddressRole.data,
                 status=IpAddressStatus.reserved,
                 source=IpAddressSource.reservation,
+                dhcp_mac=res_mac,
             )
             db.add(row)
             upserted += 1
@@ -233,11 +269,28 @@ async def sync_reservations(
                 "reservation_ip": norm, "decision": "skipped_collision",
                 "ip_address_id": str(match.id),
             })
-        elif src == IpAddressSource.dhcp.value:
+            continue
+        # PR 88 — MAC mismatch refuses to promote. The lease at this
+        # IP is bound to a different client than the reservation
+        # expects; promoting silently would mask the conflict.
+        row_mac = _normalize_mac(getattr(match, "dhcp_mac", None))
+        if res_mac and row_mac and res_mac != row_mac:
+            skipped_mac_mismatch += 1
+            entries.append({
+                "reservation_ip": norm, "decision": "skipped_mac_mismatch",
+                "ip_address_id": str(match.id),
+                "reservation_mac": res_mac, "row_mac": row_mac,
+            })
+            continue
+        if src == IpAddressSource.dhcp.value:
             # Lease materialized; tag as reservation so it stops
             # looking like a transient allocation.
             match.source = IpAddressSource.reservation
             match.status = IpAddressStatus.reserved
+            if res_mac and not row_mac:
+                # Reservation knows the MAC, lease didn't record one
+                # — backfill so reconcile and future syncs agree.
+                match.dhcp_mac = res_mac
             promoted += 1
             entries.append({
                 "reservation_ip": norm, "decision": "promoted",
@@ -258,6 +311,7 @@ async def sync_reservations(
         promoted=promoted,
         skipped_collision=skipped_collision,
         skipped_clean=skipped_clean,
+        skipped_mac_mismatch=skipped_mac_mismatch,
         skipped_no_subnet=0,
         entries=entries,
     )

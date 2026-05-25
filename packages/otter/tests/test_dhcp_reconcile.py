@@ -59,16 +59,16 @@ def test_normalize_rejects_garbage_returns_none():
 # ----- clean: reservation matches a source=reservation/dhcp IPAddress -----
 
 def test_reservation_matching_dhcp_source_is_clean():
-    # PR 84: source=dhcp counts as clean — the lease has materialized;
-    # reconcile doesn't enforce that the MAC matches (could be stale
-    # but isn't a conflict).
+    # PR 84: source=dhcp counts as clean — the lease has materialized.
+    # PR 88: clean requires the MAC to agree (or one side to be NULL);
+    # this fixture leaves dhcp_mac unset so the check is bypassed.
     scope = _Scope(
         id=uuid4(),
         reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5"}],
     )
     rows = [_ip("10.0.0.5", IpAddressSource.dhcp.value)]
     report = reconcile_scope(scope, rows)
-    assert report.counts == {"clean": 1, "collision": 0, "unbacked": 0}
+    assert report.counts == {"clean": 1, "collision": 0, "unbacked": 0, "mac_mismatch": 0}
     assert report.entries[0].status == "clean"
 
 
@@ -173,7 +173,7 @@ def test_mixed_states_aggregate_correctly_in_counts():
     ]
     report = reconcile_scope(scope, rows)
     assert report.total == 3
-    assert report.counts == {"clean": 1, "collision": 1, "unbacked": 1}
+    assert report.counts == {"clean": 1, "collision": 1, "unbacked": 1, "mac_mismatch": 0}
 
 
 # ----- IP normalization across the index -----
@@ -195,3 +195,82 @@ def test_short_v6_form_in_scope_matches_canonical_form_in_ipam():
 def test_dhcp_scopes_reconcile_capability_registered():
     from dcim.security.capabilities import CAPABILITY_CATALOG
     assert "reconcile" in CAPABILITY_CATALOG["ipam"]["dhcp-scopes"]
+
+
+# ----- PR 88: MAC binding -----
+
+def _ip_with_mac(addr: str, source: str, mac: str | None) -> _IPRow:
+    row = _IPRow(id=uuid4(), address=addr, source=_Src(source))
+    row.dhcp_mac = mac
+    return row
+
+
+def test_normalize_mac_canonicalizes_separators_and_case():
+    from dcim.services.dhcp_reconcile import _normalize_mac
+    # Colon, hyphen, dot, no-separator — all canonicalize the same way.
+    expected = "aa:bb:cc:dd:ee:ff"
+    assert _normalize_mac("AA:BB:CC:DD:EE:FF") == expected
+    assert _normalize_mac("aa-bb-cc-dd-ee-ff") == expected
+    assert _normalize_mac("aabb.ccdd.eeff") == expected
+    assert _normalize_mac("aabbccddeeff") == expected
+
+
+def test_normalize_mac_rejects_wrong_length():
+    from dcim.services.dhcp_reconcile import _normalize_mac
+    assert _normalize_mac("aa:bb:cc") is None
+    assert _normalize_mac("") is None
+    assert _normalize_mac(None) is None
+
+
+def test_reservation_with_matching_mac_is_clean():
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"mac": "AA:BB:CC:DD:EE:FF", "ip": "10.0.0.5"}],
+    )
+    rows = [_ip_with_mac("10.0.0.5", IpAddressSource.dhcp.value, "aa-bb-cc-dd-ee-ff")]
+    report = reconcile_scope(scope, rows)
+    # Case + separator differ; normalize_mac canonicalizes both sides.
+    assert report.counts["clean"] == 1
+    assert report.counts["mac_mismatch"] == 0
+
+
+def test_reservation_with_mismatched_mac_is_mac_mismatch():
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5"}],
+    )
+    rows = [_ip_with_mac("10.0.0.5", IpAddressSource.dhcp.value, "11:22:33:44:55:66")]
+    report = reconcile_scope(scope, rows)
+    assert report.counts["mac_mismatch"] == 1
+    assert report.counts["clean"] == 0
+    entry = report.entries[0]
+    assert entry.status == "mac_mismatch"
+    assert "aa:bb:cc:dd:ee:ff" in (entry.note or "")
+    assert "11:22:33:44:55:66" in (entry.note or "")
+
+
+def test_reservation_without_mac_skips_the_check_entirely():
+    # v6 reservations use duid, not mac. The check is no-op when
+    # either side lacks a MAC — falls through to clean as before.
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "10.0.0.5"}],
+    )
+    rows = [_ip_with_mac("10.0.0.5", IpAddressSource.dhcp.value, "11:22:33:44:55:66")]
+    report = reconcile_scope(scope, rows)
+    assert report.counts["clean"] == 1
+    assert report.counts["mac_mismatch"] == 0
+
+
+def test_ipaddress_without_mac_skips_the_check():
+    # Lease ingested before mac was known — IPAddress.dhcp_mac is
+    # NULL. Reservation supplied a mac, but we can't compare; treat
+    # as clean (don't false-alarm on missing data).
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.5"}],
+    )
+    rows = [_ip_with_mac("10.0.0.5", IpAddressSource.dhcp.value, None)]
+    report = reconcile_scope(scope, rows)
+    assert report.counts["clean"] == 1
+    assert report.counts["mac_mismatch"] == 0
