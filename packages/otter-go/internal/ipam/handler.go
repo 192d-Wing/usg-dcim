@@ -196,6 +196,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("ipam:supernets:delete")).Delete("/supernets/{id}", h.deleteSupernet)
 
 		r.With(auth.RequireCapability("ipam:subnets:create")).Post("/subnets", h.createSubnet)
+		r.With(auth.RequireCapability("ipam:bulk:execute")).Post("/subnets/bulk", h.bulkCreateSubnets)
 		r.With(auth.RequireCapability("ipam:subnets:update")).Patch("/subnets/{id}", h.updateSubnet)
 		r.With(auth.RequireCapability("ipam:subnets:delete")).Delete("/subnets/{id}", h.deleteSubnet)
 
