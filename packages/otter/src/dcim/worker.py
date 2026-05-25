@@ -81,6 +81,57 @@ async def dhcp_age_out(_ctx) -> dict:
     return {"aged_out": n}
 
 
+async def dhcp_drift_check(_ctx) -> dict:
+    """PR 81 — refresh persisted drift state across every enabled
+    DhcpServer. Calls services.dhcp_push.diff_all_scopes once per
+    server; the orchestrator already writes last_diff_* on each scope.
+
+    Failures on one server don't abort the sweep — the per-server
+    diff_all_scopes call returns per-scope errors in its report, and
+    a transport failure to one server is logged + skipped here. The
+    LIST endpoint's ?diff_status= filter and the push-drifted route
+    read whatever this leaves on the rows.
+    """
+    from .models.ipam import DhcpServer  # local — same defer pattern as dhcp_sync
+    from .services import dhcp_push as dhcp_push_svc
+
+    started = datetime.now(UTC)
+    per_server: dict[str, dict] = {}
+    errors = 0
+    async with async_session() as db:
+        servers = (
+            await db.execute(
+                select(DhcpServer).where(DhcpServer.enabled.is_(True))
+            )
+        ).scalars().all()
+        for srv in servers:
+            try:
+                report = await dhcp_push_svc.diff_all_scopes(db, srv)
+                per_server[str(srv.id)] = {
+                    "total": report.total,
+                    "counts": report.counts,
+                }
+            except Exception as e:  # noqa: BLE001 — log + continue
+                errors += 1
+                per_server[str(srv.id)] = {"error": f"{type(e).__name__}: {e}"}
+                log.error(
+                    "dhcp_drift_check.server_error",
+                    server_id=str(srv.id), error=str(e),
+                )
+        await db.commit()
+    elapsed = (datetime.now(UTC) - started).total_seconds()
+    log.info(
+        "dhcp_drift_check.done",
+        servers=len(per_server), errors=errors, elapsed_s=round(elapsed, 3),
+    )
+    return {
+        "servers": len(per_server),
+        "errors": errors,
+        "elapsed_s": elapsed,
+        "per_server": per_server,
+    }
+
+
 async def dns_sync_from_ipam(_ctx) -> dict:
     """Re-project IPAddress.dns_name into source=ipam DNS records for
     every site zone. Catches new allocations / DHCP leases that landed
@@ -239,7 +290,7 @@ class WorkerSettings:
         # retired in favor of services/go-alerts and services/go-dns-probe.
         evaluate_alerts, sweep_collectors, dns_health_checks,
         freshness_sweep,
-        dhcp_sync, dhcp_age_out, dns_sync_from_ipam,
+        dhcp_sync, dhcp_age_out, dhcp_drift_check, dns_sync_from_ipam,
         dns_rotate_zsks, dns_purge_metrics,
         notify_bridge,
         # Region-deploy orchestrator — enqueued on demand from the
@@ -257,6 +308,12 @@ class WorkerSettings:
         # already-stale rows don't pile up.
         cron(dhcp_sync, minute=set(range(2, 60, 5))),
         cron(dhcp_age_out, minute={7}),
+        # PR 81 — refresh persisted drift state. Default :09 / :24 /
+        # :39 / :54 (every 15 min, offset from the lease sync so the
+        # two cron groups don't pile up). Each tick walks every
+        # enabled DhcpServer; for tens of servers with tens of scopes
+        # each, well under a minute.
+        cron(dhcp_drift_check, minute={9, 24, 39, 54}),
         # DNS IPAM-projection: 5 minutes offset from DHCP so a freshly-
         # ingested lease has time to land before its DNS record renders.
         cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))),
