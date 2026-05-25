@@ -166,6 +166,26 @@ func (f *fakeQ) ListDnsServerMetricsSamples(_ context.Context, _ uuid.UUID, _ ti
 func (f *fakeQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
 	return nil, nil
 }
+func (f *fakeQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error) {
+	return dbq.DnsKeyRow{ID: uuid.New(), ZoneID: a.ZoneID, Role: a.Role,
+		Algorithm: a.Algorithm, PrivatePem: a.PrivatePem,
+		PublicKeyB64: a.PublicKeyB64, KeyTag: a.KeyTag}, nil
+}
+func (f *fakeQ) SetDnsZoneSigned(_ context.Context, _ uuid.UUID, _ bool) (int64, error) {
+	return 1, nil
+}
+func (f *fakeQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, _ uuid.UUID, _ string) ([]dbq.DnsKeyRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) RetireDnsKey(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 1, nil
+}
+func (f *fakeQ) DeleteDnsKey(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 1, nil
+}
+func (f *fakeQ) RetireAllDnsKeysForZone(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }

@@ -283,6 +283,57 @@ SET last_render_at = NOW(),
     coredns_version = COALESCE($5, coredns_version)
 WHERE id = $1;
 
+-- ===== DnsKey writes (PR 80+) =====
+-- Key generation/rotation/enable + key delete. Keys are stored
+-- plaintext in Postgres for the Go port (Fernet-at-rest is a
+-- known gap vs Python — operators concerned about at-rest must
+-- use column-level encryption or KMS).
+
+-- name: CreateDnsKey :one
+INSERT INTO dns_keys (
+    id, zone_id, catalog_id, role, algorithm,
+    private_pem, public_key_b64, key_tag,
+    active_from, created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, $2, $3::dns_key_role, $4::dns_key_algorithm,
+    $5, $6, $7, NOW(), NOW(), NOW()
+)
+RETURNING id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+          private_pem, public_key_b64, key_tag, active_from, retired_at,
+          created_at, updated_at;
+
+-- name: SetDnsZoneSigned :exec
+-- Flip the signed flag without bumping the SOA serial — caller
+-- (rotate-key, sync-from-ipam) bumps updated_at separately when
+-- the change should propagate to resolvers.
+UPDATE dns_zones SET signed = $2, updated_at = NOW() WHERE id = $1;
+
+-- name: ListActiveDnsKeysForZoneAndRole :many
+-- Used by enable-dnssec to find existing keys and by rotate-key to
+-- list keys eligible for retirement. retired_at IS NULL filters to
+-- the currently-signing set.
+SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+       private_pem, public_key_b64, key_tag, active_from, retired_at,
+       created_at, updated_at
+FROM dns_keys
+WHERE zone_id = $1 AND role = $2::dns_key_role AND retired_at IS NULL
+ORDER BY active_from DESC;
+
+-- name: RetireDnsKey :exec
+-- Marks a key retired without deleting — the renderer still emits
+-- the DNSKEY RR until the next rollover so resolvers caching the
+-- old key can validate. delete_dnssec_key cleans up later.
+UPDATE dns_keys SET retired_at = NOW() WHERE id = $1;
+
+-- name: DeleteDnsKey :exec
+DELETE FROM dns_keys WHERE id = $1;
+
+-- name: RetireAllDnsKeysForZone :exec
+-- disable-dnssec retires every key — the renderer drops DNSKEY/
+-- RRSIG output and the zone goes back to unsigned.
+UPDATE dns_keys SET retired_at = NOW() WHERE zone_id = $1 AND retired_at IS NULL;
+
 -- ===== DnsKey reads (PR 79) =====
 -- DNSSEC key list + DS-record derivation are pure reads. The key-
 -- generation/rotation surface (POST /enable-dnssec, /rotate-key/{role},

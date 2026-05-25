@@ -68,6 +68,12 @@ type Querier interface {
 	CreateDnsServerMetricsSample(ctx context.Context, arg dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsMetricsSampleRow, error)
 	ListDnsServerMetricsSamples(ctx context.Context, serverID uuid.UUID, cutoff time.Time) ([]dbq.DnsMetricsSampleRow, error)
 	ListDnsKeysByZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsKeyRow, error)
+	CreateDnsKey(ctx context.Context, arg dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error)
+	SetDnsZoneSigned(ctx context.Context, id uuid.UUID, signed bool) (int64, error)
+	ListActiveDnsKeysForZoneAndRole(ctx context.Context, zoneID uuid.UUID, role string) ([]dbq.DnsKeyRow, error)
+	RetireDnsKey(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteDnsKey(ctx context.Context, id uuid.UUID) (int64, error)
+	RetireAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) (int64, error)
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
@@ -183,6 +189,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:zones:read")).Get("/zones/{id}/preview", h.previewZone)
 		r.With(auth.RequireCapability("dns:keys:read")).Get("/zones/{id}/keys", h.listZoneKeys)
 		r.With(auth.RequireCapability("dns:keys:read")).Get("/zones/{id}/ds-records", h.listZoneDsRecords)
+		r.With(auth.RequireCapability("dns:keys:rotate")).Post("/zones/{id}/enable-dnssec", h.enableDnssec)
 
 		r.With(auth.RequireCapability("dns:records:create")).Post("/records", h.createRecord)
 		r.With(auth.RequireCapability("dns:records:update")).Patch("/records/{id}", h.updateRecord)

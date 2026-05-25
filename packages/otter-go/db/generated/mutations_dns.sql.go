@@ -771,6 +771,108 @@ func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+// ---- DnsKey writes (PR 80+) ----
+
+const createDnsKey = `INSERT INTO dns_keys (
+    id, zone_id, catalog_id, role, algorithm,
+    private_pem, public_key_b64, key_tag,
+    active_from, created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, $2, $3::dns_key_role, $4::dns_key_algorithm,
+    $5, $6, $7, NOW(), NOW(), NOW()
+)
+RETURNING id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+          private_pem, public_key_b64, key_tag, active_from, retired_at,
+          created_at, updated_at`
+
+type CreateDnsKeyParams struct {
+	ZoneID       *uuid.UUID `json:"zone_id"`
+	CatalogID    *uuid.UUID `json:"catalog_id"`
+	Role         string     `json:"role"`
+	Algorithm    string     `json:"algorithm"`
+	PrivatePem   string     `json:"private_pem"`
+	PublicKeyB64 string     `json:"public_key_b64"`
+	KeyTag       int32      `json:"key_tag"`
+}
+
+func (q *Queries) CreateDnsKey(ctx context.Context, arg CreateDnsKeyParams) (DnsKeyRow, error) {
+	row := q.db.QueryRow(ctx, createDnsKey,
+		arg.ZoneID, arg.CatalogID, arg.Role, arg.Algorithm,
+		arg.PrivatePem, arg.PublicKeyB64, arg.KeyTag)
+	var k DnsKeyRow
+	err := row.Scan(&k.ID, &k.ZoneID, &k.CatalogID, &k.Role, &k.Algorithm,
+		&k.PrivatePem, &k.PublicKeyB64, &k.KeyTag, &k.ActiveFrom, &k.RetiredAt,
+		&k.CreatedAt, &k.UpdatedAt)
+	return k, err
+}
+
+const setDnsZoneSigned = `UPDATE dns_zones SET signed = $2, updated_at = NOW() WHERE id = $1`
+
+func (q *Queries) SetDnsZoneSigned(ctx context.Context, id uuid.UUID, signed bool) (int64, error) {
+	tag, err := q.db.Exec(ctx, setDnsZoneSigned, id, signed)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+const listActiveDnsKeysForZoneAndRole = `SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+       private_pem, public_key_b64, key_tag, active_from, retired_at,
+       created_at, updated_at
+FROM dns_keys
+WHERE zone_id = $1 AND role = $2::dns_key_role AND retired_at IS NULL
+ORDER BY active_from DESC`
+
+func (q *Queries) ListActiveDnsKeysForZoneAndRole(ctx context.Context, zoneID uuid.UUID, role string) ([]DnsKeyRow, error) {
+	rows, err := q.db.Query(ctx, listActiveDnsKeysForZoneAndRole, zoneID, role)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsKeyRow{}
+	for rows.Next() {
+		var k DnsKeyRow
+		if err := rows.Scan(&k.ID, &k.ZoneID, &k.CatalogID, &k.Role, &k.Algorithm,
+			&k.PrivatePem, &k.PublicKeyB64, &k.KeyTag, &k.ActiveFrom, &k.RetiredAt,
+			&k.CreatedAt, &k.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
+const retireDnsKey = `UPDATE dns_keys SET retired_at = NOW() WHERE id = $1`
+
+func (q *Queries) RetireDnsKey(ctx context.Context, id uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, retireDnsKey, id)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+const deleteDnsKey = `DELETE FROM dns_keys WHERE id = $1`
+
+func (q *Queries) DeleteDnsKey(ctx context.Context, id uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, deleteDnsKey, id)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+const retireAllDnsKeysForZone = `UPDATE dns_keys SET retired_at = NOW() WHERE zone_id = $1 AND retired_at IS NULL`
+
+func (q *Queries) RetireAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, retireAllDnsKeysForZone, zoneID)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // ---- DnsKey reads (PR 79) ----
 
 // DnsKeyRow is the wire shape for one DNSSEC key.
