@@ -20,6 +20,7 @@ import (
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/alerts"
+	"github.com/usg-dcim/packages/otter-go/internal/admin"
 	"github.com/usg-dcim/packages/otter-go/internal/assets"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
@@ -77,6 +78,7 @@ func main() {
 	oh := &organization.Handler{Q: q, Audit: q}
 	sth := &stencils.Handler{}
 	th := &telemetry.Handler{Q: q}
+	adh := &admin.Handler{Q: q, Audit: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -182,6 +184,7 @@ func main() {
 		oh.Mount(r)
 		sth.Mount(r)
 		th.Mount(r)
+		adh.Mount(r)
 		authHandler.Mount(r)
 	})
 
