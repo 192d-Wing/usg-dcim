@@ -522,6 +522,43 @@ def should_auto_push(server: DhcpServer | None, scope: DhcpScope | None = None) 
     return True
 
 
+async def enqueue_bundle_rerender(server_id) -> bool:
+    """PR 83 — enqueue the rerender_dhcp_bundle arq task for `server_id`.
+
+    Best-effort: returns False (and logs a warning) on Redis failure
+    so the API handler can proceed without failing the user's
+    request. The bundle endpoint serves stale cache or falls back to
+    live render when the worker hasn't caught up.
+
+    Lives in this module rather than the api/ layer so every handler
+    that mutates DHCP state (scope create/update/delete, template
+    update, future server-config edits) shares one call site.
+    """
+    try:
+        # Local imports — arq + settings only needed when this is
+        # called, and importing them at module load couples the
+        # worker import graph more tightly than necessary.
+        from arq import create_pool
+        from arq.connections import RedisSettings
+
+        from ..settings import get_settings
+
+        pool = await create_pool(
+            RedisSettings.from_dsn(str(get_settings().redis_dsn)),
+        )
+        try:
+            await pool.enqueue_job("rerender_dhcp_bundle", str(server_id))
+        finally:
+            await pool.close()
+        return True
+    except Exception as e:  # noqa: BLE001 — handler shouldn't fail on enqueue
+        log.warning(
+            "dhcp_bundle_rerender.enqueue_failed",
+            server_id=str(server_id), error=f"{type(e).__name__}: {e}",
+        )
+        return False
+
+
 async def schedule_template_fanout_pushes(
     db: AsyncSession, template_id,
 ) -> list:

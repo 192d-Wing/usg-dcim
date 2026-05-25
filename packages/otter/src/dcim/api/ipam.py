@@ -1843,6 +1843,16 @@ async def get_dhcp_server_bundle(
     await enforce_fabric_scope(
         db, principal.capabilities, server.fabric_id, "ipam:dhcp-servers:bundle",
     )
+    # PR 83 — read from the pre-rendered cache when present. Worker
+    # task rerender_dhcp_bundle writes the columns on every scope
+    # mutation. A null cache means we haven't rendered yet on this
+    # row (fresh install, just-migrated DB) — fall through to live
+    # render, which also seeds the cache via the on-demand worker
+    # enqueue on the next mutation.
+    if server.bundle_cache_etag and server.bundle_cache_json:
+        if if_none_match and if_none_match.strip('"') == server.bundle_cache_etag:
+            return Response(status_code=304)
+        return server.bundle_cache_json
     scopes = (
         await db.execute(
             select(DhcpScope).where(DhcpScope.dhcp_server_id == server_id)
@@ -2053,6 +2063,13 @@ async def create_dhcp_scope(
         background_tasks.add_task(
             dhcp_push.auto_push_scope_in_background, obj.id,
         )
+    # PR 83 — enqueue a bundle re-render so the dhcp-site puller's
+    # next poll picks up the new scope without re-assembling on the
+    # fly. Best-effort: a Redis hiccup logs but doesn't fail the
+    # create.
+    background_tasks.add_task(
+        dhcp_push.enqueue_bundle_rerender, obj.dhcp_server_id,
+    )
     return DhcpScopeOut.model_validate(obj)
 
 
@@ -2136,12 +2153,17 @@ async def update_dhcp_scope(
         background_tasks.add_task(
             dhcp_push.auto_push_scope_in_background, obj.id,
         )
+    # PR 83 — bundle cache refresh.
+    background_tasks.add_task(
+        dhcp_push.enqueue_bundle_rerender, obj.dhcp_server_id,
+    )
     return DhcpScopeOut.model_validate(obj)
 
 
 @router.delete("/dhcp/scopes/{scope_id}", status_code=204)
 async def delete_dhcp_scope(
     scope_id: UUID,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_capability("ipam:dhcp-scopes:delete")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2151,6 +2173,7 @@ async def delete_dhcp_scope(
     server = await _enforce_scope_via_server(
         db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:delete",
     )
+    server_id = obj.dhcp_server_id  # remember for re-render after delete
     # PR 74 — best-effort Kea cleanup before the DB delete. If the
     # scope was never pushed (kea_subnet_id IS NULL), this is a no-op.
     # On a Kea-side failure we proceed with the DB delete anyway and
@@ -2172,6 +2195,8 @@ async def delete_dhcp_scope(
         },
     )
     await db.commit()
+    # PR 83 — bundle cache refresh after delete.
+    background_tasks.add_task(dhcp_push.enqueue_bundle_rerender, server_id)
 
 
 @router.get("/dhcp/scopes/{scope_id}/diff")
@@ -2515,6 +2540,21 @@ async def update_dhcp_scope_template(
     for sid in scope_ids:
         background_tasks.add_task(
             dhcp_push.auto_push_scope_in_background, sid,
+        )
+    # PR 83 — refresh the bundle cache for every server whose scopes
+    # reference this template. Distinct servers only; auto_push status
+    # doesn't gate this (a server without auto_push still serves the
+    # bundle; the cache should still be fresh).
+    affected_servers = (
+        await db.execute(
+            select(DhcpScope.dhcp_server_id)
+            .where(DhcpScope.template_id == template_id)
+            .distinct()
+        )
+    ).scalars().all()
+    for srv_id in affected_servers:
+        background_tasks.add_task(
+            dhcp_push.enqueue_bundle_rerender, srv_id,
         )
     return DhcpScopeTemplateOut.model_validate(obj)
 

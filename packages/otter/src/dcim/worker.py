@@ -81,6 +81,63 @@ async def dhcp_age_out(_ctx) -> dict:
     return {"aged_out": n}
 
 
+async def rerender_dhcp_bundle(_ctx, server_id: str) -> dict:
+    """PR 83 — re-render the Kea bundle for one server and write it
+    to dhcp_servers.bundle_cache_*. Enqueued by API handlers after
+    scope create/update/delete or template update commits.
+
+    No-op if the server is missing (race: deleted between enqueue
+    and execution). Returns the new etag + element counts for log
+    inspection.
+    """
+    from .models.ipam import DhcpScope, DhcpScopeTemplate, DhcpServer
+    from .services import dhcp_bundle as bundle_svc
+
+    async with async_session() as db:
+        server = await db.get(DhcpServer, UUID(server_id))
+        if server is None:
+            log.info("rerender_dhcp_bundle.server_gone", server_id=server_id)
+            return {"server_id": server_id, "status": "server_gone"}
+        scopes = (
+            await db.execute(
+                select(DhcpScope).where(DhcpScope.dhcp_server_id == server.id)
+            )
+        ).scalars().all()
+        template_ids = {s.template_id for s in scopes if s.template_id}
+        templates_by_id: dict = {}
+        if template_ids:
+            rows = (
+                await db.execute(
+                    select(DhcpScopeTemplate)
+                    .where(DhcpScopeTemplate.id.in_(template_ids))
+                )
+            ).scalars().all()
+            templates_by_id = {t.id: t for t in rows}
+        bundle = bundle_svc.render_kea_bundle(server, scopes, templates_by_id)
+        server.bundle_cache_at = datetime.now(UTC)
+        server.bundle_cache_etag = bundle.etag
+        server.bundle_cache_json = {
+            "server_id": bundle.server_id,
+            "ctrl_agent": bundle.ctrl_agent,
+            "dhcp4": bundle.dhcp4,
+            "dhcp6": bundle.dhcp6,
+            "etag": bundle.etag,
+        }
+        await db.commit()
+    log.info(
+        "rerender_dhcp_bundle.done",
+        server_id=server_id, etag=bundle.etag,
+        v4=len(bundle.dhcp4.get("subnet4", [])),
+        v6=len(bundle.dhcp6.get("subnet6", [])),
+    )
+    return {
+        "server_id": server_id,
+        "etag": bundle.etag,
+        "v4_subnets": len(bundle.dhcp4.get("subnet4", [])),
+        "v6_subnets": len(bundle.dhcp6.get("subnet6", [])),
+    }
+
+
 async def dhcp_drift_check(_ctx) -> dict:
     """PR 81 — refresh persisted drift state across every enabled
     DhcpServer. Calls services.dhcp_push.diff_all_scopes once per
@@ -290,7 +347,8 @@ class WorkerSettings:
         # retired in favor of services/go-alerts and services/go-dns-probe.
         evaluate_alerts, sweep_collectors, dns_health_checks,
         freshness_sweep,
-        dhcp_sync, dhcp_age_out, dhcp_drift_check, dns_sync_from_ipam,
+        dhcp_sync, dhcp_age_out, dhcp_drift_check, rerender_dhcp_bundle,
+        dns_sync_from_ipam,
         dns_rotate_zsks, dns_purge_metrics,
         notify_bridge,
         # Region-deploy orchestrator — enqueued on demand from the

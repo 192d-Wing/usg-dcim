@@ -500,6 +500,12 @@ class DhcpServer(UUIDPrimaryKey, Timestamped, Base):
     # after the response returns). Default FALSE = explicit-push
     # workflow PR 74 shipped.
     auto_push: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # PR 83 — bundle pre-render cache. Worker task (rerender_dhcp_bundle)
+    # writes these; the bundle endpoint reads from them when present
+    # and falls back to live render when null. See migration 0058.
+    bundle_cache_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bundle_cache_etag: Mapped[str | None] = mapped_column(String(128))
+    bundle_cache_json: Mapped[dict | None] = mapped_column(JSON)
 
 
 class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
