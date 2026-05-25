@@ -54,6 +54,20 @@ func (q *Queries) GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID,
 	return regionID, err
 }
 
+const getSiteOrganizationID = `-- name: GetSiteOrganizationID :one
+SELECT organization_id FROM sites WHERE id = $1
+`
+
+// GetSiteOrganizationID returns the site's organization_id FK (PR 90).
+// Pointer return — NULL columns map to nil so callers can distinguish
+// "site has no org mapped yet" from "site exists with org X."
+func (q *Queries) GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getSiteOrganizationID, id)
+	var orgID *uuid.UUID
+	err := row.Scan(&orgID)
+	return orgID, err
+}
+
 const listSiteGroupIDsForSite = `-- name: ListSiteGroupIDsForSite :many
 SELECT group_id FROM site_group_memberships WHERE site_id = $1
 `
@@ -326,21 +340,25 @@ const listSiteIDsForExpansion = `-- name: ListSiteIDsForExpansion :many
 SELECT DISTINCT s.id
 FROM sites s
 LEFT JOIN site_group_memberships sgm ON sgm.site_id = s.id
-WHERE ($1::uuid[] IS NOT NULL AND s.id        = ANY($1::uuid[]))
-   OR ($2::uuid[] IS NOT NULL AND s.region_id = ANY($2::uuid[]))
-   OR ($3::uuid[] IS NOT NULL AND sgm.group_id = ANY($3::uuid[]))`
+WHERE ($1::uuid[] IS NOT NULL AND s.id              = ANY($1::uuid[]))
+   OR ($2::uuid[] IS NOT NULL AND s.region_id       = ANY($2::uuid[]))
+   OR ($3::uuid[] IS NOT NULL AND sgm.group_id      = ANY($3::uuid[]))
+   OR ($4::uuid[] IS NOT NULL AND s.organization_id = ANY($4::uuid[]))`
 
-// ListSiteIDsForExpansionParams are the (direct, region, group) input
-// slices. nil for any of them means "this dimension doesn't apply" —
-// the query OR-joins matches from whichever dimensions are non-NULL.
+// ListSiteIDsForExpansionParams are the (direct, region, group,
+// organization) input slices. nil for any of them means "this
+// dimension doesn't apply" — the query OR-joins matches from
+// whichever dimensions are non-NULL. PR 90 adds OrganizationIds.
 type ListSiteIDsForExpansionParams struct {
-	DirectSiteIds []uuid.UUID `json:"direct_site_ids"`
-	RegionIds     []uuid.UUID `json:"region_ids"`
-	GroupIds      []uuid.UUID `json:"group_ids"`
+	DirectSiteIds   []uuid.UUID `json:"direct_site_ids"`
+	RegionIds       []uuid.UUID `json:"region_ids"`
+	GroupIds        []uuid.UUID `json:"group_ids"`
+	OrganizationIds []uuid.UUID `json:"organization_ids"`
 }
 
 func (q *Queries) ListSiteIDsForExpansion(ctx context.Context, arg ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listSiteIDsForExpansion, arg.DirectSiteIds, arg.RegionIds, arg.GroupIds)
+	rows, err := q.db.Query(ctx, listSiteIDsForExpansion,
+		arg.DirectSiteIds, arg.RegionIds, arg.GroupIds, arg.OrganizationIds)
 	if err != nil {
 		return nil, err
 	}

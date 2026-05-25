@@ -49,11 +49,15 @@ func TestFabricMatches(t *testing.T) {
 type fakeSiteQ struct {
 	regionID uuid.UUID
 	groups   []uuid.UUID
+	orgID    *uuid.UUID
 	err      error
 }
 
 func (f *fakeSiteQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return f.regionID, f.err
+}
+func (f *fakeSiteQ) GetSiteOrganizationID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return f.orgID, f.err
 }
 func (f *fakeSiteQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
 	return f.groups, f.err
@@ -94,6 +98,49 @@ func TestSiteMatches_NoMatch(t *testing.T) {
 	ok, _ := s.SiteMatches(context.Background(), q, uuid.New())
 	if ok {
 		t.Error("unrelated site should fail")
+	}
+}
+
+func TestSiteMatches_ViaOrganization(t *testing.T) {
+	// PR 90 — principal scoped on an organizations.id UUID should
+	// match every site whose sites.organization_id FK matches.
+	org := uuid.New()
+	s := Scope{OrganizationIDs: singletonUUID(org)}
+	q := &fakeSiteQ{orgID: &org}
+	ok, _ := s.SiteMatches(context.Background(), q, uuid.New())
+	if !ok {
+		t.Error("site under matching organization should pass")
+	}
+}
+
+func TestSiteMatches_OrganizationNullOnSite(t *testing.T) {
+	// Sites not yet mapped to an organization (PR 66 backfill leaves
+	// unmatched rows with NULL organization_id) don't match an
+	// organization-scoped principal — the dimension is "I belong to
+	// org X," not "I have no org."
+	org := uuid.New()
+	s := Scope{OrganizationIDs: singletonUUID(org)}
+	q := &fakeSiteQ{orgID: nil}
+	ok, _ := s.SiteMatches(context.Background(), q, uuid.New())
+	if ok {
+		t.Error("site with NULL organization_id should not match org-scoped principal")
+	}
+}
+
+func TestOrganizationMatches_DirectAndGlobal(t *testing.T) {
+	target := uuid.New()
+	// Direct match.
+	s := Scope{OrganizationIDs: singletonUUID(target)}
+	if !s.OrganizationMatches(target) {
+		t.Error("direct match should pass")
+	}
+	if s.OrganizationMatches(uuid.New()) {
+		t.Error("non-match should fail")
+	}
+	// Global bypasses dimension set entirely.
+	g := GlobalScope()
+	if !g.OrganizationMatches(target) {
+		t.Error("global should match any org id")
 	}
 }
 

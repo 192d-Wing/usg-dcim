@@ -60,6 +60,9 @@ func (f *fakeQuerier) UpdateSite(_ context.Context, arg dbq.UpdateSiteParams) (d
 func (f *fakeQuerier) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
+func (f *fakeQuerier) GetSiteOrganizationID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
 func (f *fakeQuerier) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
 	return nil, nil
 }

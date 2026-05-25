@@ -19,6 +19,13 @@ WHERE ur.user_id = $1;
 -- expanded to match sites under that region.
 SELECT region_id FROM sites WHERE id = $1;
 
+-- name: GetSiteOrganizationID :one
+-- PR 90 — site → organization lookup. NULL when the site hasn't been
+-- mapped to organizations yet (post-PR-66 migration may leave rows
+-- with NULL organization_id). Used by SiteMatches to expand a
+-- principal scoped on an organizations.id UUID to the matching sites.
+SELECT organization_id FROM sites WHERE id = $1;
+
 -- name: ListSiteGroupIDsForSite :many
 -- All SiteGroup memberships for a site. A site-group-scoped principal
 -- matches a site if any of its memberships overlap the principal's
@@ -146,8 +153,10 @@ SELECT site_id FROM maintenance_windows WHERE id = $1;
 -- name: ListSiteIDsForExpansion :many
 -- PR 62 — expand a scoped principal's region + site_group + direct
 -- site dimensions into the concrete set of site IDs they can see.
--- The three inputs are independently optional; any/all may be NULL.
--- A row is returned if it matches any non-NULL dimension. (Caller
+-- PR 90 adds the organization_id dim: a principal scoped on an
+-- organizations.id UUID sees every site with the matching FK.
+-- All inputs are independently optional; any/all may be NULL. A row
+-- is returned if it matches any non-NULL dimension. (Caller
 -- guarantees at least one dimension is non-NULL; global principals
 -- skip this query entirely.) Used by auth.ScopedSiteFilter to build
 -- the scope_site_ids slice that LIST/COUNT queries on site-rooted
@@ -155,6 +164,7 @@ SELECT site_id FROM maintenance_windows WHERE id = $1;
 SELECT DISTINCT s.id
 FROM sites s
 LEFT JOIN site_group_memberships sgm ON sgm.site_id = s.id
-WHERE (sqlc.narg(direct_site_ids)::uuid[] IS NOT NULL AND s.id        = ANY(sqlc.narg(direct_site_ids)::uuid[]))
-   OR (sqlc.narg(region_ids)::uuid[]      IS NOT NULL AND s.region_id = ANY(sqlc.narg(region_ids)::uuid[]))
-   OR (sqlc.narg(group_ids)::uuid[]       IS NOT NULL AND sgm.group_id = ANY(sqlc.narg(group_ids)::uuid[]));
+WHERE (sqlc.narg(direct_site_ids)::uuid[]  IS NOT NULL AND s.id              = ANY(sqlc.narg(direct_site_ids)::uuid[]))
+   OR (sqlc.narg(region_ids)::uuid[]       IS NOT NULL AND s.region_id       = ANY(sqlc.narg(region_ids)::uuid[]))
+   OR (sqlc.narg(group_ids)::uuid[]        IS NOT NULL AND sgm.group_id      = ANY(sqlc.narg(group_ids)::uuid[]))
+   OR (sqlc.narg(organization_ids)::uuid[] IS NOT NULL AND s.organization_id = ANY(sqlc.narg(organization_ids)::uuid[]));

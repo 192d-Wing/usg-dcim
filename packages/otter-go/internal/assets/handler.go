@@ -38,6 +38,7 @@ type Querier interface {
 
 	// PR 54: ABAC SiteMatches expansion.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 
 	// PR 62: scope-filtered LISTs.

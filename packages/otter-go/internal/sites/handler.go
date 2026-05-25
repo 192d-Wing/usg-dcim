@@ -32,6 +32,7 @@ type Querier interface {
 	// PR 54: ABAC SiteMatches expansion. Region- and site-group-scoped
 	// principals need these to resolve whether a target site is reachable.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 
 	// PR 62: scope-filtered LISTs. Expands the caller's region + group +

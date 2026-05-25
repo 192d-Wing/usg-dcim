@@ -47,6 +47,7 @@ type Querier interface {
 	GetAlertRuleSiteScopeID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	GetMaintenanceWindowSiteID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 
 	// PR 63: scope-filtered LISTs. Site-scope expansion to a concrete

@@ -83,6 +83,9 @@ func (f *fakeQ) GetMaintenanceWindowSiteID(_ context.Context, _ uuid.UUID) (*uui
 func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
+func (f *fakeQ) GetSiteOrganizationID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
 func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
 	return nil, nil
 }

@@ -116,6 +116,7 @@ type Querier interface {
 	GetBgpPeerSiteID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetAnycastBindingDnsServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 
 	// PR 63: scope-filtered LIST. Site-scope expansion for /dns/bgp-peers.

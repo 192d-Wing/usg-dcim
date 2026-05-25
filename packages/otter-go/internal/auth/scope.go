@@ -125,6 +125,21 @@ func (s Scope) ClassificationMatches(classification string) bool {
 	return ok
 }
 
+// OrganizationMatches reports whether the given organizations.id UUID
+// is reachable under s. Pure set check; the resolver populated
+// OrganizationIDs from scope bindings whose target_id parsed as UUID
+// (PR 69). The legacy string-keyed Organizations dimension is
+// intentionally not consulted here — string bindings predate the FK
+// pivot and apply only to sites.organization, which the site filter
+// no longer keys on (PR 90).
+func (s Scope) OrganizationMatches(orgID uuid.UUID) bool {
+	if s.IsGlobal {
+		return true
+	}
+	_, ok := s.OrganizationIDs[orgID]
+	return ok
+}
+
 // FabricIDsInScope returns the fabric set the caller should constrain
 // their list query to. nil = no filter (global scope); empty set =
 // nothing in scope; non-nil non-empty = restrict via WHERE
@@ -169,7 +184,7 @@ func ScopedSiteFilter(ctx context.Context, q siteExpansionQ, p Principal, capCod
 	if s == nil || s.IsGlobal {
 		return nil, false, nil
 	}
-	var directs, regions, groups []uuid.UUID
+	var directs, regions, groups, orgs []uuid.UUID
 	if len(s.SiteIDs) > 0 {
 		directs = make([]uuid.UUID, 0, len(s.SiteIDs))
 		for id := range s.SiteIDs {
@@ -188,11 +203,21 @@ func ScopedSiteFilter(ctx context.Context, q siteExpansionQ, p Principal, capCod
 			groups = append(groups, id)
 		}
 	}
-	if directs == nil && regions == nil && groups == nil {
+	// PR 90 — organization_id is a site-reachable dimension now. A
+	// principal scoped only on an organizations.id UUID sees every
+	// site whose sites.organization_id FK matches.
+	if len(s.OrganizationIDs) > 0 {
+		orgs = make([]uuid.UUID, 0, len(s.OrganizationIDs))
+		for id := range s.OrganizationIDs {
+			orgs = append(orgs, id)
+		}
+	}
+	if directs == nil && regions == nil && groups == nil && orgs == nil {
 		return []uuid.UUID{}, true, nil
 	}
 	ids, err := q.ListSiteIDsForExpansion(ctx, dbq.ListSiteIDsForExpansionParams{
 		DirectSiteIds: directs, RegionIds: regions, GroupIds: groups,
+		OrganizationIds: orgs,
 	})
 	if err != nil {
 		return nil, true, err
@@ -234,11 +259,16 @@ func ScopedFabricFilter(p Principal, capCode string) (ids []uuid.UUID, scoped bo
 }
 
 // SiteMatches reports whether site_id is reachable under s. Walks the
-// region + site-group dimensions via DB lookups when needed; for
-// site-scoped principals it's a pure set check.
+// region + site-group + organization dimensions via DB lookups when
+// needed; for site-scoped principals it's a pure set check.
 type siteScopeQ interface {
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
+	// PR 90 — organization_id lookup for the org-scope dimension.
+	// Pointer return: NULL means the site hasn't been mapped to an
+	// organization yet (post-PR-66 backfill leaves unmatched rows
+	// with NULL); the matcher reads it as "no org dim match."
+	GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
 }
 
 func (s Scope) SiteMatches(ctx context.Context, q siteScopeQ, siteID uuid.UUID) (bool, error) {
@@ -263,6 +293,17 @@ func (s Scope) SiteMatches(ctx context.Context, q siteScopeQ, siteID uuid.UUID) 
 				if _, ok := s.SiteGroupIDs[g]; ok {
 					return true, nil
 				}
+			}
+		}
+	}
+	// PR 90 — organization scope dim. Skip the DB lookup when the
+	// principal has no OrganizationIDs (steady-state for most
+	// scoped principals) to keep the hot path cheap.
+	if len(s.OrganizationIDs) > 0 {
+		orgID, err := q.GetSiteOrganizationID(ctx, siteID)
+		if err == nil && orgID != nil {
+			if _, ok := s.OrganizationIDs[*orgID]; ok {
+				return true, nil
 			}
 		}
 	}
