@@ -270,6 +270,19 @@ RETURNING id, name, fabric_id, host(target_ip) AS target_ip,
 -- name: DeleteDnsHealthCheck :exec
 DELETE FROM dns_health_checks WHERE id = $1;
 
+-- name: SetDnsServerRenderStatus :exec
+-- PR 73 — collector callback after every render attempt. Mirrors
+-- DhcpServer.last_sync_* shape on DnsServer. coredns_version is
+-- optional: if NULL it's left unchanged (existing value sticks),
+-- if non-NULL it's recorded.
+UPDATE dns_servers
+SET last_render_at = NOW(),
+    last_render_status = $2,
+    last_render_error = $3,
+    last_render_etag = $4,
+    coredns_version = COALESCE($5, coredns_version)
+WHERE id = $1;
+
 -- name: SetDnsHealthCheckResult :exec
 -- PR 72 — collector callback after running one probe. Status,
 -- last_checked_at, last_error are the only mutable fields. Audit

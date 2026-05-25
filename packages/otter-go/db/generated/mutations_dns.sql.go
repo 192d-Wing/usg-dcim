@@ -770,6 +770,32 @@ func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+const setDnsServerRenderStatus = `-- name: SetDnsServerRenderStatus :exec
+UPDATE dns_servers
+SET last_render_at = NOW(),
+    last_render_status = $2,
+    last_render_error = $3,
+    last_render_etag = $4,
+    coredns_version = COALESCE($5, coredns_version)
+WHERE id = $1
+`
+
+type SetDnsServerRenderStatusParams struct {
+	ID             uuid.UUID `json:"id"`
+	Status         string    `json:"status"`
+	Error          *string   `json:"error"`
+	Etag           *string   `json:"etag"`
+	CoreDNSVersion *string   `json:"coredns_version"`
+}
+
+func (q *Queries) SetDnsServerRenderStatus(ctx context.Context, arg SetDnsServerRenderStatusParams) (int64, error) {
+	tag, err := q.db.Exec(ctx, setDnsServerRenderStatus, arg.ID, arg.Status, arg.Error, arg.Etag, arg.CoreDNSVersion)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 const setDnsHealthCheckResult = `-- name: SetDnsHealthCheckResult :exec
 UPDATE dns_health_checks
 SET status = $2::dns_health_check_status,

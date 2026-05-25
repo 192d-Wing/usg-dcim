@@ -63,6 +63,7 @@ type Querier interface {
 	SetDnsZoneNsec3(ctx context.Context, arg dbq.SetDnsZoneNsec3Params) (dbq.DnsZone, error)
 	ListAllRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsRecordForRender, error)
 	SetDnsHealthCheckResult(ctx context.Context, id uuid.UUID, status string, lastError *string) (int64, error)
+	SetDnsServerRenderStatus(ctx context.Context, arg dbq.SetDnsServerRenderStatusParams) (int64, error)
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
@@ -184,6 +185,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:servers:create")).Post("/servers", h.createServer)
 		r.With(auth.RequireCapability("dns:servers:update")).Patch("/servers/{id}", h.updateServer)
 		r.With(auth.RequireCapability("dns:servers:delete")).Delete("/servers/{id}", h.deleteServer)
+		r.With(auth.RequireCapability("dns:servers:update")).Post("/servers/{id}/render-status", h.postServerRenderStatus)
 
 		r.With(auth.RequireCapability("dns:anycast-groups:create")).Post("/anycast-groups", h.createAnycastGroup)
 		r.With(auth.RequireCapability("dns:anycast-groups:update")).Patch("/anycast-groups/{id}", h.updateAnycastGroup)
