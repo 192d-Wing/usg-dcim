@@ -29,6 +29,8 @@ What this module does NOT do (yet):
 
 from __future__ import annotations
 
+import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -38,8 +40,32 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import metrics
 from ..models.ipam import DhcpScope, DhcpScopeTemplate, DhcpServer
 from .kea import KeaClient
+
+
+@contextmanager
+def _kea_call_timer(server_id: str, operation: str):
+    """Record Kea RPC duration into the histogram (PR 98).
+
+    Yields a small holder; the caller stamps `holder.status` with the
+    interpreted result ("ok" / "error" / "unsupported") before the
+    block exits. The status is the same taxonomy push_scope and
+    diff_scope return so dashboards can slice latency by outcome.
+
+    On exception, status defaults to "error" — the operator still
+    gets the duration even when the RPC blew up.
+    """
+    holder = SimpleNamespace(status="error")
+    start = time.perf_counter()
+    try:
+        yield holder
+    finally:
+        elapsed = time.perf_counter() - start
+        metrics.dhcp_kea_call_seconds.labels(
+            server_id=server_id, operation=operation, status=holder.status,
+        ).observe(elapsed)
 
 log = structlog.get_logger("dcim.dhcp_push")
 
@@ -405,36 +431,42 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
         password=server.auth_password,
     )
 
-    try:
-        if scope.ip_family == 4:
-            subnet_def = render_kea_subnet4(effective, scope.kea_subnet_id)
-            resp = await (
-                client.subnet4_update(subnet_def) if is_update
-                else client.subnet4_add(subnet_def)
+    # PR 98 — wrap the Kea RPC + config_write in one timer span.
+    # The timer's holder.status is stamped from the interpreted
+    # response below so dashboards can slice latency by outcome.
+    with _kea_call_timer(str(server.id), "push") as timer:
+        try:
+            if scope.ip_family == 4:
+                subnet_def = render_kea_subnet4(effective, scope.kea_subnet_id)
+                resp = await (
+                    client.subnet4_update(subnet_def) if is_update
+                    else client.subnet4_add(subnet_def)
+                )
+                await client.config_write(["dhcp4"])
+            else:
+                subnet_def = render_kea_subnet6(effective, scope.kea_subnet_id)
+                resp = await (
+                    client.subnet6_update(subnet_def) if is_update
+                    else client.subnet6_add(subnet_def)
+                )
+                await client.config_write(["dhcp6"])
+        except Exception as e:  # noqa: BLE001 — surface any transport error verbatim
+            status, err = "error", f"{type(e).__name__}: {e}"
+            timer.status = status  # noqa: B010 — context manager holder
+            log.error("dhcp_push.transport_error", scope_id=str(scope.id), error=err)
+            await _record_push_status(db, server, status, err)
+            # Roll back the optimistic id allocation if this was a first
+            # push that never made it to Kea — leaves the scope in its
+            # pre-push state so a retry doesn't burn an id.
+            if not is_update:
+                scope.kea_subnet_id = None
+            return PushResult(
+                scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
+                status=status, error=err, raw=None,
             )
-            await client.config_write(["dhcp4"])
-        else:
-            subnet_def = render_kea_subnet6(effective, scope.kea_subnet_id)
-            resp = await (
-                client.subnet6_update(subnet_def) if is_update
-                else client.subnet6_add(subnet_def)
-            )
-            await client.config_write(["dhcp6"])
-    except Exception as e:  # noqa: BLE001 — surface any transport error verbatim
-        status, err = "error", f"{type(e).__name__}: {e}"
-        log.error("dhcp_push.transport_error", scope_id=str(scope.id), error=err)
-        await _record_push_status(db, server, status, err)
-        # Roll back the optimistic id allocation if this was a first
-        # push that never made it to Kea — leaves the scope in its
-        # pre-push state so a retry doesn't burn an id.
-        if not is_update:
-            scope.kea_subnet_id = None
-        return PushResult(
-            scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
-            status=status, error=err, raw=None,
-        )
 
-    status, err = _interpret_kea_response(resp)
+        status, err = _interpret_kea_response(resp)
+        timer.status = status  # noqa: B010
     if status != "ok" and not is_update:
         # Same rollback as the transport-error branch: id wasn't
         # actually claimed in Kea.
@@ -472,19 +504,26 @@ async def delete_scope_from_kea(scope: DhcpScope, server: DhcpServer) -> PushRes
         username=server.auth_username,
         password=server.auth_password,
     )
-    try:
-        if scope.ip_family == 4:
-            resp = await client.subnet4_del(scope.kea_subnet_id)
-            await client.config_write(["dhcp4"])
-        else:
-            resp = await client.subnet6_del(scope.kea_subnet_id)
-            await client.config_write(["dhcp6"])
-    except Exception as e:  # noqa: BLE001
-        return PushResult(
-            scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
-            status="error", error=f"{type(e).__name__}: {e}", raw=None,
-        )
-    status, err = _interpret_kea_response(resp)
+    # PR 98 — same timing pattern as push_scope. delete is its own
+    # operation label so dashboards can distinguish add/update RPCs
+    # (typically slow on busy servers) from delete RPCs (usually
+    # cheap).
+    with _kea_call_timer(str(server.id), "delete") as timer:
+        try:
+            if scope.ip_family == 4:
+                resp = await client.subnet4_del(scope.kea_subnet_id)
+                await client.config_write(["dhcp4"])
+            else:
+                resp = await client.subnet6_del(scope.kea_subnet_id)
+                await client.config_write(["dhcp6"])
+        except Exception as e:  # noqa: BLE001
+            timer.status = "error"  # noqa: B010
+            return PushResult(
+                scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
+                status="error", error=f"{type(e).__name__}: {e}", raw=None,
+            )
+        status, err = _interpret_kea_response(resp)
+        timer.status = status  # noqa: B010
     return PushResult(
         scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
         status=status, error=err, raw=resp,
@@ -782,19 +821,27 @@ async def diff_scope(
         password=server.auth_password,
     )
 
-    try:
-        if scope.ip_family == 4:
-            resp = await client.subnet4_get(scope.kea_subnet_id)
-        else:
-            resp = await client.subnet6_get(scope.kea_subnet_id)
-    except Exception as e:  # noqa: BLE001
-        err = f"{type(e).__name__}: {e}"
-        log.error("dhcp_diff.transport_error", scope_id=str(scope.id), error=err)
-        return DiffResult(
-            scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
-            status="error", dcim_subnet=dcim_subnet, kea_subnet=None,
-            delta={}, error=err,
-        )
+    # PR 98 — wrap the subnetN-get RPC in the histogram. The timer
+    # records the RPC duration; the application-level diff outcome
+    # (drifted / in_sync / missing) is decided below from the
+    # response body. timer.status reflects whether the RPC itself
+    # succeeded — local diff computation is fast and not counted.
+    with _kea_call_timer(str(server.id), "diff") as timer:
+        try:
+            if scope.ip_family == 4:
+                resp = await client.subnet4_get(scope.kea_subnet_id)
+            else:
+                resp = await client.subnet6_get(scope.kea_subnet_id)
+            timer.status = "ok"  # noqa: B010
+        except Exception as e:  # noqa: BLE001
+            err = f"{type(e).__name__}: {e}"
+            timer.status = "error"  # noqa: B010
+            log.error("dhcp_diff.transport_error", scope_id=str(scope.id), error=err)
+            return DiffResult(
+                scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,
+                status="error", dcim_subnet=dcim_subnet, kea_subnet=None,
+                delta={}, error=err,
+            )
 
     kea_subnet = _extract_kea_subnet(resp, scope.ip_family)
     if kea_subnet is None:

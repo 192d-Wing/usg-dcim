@@ -137,6 +137,24 @@ dhcp_drift_alerts_firing = Gauge(
     ["server_id", "fabric_id"],
 )
 
+# --- Kea RPC latency (PR 98) ---
+# Per-call duration of the Kea Control Agent REST hops we make in
+# push_scope (subnetN-add/update), diff_scope (subnetN-get), and
+# delete_scope_from_kea (subnetN-del). Operators graph p95/p99 by
+# server_id to spot Kea-side slowness before it cascades into
+# timeouts; `status` separates the happy path from error paths
+# (which often have very different latency distributions).
+#
+# Buckets are wider than the HTTP-request histogram — Kea reloads
+# on subnet_cmds can take a few seconds on busy servers, and we
+# want resolution out to ~minute timeouts.
+dhcp_kea_call_seconds = Histogram(
+    "dcim_dhcp_kea_call_seconds",
+    "Kea Control Agent RPC latency by server + operation + status.",
+    ["server_id", "operation", "status"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+)
+
 
 _UNMATCHED_ROUTE = "<unmatched>"
 
