@@ -163,6 +163,9 @@ func (f *fakeQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.CreateDnsS
 func (f *fakeQ) ListDnsServerMetricsSamples(_ context.Context, _ uuid.UUID, _ time.Time) ([]dbq.DnsMetricsSampleRow, error) {
 	return nil, nil
 }
+func (f *fakeQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+	return nil, nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }

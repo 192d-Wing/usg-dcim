@@ -771,6 +771,50 @@ func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+// ---- DnsKey reads (PR 79) ----
+
+// DnsKeyRow is the wire shape for one DNSSEC key.
+type DnsKeyRow struct {
+	ID            uuid.UUID  `json:"id"`
+	ZoneID        *uuid.UUID `json:"zone_id"`
+	CatalogID     *uuid.UUID `json:"catalog_id"`
+	Role          string     `json:"role"`
+	Algorithm     string     `json:"algorithm"`
+	PrivatePem    string     `json:"-"` // never returned over the wire
+	PublicKeyB64  string     `json:"public_key_b64"`
+	KeyTag        int32      `json:"key_tag"`
+	ActiveFrom    time.Time  `json:"active_from"`
+	RetiredAt     *time.Time `json:"retired_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+const listDnsKeysByZone = `SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+       private_pem, public_key_b64, key_tag, active_from, retired_at,
+       created_at, updated_at
+FROM dns_keys
+WHERE zone_id = $1
+ORDER BY role::text ASC, active_from DESC`
+
+func (q *Queries) ListDnsKeysByZone(ctx context.Context, zoneID uuid.UUID) ([]DnsKeyRow, error) {
+	rows, err := q.db.Query(ctx, listDnsKeysByZone, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsKeyRow{}
+	for rows.Next() {
+		var k DnsKeyRow
+		if err := rows.Scan(&k.ID, &k.ZoneID, &k.CatalogID, &k.Role, &k.Algorithm,
+			&k.PrivatePem, &k.PublicKeyB64, &k.KeyTag, &k.ActiveFrom, &k.RetiredAt,
+			&k.CreatedAt, &k.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 // ---- DnsServerMetricsSample (PR 78) ----
 
 // DnsMetricsSampleRow is the wire shape for one metrics sample.

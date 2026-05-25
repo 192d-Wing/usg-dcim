@@ -283,6 +283,22 @@ SET last_render_at = NOW(),
     coredns_version = COALESCE($5, coredns_version)
 WHERE id = $1;
 
+-- ===== DnsKey reads (PR 79) =====
+-- DNSSEC key list + DS-record derivation are pure reads. The key-
+-- generation/rotation surface (POST /enable-dnssec, /rotate-key/{role},
+-- DELETE /keys/{id}) stays Python — those need the cryptography
+-- crate and live state machines.
+
+-- name: ListDnsKeysByZone :many
+-- PR 79 — list every key bound to a zone, ordered KSK first then
+-- newest active_from first (matches Python's role ASC + active_from DESC).
+SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
+       private_pem, public_key_b64, key_tag, active_from, retired_at,
+       created_at, updated_at
+FROM dns_keys
+WHERE zone_id = $1
+ORDER BY role::text ASC, active_from DESC;
+
 -- ===== DnsServerMetricsSample (PR 78) =====
 -- Per-interval delta sample posted by the dns-collector on every
 -- scrape. Stored as raw rows; aggregation happens in the dashboard
