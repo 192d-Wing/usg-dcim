@@ -339,6 +339,10 @@ class IPAddress(UUIDPrimaryKey, Timestamped, Base):
     # ages out IPs whose lease has lapsed without churning static rows.
     dhcp_lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dhcp_mac: Mapped[str | None] = mapped_column(String(32))
+    # PR 94 — DUID binding for v6 reservation/lease rows. Mirrors
+    # dhcp_mac's purpose for v4 (PR 88). RFC 8415 caps DUIDs at
+    # 128 octets; 254-char VARCHAR covers any canonicalized form.
+    dhcp_duid: Mapped[str | None] = mapped_column(String(254))
 
 
 class Overlay(UUIDPrimaryKey, Timestamped, Base):

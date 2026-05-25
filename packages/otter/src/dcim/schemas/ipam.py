@@ -255,6 +255,8 @@ class IPAddressBase(BaseModel):
     description: str | None = None
     dhcp_lease_expires_at: datetime | None = None
     dhcp_mac: str | None = None
+    # PR 94 — DUID binding for v6 rows (mirrors dhcp_mac for v4).
+    dhcp_duid: str | None = None
 
 
 class IPAddressCreate(IPAddressBase):

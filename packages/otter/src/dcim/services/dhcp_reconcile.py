@@ -91,6 +91,27 @@ def _normalize_mac(mac: str | None) -> str | None:
     return ":".join(cleaned[i:i + 2] for i in range(0, 12, 2))
 
 
+def _normalize_duid(duid: str | None) -> str | None:
+    """Canonicalize a DUID for comparison (PR 94).
+
+    RFC 8415 caps DUIDs at 128 octets (1-128 bytes); canonicalized
+    form is lowercase hex joined by colons. Accepts colon, dash, or
+    no separator on input. Returns None if the input has fewer than
+    2 hex characters (1 byte minimum per RFC) or more than 256
+    (128 octets max).
+
+    Unlike MAC (always 6 octets), DUIDs are variable-length, so the
+    normalizer accepts any even hex count in the valid range and
+    canonicalizes the separator.
+    """
+    if not duid:
+        return None
+    cleaned = "".join(c for c in duid.lower() if c in "0123456789abcdef")
+    if len(cleaned) < 2 or len(cleaned) > 256 or len(cleaned) % 2 != 0:
+        return None
+    return ":".join(cleaned[i:i + 2] for i in range(0, len(cleaned), 2))
+
+
 def reconcile_scope(scope, ip_rows: list[IPAddress]) -> ReconcileReport:
     """Build a ReconcileReport for `scope` against the IPAddress rows
     already loaded for the linked subnet.
@@ -139,11 +160,10 @@ def reconcile_scope(scope, ip_rows: list[IPAddress]) -> ReconcileReport:
                 note="IPAddress is static — reservation would hand out an already-claimed IP",
             ))
             continue
-        # PR 88 — MAC binding check. If the reservation declares a MAC
-        # (v4) and the matching IPAddress carries one too, they must
-        # agree. The reservation is bound to a specific client; if
-        # IPAM thinks the IP is bound to a different MAC, that's a
-        # silent mismatch the operator should hear about.
+        # PR 88 — MAC binding check (v4). If the reservation declares
+        # a MAC and the matching IPAddress carries one too, they must
+        # agree. Either side NULL = check skipped (don't false-alarm
+        # on missing data).
         res_mac = _normalize_mac(r.get("mac"))
         row_mac = _normalize_mac(getattr(match, "dhcp_mac", None))
         if res_mac and row_mac and res_mac != row_mac:
@@ -157,14 +177,34 @@ def reconcile_scope(scope, ip_rows: list[IPAddress]) -> ReconcileReport:
                 ),
             ))
             continue
-        # dhcp or reservation source with matching (or unknown) MAC.
+        # PR 94 — DUID binding check (v6). Parallel to the MAC check;
+        # separate status so operators can distinguish v4 mac drift
+        # from v6 duid drift in the report.
+        res_duid = _normalize_duid(r.get("duid"))
+        row_duid = _normalize_duid(getattr(match, "dhcp_duid", None))
+        if res_duid and row_duid and res_duid != row_duid:
+            entries.append(ReconcileEntry(
+                reservation_ip=norm, identifier=ident,
+                status="duid_mismatch", ip_address_id=str(match.id),
+                ip_source=src,
+                note=(
+                    f"reservation expects duid={res_duid} but IPAddress "
+                    f"has duid={row_duid}"
+                ),
+            ))
+            continue
+        # dhcp or reservation source with matching (or unknown)
+        # identifier on whichever family applies.
         entries.append(ReconcileEntry(
             reservation_ip=norm, identifier=ident,
             status="clean", ip_address_id=str(match.id),
             ip_source=src,
         ))
 
-    counts = {"clean": 0, "collision": 0, "unbacked": 0, "mac_mismatch": 0}
+    counts = {
+        "clean": 0, "collision": 0, "unbacked": 0,
+        "mac_mismatch": 0, "duid_mismatch": 0,
+    }
     for e in entries:
         counts[e.status] = counts.get(e.status, 0) + 1
 
@@ -189,6 +229,7 @@ class SyncReport:
     skipped_collision: int  # static-source rows left alone
     skipped_clean: int      # already source=reservation (or dhcp) — no change
     skipped_mac_mismatch: int  # PR 88 — lease MAC ≠ reservation MAC
+    skipped_duid_mismatch: int  # PR 94 — lease DUID ≠ reservation DUID
     skipped_no_subnet: int  # scope.subnet_id is NULL
     entries: list[dict]
 
@@ -220,6 +261,7 @@ async def sync_reservations(
             scope_id=str(scope.id), subnet_id=None,
             upserted=0, promoted=0, skipped_collision=0,
             skipped_clean=0, skipped_mac_mismatch=0,
+            skipped_duid_mismatch=0,
             skipped_no_subnet=len(scope.reservations_json or []),
             entries=[
                 {"reservation_ip": (r.get("ip") or ""), "decision": "skipped_no_subnet"}
@@ -233,7 +275,8 @@ async def sync_reservations(
         if key is not None:
             ip_index[key] = row
 
-    upserted = promoted = skipped_collision = skipped_clean = skipped_mac_mismatch = 0
+    upserted = promoted = skipped_collision = skipped_clean = 0
+    skipped_mac_mismatch = skipped_duid_mismatch = 0
     entries: list[dict] = []
     for r in scope.reservations_json or []:
         raw_ip = r.get("ip", "")
@@ -242,12 +285,13 @@ async def sync_reservations(
             entries.append({"reservation_ip": raw_ip, "decision": "skipped_unparseable"})
             continue
         res_mac = _normalize_mac(r.get("mac"))
+        res_duid = _normalize_duid(r.get("duid"))
         match = ip_index.get(norm)
         if match is None:
-            # Unbacked — insert a fresh reservation row. PR 88: also
-            # carry the reservation's MAC onto the new row's dhcp_mac
-            # so future syncs treat it as already-bound and the row
-            # roundtrips through reconcile cleanly.
+            # Unbacked — insert a fresh reservation row. PR 88/94:
+            # carry the reservation's MAC and/or DUID onto the new
+            # row so future syncs treat it as already-bound and the
+            # row roundtrips through reconcile cleanly.
             row = IPAddress(
                 subnet_id=scope.subnet_id,
                 address=norm,
@@ -255,6 +299,7 @@ async def sync_reservations(
                 status=IpAddressStatus.reserved,
                 source=IpAddressSource.reservation,
                 dhcp_mac=res_mac,
+                dhcp_duid=res_duid,
             )
             db.add(row)
             upserted += 1
@@ -270,9 +315,7 @@ async def sync_reservations(
                 "ip_address_id": str(match.id),
             })
             continue
-        # PR 88 — MAC mismatch refuses to promote. The lease at this
-        # IP is bound to a different client than the reservation
-        # expects; promoting silently would mask the conflict.
+        # PR 88 — MAC mismatch refuses to promote (v4 path).
         row_mac = _normalize_mac(getattr(match, "dhcp_mac", None))
         if res_mac and row_mac and res_mac != row_mac:
             skipped_mac_mismatch += 1
@@ -282,15 +325,29 @@ async def sync_reservations(
                 "reservation_mac": res_mac, "row_mac": row_mac,
             })
             continue
+        # PR 94 — DUID mismatch refuses to promote (v6 path). Same
+        # rationale as MAC mismatch — promoting silently would mask
+        # the lease binding conflict.
+        row_duid = _normalize_duid(getattr(match, "dhcp_duid", None))
+        if res_duid and row_duid and res_duid != row_duid:
+            skipped_duid_mismatch += 1
+            entries.append({
+                "reservation_ip": norm, "decision": "skipped_duid_mismatch",
+                "ip_address_id": str(match.id),
+                "reservation_duid": res_duid, "row_duid": row_duid,
+            })
+            continue
         if src == IpAddressSource.dhcp.value:
             # Lease materialized; tag as reservation so it stops
-            # looking like a transient allocation.
+            # looking like a transient allocation. Backfill MAC/DUID
+            # when the reservation knows it but the lease didn't
+            # record one — keeps reconcile and future syncs agreeing.
             match.source = IpAddressSource.reservation
             match.status = IpAddressStatus.reserved
             if res_mac and not row_mac:
-                # Reservation knows the MAC, lease didn't record one
-                # — backfill so reconcile and future syncs agree.
                 match.dhcp_mac = res_mac
+            if res_duid and not row_duid:
+                match.dhcp_duid = res_duid
             promoted += 1
             entries.append({
                 "reservation_ip": norm, "decision": "promoted",
@@ -312,6 +369,7 @@ async def sync_reservations(
         skipped_collision=skipped_collision,
         skipped_clean=skipped_clean,
         skipped_mac_mismatch=skipped_mac_mismatch,
+        skipped_duid_mismatch=skipped_duid_mismatch,
         skipped_no_subnet=0,
         entries=entries,
     )

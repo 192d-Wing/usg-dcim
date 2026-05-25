@@ -68,7 +68,10 @@ def test_reservation_matching_dhcp_source_is_clean():
     )
     rows = [_ip("10.0.0.5", IpAddressSource.dhcp.value)]
     report = reconcile_scope(scope, rows)
-    assert report.counts == {"clean": 1, "collision": 0, "unbacked": 0, "mac_mismatch": 0}
+    assert report.counts == {
+        "clean": 1, "collision": 0, "unbacked": 0,
+        "mac_mismatch": 0, "duid_mismatch": 0,
+    }
     assert report.entries[0].status == "clean"
 
 
@@ -173,7 +176,10 @@ def test_mixed_states_aggregate_correctly_in_counts():
     ]
     report = reconcile_scope(scope, rows)
     assert report.total == 3
-    assert report.counts == {"clean": 1, "collision": 1, "unbacked": 1, "mac_mismatch": 0}
+    assert report.counts == {
+        "clean": 1, "collision": 1, "unbacked": 1,
+        "mac_mismatch": 0, "duid_mismatch": 0,
+    }
 
 
 # ----- IP normalization across the index -----
@@ -274,3 +280,82 @@ def test_ipaddress_without_mac_skips_the_check():
     report = reconcile_scope(scope, rows)
     assert report.counts["clean"] == 1
     assert report.counts["mac_mismatch"] == 0
+
+
+# ----- PR 94: DUID binding (v6 reservations) -----
+
+def _ip_with_duid(addr: str, source: str, duid: str | None) -> _IPRow:
+    row = _IPRow(id=uuid4(), address=addr, source=_Src(source))
+    row.dhcp_mac = None
+    row.dhcp_duid = duid
+    return row
+
+
+def test_normalize_duid_canonicalizes_separators_and_length_range():
+    from dcim.services.dhcp_reconcile import _normalize_duid
+    # Common 14-byte DUID-LL form — separators differ; canonicalize.
+    expected = "00:01:00:01:25:ab:cd:01:aa:bb:cc:dd:ee:ff"
+    assert _normalize_duid("00:01:00:01:25:AB:CD:01:AA:BB:CC:DD:EE:FF") == expected
+    assert _normalize_duid("0001000125abcd01aabbccddeeff") == expected
+
+
+def test_normalize_duid_rejects_out_of_range():
+    from dcim.services.dhcp_reconcile import _normalize_duid
+    # < 2 hex (RFC 8415 minimum 1 byte) or > 256 hex (>128 octets) rejected.
+    assert _normalize_duid("") is None
+    assert _normalize_duid(None) is None
+    assert _normalize_duid("a") is None  # odd length
+    assert _normalize_duid("a" * 258) is None  # too long
+
+
+def test_v6_reservation_with_matching_duid_is_clean():
+    # Separator/case differ across the reservation and the IPAddress
+    # row; _normalize_duid canonicalizes both sides so the comparison
+    # holds.
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "2001:db8::5"}],
+    )
+    rows = [_ip_with_duid("2001:db8::5", IpAddressSource.dhcp.value, "0001-0001-ABCD")]
+    report = reconcile_scope(scope, rows)
+    assert report.counts["clean"] == 1
+    assert report.counts["duid_mismatch"] == 0
+
+
+def test_v6_reservation_with_mismatched_duid_is_duid_mismatch():
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "2001:db8::5"}],
+    )
+    rows = [_ip_with_duid("2001:db8::5", IpAddressSource.dhcp.value, "00:01:00:02:eeff")]
+    report = reconcile_scope(scope, rows)
+    assert report.counts["duid_mismatch"] == 1
+    assert report.counts["clean"] == 0
+    entry = report.entries[0]
+    assert entry.status == "duid_mismatch"
+    assert "00:01:00:01:ab:cd" in (entry.note or "")
+    assert "00:01:00:02:ee:ff" in (entry.note or "")
+
+
+def test_v6_reservation_without_duid_skips_the_check():
+    # Some v6 reservations key on a different identifier; if no DUID
+    # is set, the check is no-op (falls through to clean).
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"ip": "2001:db8::5"}],
+    )
+    rows = [_ip_with_duid("2001:db8::5", IpAddressSource.dhcp.value, "00:01:abcd")]
+    report = reconcile_scope(scope, rows)
+    assert report.counts["clean"] == 1
+    assert report.counts["duid_mismatch"] == 0
+
+
+def test_v6_ipaddress_without_duid_skips_the_check():
+    scope = _Scope(
+        id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "2001:db8::5"}],
+    )
+    rows = [_ip_with_duid("2001:db8::5", IpAddressSource.dhcp.value, None)]
+    report = reconcile_scope(scope, rows)
+    assert report.counts["clean"] == 1
+    assert report.counts["duid_mismatch"] == 0

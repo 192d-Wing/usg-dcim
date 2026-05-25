@@ -2298,6 +2298,7 @@ async def reconcile_sync_dhcp_scope(
             "skipped_collision": report.skipped_collision,
             "skipped_clean": report.skipped_clean,
             "skipped_mac_mismatch": report.skipped_mac_mismatch,
+            "skipped_duid_mismatch": report.skipped_duid_mismatch,
             "skipped_no_subnet": report.skipped_no_subnet,
         },
     )

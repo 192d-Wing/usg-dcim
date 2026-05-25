@@ -245,3 +245,64 @@ def test_promote_matching_mac_succeeds():
     assert report.promoted == 1
     assert report.skipped_mac_mismatch == 0
     assert dhcp_row.source == IpAddressSource.reservation
+
+
+# ----- PR 94: DUID binding on sync (v6) -----
+
+def _ip_with_duid(addr: str, source: str, duid: str | None) -> _IPRow:
+    row = _IPRow(id=uuid4(), address=addr, source=_Src(source))
+    row.dhcp_mac = None
+    row.dhcp_duid = duid
+    return row
+
+
+def test_v6_upsert_carries_reservation_duid_onto_new_row():
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "2001:db8::99"}],
+    )
+    sess = _FakeSession()
+    report = _run(sync_reservations(sess, scope, []))
+    assert report.upserted == 1
+    new_row = sess.added[0]
+    assert new_row.dhcp_duid == "00:01:00:01:ab:cd"  # canonical form
+    assert new_row.dhcp_mac is None
+
+
+def test_v6_duid_mismatch_skips_promote():
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "2001:db8::5"}],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_duid("2001:db8::5", IpAddressSource.dhcp.value, "00:01:00:02:eeff")
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 0
+    assert report.skipped_duid_mismatch == 1
+    # Row stays as source=dhcp; not promoted despite IP match.
+    assert dhcp_row.source.value == IpAddressSource.dhcp.value
+
+
+def test_v6_promote_backfills_dhcp_duid_when_lease_lacks_it():
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "2001:db8::5"}],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_duid("2001:db8::5", IpAddressSource.dhcp.value, None)
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 1
+    assert dhcp_row.source == IpAddressSource.reservation
+    assert dhcp_row.dhcp_duid == "00:01:00:01:ab:cd"
+
+
+def test_v6_matching_duid_promotes_successfully():
+    scope = _Scope(
+        id=uuid4(), subnet_id=uuid4(),
+        reservations_json=[{"duid": "00:01:00:01:abcd", "ip": "2001:db8::5"}],
+    )
+    sess = _FakeSession()
+    dhcp_row = _ip_with_duid("2001:db8::5", IpAddressSource.dhcp.value, "00:01-00:01-AB:CD")
+    report = _run(sync_reservations(sess, scope, [dhcp_row]))
+    assert report.promoted == 1
+    assert report.skipped_duid_mismatch == 0
