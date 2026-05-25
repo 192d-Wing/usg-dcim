@@ -47,6 +47,21 @@ class FleetDriftSummary:
     alerts_firing: int
 
 
+@dataclass
+class FabricDriftSummary:
+    """PR 102 — per-fabric slice. The fleet roll-up gives operators
+    the whole picture; the per-server detail gives them the deep dive.
+    The per-fabric slice fills the middle ground: "which of my
+    fabrics has the most drift right now" without grouping
+    client-side."""
+    fabric_id: str
+    servers_total: int
+    servers_with_drift: int
+    scopes_total: int
+    scope_counts: dict[str, int]
+    alerts_firing: int
+
+
 def _scope_count_template() -> dict[str, int]:
     """Fixed-key map so the API response shape is stable per status,
     even when no scope on a server has reached a given state yet."""
@@ -57,8 +72,12 @@ def aggregate(
     servers: Iterable,
     scopes_by_server: dict,
     alert_counts_by_dedupe_prefix: dict,
-) -> tuple[FleetDriftSummary, list[ServerDriftSummary]]:
-    """Build per-server summaries + fleet roll-up.
+) -> tuple[FleetDriftSummary, list[FabricDriftSummary], list[ServerDriftSummary]]:
+    """Build per-server summaries + per-fabric slice + fleet roll-up.
+
+    PR 93 returned (fleet, [server]); PR 102 adds the middle layer:
+    [fabric] so multi-fabric operators see per-cluster drift
+    without grouping client-side.
 
     `scopes_by_server` maps server.id (UUID) → list[DhcpScope].
     `alert_counts_by_dedupe_prefix` maps each scope.id (str) → firing
@@ -76,6 +95,10 @@ def aggregate(
     summaries: list[ServerDriftSummary] = []
     servers_total = 0
     scopes_total = 0
+    # PR 102 — per-fabric accumulators. Keyed by fabric_id (string)
+    # so the iteration order matches insertion (Python dict
+    # ordering); the handler emits the list in that same order.
+    by_fabric: dict[str, FabricDriftSummary] = {}
 
     for srv in servers:
         servers_total += 1
@@ -95,7 +118,8 @@ def aggregate(
         for k, v in counts.items():
             fleet_counts[k] += v
         fleet_alerts += server_alerts
-        if counts.get("drifted", 0) > 0:
+        has_drift = counts.get("drifted", 0) > 0
+        if has_drift:
             servers_with_drift += 1
         summaries.append(ServerDriftSummary(
             server_id=str(srv.id),
@@ -108,6 +132,25 @@ def aggregate(
             scopes_total=scopes_total_for_server,
             alerts_firing=server_alerts,
         ))
+        # PR 102 — fold this server's counts into its fabric slice.
+        fid = str(srv.fabric_id)
+        fab = by_fabric.get(fid)
+        if fab is None:
+            fab = FabricDriftSummary(
+                fabric_id=fid,
+                servers_total=0, servers_with_drift=0,
+                scopes_total=0,
+                scope_counts=_scope_count_template(),
+                alerts_firing=0,
+            )
+            by_fabric[fid] = fab
+        fab.servers_total += 1
+        fab.scopes_total += scopes_total_for_server
+        fab.alerts_firing += server_alerts
+        for k, v in counts.items():
+            fab.scope_counts[k] += v
+        if has_drift:
+            fab.servers_with_drift += 1
 
     fleet = FleetDriftSummary(
         servers_total=servers_total,
@@ -116,4 +159,4 @@ def aggregate(
         scope_counts=fleet_counts,
         alerts_firing=fleet_alerts,
     )
-    return fleet, summaries
+    return fleet, list(by_fabric.values()), summaries

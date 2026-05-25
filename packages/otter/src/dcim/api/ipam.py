@@ -2654,6 +2654,7 @@ async def dhcp_drift_summary(
                 },
                 "alerts_firing": 0,
             },
+            "fabrics": [],
             "servers": [],
         }
     server_ids = {s.id for s in servers}
@@ -2684,7 +2685,7 @@ async def dhcp_drift_summary(
         scope_id = key.split(":", 1)[1] if ":" in key else ""
         if scope_id:
             alert_counts[scope_id] = alert_counts.get(scope_id, 0) + 1
-    fleet, summaries = dhcp_drift_summary_svc.aggregate(
+    fleet, fabrics, summaries = dhcp_drift_summary_svc.aggregate(
         servers, scopes_by_server, alert_counts,
     )
     return {
@@ -2695,6 +2696,19 @@ async def dhcp_drift_summary(
             "scope_counts": fleet.scope_counts,
             "alerts_firing": fleet.alerts_firing,
         },
+        # PR 102 — per-fabric slice. Operators with multi-fabric
+        # estates see per-cluster drift without grouping client-side.
+        "fabrics": [
+            {
+                "fabric_id": f.fabric_id,
+                "servers_total": f.servers_total,
+                "servers_with_drift": f.servers_with_drift,
+                "scopes_total": f.scopes_total,
+                "scope_counts": f.scope_counts,
+                "alerts_firing": f.alerts_firing,
+            }
+            for f in fabrics
+        ],
         "servers": [
             {
                 "server_id": s.server_id,
