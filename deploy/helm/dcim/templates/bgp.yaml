@@ -21,7 +21,7 @@
 {{- $bgp := .Values.bgp -}}
 {{- $name := include "dcim.fullname" . -}}
 {{- $labels := include "dcim.labels" . -}}
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumBGPPeerConfig
 metadata:
   name: {{ $name }}-peer-config
@@ -40,7 +40,7 @@ spec:
       safi: {{ .safi }}
     {{- end }}
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumBGPClusterConfig
 metadata:
   name: {{ $name }}-cluster
@@ -61,7 +61,7 @@ spec:
             name: {{ $name }}-peer-config
         {{- end }}
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumBGPAdvertisement
 metadata:
   name: {{ $name }}-advert
@@ -81,7 +81,7 @@ spec:
           - LoadBalancerIP
 {{- range $bgp.ipPools }}
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumLoadBalancerIPPool
 metadata:
   name: {{ $name }}-{{ .name }}

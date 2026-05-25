@@ -107,11 +107,15 @@ heron:
       dcim.io/bgp-advertise: "true"
 ```
 
-The CRD apiVersion is `cilium.io/v2alpha1` — same as the regional
-cluster renderer in
+The CRD apiVersion is `cilium.io/v2` (PR 91 graduated BGP CRDs +
+CiliumLoadBalancerIPPool from `v2alpha1` in lockstep with Cilium
+1.16+) — same as the regional cluster renderer in
 [`packages/otter/src/dcim/regiondeploy/cilium.py`](../packages/otter/src/dcim/regiondeploy/cilium.py)
-so central and regional clusters speak the same dialect; bump in
-lockstep with that file when Cilium graduates the API.
+so central and regional clusters speak the same dialect. Requires
+Cilium ≥ 1.16; older clusters need to roll back to `v2alpha1`
+manually (the CRD shape is identical, only the group/version
+differs). `CiliumL2AnnouncementPolicy` (PR 89) stays at
+`cilium.io/v2alpha1` — that CRD has not yet graduated.
 
 Quote `"true"` (and any other label value) — unquoted YAML `true`
 becomes a boolean and Kubernetes rejects the Service label.

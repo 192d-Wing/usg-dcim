@@ -143,7 +143,7 @@ def render_bgp_crds(deployment: Any) -> list[dict]:
     # Splitting per-peer is overkill until operators actually need
     # different timers per peer.
     out.append({
-        "apiVersion": "cilium.io/v2alpha1",
+        "apiVersion": "cilium.io/v2",
         "kind": "CiliumBGPPeerConfig",
         "metadata": {
             "name": f"{base_name}-peer-config",
@@ -163,7 +163,7 @@ def render_bgp_crds(deployment: Any) -> list[dict]:
 
     # ClusterConfig references the PeerConfig per peer.
     out.append({
-        "apiVersion": "cilium.io/v2alpha1",
+        "apiVersion": "cilium.io/v2",
         "kind": "CiliumBGPClusterConfig",
         "metadata": {
             "name": f"{base_name}-cluster",
@@ -195,7 +195,7 @@ def render_bgp_crds(deployment: Any) -> list[dict]:
     # gobgp-coexistence note, we deliberately don't advertise pod
     # CIDRs — gobgp at sites handles its own /32 health routes.
     out.append({
-        "apiVersion": "cilium.io/v2alpha1",
+        "apiVersion": "cilium.io/v2",
         "kind": "CiliumBGPAdvertisement",
         "metadata": {
             "name": f"{base_name}-advert",
@@ -213,7 +213,7 @@ def render_bgp_crds(deployment: Any) -> list[dict]:
     # operator can re-render after setting it.
     if lb_pool:
         out.append({
-            "apiVersion": "cilium.io/v2alpha1",
+            "apiVersion": "cilium.io/v2",
             "kind": "CiliumLoadBalancerIPPool",
             "metadata": {
                 "name": f"{base_name}-lb-pool",

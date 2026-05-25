@@ -29,6 +29,8 @@
 {{- $l2 := .Values.l2 -}}
 {{- $name := include "dcim.fullname" . -}}
 {{- $labels := include "dcim.labels" . -}}
+{{- /* PR 91 — CiliumL2AnnouncementPolicy is still v2alpha1 in
+       Cilium 1.16+ (BGP CRDs graduated to v2; L2 has not). */}}
 apiVersion: cilium.io/v2alpha1
 kind: CiliumL2AnnouncementPolicy
 metadata:
@@ -52,7 +54,7 @@ spec:
   loadBalancerIPs: {{ $l2.loadBalancerIPs | default true }}
 {{- range $l2.ipPools }}
 ---
-apiVersion: cilium.io/v2alpha1
+apiVersion: cilium.io/v2
 kind: CiliumLoadBalancerIPPool
 metadata:
   name: {{ $name }}-{{ .name }}
