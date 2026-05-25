@@ -34,6 +34,7 @@ from ..models.dns import BgpPeer
 from ..models.ipam import (
     BgpAddressFamily,
     DhcpScope,
+    DhcpScopeTemplate,
     DhcpServer,
     Fabric,
     IPAddress,
@@ -50,6 +51,9 @@ from ..schemas.common import BulkResult, Page, PageParams
 from ..schemas.ipam import (
     DhcpScopeCreate,
     DhcpScopeOut,
+    DhcpScopeTemplateCreate,
+    DhcpScopeTemplateOut,
+    DhcpScopeTemplateUpdate,
     DhcpScopeUpdate,
     DhcpServerCreate,
     DhcpServerOut,
@@ -1844,7 +1848,19 @@ async def get_dhcp_server_bundle(
             select(DhcpScope).where(DhcpScope.dhcp_server_id == server_id)
         )
     ).scalars().all()
-    bundle = dhcp_bundle.render_kea_bundle(server, scopes)
+    # PR 78 — preload referenced templates so the renderer can merge
+    # template defaults under per-scope values without N+1 queries.
+    template_ids = {s.template_id for s in scopes if s.template_id}
+    templates_by_id: dict = {}
+    if template_ids:
+        rows = (
+            await db.execute(
+                select(DhcpScopeTemplate)
+                .where(DhcpScopeTemplate.id.in_(template_ids))
+            )
+        ).scalars().all()
+        templates_by_id = {t.id: t for t in rows}
+    bundle = dhcp_bundle.render_kea_bundle(server, scopes, templates_by_id)
     if if_none_match and if_none_match.strip('"') == bundle.etag:
         return Response(status_code=304)
     return {
@@ -1970,9 +1986,23 @@ async def create_dhcp_scope(
         subnet = await db.get(Subnet, payload.subnet_id)
         if subnet is None:
             raise ValidationError(f"subnet {payload.subnet_id} not found")
+    # PR 78 — if a template is named, it must exist and its family
+    # must match the scope. Mismatched families would render invalid
+    # Kea config (v4 routers option in a v6 subnet, etc.); reject
+    # at create rather than discover at push.
+    if payload.template_id is not None:
+        tpl = await db.get(DhcpScopeTemplate, payload.template_id)
+        if tpl is None:
+            raise ValidationError(f"dhcp scope template {payload.template_id} not found")
+        if tpl.ip_family != payload.ip_family:
+            raise ValidationError(
+                f"template ip_family={tpl.ip_family} does not match scope "
+                f"ip_family={payload.ip_family}",
+            )
     obj = DhcpScope(
         dhcp_server_id=server_id,
         subnet_id=payload.subnet_id,
+        template_id=payload.template_id,
         name=payload.name,
         ip_family=payload.ip_family,
         prefix=payload.prefix,
@@ -2043,6 +2073,18 @@ async def update_dhcp_scope(
             raise ValidationError("pd_pools is v6-only")
         if "preferred_lifetime_seconds" in diff and diff["preferred_lifetime_seconds"] is not None:
             raise ValidationError("preferred_lifetime_seconds is v6-only")
+    # PR 78 — if the operator is reassigning the template, validate
+    # the family matches. Setting template_id=null unbinds and is
+    # always fine.
+    if "template_id" in diff and diff["template_id"] is not None:
+        tpl = await db.get(DhcpScopeTemplate, diff["template_id"])
+        if tpl is None:
+            raise ValidationError(f"dhcp scope template {diff['template_id']} not found")
+        if tpl.ip_family != obj.ip_family:
+            raise ValidationError(
+                f"template ip_family={tpl.ip_family} does not match scope "
+                f"ip_family={obj.ip_family}",
+            )
     # Map flat names to *_json column names; everything else passes
     # through 1:1.
     column_map = {
@@ -2249,3 +2291,170 @@ async def diff_all_dhcp_scopes(
         "counts": report.counts,
         "results": [_diff_result_dict(r) for r in report.results],
     }
+
+
+# ----------------------- DHCP scope templates (PR 78) -----------------------
+_DHCP_SCOPE_TEMPLATE_NOT_FOUND = "dhcp scope template not found"
+
+
+@router.get("/dhcp/scope-templates", response_model=Page[DhcpScopeTemplateOut])
+async def list_dhcp_scope_templates(
+    params: PageParams = Depends(PageParams.from_query),
+    fabric_id: UUID | None = Query(None),
+    ip_family: int | None = Query(None, ge=4, le=6),
+    principal: Principal = Depends(require_capability("ipam:dhcp-scope-templates:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    stmt = select(DhcpScopeTemplate)
+    if fabric_id is not None:
+        stmt = stmt.where(DhcpScopeTemplate.fabric_id == fabric_id)
+    if ip_family is not None:
+        if ip_family not in (4, 6):
+            raise ValidationError("ip_family must be 4 or 6")
+        stmt = stmt.where(DhcpScopeTemplate.ip_family == ip_family)
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "ipam:dhcp-scope-templates:read",
+    )
+    if in_scope is not None:
+        if not in_scope:
+            return empty_page(DhcpScopeTemplateOut, params)
+        stmt = stmt.where(DhcpScopeTemplate.fabric_id.in_(in_scope))
+    return await paginate(
+        db, stmt, model=DhcpScopeTemplate, params=params,
+        out_model=DhcpScopeTemplateOut,
+    )
+
+
+@router.post(
+    "/dhcp/scope-templates",
+    response_model=DhcpScopeTemplateOut, status_code=201,
+)
+async def create_dhcp_scope_template(
+    payload: DhcpScopeTemplateCreate,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scope-templates:create")),
+    db: AsyncSession = Depends(get_db),
+):
+    await enforce_fabric_scope(
+        db, principal.capabilities, payload.fabric_id,
+        "ipam:dhcp-scope-templates:create",
+    )
+    fabric = await db.get(Fabric, payload.fabric_id)
+    if fabric is None:
+        raise ValidationError(f"fabric {payload.fabric_id} not found")
+    if payload.ip_family == 4 and payload.preferred_lifetime_seconds is not None:
+        raise ValidationError("preferred_lifetime_seconds is v6-only")
+    obj = DhcpScopeTemplate(
+        fabric_id=payload.fabric_id,
+        name=payload.name,
+        ip_family=payload.ip_family,
+        options_json=[o.model_dump(exclude_none=True) for o in payload.options],
+        valid_lifetime_seconds=payload.valid_lifetime_seconds,
+        renew_timer_seconds=payload.renew_timer_seconds,
+        rebind_timer_seconds=payload.rebind_timer_seconds,
+        preferred_lifetime_seconds=payload.preferred_lifetime_seconds,
+        description=payload.description,
+    )
+    db.add(obj)
+    try:
+        await db.flush()
+    except Exception as e:
+        if "uq_dhcp_scope_template_fabric_name" in str(e):
+            raise ConflictError(
+                "a dhcp scope template with that name already exists in this fabric",
+            ) from e
+        raise
+    await audit.record(
+        db, principal, action="dhcp_scope_template.create",
+        target_type="dhcp_scope_template", target_id=str(obj.id),
+        metadata={"fabric_id": str(payload.fabric_id), "ip_family": payload.ip_family},
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return DhcpScopeTemplateOut.model_validate(obj)
+
+
+@router.get("/dhcp/scope-templates/{template_id}", response_model=DhcpScopeTemplateOut)
+async def get_dhcp_scope_template(
+    template_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scope-templates:read")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpScopeTemplate, template_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_TEMPLATE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id,
+        "ipam:dhcp-scope-templates:read",
+    )
+    return DhcpScopeTemplateOut.model_validate(obj)
+
+
+@router.patch("/dhcp/scope-templates/{template_id}", response_model=DhcpScopeTemplateOut)
+async def update_dhcp_scope_template(
+    template_id: UUID,
+    payload: DhcpScopeTemplateUpdate,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scope-templates:update")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpScopeTemplate, template_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_TEMPLATE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id,
+        "ipam:dhcp-scope-templates:update",
+    )
+    diff = payload.model_dump(exclude_unset=True)
+    # PR 78 — preferred_lifetime is v6-only; reject the v4 case at
+    # the API for an actionable message (DB CHECK would otherwise
+    # catch it with a generic constraint violation).
+    if (
+        obj.ip_family == 4
+        and "preferred_lifetime_seconds" in diff
+        and diff["preferred_lifetime_seconds"] is not None
+    ):
+        raise ValidationError("preferred_lifetime_seconds is v6-only")
+    for k, v in diff.items():
+        if k == "options" and v is not None:
+            obj.options_json = [
+                item if isinstance(item, dict) else item.model_dump(exclude_none=True)
+                for item in v
+            ]
+        elif k == "options" and v is None:
+            obj.options_json = []
+        else:
+            setattr(obj, k, v)
+    await audit.record(
+        db, principal, action="dhcp_scope_template.update",
+        target_type="dhcp_scope_template", target_id=str(template_id),
+        diff=diff,
+    )
+    await db.commit()
+    await db.refresh(obj)
+    return DhcpScopeTemplateOut.model_validate(obj)
+
+
+@router.delete("/dhcp/scope-templates/{template_id}", status_code=204)
+async def delete_dhcp_scope_template(
+    template_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scope-templates:delete")),
+    db: AsyncSession = Depends(get_db),
+):
+    obj = await db.get(DhcpScopeTemplate, template_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_TEMPLATE_NOT_FOUND)
+    await enforce_fabric_scope(
+        db, principal.capabilities, obj.fabric_id,
+        "ipam:dhcp-scope-templates:delete",
+    )
+    # FK is ON DELETE SET NULL — scopes that referenced this template
+    # fall back to their stored values automatically. No need to
+    # cascade-update manually.
+    await db.execute(
+        delete(DhcpScopeTemplate).where(DhcpScopeTemplate.id == template_id),
+    )
+    await audit.record(
+        db, principal, action="dhcp_scope_template.delete",
+        target_type="dhcp_scope_template", target_id=str(template_id),
+        metadata={"fabric_id": str(obj.fabric_id), "ip_family": obj.ip_family},
+    )
+    await db.commit()

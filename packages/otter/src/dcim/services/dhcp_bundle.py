@@ -32,8 +32,12 @@ import json
 from dataclasses import dataclass
 from typing import Iterable
 
-from ..models.ipam import DhcpScope, DhcpServer
-from .dhcp_push import render_kea_subnet4, render_kea_subnet6
+from ..models.ipam import DhcpScope, DhcpScopeTemplate, DhcpServer
+from .dhcp_push import (
+    merge_template_into_scope,
+    render_kea_subnet4,
+    render_kea_subnet6,
+)
 
 
 @dataclass
@@ -56,7 +60,10 @@ def _next_id(used: set[int]) -> int:
     return candidate
 
 
-def _assemble_subnets(scopes: Iterable[DhcpScope]) -> tuple[list[dict], list[dict]]:
+def _assemble_subnets(
+    scopes: Iterable[DhcpScope],
+    templates_by_id: dict,
+) -> tuple[list[dict], list[dict]]:
     """Render every enabled scope into Kea subnet4/subnet6 objects.
 
     Disabled scopes are skipped entirely — they shouldn't appear in
@@ -64,6 +71,11 @@ def _assemble_subnets(scopes: Iterable[DhcpScope]) -> tuple[list[dict], list[dic
     set; unpushed scopes get a fresh allocation inside this bundle
     pass that doesn't touch the DB (the DB-side allocation belongs
     to push_scope; this is bundle-internal only).
+
+    PR 78 — `templates_by_id` carries any DhcpScopeTemplate rows the
+    scopes reference. merge_template_into_scope folds template
+    defaults under per-scope overrides before the pure renderer
+    sees the data.
     """
     subnet4: list[dict] = []
     subnet6: list[dict] = []
@@ -72,6 +84,15 @@ def _assemble_subnets(scopes: Iterable[DhcpScope]) -> tuple[list[dict], list[dic
     deferred4: list[DhcpScope] = []
     deferred6: list[DhcpScope] = []
 
+    def _effective(s: DhcpScope):
+        # getattr — older test fixtures (test_dhcp_bundle.py from PR 76)
+        # mock DhcpScope with a dataclass that predates template_id.
+        # Real rows always have the column; the default keeps those
+        # tests passing without backporting the field.
+        tid = getattr(s, "template_id", None)
+        tpl = templates_by_id.get(tid) if tid else None
+        return merge_template_into_scope(s, tpl)
+
     # First pass — claim every pinned id so allocations don't collide.
     for s in scopes:
         if not s.enabled:
@@ -79,22 +100,23 @@ def _assemble_subnets(scopes: Iterable[DhcpScope]) -> tuple[list[dict], list[dic
         if s.kea_subnet_id is None:
             (deferred4 if s.ip_family == 4 else deferred6).append(s)
             continue
+        eff = _effective(s)
         if s.ip_family == 4:
             used4.add(int(s.kea_subnet_id))
-            subnet4.append(render_kea_subnet4(s, s.kea_subnet_id))
+            subnet4.append(render_kea_subnet4(eff, s.kea_subnet_id))
         else:
             used6.add(int(s.kea_subnet_id))
-            subnet6.append(render_kea_subnet6(s, s.kea_subnet_id))
+            subnet6.append(render_kea_subnet6(eff, s.kea_subnet_id))
 
     # Second pass — fill in unpushed scopes with bundle-local ids.
     for s in deferred4:
         kid = _next_id(used4)
         used4.add(kid)
-        subnet4.append(render_kea_subnet4(s, kid))
+        subnet4.append(render_kea_subnet4(_effective(s), kid))
     for s in deferred6:
         kid = _next_id(used6)
         used6.add(kid)
-        subnet6.append(render_kea_subnet6(s, kid))
+        subnet6.append(render_kea_subnet6(_effective(s), kid))
 
     return subnet4, subnet6
 
@@ -119,20 +141,31 @@ def _compute_etag(ctrl_agent: dict, dhcp4: dict, dhcp6: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def render_kea_bundle(server: DhcpServer, scopes: Iterable[DhcpScope]) -> KeaBundle:
+def render_kea_bundle(
+    server: DhcpServer,
+    scopes: Iterable[DhcpScope],
+    templates_by_id: dict | None = None,
+) -> KeaBundle:
     """Build the bundle for one server.
 
-    Pure: no DB calls. Caller passes the DhcpServer row and the list
-    of DhcpScope rows that belong to it. Disabled scopes are skipped
-    (do not appear in Kea); disabled servers still render normally —
-    the bundle endpoint can refuse on its own if needed.
+    Pure: no DB calls. Caller passes the DhcpServer row, the list of
+    DhcpScope rows that belong to it, and (PR 78) a dict of
+    DhcpScopeTemplate rows referenced by those scopes — the bundle
+    endpoint preloads it in one round-trip. `templates_by_id=None`
+    is treated as no templates (scopes render with their stored
+    values), so existing test call sites without a third argument
+    keep working.
+
+    Disabled scopes are skipped (do not appear in Kea); disabled
+    servers still render normally — the bundle endpoint can refuse
+    on its own if needed.
     """
     base = dict(server.base_config or {})
     base_ctrl = dict(base.get("ctrl-agent") or {})
     base_dhcp4 = dict(base.get("dhcp4") or {})
     base_dhcp6 = dict(base.get("dhcp6") or {})
 
-    subnet4, subnet6 = _assemble_subnets(scopes)
+    subnet4, subnet6 = _assemble_subnets(scopes, templates_by_id or {})
 
     ctrl_agent = base_ctrl
     dhcp4 = _overlay_subnets(base_dhcp4, "subnet4", subnet4)

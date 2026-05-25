@@ -360,6 +360,10 @@ class DhcpReservation(BaseModel):
 class DhcpScopeBase(BaseModel):
     dhcp_server_id: UUID
     subnet_id: UUID | None = None
+    # PR 78 — optional FK to a DhcpScopeTemplate. When set, the push/
+    # diff orchestrators merge template defaults under the scope's
+    # values before rendering. Scope values still win on conflict.
+    template_id: UUID | None = None
     name: str
     ip_family: int  # 4 or 6
     prefix: str
@@ -367,7 +371,9 @@ class DhcpScopeBase(BaseModel):
     pd_pools: list[DhcpPdPool] | None = None
     options: list[DhcpOption] = Field(default_factory=list)
     reservations: list[DhcpReservation] = Field(default_factory=list)
-    valid_lifetime_seconds: int = 3600
+    # PR 78 — nullable. NULL = inherit from template (if any),
+    # else fall back to the renderer's hardcoded default.
+    valid_lifetime_seconds: int | None = None
     renew_timer_seconds: int | None = None
     rebind_timer_seconds: int | None = None
     preferred_lifetime_seconds: int | None = None
@@ -390,6 +396,7 @@ class DhcpScopeUpdate(BaseModel):
     # ip_family + prefix + dhcp_server_id are immutable post-create.
     name: str | None = None
     subnet_id: UUID | None = None
+    template_id: UUID | None = None
     pools: list[DhcpPool] | None = None
     pd_pools: list[DhcpPdPool] | None = None
     options: list[DhcpOption] | None = None
@@ -518,5 +525,49 @@ class VtepVniMembershipOut(BaseModel):
     id: UUID
     vtep_id: UUID
     vni_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------- DhcpScopeTemplate (PR 78) ----------
+
+class DhcpScopeTemplateBase(BaseModel):
+    fabric_id: UUID
+    name: str
+    ip_family: int  # 4 or 6
+    options: list[DhcpOption] = Field(default_factory=list)
+    valid_lifetime_seconds: int | None = None
+    renew_timer_seconds: int | None = None
+    rebind_timer_seconds: int | None = None
+    preferred_lifetime_seconds: int | None = None
+    description: str | None = None
+
+    @field_validator("ip_family")
+    @classmethod
+    def _family_must_be_4_or_6(cls, v: int) -> int:
+        if v not in (4, 6):
+            raise ValueError("ip_family must be 4 or 6")
+        return v
+
+
+class DhcpScopeTemplateCreate(DhcpScopeTemplateBase):
+    pass
+
+
+class DhcpScopeTemplateUpdate(BaseModel):
+    # fabric_id + ip_family are immutable post-create (mirrors
+    # DhcpScopeUpdate's posture on family/prefix).
+    name: str | None = None
+    options: list[DhcpOption] | None = None
+    valid_lifetime_seconds: int | None = None
+    renew_timer_seconds: int | None = None
+    rebind_timer_seconds: int | None = None
+    preferred_lifetime_seconds: int | None = None
+    description: str | None = None
+
+
+class DhcpScopeTemplateOut(DhcpScopeTemplateBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
     created_at: datetime
     updated_at: datetime

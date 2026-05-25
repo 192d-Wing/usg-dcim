@@ -31,13 +31,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.ipam import DhcpScope, DhcpServer
+from ..models.ipam import DhcpScope, DhcpScopeTemplate, DhcpServer
 from .kea import KeaClient
 
 log = structlog.get_logger("dcim.dhcp_push")
@@ -133,15 +134,24 @@ def _render_reservations_v6(reservations: list[dict]) -> list[dict]:
     return out
 
 
-def render_kea_subnet4(scope: DhcpScope, kea_id: int) -> dict:
-    """Project a v4 DhcpScope row onto Kea's subnet4 object."""
+# Renderer fallback when both scope and template leave valid-lifetime
+# unset. Kea defaults to 7200; we pick 3600 to match the column default
+# DhcpScope used pre-PR 78.
+_DEFAULT_VALID_LIFETIME = 3600
+
+
+def render_kea_subnet4(scope, kea_id: int) -> dict:
+    """Project a v4 DhcpScope (or template-merged effective scope)
+    onto Kea's subnet4 object. Duck-typed: accepts a real DhcpScope
+    row or the SimpleNamespace `merge_template_into_scope` returns."""
+    vl = scope.valid_lifetime_seconds
     out: dict = {
         "id": int(kea_id),
         "subnet": str(scope.prefix),
         "pools": _render_pools(scope.pools_json or []),
         "option-data": _render_options(scope.options_json or []),
         "reservations": _render_reservations_v4(scope.reservations_json or []),
-        "valid-lifetime": int(scope.valid_lifetime_seconds),
+        "valid-lifetime": int(vl) if vl is not None else _DEFAULT_VALID_LIFETIME,
     }
     if scope.renew_timer_seconds is not None:
         out["renew-timer"] = int(scope.renew_timer_seconds)
@@ -150,15 +160,17 @@ def render_kea_subnet4(scope: DhcpScope, kea_id: int) -> dict:
     return out
 
 
-def render_kea_subnet6(scope: DhcpScope, kea_id: int) -> dict:
-    """Project a v6 DhcpScope row onto Kea's subnet6 object."""
+def render_kea_subnet6(scope, kea_id: int) -> dict:
+    """Project a v6 DhcpScope (or template-merged effective scope)
+    onto Kea's subnet6 object."""
+    vl = scope.valid_lifetime_seconds
     out: dict = {
         "id": int(kea_id),
         "subnet": str(scope.prefix),
         "pools": _render_pools(scope.pools_json or []),
         "option-data": _render_options(scope.options_json or []),
         "reservations": _render_reservations_v6(scope.reservations_json or []),
-        "valid-lifetime": int(scope.valid_lifetime_seconds),
+        "valid-lifetime": int(vl) if vl is not None else _DEFAULT_VALID_LIFETIME,
     }
     if scope.preferred_lifetime_seconds is not None:
         out["preferred-lifetime"] = int(scope.preferred_lifetime_seconds)
@@ -170,6 +182,118 @@ def render_kea_subnet6(scope: DhcpScope, kea_id: int) -> dict:
     if pd:
         out["pd-pools"] = pd
     return out
+
+
+# ---------- template merge (PR 78) ----------
+
+
+def _option_key(opt: dict) -> Any:
+    """Stable identity for a Kea option-data entry. Code wins when
+    present (it's the wire ID Kea actually keys on); name is the
+    fallback. (code, space) pair handles vendor-options with
+    separate code spaces."""
+    code = opt.get("code")
+    if code is not None:
+        return ("code", int(code), opt.get("space") or "")
+    return ("name", opt.get("name") or "", opt.get("space") or "")
+
+
+def _merge_options(template_opts: list[dict], scope_opts: list[dict]) -> list[dict]:
+    """Scope entries win on conflict; new scope entries append.
+
+    Stable order: template entries first (in template order), then
+    scope-only entries (in scope order). Operators see template
+    defaults at the top of the option-data array in Kea config
+    dumps, which makes review easier."""
+    by_key: dict[Any, dict] = {}
+    order: list[Any] = []
+    for o in template_opts or []:
+        k = _option_key(o)
+        if k not in by_key:
+            order.append(k)
+        by_key[k] = dict(o)
+    for o in scope_opts or []:
+        k = _option_key(o)
+        if k not in by_key:
+            order.append(k)
+        by_key[k] = dict(o)  # scope overrides
+    return [by_key[k] for k in order]
+
+
+def merge_template_into_scope(
+    scope: DhcpScope, template: DhcpScopeTemplate | None,
+) -> Any:
+    """Build the effective scope the renderer should consume.
+
+    With `template=None` this is a near-identity (returns a
+    SimpleNamespace with the scope's own values) so callers don't
+    need to branch.
+
+    Merge rules:
+      * Timers (valid_lifetime / renew / rebind / preferred_lifetime):
+        scope value wins when not None; otherwise inherit template.
+      * options_json: merged by (code|name, space) — scope entries
+        override template entries with the same key, new ones append.
+      * Everything else (prefix, pools, pd_pools, reservations,
+        ip_family, kea_subnet_id, id, dhcp_server_id): from scope.
+
+    Returns a SimpleNamespace so the existing pure renderers can
+    duck-type on attribute access without instantiating a real
+    DhcpScope row.
+    """
+    if template is None:
+        # Identity pass-through. Still returns a SimpleNamespace so
+        # the renderer's attribute access is uniform across paths.
+        return SimpleNamespace(
+            id=scope.id,
+            dhcp_server_id=scope.dhcp_server_id,
+            ip_family=scope.ip_family,
+            prefix=scope.prefix,
+            pools_json=scope.pools_json,
+            pd_pools_json=scope.pd_pools_json,
+            options_json=scope.options_json,
+            reservations_json=scope.reservations_json,
+            valid_lifetime_seconds=scope.valid_lifetime_seconds,
+            renew_timer_seconds=scope.renew_timer_seconds,
+            rebind_timer_seconds=scope.rebind_timer_seconds,
+            preferred_lifetime_seconds=scope.preferred_lifetime_seconds,
+            kea_subnet_id=getattr(scope, "kea_subnet_id", None),
+            enabled=getattr(scope, "enabled", True),
+        )
+    return SimpleNamespace(
+        id=scope.id,
+        dhcp_server_id=scope.dhcp_server_id,
+        ip_family=scope.ip_family,
+        prefix=scope.prefix,
+        pools_json=scope.pools_json,
+        pd_pools_json=scope.pd_pools_json,
+        options_json=_merge_options(
+            template.options_json or [], scope.options_json or [],
+        ),
+        reservations_json=scope.reservations_json,
+        valid_lifetime_seconds=(
+            scope.valid_lifetime_seconds
+            if scope.valid_lifetime_seconds is not None
+            else template.valid_lifetime_seconds
+        ),
+        renew_timer_seconds=(
+            scope.renew_timer_seconds
+            if scope.renew_timer_seconds is not None
+            else template.renew_timer_seconds
+        ),
+        rebind_timer_seconds=(
+            scope.rebind_timer_seconds
+            if scope.rebind_timer_seconds is not None
+            else template.rebind_timer_seconds
+        ),
+        preferred_lifetime_seconds=(
+            scope.preferred_lifetime_seconds
+            if scope.preferred_lifetime_seconds is not None
+            else template.preferred_lifetime_seconds
+        ),
+        kea_subnet_id=getattr(scope, "kea_subnet_id", None),
+        enabled=getattr(scope, "enabled", True),
+    )
 
 
 # ---------- ID allocation ----------
@@ -265,6 +389,16 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
             db, server_id=server.id,
         )
 
+    # PR 78 — merge template defaults under scope overrides before
+    # rendering. The renderer stays pure; the merge happens here so
+    # diff_scope and the bundle renderer can do the same load and
+    # share the contract.
+    template = (
+        await db.get(DhcpScopeTemplate, scope.template_id)
+        if scope.template_id else None
+    )
+    effective = merge_template_into_scope(scope, template)
+
     client = KeaClient(
         server.kea_url,
         username=server.auth_username,
@@ -273,14 +407,14 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
 
     try:
         if scope.ip_family == 4:
-            subnet_def = render_kea_subnet4(scope, scope.kea_subnet_id)
+            subnet_def = render_kea_subnet4(effective, scope.kea_subnet_id)
             resp = await (
                 client.subnet4_update(subnet_def) if is_update
                 else client.subnet4_add(subnet_def)
             )
             await client.config_write(["dhcp4"])
         else:
-            subnet_def = render_kea_subnet6(scope, scope.kea_subnet_id)
+            subnet_def = render_kea_subnet6(effective, scope.kea_subnet_id)
             resp = await (
                 client.subnet6_update(subnet_def) if is_update
                 else client.subnet6_add(subnet_def)
@@ -443,7 +577,11 @@ def _extract_kea_subnet(resp: Any, ip_family: int) -> dict | None:
     return first if isinstance(first, dict) else None
 
 
-async def diff_scope(scope: DhcpScope, server: DhcpServer) -> DiffResult:
+async def diff_scope(
+    scope: DhcpScope,
+    server: DhcpServer,
+    template: DhcpScopeTemplate | None = None,
+) -> DiffResult:
     """Compare what DCIM would render against what Kea currently has.
 
     Five terminal states:
@@ -470,10 +608,14 @@ async def diff_scope(scope: DhcpScope, server: DhcpServer) -> DiffResult:
             delta={}, error=None,
         )
 
+    # PR 78 — apply template merge before rendering so the DCIM side
+    # of the diff reflects the effective config Kea would have been
+    # pushed, not the raw scope row.
+    effective = merge_template_into_scope(scope, template)
     if scope.ip_family == 4:
-        dcim_subnet = render_kea_subnet4(scope, scope.kea_subnet_id)
+        dcim_subnet = render_kea_subnet4(effective, scope.kea_subnet_id)
     else:
-        dcim_subnet = render_kea_subnet6(scope, scope.kea_subnet_id)
+        dcim_subnet = render_kea_subnet6(effective, scope.kea_subnet_id)
 
     client = KeaClient(
         server.kea_url,
@@ -612,9 +754,22 @@ async def diff_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkDiffRepor
             select(DhcpScope).where(DhcpScope.dhcp_server_id == server.id)
         )
     ).scalars().all()
+    # PR 78 — preload referenced templates in one round-trip so the
+    # per-scope diff loop doesn't issue N+1 selects.
+    template_ids = {s.template_id for s in scopes if s.template_id}
+    templates_by_id: dict = {}
+    if template_ids:
+        rows = (
+            await db.execute(
+                select(DhcpScopeTemplate)
+                .where(DhcpScopeTemplate.id.in_(template_ids))
+            )
+        ).scalars().all()
+        templates_by_id = {t.id: t for t in rows}
     results: list[DiffResult] = []
     for scope in scopes:
-        results.append(await diff_scope(scope, server))
+        template = templates_by_id.get(scope.template_id) if scope.template_id else None
+        results.append(await diff_scope(scope, server, template))
     return BulkDiffReport(
         server_id=str(server.id),
         total=len(results),

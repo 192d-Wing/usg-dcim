@@ -547,9 +547,9 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
     # {"name": "routers", "code": 3, "data": "10.0.0.1"}.
     options_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     reservations_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    valid_lifetime_seconds: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=3600,
-    )
+    # PR 78 — now nullable. NULL = inherit from template_id (if any),
+    # otherwise the renderer falls back to a hardcoded default.
+    valid_lifetime_seconds: Mapped[int | None] = mapped_column(Integer)
     renew_timer_seconds: Mapped[int | None] = mapped_column(Integer)
     rebind_timer_seconds: Mapped[int | None] = mapped_column(Integer)
     # v6-only — null on v4 (CHECK constraint enforces).
@@ -559,6 +559,14 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
     # PR 74 — Kea wants numeric subnet IDs. Allocated per-DhcpServer on
     # first push and pinned for the scope's life. NULL = not yet pushed.
     kea_subnet_id: Mapped[int | None] = mapped_column(Integer)
+    # PR 78 — optional FK to a DhcpScopeTemplate. NULL = no template
+    # inheritance (the scope's stored values render as-is). When set,
+    # the push/diff orchestrators merge template defaults under scope
+    # overrides before calling the renderer.
+    template_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("dhcp_scope_templates.id", ondelete="SET NULL"),
+    )
 
     # Pydantic-friendly property aliases. The model_validate path in
     # DhcpScopeOut sees these names; the API layer mutates the *_json
@@ -578,3 +586,44 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
     @property
     def reservations(self) -> list:
         return self.reservations_json or []
+
+
+class DhcpScopeTemplate(UUIDPrimaryKey, Timestamped, Base):
+    """Reusable option-bundle + timer defaults a DhcpScope inherits from.
+
+    Fabric-scoped: templates are FK'd to a single fabric so ABAC's
+    fabric-scope enforcement applies the same way it does for the
+    parent DhcpServer. Family-typed: ip_family pins the option-data
+    code space (v4: 1-254; v6: separate set), and the API enforces
+    that a scope's family matches its template's.
+
+    See services/dhcp_push.merge_template_into_scope for the merge
+    contract: scope values win on conflict; missing scope values fall
+    back to template values; missing both falls back to the
+    renderer's hardcoded defaults.
+    """
+
+    __tablename__ = "dhcp_scope_templates"
+    __table_args__ = (
+        UniqueConstraint("fabric_id", "name", name="uq_dhcp_scope_template_fabric_name"),
+        Index("ix_dhcp_scope_templates_fabric", "fabric_id"),
+        Index("ix_dhcp_scope_templates_family", "ip_family"),
+    )
+
+    fabric_id: Mapped[UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("fabrics.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    ip_family: Mapped[int] = mapped_column(Integer, nullable=False)
+    options_json: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    valid_lifetime_seconds: Mapped[int | None] = mapped_column(Integer)
+    renew_timer_seconds: Mapped[int | None] = mapped_column(Integer)
+    rebind_timer_seconds: Mapped[int | None] = mapped_column(Integer)
+    preferred_lifetime_seconds: Mapped[int | None] = mapped_column(Integer)
+    description: Mapped[str | None] = mapped_column(String(512))
+
+    @property
+    def options(self) -> list:
+        return self.options_json or []
