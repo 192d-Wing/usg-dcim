@@ -108,6 +108,50 @@ func (q *Queries) DeleteDnsZone(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const setDnsZoneFrozen = `-- name: SetDnsZoneFrozen :one
+UPDATE dns_zones
+SET frozen = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
+          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+          nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+`
+
+func (q *Queries) SetDnsZoneFrozen(ctx context.Context, id uuid.UUID, frozen bool) (DnsZone, error) {
+	row := q.db.QueryRow(ctx, setDnsZoneFrozen, id, frozen)
+	var z DnsZone
+	err := scanDnsZoneM(row, &z)
+	return z, err
+}
+
+const setDnsZoneNsec3 = `-- name: SetDnsZoneNsec3 :one
+UPDATE dns_zones
+SET nsec3_salt = $2,
+    nsec3_iterations = $3,
+    nsec3_opt_out = $4,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
+          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+          nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+`
+
+type SetDnsZoneNsec3Params struct {
+	ID         uuid.UUID `json:"id"`
+	Salt       *string   `json:"salt"`
+	Iterations int32     `json:"iterations"`
+	OptOut     bool      `json:"opt_out"`
+}
+
+func (q *Queries) SetDnsZoneNsec3(ctx context.Context, arg SetDnsZoneNsec3Params) (DnsZone, error) {
+	row := q.db.QueryRow(ctx, setDnsZoneNsec3, arg.ID, arg.Salt, arg.Iterations, arg.OptOut)
+	var z DnsZone
+	err := scanDnsZoneM(row, &z)
+	return z, err
+}
+
 // ---- DNS Records ----
 
 const dnsRecRetCols = `id, zone_id, name, type::text AS type, ttl, data, source::text AS source,

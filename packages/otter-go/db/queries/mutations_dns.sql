@@ -35,6 +35,34 @@ RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
 -- name: DeleteDnsZone :exec
 DELETE FROM dns_zones WHERE id = $1;
 
+-- name: SetDnsZoneFrozen :one
+-- PR 70 — flip the maintenance-window write lock. Idempotent;
+-- mutation handlers refuse on frozen=true (enforced in API
+-- layer). updated_at bumps on every call so the bundle etag
+-- changes even when nothing else does.
+UPDATE dns_zones
+SET frozen = $2, updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
+          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+
+-- name: SetDnsZoneNsec3 :one
+-- PR 70 — set NSEC3 params on a signed zone. Salt is hex string
+-- (validated by handler) or NULL to mean "renderer picks a fresh
+-- random salt at sign time." API refuses on unsigned zones.
+UPDATE dns_zones
+SET nsec3_salt = $2,
+    nsec3_iterations = $3,
+    nsec3_opt_out = $4,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
+          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+
 -- ===== DNS Records =====
 -- name: CreateDnsRecord :one
 INSERT INTO dns_records (id, zone_id, name, type, ttl, data, source,

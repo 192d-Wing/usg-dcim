@@ -135,6 +135,12 @@ func (f *fakeQ) UpdateDnsZone(_ context.Context, a dbq.UpdateDnsZoneParams) (dbq
 	return dbq.DnsZone{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsZone(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) SetDnsZoneFrozen(_ context.Context, id uuid.UUID, frozen bool) (dbq.DnsZone, error) {
+	return dbq.DnsZone{ID: id, Frozen: frozen}, nil
+}
+func (f *fakeQ) SetDnsZoneNsec3(_ context.Context, a dbq.SetDnsZoneNsec3Params) (dbq.DnsZone, error) {
+	return dbq.DnsZone{ID: a.ID, Nsec3Salt: a.Salt, Nsec3Iterations: a.Iterations, Nsec3OptOut: a.OptOut, Signed: true}, nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }
