@@ -149,6 +149,7 @@ async def dhcp_drift_check(_ctx) -> dict:
     LIST endpoint's ?diff_status= filter and the push-drifted route
     read whatever this leaves on the rows.
     """
+    from . import metrics
     from .models.ipam import DhcpServer  # local — same defer pattern as dhcp_sync
     from .services import dhcp_alerts, dhcp_push as dhcp_push_svc
 
@@ -175,6 +176,20 @@ async def dhcp_drift_check(_ctx) -> dict:
                 )
                 total_alerts_fired += alert_summary.get("fired", 0)
                 total_alerts_resolved += alert_summary.get("resolved", 0)
+                # PR 97 — populate Prometheus drift gauges. set() so
+                # re-runs overwrite prior values; a status with zero
+                # scopes on this server emits the 0 sample (rather
+                # than dropping the series) so Grafana queries with
+                # WHERE status="drifted" never go NaN.
+                sid_label = str(srv.id)
+                fid_label = str(srv.fabric_id)
+                for status, count in report.counts.items():
+                    metrics.dhcp_drift_scope_status.labels(
+                        server_id=sid_label, fabric_id=fid_label, status=status,
+                    ).set(count)
+                metrics.dhcp_drift_alerts_firing.labels(
+                    server_id=sid_label, fabric_id=fid_label,
+                ).set(alert_summary.get("fired", 0))
                 per_server[str(srv.id)] = {
                     "total": report.total,
                     "counts": report.counts,

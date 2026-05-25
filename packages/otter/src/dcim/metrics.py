@@ -15,6 +15,7 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Counter,
+    Gauge,
     Histogram,
     generate_latest,
     multiprocess,
@@ -112,6 +113,29 @@ alert_eval_runs = _go_ported(Counter(
     "Alert-evaluation worker runs.",
     ["outcome"],  # ok | error
 ))
+
+# --- DHCP drift gauges (PR 97) ---
+# Populated by worker.dhcp_drift_check after each scheduled drift
+# pass; values are point-in-time counts that go up and down (a
+# drifted scope becomes in_sync after a successful push). Operators
+# graph trends in Grafana to spot persistent drift, alert on
+# sustained drifted_total > 0, or compare across fabrics.
+#
+# Labels: server_id and fabric_id let dashboards slice per server
+# AND per fabric without a Prometheus join. Status is the same
+# taxonomy services.dhcp_push uses (in_sync | drifted |
+# missing_from_kea | never_pushed | error). Cardinality is bounded
+# by (servers × 5 statuses) + servers — small for any real fleet.
+dhcp_drift_scope_status = Gauge(
+    "dcim_dhcp_drift_scope_status",
+    "Per-server count of DhcpScope rows in each drift-status bucket.",
+    ["server_id", "fabric_id", "status"],
+)
+dhcp_drift_alerts_firing = Gauge(
+    "dcim_dhcp_drift_alerts_firing",
+    "Per-server count of firing dhcp-drift Alert rows.",
+    ["server_id", "fabric_id"],
+)
 
 
 _UNMATCHED_ROUTE = "<unmatched>"
