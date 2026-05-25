@@ -36,7 +36,14 @@ from __future__ import annotations
 import ipaddress
 from dataclasses import dataclass
 
-from ..models.ipam import IPAddress, IpAddressSource
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models.ipam import (
+    IPAddress,
+    IpAddressRole,
+    IpAddressSource,
+    IpAddressStatus,
+)
 
 
 @dataclass
@@ -136,5 +143,121 @@ def reconcile_scope(scope, ip_rows: list[IPAddress]) -> ReconcileReport:
         subnet_id=str(scope.subnet_id) if scope.subnet_id else None,
         total=len(entries),
         counts=counts,
+        entries=entries,
+    )
+
+
+# ---------- mutating sync (PR 85) ----------
+
+
+@dataclass
+class SyncReport:
+    scope_id: str
+    subnet_id: str | None
+    upserted: int      # new IPAddress rows created
+    promoted: int      # existing dhcp-source rows flipped to reservation
+    skipped_collision: int  # static-source rows left alone
+    skipped_clean: int      # already source=reservation (or dhcp) — no change
+    skipped_no_subnet: int  # scope.subnet_id is NULL
+    entries: list[dict]
+
+
+async def sync_reservations(
+    db: AsyncSession,
+    scope,
+    ip_rows: list[IPAddress],
+) -> SyncReport:
+    """Materialize the scope's reservations into IPAM (PR 85).
+
+    Walks the same matching logic as reconcile_scope, but mutates:
+
+      * unbacked  → INSERT IPAddress(source=reservation, status=reserved,
+                    subnet_id=scope.subnet_id, address=<ip>)
+      * dhcp      → UPDATE source=reservation, status=reserved
+                    (promote — the lease is already there; tag it as
+                    a planned reservation so future syncs don't churn)
+      * collision → skip (static-source rows belong to the operator;
+                    they resolve manually)
+      * reservation → skip (already where we want it)
+      * no subnet_id → skip everything (can't insert without a parent)
+
+    Caller owns the commit. Returns counts + per-entry decisions so
+    the audit log can detail what happened.
+    """
+    if scope.subnet_id is None:
+        return SyncReport(
+            scope_id=str(scope.id), subnet_id=None,
+            upserted=0, promoted=0, skipped_collision=0,
+            skipped_clean=0,
+            skipped_no_subnet=len(scope.reservations_json or []),
+            entries=[
+                {"reservation_ip": (r.get("ip") or ""), "decision": "skipped_no_subnet"}
+                for r in (scope.reservations_json or [])
+            ],
+        )
+
+    ip_index: dict[str, IPAddress] = {}
+    for row in ip_rows:
+        key = _normalize_ip(str(row.address).split("/")[0])
+        if key is not None:
+            ip_index[key] = row
+
+    upserted = promoted = skipped_collision = skipped_clean = 0
+    entries: list[dict] = []
+    for r in scope.reservations_json or []:
+        raw_ip = r.get("ip", "")
+        norm = _normalize_ip(raw_ip)
+        if norm is None:
+            entries.append({"reservation_ip": raw_ip, "decision": "skipped_unparseable"})
+            continue
+        match = ip_index.get(norm)
+        if match is None:
+            # Unbacked — insert a fresh reservation row.
+            row = IPAddress(
+                subnet_id=scope.subnet_id,
+                address=norm,
+                role=IpAddressRole.data,
+                status=IpAddressStatus.reserved,
+                source=IpAddressSource.reservation,
+            )
+            db.add(row)
+            upserted += 1
+            entries.append({
+                "reservation_ip": norm, "decision": "upserted",
+            })
+            continue
+        src = str(match.source.value if hasattr(match.source, "value") else match.source)
+        if src == IpAddressSource.static.value:
+            skipped_collision += 1
+            entries.append({
+                "reservation_ip": norm, "decision": "skipped_collision",
+                "ip_address_id": str(match.id),
+            })
+        elif src == IpAddressSource.dhcp.value:
+            # Lease materialized; tag as reservation so it stops
+            # looking like a transient allocation.
+            match.source = IpAddressSource.reservation
+            match.status = IpAddressStatus.reserved
+            promoted += 1
+            entries.append({
+                "reservation_ip": norm, "decision": "promoted",
+                "ip_address_id": str(match.id),
+            })
+        else:
+            skipped_clean += 1
+            entries.append({
+                "reservation_ip": norm, "decision": "skipped_clean",
+                "ip_address_id": str(match.id),
+            })
+
+    await db.flush()
+    return SyncReport(
+        scope_id=str(scope.id),
+        subnet_id=str(scope.subnet_id),
+        upserted=upserted,
+        promoted=promoted,
+        skipped_collision=skipped_collision,
+        skipped_clean=skipped_clean,
+        skipped_no_subnet=0,
         entries=entries,
     )

@@ -65,7 +65,7 @@ CAPABILITY_CATALOG: dict[str, dict[str, list[str]]] = {
         "vteps": ["create", "read", "update", "delete"],
         "vtep-memberships": ["create", "read", "update", "delete"],
         "dhcp-servers": ["create", "read", "update", "delete", "bundle"],
-        "dhcp-scopes": ["create", "read", "update", "delete", "push", "reconcile"],
+        "dhcp-scopes": ["create", "read", "update", "delete", "push", "reconcile", "reconcile-sync"],
         "dhcp-scope-templates": ["create", "read", "update", "delete"],
     },
     "dns": {

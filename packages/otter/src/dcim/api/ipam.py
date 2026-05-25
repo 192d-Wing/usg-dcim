@@ -2251,6 +2251,66 @@ async def reconcile_dhcp_scope(
     }
 
 
+@router.post("/dhcp/scopes/{scope_id}/reconcile/sync")
+async def reconcile_sync_dhcp_scope(
+    scope_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:reconcile-sync")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Materialize this scope's reservations into IPAM (PR 85).
+
+    Walks the same status taxonomy as GET .../reconcile, but mutates:
+      * unbacked  → INSERT an IPAddress(source=reservation,
+                    status=reserved) in the linked subnet.
+      * dhcp      → promote: flip the existing row to
+                    source=reservation, status=reserved.
+      * collision → skip (static-source rows are operator-owned).
+      * reservation → skip (already correct).
+      * no scope.subnet_id → skip everything (can't insert).
+
+    Returns counts + per-entry decisions. A single audit entry
+    captures the totals; per-reservation history lives in the
+    response for the operator's UI.
+    """
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:reconcile-sync",
+    )
+    ip_rows: list = []
+    if obj.subnet_id is not None:
+        ip_rows = (
+            await db.execute(
+                select(IPAddress).where(IPAddress.subnet_id == obj.subnet_id)
+            )
+        ).scalars().all()
+    report = await dhcp_reconcile.sync_reservations(db, obj, ip_rows)
+    await audit.record(
+        db, principal, action="dhcp_scope.reconcile_sync",
+        target_type="dhcp_scope", target_id=str(scope_id),
+        metadata={
+            "subnet_id": report.subnet_id,
+            "upserted": report.upserted,
+            "promoted": report.promoted,
+            "skipped_collision": report.skipped_collision,
+            "skipped_clean": report.skipped_clean,
+            "skipped_no_subnet": report.skipped_no_subnet,
+        },
+    )
+    await db.commit()
+    return {
+        "scope_id": report.scope_id,
+        "subnet_id": report.subnet_id,
+        "upserted": report.upserted,
+        "promoted": report.promoted,
+        "skipped_collision": report.skipped_collision,
+        "skipped_clean": report.skipped_clean,
+        "skipped_no_subnet": report.skipped_no_subnet,
+        "entries": report.entries,
+    }
+
+
 @router.get("/dhcp/scopes/{scope_id}/diff")
 async def diff_dhcp_scope(
     scope_id: UUID,
