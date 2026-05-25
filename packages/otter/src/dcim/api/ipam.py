@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import ConflictError, NotFoundError, ValidationError
+from ..models.alerts import Alert, AlertState
 from ..models.dns import BgpPeer
 from ..models.ipam import (
     BgpAddressFamily,
@@ -93,6 +94,7 @@ from ..security import audit
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
 from ..services import dhcp_bundle
+from ..services import dhcp_drift_summary as dhcp_drift_summary_svc
 from ..services import dhcp_push
 from ..services import dhcp_reconcile
 from ..services import ipam as ipam_svc
@@ -2505,6 +2507,110 @@ async def diff_all_dhcp_scopes(
         "total": report.total,
         "counts": report.counts,
         "results": [_diff_result_dict(r) for r in report.results],
+    }
+
+
+@router.get("/dhcp/drift-summary")
+async def dhcp_drift_summary(
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Fleet-wide DHCP drift aggregation (PR 93).
+
+    Returns per-server scope-status counts + a fleet roll-up + the
+    number of firing dhcp-drift Alert rows per server. Read-only;
+    ABAC-filtered to fabrics the caller can read.
+
+    Operators used to walk every DhcpServer and call
+    GET .../scopes?diff_status=drifted per server to assemble the
+    same view; this endpoint does it in three SELECTs.
+    """
+    # ABAC: limit to fabrics the caller can see (same gate
+    # list_dhcp_servers uses).
+    in_scope = await scope_filtered_fabric_ids(
+        db, principal.capabilities, "ipam:dhcp-scopes:read",
+    )
+    servers_stmt = select(DhcpServer)
+    if in_scope is not None:
+        if not in_scope:
+            return {
+                "fleet": {
+                    "servers_total": 0, "servers_with_drift": 0,
+                    "scopes_total": 0,
+                    "scope_counts": {
+                        "in_sync": 0, "drifted": 0, "missing_from_kea": 0,
+                        "never_pushed": 0, "error": 0,
+                    },
+                    "alerts_firing": 0,
+                },
+                "servers": [],
+            }
+        servers_stmt = servers_stmt.where(DhcpServer.fabric_id.in_(in_scope))
+    servers = (await db.execute(servers_stmt)).scalars().all()
+    if not servers:
+        return {
+            "fleet": {
+                "servers_total": 0, "servers_with_drift": 0,
+                "scopes_total": 0,
+                "scope_counts": {
+                    "in_sync": 0, "drifted": 0, "missing_from_kea": 0,
+                    "never_pushed": 0, "error": 0,
+                },
+                "alerts_firing": 0,
+            },
+            "servers": [],
+        }
+    server_ids = {s.id for s in servers}
+    scope_rows = (
+        await db.execute(
+            select(DhcpScope).where(DhcpScope.dhcp_server_id.in_(server_ids))
+        )
+    ).scalars().all()
+    scopes_by_server: dict = {}
+    for sc in scope_rows:
+        scopes_by_server.setdefault(sc.dhcp_server_id, []).append(sc)
+    # Firing drift alerts — dedupe_key prefix `dhcp-drift:` (PR 87).
+    # One per scope by construction (dedupe_key is per scope), so the
+    # count is either 0 or 1 per scope.
+    alert_rows = (
+        await db.execute(
+            select(Alert.dedupe_key).where(
+                Alert.dedupe_key.like("dhcp-drift:%"),
+                Alert.state == AlertState.firing,
+            )
+        )
+    ).scalars().all()
+    alert_counts: dict[str, int] = {}
+    for key in alert_rows:
+        # dedupe_key = "dhcp-drift:<scope_id>"
+        scope_id = key.split(":", 1)[1] if ":" in key else ""
+        if scope_id:
+            alert_counts[scope_id] = alert_counts.get(scope_id, 0) + 1
+    fleet, summaries = dhcp_drift_summary_svc.aggregate(
+        servers, scopes_by_server, alert_counts,
+    )
+    return {
+        "fleet": {
+            "servers_total": fleet.servers_total,
+            "servers_with_drift": fleet.servers_with_drift,
+            "scopes_total": fleet.scopes_total,
+            "scope_counts": fleet.scope_counts,
+            "alerts_firing": fleet.alerts_firing,
+        },
+        "servers": [
+            {
+                "server_id": s.server_id,
+                "server_name": s.server_name,
+                "fabric_id": s.fabric_id,
+                "enabled": s.enabled,
+                "last_push_at": s.last_push_at,
+                "last_push_status": s.last_push_status,
+                "scopes_total": s.scopes_total,
+                "scope_counts": s.scope_counts,
+                "alerts_firing": s.alerts_firing,
+            }
+            for s in summaries
+        ],
     }
 
 
