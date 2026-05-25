@@ -61,7 +61,10 @@ class Alert(UUIDPrimaryKey, Timestamped, Base):
     )
 
     rule_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("alert_rules.id"))
-    site_id: Mapped[UUID] = mapped_column(PgUUID(as_uuid=True), ForeignKey("sites.id"), nullable=False)
+    # PR 87 — nullable for fabric-rooted alerts (DHCP scope drift).
+    # The metric-rule engine still populates site_id on every row it
+    # writes; only drift events leave it NULL.
+    site_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("sites.id"))
     asset_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("assets.id"))
     collector_id: Mapped[UUID | None] = mapped_column(PgUUID(as_uuid=True), ForeignKey("collectors.id"))
 

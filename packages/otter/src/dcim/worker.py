@@ -156,6 +156,7 @@ async def dhcp_drift_check(_ctx) -> dict:
     per_server: dict[str, dict] = {}
     errors = 0
     total_alerts_fired = 0
+    total_alerts_resolved = 0
     async with async_session() as db:
         servers = (
             await db.execute(
@@ -173,6 +174,7 @@ async def dhcp_drift_check(_ctx) -> dict:
                     db, srv, report.transitions,
                 )
                 total_alerts_fired += alert_summary.get("fired", 0)
+                total_alerts_resolved += alert_summary.get("resolved", 0)
                 per_server[str(srv.id)] = {
                     "total": report.total,
                     "counts": report.counts,
@@ -191,12 +193,14 @@ async def dhcp_drift_check(_ctx) -> dict:
         "dhcp_drift_check.done",
         servers=len(per_server), errors=errors,
         alerts_fired=total_alerts_fired,
+        alerts_resolved=total_alerts_resolved,
         elapsed_s=round(elapsed, 3),
     )
     return {
         "servers": len(per_server),
         "errors": errors,
         "alerts_fired": total_alerts_fired,
+        "alerts_resolved": total_alerts_resolved,
         "elapsed_s": elapsed,
         "per_server": per_server,
     }
