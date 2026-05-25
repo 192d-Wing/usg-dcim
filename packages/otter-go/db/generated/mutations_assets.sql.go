@@ -283,3 +283,23 @@ func (q *Queries) GetAssetSiteID(ctx context.Context, id uuid.UUID) (uuid.UUID, 
 	err := row.Scan(&sid)
 	return sid, err
 }
+
+const findAssetByManufacturerSerial = `-- name: FindAssetByManufacturerSerial :one
+SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
+       kind::text AS kind, manufacturer, model, serial, firmware,
+       rack_position_u, rack_units, face::text AS face, mount::text AS mount,
+       pdu_side::text AS pdu_side, psu_count, port_count,
+       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+       lifecycle_state::text AS lifecycle_state, install_date, warranty_expires,
+       metadata_json, created_at, updated_at
+FROM assets
+WHERE manufacturer = $1 AND serial = $2
+LIMIT 1
+`
+
+func (q *Queries) FindAssetByManufacturerSerial(ctx context.Context, manufacturer, serial string) (Asset, error) {
+	row := q.db.QueryRow(ctx, findAssetByManufacturerSerial, manufacturer, serial)
+	var a Asset
+	err := scanAsset(row, &a)
+	return a, err
+}

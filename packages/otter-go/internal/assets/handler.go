@@ -1,6 +1,6 @@
-// Package assets holds GET handlers for /api/v1/assets. The Python
-// otter exposes more endpoints (create/patch/decommission/bulk); only
-// the read paths are ported in Phase 1.
+// Package assets holds the /api/v1/assets surface. PR 41 ported the
+// reads + single-row mutations (create, patch, decommission). PR 69
+// closed the last gap with bulk upsert. Python otter parity reached.
 package assets
 
 import (
@@ -26,6 +26,7 @@ type Querier interface {
 	CreateAsset(ctx context.Context, arg dbq.CreateAssetParams) (dbq.Asset, error)
 	UpdateAsset(ctx context.Context, arg dbq.UpdateAssetParams) (dbq.Asset, error)
 	SetAssetDecommissioned(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
+	FindAssetByManufacturerSerial(ctx context.Context, manufacturer, serial string) (dbq.Asset, error)
 	CountConsumerPowerDrops(ctx context.Context, assetID uuid.UUID) (int64, error)
 	CountPduPowerDrops(ctx context.Context, pduAssetID uuid.UUID) (int64, error)
 	ListDownstreamAssetNames(ctx context.Context, pduAssetID uuid.UUID) ([]string, error)
@@ -57,6 +58,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability("inventory:assets:create")).Post("/assets", h.create)
 	r.With(auth.RequireCapability("inventory:assets:update")).Patch("/assets/{id}", h.update)
 	r.With(auth.RequireCapability("inventory:assets:update")).Post("/assets/{id}/decommission", h.decommission)
+	r.With(auth.RequireCapability("inventory:bulk:execute")).Post("/assets/bulk", h.bulkUpsert)
 }
 
 type listResponse struct {
