@@ -222,6 +222,18 @@ func (f *fakeQ) CountIPAMRecordsInZones(_ context.Context, _ []uuid.UUID) (int64
 func (f *fakeQ) CreateProjectedDnsRecord(_ context.Context, _ dbq.CreateProjectedDnsRecordParams) (uuid.UUID, error) {
 	return uuid.New(), nil
 }
+func (f *fakeQ) ListDnsSamplesInWindow(_ context.Context, _ time.Time, _ []uuid.UUID) ([]dbq.DnsMetricsSampleRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListDnsServersForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.DnsServerForDashboardRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListDnsZonesForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.DnsZoneForDashboardRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) CountAnycastGroupsForDashboard(_ context.Context, _ *uuid.UUID) (int64, error) {
+	return 0, nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }

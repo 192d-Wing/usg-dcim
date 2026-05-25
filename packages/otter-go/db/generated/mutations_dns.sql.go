@@ -771,6 +771,125 @@ func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+// ---- Dashboard (PR 84) ----
+
+const listDnsSamplesInWindow = `SELECT id, server_id, observed_at, interval_seconds,
+       queries, nxdomain, servfail, noerror,
+       p50_ms, p95_ms, top_names
+FROM dns_server_metrics_samples
+WHERE observed_at >= $1
+  AND ($2::uuid[] IS NULL OR server_id = ANY($2::uuid[]))
+ORDER BY observed_at ASC`
+
+func (q *Queries) ListDnsSamplesInWindow(ctx context.Context, cutoff time.Time, serverIDs []uuid.UUID) ([]DnsMetricsSampleRow, error) {
+	rows, err := q.db.Query(ctx, listDnsSamplesInWindow, cutoff, serverIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsMetricsSampleRow{}
+	for rows.Next() {
+		var s DnsMetricsSampleRow
+		if err := scanDnsMetricsSample(rows, &s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DnsServerForDashboardRow projects the columns the dashboard reads
+// from dns_servers. The full DnsServer struct has more fields but
+// the dashboard only needs these.
+type DnsServerForDashboardRow struct {
+	ID               uuid.UUID  `json:"id"`
+	Name             string     `json:"name"`
+	SiteID           *uuid.UUID `json:"site_id"`
+	FabricID         uuid.UUID  `json:"fabric_id"`
+	Role             string     `json:"role"`
+	UnicastIP        string     `json:"unicast_ip"`
+	Enabled          bool       `json:"enabled"`
+	LastRenderAt     *time.Time `json:"last_render_at"`
+	LastRenderStatus *string    `json:"last_render_status"`
+	LastRenderError  *string    `json:"last_render_error"`
+	LastRenderEtag   *string    `json:"last_render_etag"`
+	CoreDNSVersion   *string    `json:"coredns_version"`
+	AnycastGroupID   *uuid.UUID `json:"anycast_group_id"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+const listDnsServersForDashboard = `SELECT id, name, site_id, fabric_id, role::text AS role, host(unicast_ip) AS unicast_ip,
+       enabled, last_render_at, last_render_status, last_render_error,
+       last_render_etag, coredns_version, anycast_group_id,
+       created_at, updated_at
+FROM dns_servers
+WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid)`
+
+func (q *Queries) ListDnsServersForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]DnsServerForDashboardRow, error) {
+	rows, err := q.db.Query(ctx, listDnsServersForDashboard, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsServerForDashboardRow{}
+	for rows.Next() {
+		var s DnsServerForDashboardRow
+		if err := rows.Scan(&s.ID, &s.Name, &s.SiteID, &s.FabricID, &s.Role, &s.UnicastIP,
+			&s.Enabled, &s.LastRenderAt, &s.LastRenderStatus, &s.LastRenderError,
+			&s.LastRenderEtag, &s.CoreDNSVersion, &s.AnycastGroupID,
+			&s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DnsZoneForDashboardRow is a thin projection — the dashboard only
+// needs the counters (signed/nsec3) plus the kind.
+type DnsZoneForDashboardRow struct {
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
+	Kind            string     `json:"kind"`
+	FabricID        uuid.UUID  `json:"fabric_id"`
+	SiteID          *uuid.UUID `json:"site_id"`
+	Signed          bool       `json:"signed"`
+	Nsec3Iterations int32      `json:"nsec3_iterations"`
+}
+
+const listDnsZonesForDashboard = `SELECT id, name, kind::text AS kind, fabric_id, site_id, signed,
+       nsec3_iterations
+FROM dns_zones
+WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid)`
+
+func (q *Queries) ListDnsZonesForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]DnsZoneForDashboardRow, error) {
+	rows, err := q.db.Query(ctx, listDnsZonesForDashboard, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsZoneForDashboardRow{}
+	for rows.Next() {
+		var z DnsZoneForDashboardRow
+		if err := rows.Scan(&z.ID, &z.Name, &z.Kind, &z.FabricID, &z.SiteID, &z.Signed, &z.Nsec3Iterations); err != nil {
+			return nil, err
+		}
+		out = append(out, z)
+	}
+	return out, rows.Err()
+}
+
+const countAnycastGroupsForDashboard = `SELECT count(*)::bigint FROM anycast_groups
+WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid)`
+
+func (q *Queries) CountAnycastGroupsForDashboard(ctx context.Context, fabricID *uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAnycastGroupsForDashboard, fabricID)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
 // ---- sync-from-ipam (PR 83) ----
 
 const reverseZoneCols = `id, name, kind::text AS kind, fabric_id, site_id, description,

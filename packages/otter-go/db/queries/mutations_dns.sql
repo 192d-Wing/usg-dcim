@@ -283,6 +283,37 @@ SET last_render_at = NOW(),
     coredns_version = COALESCE($5, coredns_version)
 WHERE id = $1;
 
+-- ===== Dashboard (PR 84) =====
+
+-- name: ListDnsSamplesInWindow :many
+-- All samples from `cutoff` onward, optionally filtered by a set of
+-- server_ids when the caller is fabric-scoped.
+SELECT id, server_id, observed_at, interval_seconds,
+       queries, nxdomain, servfail, noerror,
+       p50_ms, p95_ms, top_names
+FROM dns_server_metrics_samples
+WHERE observed_at >= $1
+  AND ($2::uuid[] IS NULL OR server_id = ANY($2::uuid[]))
+ORDER BY observed_at ASC;
+
+-- name: ListDnsServersForDashboard :many
+SELECT id, name, site_id, fabric_id, role::text AS role, host(unicast_ip) AS unicast_ip,
+       enabled, last_render_at, last_render_status, last_render_error,
+       last_render_etag, coredns_version, anycast_group_id,
+       created_at, updated_at
+FROM dns_servers
+WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid);
+
+-- name: ListDnsZonesForDashboard :many
+SELECT id, name, kind::text AS kind, fabric_id, site_id, signed,
+       nsec3_iterations
+FROM dns_zones
+WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid);
+
+-- name: CountAnycastGroupsForDashboard :one
+SELECT count(*)::bigint FROM anycast_groups
+WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid);
+
 -- ===== sync-from-ipam (PR 83) =====
 
 -- name: ListReverseZonesForSite :many

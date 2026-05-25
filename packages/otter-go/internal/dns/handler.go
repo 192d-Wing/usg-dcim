@@ -86,6 +86,10 @@ type Querier interface {
 	DeleteIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) error
 	CountIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) (int64, error)
 	CreateProjectedDnsRecord(ctx context.Context, arg dbq.CreateProjectedDnsRecordParams) (uuid.UUID, error)
+	ListDnsSamplesInWindow(ctx context.Context, cutoff time.Time, serverIDs []uuid.UUID) ([]dbq.DnsMetricsSampleRow, error)
+	ListDnsServersForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]dbq.DnsServerForDashboardRow, error)
+	ListDnsZonesForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]dbq.DnsZoneForDashboardRow, error)
+	CountAnycastGroupsForDashboard(ctx context.Context, fabricID *uuid.UUID) (int64, error)
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
@@ -207,6 +211,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:keys:delete")).Delete("/keys/{id}", h.deleteDnsKey)
 		r.With(auth.RequireCapability("dns:zones:update")).Post("/zones/{id}/import", h.importZone)
 		r.With(auth.RequireCapability("dns:zones:update")).Post("/zones/{id}/sync-from-ipam", h.syncFromIPAM)
+		r.With(auth.RequireCapability("dns:servers:read")).Get("/dashboard", h.dnsDashboard)
 
 		r.With(auth.RequireCapability("dns:records:create")).Post("/records", h.createRecord)
 		r.With(auth.RequireCapability("dns:records:update")).Patch("/records/{id}", h.updateRecord)
