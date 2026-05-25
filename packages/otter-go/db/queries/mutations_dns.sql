@@ -283,6 +283,83 @@ SET last_render_at = NOW(),
     coredns_version = COALESCE($5, coredns_version)
 WHERE id = $1;
 
+-- ===== sync-from-ipam (PR 83) =====
+
+-- name: ListReverseZonesForSite :many
+SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
+       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+FROM dns_zones
+WHERE kind = 'reverse'::dns_zone_kind
+  AND fabric_id = $1
+  AND site_id = $2;
+
+-- name: GetReverseZoneByName :one
+SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
+       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+FROM dns_zones
+WHERE kind = 'reverse'::dns_zone_kind
+  AND fabric_id = $1 AND site_id = $2 AND name = $3;
+
+-- name: CreateReverseZone :one
+INSERT INTO dns_zones (
+    id, name, kind, fabric_id, site_id,
+    soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+    default_ttl, signed, nsec3_iterations, nsec3_opt_out, publish_cds, frozen,
+    created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, 'reverse'::dns_zone_kind, $2, $3,
+    'ns1', 'hostmaster', 900, 900, 1800, 60,
+    60, FALSE, 0, FALSE, TRUE, FALSE,
+    NOW(), NOW()
+)
+RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
+          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+
+-- name: ListIPAddressesForSiteWithDnsName :many
+-- Joins subnets+ip_addresses by site, filters to rows with dns_name set.
+-- The sync projector emits A/AAAA + PTR for each row returned.
+SELECT i.id, i.subnet_id, host(i.address) AS address,
+       source::text AS source, dns_name
+FROM ip_addresses i
+JOIN subnets s ON s.id = i.subnet_id
+WHERE s.site_id = $1
+  AND i.dns_name IS NOT NULL;
+
+-- name: DeleteIPAMRecordsInZones :exec
+-- Drop every projector-owned record (source=ipam or =ddns) across
+-- the named zones. Operator-authored manual rows stay put.
+DELETE FROM dns_records
+WHERE zone_id = ANY($1::uuid[])
+  AND source IN ('ipam'::dns_record_source, 'ddns'::dns_record_source);
+
+-- name: CountIPAMRecordsInZones :one
+-- Pre-count for the response shape (Python returns removed count).
+SELECT count(*)::bigint FROM dns_records
+WHERE zone_id = ANY($1::uuid[])
+  AND source IN ('ipam'::dns_record_source, 'ddns'::dns_record_source);
+
+-- name: CreateProjectedDnsRecord :one
+-- Variant of CreateDnsRecord that takes an explicit source enum
+-- value (ipam or ddns) plus the IPAM back-pointer for projector-
+-- owned rows. CreateDnsRecord hardcoded source='manual' which
+-- doesn't fit the sync path.
+INSERT INTO dns_records (
+    id, zone_id, name, type, ttl, data, source, ipam_address_id,
+    created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, $2, $3::dns_record_type, $4, $5::jsonb,
+    $6::dns_record_source, $7, NOW(), NOW()
+)
+RETURNING id;
+
 -- ===== Zone import (PR 82) =====
 
 -- name: DeleteManualRecordsInZone :many

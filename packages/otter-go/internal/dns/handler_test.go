@@ -201,6 +201,27 @@ func (f *fakeQ) DeleteManualRecordsInZone(_ context.Context, _ uuid.UUID) ([]uui
 func (f *fakeQ) UpdateDnsZoneSoa(_ context.Context, _ dbq.UpdateDnsZoneSoaParams) error {
 	return nil
 }
+func (f *fakeQ) ListReverseZonesForSite(_ context.Context, _, _ uuid.UUID) ([]dbq.DnsZone, error) {
+	return nil, nil
+}
+func (f *fakeQ) GetReverseZoneByName(_ context.Context, _, _ uuid.UUID, _ string) (dbq.DnsZone, error) {
+	return dbq.DnsZone{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateReverseZone(_ context.Context, _ string, _, _ uuid.UUID) (dbq.DnsZone, error) {
+	return dbq.DnsZone{ID: uuid.New()}, nil
+}
+func (f *fakeQ) ListIPAddressesForSiteWithDnsName(_ context.Context, _ uuid.UUID) ([]dbq.IPAddressForSyncRow, error) {
+	return nil, nil
+}
+func (f *fakeQ) DeleteIPAMRecordsInZones(_ context.Context, _ []uuid.UUID) error {
+	return nil
+}
+func (f *fakeQ) CountIPAMRecordsInZones(_ context.Context, _ []uuid.UUID) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) CreateProjectedDnsRecord(_ context.Context, _ dbq.CreateProjectedDnsRecordParams) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }

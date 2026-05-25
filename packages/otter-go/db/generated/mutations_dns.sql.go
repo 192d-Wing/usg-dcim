@@ -771,6 +771,152 @@ func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+// ---- sync-from-ipam (PR 83) ----
+
+const reverseZoneCols = `id, name, kind::text AS kind, fabric_id, site_id, description,
+       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+       nsec3_opt_out, publish_cds, frozen, created_at, updated_at`
+
+func scanReverseZone(row interface{ Scan(...any) error }, z *DnsZone) error {
+	return row.Scan(&z.ID, &z.Name, &z.Kind, &z.FabricID, &z.SiteID, &z.Description,
+		&z.SoaMname, &z.SoaRname, &z.SoaRefresh, &z.SoaRetry, &z.SoaExpire, &z.SoaMinimum,
+		&z.DefaultTTL, &z.Signed, &z.ZskRotationDays, &z.Nsec3Salt, &z.Nsec3Iterations,
+		&z.Nsec3OptOut, &z.PublishCds, &z.Frozen, &z.CreatedAt, &z.UpdatedAt)
+}
+
+const listReverseZonesForSite = `SELECT ` + reverseZoneCols + `
+FROM dns_zones
+WHERE kind = 'reverse'::dns_zone_kind AND fabric_id = $1 AND site_id = $2`
+
+func (q *Queries) ListReverseZonesForSite(ctx context.Context, fabricID, siteID uuid.UUID) ([]DnsZone, error) {
+	rows, err := q.db.Query(ctx, listReverseZonesForSite, fabricID, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsZone{}
+	for rows.Next() {
+		var z DnsZone
+		if err := scanReverseZone(rows, &z); err != nil {
+			return nil, err
+		}
+		out = append(out, z)
+	}
+	return out, rows.Err()
+}
+
+const getReverseZoneByName = `SELECT ` + reverseZoneCols + `
+FROM dns_zones WHERE kind = 'reverse'::dns_zone_kind AND fabric_id = $1 AND site_id = $2 AND name = $3`
+
+func (q *Queries) GetReverseZoneByName(ctx context.Context, fabricID, siteID uuid.UUID, name string) (DnsZone, error) {
+	row := q.db.QueryRow(ctx, getReverseZoneByName, fabricID, siteID, name)
+	var z DnsZone
+	err := scanReverseZone(row, &z)
+	return z, err
+}
+
+const createReverseZone = `INSERT INTO dns_zones (
+    id, name, kind, fabric_id, site_id,
+    soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+    default_ttl, signed, nsec3_iterations, nsec3_opt_out, publish_cds, frozen,
+    created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, 'reverse'::dns_zone_kind, $2, $3,
+    'ns1', 'hostmaster', 900, 900, 1800, 60,
+    60, FALSE, 0, FALSE, TRUE, FALSE,
+    NOW(), NOW()
+)
+RETURNING ` + reverseZoneCols
+
+func (q *Queries) CreateReverseZone(ctx context.Context, name string, fabricID, siteID uuid.UUID) (DnsZone, error) {
+	row := q.db.QueryRow(ctx, createReverseZone, name, fabricID, siteID)
+	var z DnsZone
+	err := scanReverseZone(row, &z)
+	return z, err
+}
+
+// IPAddressForSyncRow projects the columns the sync projector reads.
+type IPAddressForSyncRow struct {
+	ID       uuid.UUID `json:"id"`
+	SubnetID uuid.UUID `json:"subnet_id"`
+	Address  string    `json:"address"`
+	Source   string    `json:"source"`
+	DnsName  *string   `json:"dns_name"`
+}
+
+const listIPAddressesForSiteWithDnsName = `SELECT i.id, i.subnet_id, host(i.address) AS address,
+       i.source::text AS source, i.dns_name
+FROM ip_addresses i
+JOIN subnets s ON s.id = i.subnet_id
+WHERE s.site_id = $1 AND i.dns_name IS NOT NULL`
+
+func (q *Queries) ListIPAddressesForSiteWithDnsName(ctx context.Context, siteID uuid.UUID) ([]IPAddressForSyncRow, error) {
+	rows, err := q.db.Query(ctx, listIPAddressesForSiteWithDnsName, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []IPAddressForSyncRow{}
+	for rows.Next() {
+		var r IPAddressForSyncRow
+		if err := rows.Scan(&r.ID, &r.SubnetID, &r.Address, &r.Source, &r.DnsName); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+const deleteIPAMRecordsInZones = `DELETE FROM dns_records
+WHERE zone_id = ANY($1::uuid[])
+  AND source IN ('ipam'::dns_record_source, 'ddns'::dns_record_source)`
+
+func (q *Queries) DeleteIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteIPAMRecordsInZones, zoneIDs)
+	return err
+}
+
+const countIPAMRecordsInZones = `SELECT count(*)::bigint FROM dns_records
+WHERE zone_id = ANY($1::uuid[])
+  AND source IN ('ipam'::dns_record_source, 'ddns'::dns_record_source)`
+
+func (q *Queries) CountIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countIPAMRecordsInZones, zoneIDs)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
+const createProjectedDnsRecord = `INSERT INTO dns_records (
+    id, zone_id, name, type, ttl, data, source, ipam_address_id,
+    created_at, updated_at
+)
+VALUES (
+    gen_random_uuid(), $1, $2, $3::dns_record_type, $4, $5::jsonb,
+    $6::dns_record_source, $7, NOW(), NOW()
+)
+RETURNING id`
+
+type CreateProjectedDnsRecordParams struct {
+	ZoneID        uuid.UUID       `json:"zone_id"`
+	Name          string          `json:"name"`
+	Type          string          `json:"type"`
+	TTL           *int32          `json:"ttl"`
+	Data          json.RawMessage `json:"data"`
+	Source        string          `json:"source"`
+	IpamAddressID *uuid.UUID      `json:"ipam_address_id"`
+}
+
+func (q *Queries) CreateProjectedDnsRecord(ctx context.Context, arg CreateProjectedDnsRecordParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, createProjectedDnsRecord,
+		arg.ZoneID, arg.Name, arg.Type, arg.TTL, arg.Data, arg.Source, arg.IpamAddressID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 // ---- Zone import (PR 82) ----
 
 const deleteManualRecordsInZone = `DELETE FROM dns_records
