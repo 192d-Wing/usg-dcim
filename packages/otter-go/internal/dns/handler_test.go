@@ -195,6 +195,12 @@ func (f *fakeQ) GetDnsKey(_ context.Context, _ uuid.UUID) (dbq.DnsKeyRow, error)
 func (f *fakeQ) TouchDnsZone(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 1, nil
 }
+func (f *fakeQ) DeleteManualRecordsInZone(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeQ) UpdateDnsZoneSoa(_ context.Context, _ dbq.UpdateDnsZoneSoaParams) error {
+	return nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }

@@ -283,6 +283,31 @@ SET last_render_at = NOW(),
     coredns_version = COALESCE($5, coredns_version)
 WHERE id = $1;
 
+-- ===== Zone import (PR 82) =====
+
+-- name: DeleteManualRecordsInZone :many
+-- Zone import replaces existing source=manual rows; IPAM-projected
+-- (source=ipam / ddns) are left alone. Returns the deleted rows so
+-- the audit metadata can include the count.
+DELETE FROM dns_records
+WHERE zone_id = $1 AND source = 'manual'::dns_record_source
+RETURNING id;
+
+-- name: UpdateDnsZoneSoa :exec
+-- Apply imported SOA timers when update_soa=true on the import
+-- payload. mname/rname strip the trailing dot + take only the
+-- left-most label (matches Python's _ImportPayload behavior).
+UPDATE dns_zones
+SET soa_mname    = COALESCE(sqlc.narg(soa_mname)::text, soa_mname),
+    soa_rname    = COALESCE(sqlc.narg(soa_rname)::text, soa_rname),
+    soa_refresh  = COALESCE(sqlc.narg(soa_refresh)::int, soa_refresh),
+    soa_retry    = COALESCE(sqlc.narg(soa_retry)::int, soa_retry),
+    soa_expire   = COALESCE(sqlc.narg(soa_expire)::int, soa_expire),
+    soa_minimum  = COALESCE(sqlc.narg(soa_minimum)::int, soa_minimum),
+    default_ttl  = COALESCE(sqlc.narg(default_ttl)::int, default_ttl),
+    updated_at   = NOW()
+WHERE id = $1;
+
 -- ===== DnsKey writes (PR 80+) =====
 -- Key generation/rotation/enable + key delete. Keys are stored
 -- plaintext in Postgres for the Go port (Fernet-at-rest is a

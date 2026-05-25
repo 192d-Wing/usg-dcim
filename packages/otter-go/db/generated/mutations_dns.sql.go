@@ -771,6 +771,59 @@ func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+// ---- Zone import (PR 82) ----
+
+const deleteManualRecordsInZone = `DELETE FROM dns_records
+WHERE zone_id = $1 AND source = 'manual'::dns_record_source
+RETURNING id`
+
+func (q *Queries) DeleteManualRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, deleteManualRecordsInZone, zoneID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+const updateDnsZoneSoa = `UPDATE dns_zones
+SET soa_mname    = COALESCE($2::text, soa_mname),
+    soa_rname    = COALESCE($3::text, soa_rname),
+    soa_refresh  = COALESCE($4::int, soa_refresh),
+    soa_retry    = COALESCE($5::int, soa_retry),
+    soa_expire   = COALESCE($6::int, soa_expire),
+    soa_minimum  = COALESCE($7::int, soa_minimum),
+    default_ttl  = COALESCE($8::int, default_ttl),
+    updated_at   = NOW()
+WHERE id = $1`
+
+type UpdateDnsZoneSoaParams struct {
+	ID          uuid.UUID `json:"id"`
+	SoaMname    *string   `json:"soa_mname"`
+	SoaRname    *string   `json:"soa_rname"`
+	SoaRefresh  *int32    `json:"soa_refresh"`
+	SoaRetry    *int32    `json:"soa_retry"`
+	SoaExpire   *int32    `json:"soa_expire"`
+	SoaMinimum  *int32    `json:"soa_minimum"`
+	DefaultTTL  *int32    `json:"default_ttl"`
+}
+
+func (q *Queries) UpdateDnsZoneSoa(ctx context.Context, arg UpdateDnsZoneSoaParams) error {
+	_, err := q.db.Exec(ctx, updateDnsZoneSoa,
+		arg.ID, arg.SoaMname, arg.SoaRname,
+		arg.SoaRefresh, arg.SoaRetry, arg.SoaExpire, arg.SoaMinimum,
+		arg.DefaultTTL)
+	return err
+}
+
 // ---- DnsKey writes (PR 80+) ----
 
 const createDnsKey = `INSERT INTO dns_keys (

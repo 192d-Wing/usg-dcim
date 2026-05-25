@@ -77,6 +77,8 @@ type Querier interface {
 	DeleteAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsKeyRow, error)
 	GetDnsKey(ctx context.Context, id uuid.UUID) (dbq.DnsKeyRow, error)
 	TouchDnsZone(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteManualRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]uuid.UUID, error)
+	UpdateDnsZoneSoa(ctx context.Context, arg dbq.UpdateDnsZoneSoaParams) error
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
@@ -196,6 +198,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:keys:rotate")).Post("/zones/{id}/disable-dnssec", h.disableDnssec)
 		r.With(auth.RequireCapability("dns:keys:rotate")).Post("/zones/{id}/rotate-key/{role}", h.rotateZoneKey)
 		r.With(auth.RequireCapability("dns:keys:delete")).Delete("/keys/{id}", h.deleteDnsKey)
+		r.With(auth.RequireCapability("dns:zones:update")).Post("/zones/{id}/import", h.importZone)
 
 		r.With(auth.RequireCapability("dns:records:create")).Post("/records", h.createRecord)
 		r.With(auth.RequireCapability("dns:records:update")).Patch("/records/{id}", h.updateRecord)
