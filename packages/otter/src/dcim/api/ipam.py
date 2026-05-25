@@ -94,6 +94,7 @@ from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
 from ..services import dhcp_bundle
 from ..services import dhcp_push
+from ..services import dhcp_reconcile
 from ..services import ipam as ipam_svc
 from ..services import kea as kea_svc
 from ._pagination import empty_page, paginate
@@ -2197,6 +2198,57 @@ async def delete_dhcp_scope(
     await db.commit()
     # PR 83 — bundle cache refresh after delete.
     background_tasks.add_task(dhcp_push.enqueue_bundle_rerender, server_id)
+
+
+def _reconcile_entry_dict(e) -> dict:
+    return {
+        "reservation_ip": e.reservation_ip,
+        "identifier": e.identifier,
+        "status": e.status,
+        "ip_address_id": e.ip_address_id,
+        "ip_source": e.ip_source,
+        "note": e.note,
+    }
+
+
+@router.get("/dhcp/scopes/{scope_id}/reconcile")
+async def reconcile_dhcp_scope(
+    scope_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:reconcile")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Cross-check this scope's reservations against IPAM (PR 84).
+
+    Read-only: pure report, no DB or Kea mutations. Per-reservation
+    status is one of:
+      * clean      — IP exists in the linked subnet as source=dhcp
+                     or source=reservation (already accounted for).
+      * collision  — IP exists as source=static; reservation would
+                     conflict with an operator-allocated address.
+      * unbacked   — IP not in IPAM at all, or scope.subnet_id is NULL
+                     so the cross-check is skipped.
+    """
+    obj = await db.get(DhcpScope, scope_id)
+    if obj is None:
+        raise NotFoundError(_DHCP_SCOPE_NOT_FOUND)
+    await _enforce_scope_via_server(
+        db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:reconcile",
+    )
+    ip_rows: list = []
+    if obj.subnet_id is not None:
+        ip_rows = (
+            await db.execute(
+                select(IPAddress).where(IPAddress.subnet_id == obj.subnet_id)
+            )
+        ).scalars().all()
+    report = dhcp_reconcile.reconcile_scope(obj, ip_rows)
+    return {
+        "scope_id": report.scope_id,
+        "subnet_id": report.subnet_id,
+        "total": report.total,
+        "counts": report.counts,
+        "entries": [_reconcile_entry_dict(e) for e in report.entries],
+    }
 
 
 @router.get("/dhcp/scopes/{scope_id}/diff")
