@@ -144,6 +144,9 @@ func (f *fakeQ) SetDnsZoneNsec3(_ context.Context, a dbq.SetDnsZoneNsec3Params) 
 func (f *fakeQ) ListAllRecordsInZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsRecordForRender, error) {
 	return nil, nil
 }
+func (f *fakeQ) SetDnsHealthCheckResult(_ context.Context, _ uuid.UUID, _ string, _ *string) (int64, error) {
+	return 1, nil
+}
 func (f *fakeQ) CreateDnsRecord(_ context.Context, a dbq.CreateDnsRecordParams) (dbq.DnsRecord, error) {
 	return dbq.DnsRecord{ID: uuid.New(), ZoneID: a.ZoneID, Name: a.Name, Type: a.Type, Data: a.Data}, nil
 }

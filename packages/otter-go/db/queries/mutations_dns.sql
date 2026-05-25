@@ -270,6 +270,18 @@ RETURNING id, name, fabric_id, host(target_ip) AS target_ip,
 -- name: DeleteDnsHealthCheck :exec
 DELETE FROM dns_health_checks WHERE id = $1;
 
+-- name: SetDnsHealthCheckResult :exec
+-- PR 72 — collector callback after running one probe. Status,
+-- last_checked_at, last_error are the only mutable fields. Audit
+-- is intentionally skipped at the handler level — every 30s
+-- probe would flood the audit log; the central worker also writes
+-- this row on its fallback cycles.
+UPDATE dns_health_checks
+SET status = $2::dns_health_check_status,
+    last_checked_at = NOW(),
+    last_error = $3
+WHERE id = $1;
+
 -- ===== BGP Peers (dns-managed) =====
 -- name: CreateBgpPeer :one
 INSERT INTO bgp_peers (id, name, site_id, local_asn_id, peer_asn_id, peer_ip,

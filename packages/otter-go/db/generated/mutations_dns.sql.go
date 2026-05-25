@@ -770,6 +770,22 @@ func (q *Queries) DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error 
 	return err
 }
 
+const setDnsHealthCheckResult = `-- name: SetDnsHealthCheckResult :exec
+UPDATE dns_health_checks
+SET status = $2::dns_health_check_status,
+    last_checked_at = NOW(),
+    last_error = $3
+WHERE id = $1
+`
+
+func (q *Queries) SetDnsHealthCheckResult(ctx context.Context, id uuid.UUID, status string, lastError *string) (int64, error) {
+	tag, err := q.db.Exec(ctx, setDnsHealthCheckResult, id, status, lastError)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 // ---- BGP Peers (dns-managed) ----
 
 const bgpPeerRetCols = `id, name, site_id, local_asn_id, peer_asn_id,

@@ -62,6 +62,7 @@ type Querier interface {
 	SetDnsZoneFrozen(ctx context.Context, id uuid.UUID, frozen bool) (dbq.DnsZone, error)
 	SetDnsZoneNsec3(ctx context.Context, arg dbq.SetDnsZoneNsec3Params) (dbq.DnsZone, error)
 	ListAllRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsRecordForRender, error)
+	SetDnsHealthCheckResult(ctx context.Context, id uuid.UUID, status string, lastError *string) (int64, error)
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
@@ -207,6 +208,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:views:delete")).Delete("/views/{id}", h.deleteView)
 
 		r.With(auth.RequireCapability("dns:health-checks:create")).Post("/health-checks", h.createHealthCheck)
+		r.With(auth.RequireCapability("dns:health-checks:update")).Post("/health-checks/{id}/result", h.postHealthCheckResult)
 		r.With(auth.RequireCapability("dns:health-checks:update")).Patch("/health-checks/{id}", h.updateHealthCheck)
 		r.With(auth.RequireCapability("dns:health-checks:delete")).Delete("/health-checks/{id}", h.deleteHealthCheck)
 
