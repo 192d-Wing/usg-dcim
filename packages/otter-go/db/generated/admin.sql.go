@@ -5,6 +5,7 @@ package dbq
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 )
@@ -102,4 +103,133 @@ func (q *Queries) UpdateAdminUser(ctx context.Context, arg UpdateAdminUserParams
 		&u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt,
 	)
 	return u, err
+}
+
+// ---- Roles (admin CRUD) ----
+
+func scanRole(row interface{ Scan(...any) error }, r *Role) error {
+	return row.Scan(&r.ID, &r.Name, &r.Description, &r.PermissionCodes,
+		&r.IsSystem, &r.CreatedAt, &r.UpdatedAt)
+}
+
+const listAdminRoles = `-- name: ListAdminRoles :many
+SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+FROM roles
+ORDER BY name
+LIMIT $1 OFFSET $2
+`
+
+type ListAdminRolesParams struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+}
+
+func (q *Queries) ListAdminRoles(ctx context.Context, arg ListAdminRolesParams) ([]Role, error) {
+	rows, err := q.db.Query(ctx, listAdminRoles, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []Role{}
+	for rows.Next() {
+		var r Role
+		if err := scanRole(rows, &r); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+const countAdminRoles = `SELECT count(*)::bigint FROM roles`
+
+func (q *Queries) CountAdminRoles(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminRoles)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
+const getAdminRole = `SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+FROM roles WHERE id = $1`
+
+func (q *Queries) GetAdminRole(ctx context.Context, id uuid.UUID) (Role, error) {
+	row := q.db.QueryRow(ctx, getAdminRole, id)
+	var r Role
+	err := scanRole(row, &r)
+	return r, err
+}
+
+const getAdminRoleByName = `SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+FROM roles WHERE name = $1`
+
+func (q *Queries) GetAdminRoleByName(ctx context.Context, name string) (Role, error) {
+	row := q.db.QueryRow(ctx, getAdminRoleByName, name)
+	var r Role
+	err := scanRole(row, &r)
+	return r, err
+}
+
+const createAdminRole = `-- name: CreateAdminRole :one
+INSERT INTO roles (id, name, description, permission_codes, is_system, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3::jsonb, FALSE, NOW(), NOW())
+RETURNING id, name, description, permission_codes, is_system, created_at, updated_at
+`
+
+type CreateAdminRoleParams struct {
+	Name            string          `json:"name"`
+	Description     *string         `json:"description"`
+	PermissionCodes json.RawMessage `json:"permission_codes"`
+}
+
+func (q *Queries) CreateAdminRole(ctx context.Context, arg CreateAdminRoleParams) (Role, error) {
+	row := q.db.QueryRow(ctx, createAdminRole, arg.Name, arg.Description, arg.PermissionCodes)
+	var r Role
+	err := scanRole(row, &r)
+	return r, err
+}
+
+const updateAdminRole = `-- name: UpdateAdminRole :one
+UPDATE roles
+SET description      = CASE WHEN $2::bool THEN $3::text ELSE description END,
+    permission_codes = CASE WHEN $4::bool THEN $5::jsonb ELSE permission_codes END,
+    updated_at       = NOW()
+WHERE id = $1 AND is_system = FALSE
+RETURNING id, name, description, permission_codes, is_system, created_at, updated_at
+`
+
+type UpdateAdminRoleParams struct {
+	ID                 uuid.UUID       `json:"id"`
+	DescriptionSet     bool            `json:"description_set"`
+	Description        *string         `json:"description"`
+	PermissionCodesSet bool            `json:"permission_codes_set"`
+	PermissionCodes    json.RawMessage `json:"permission_codes"`
+}
+
+func (q *Queries) UpdateAdminRole(ctx context.Context, arg UpdateAdminRoleParams) (Role, error) {
+	row := q.db.QueryRow(ctx, updateAdminRole,
+		arg.ID, arg.DescriptionSet, arg.Description,
+		arg.PermissionCodesSet, arg.PermissionCodes)
+	var r Role
+	err := scanRole(row, &r)
+	return r, err
+}
+
+const deleteAdminRole = `DELETE FROM roles WHERE id = $1 AND is_system = FALSE`
+
+func (q *Queries) DeleteAdminRole(ctx context.Context, id uuid.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, deleteAdminRole, id)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+const countUserRolesForRole = `SELECT count(*)::bigint FROM user_roles WHERE role_id = $1`
+
+func (q *Queries) CountUserRolesForRole(ctx context.Context, roleID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countUserRolesForRole, roleID)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
 }

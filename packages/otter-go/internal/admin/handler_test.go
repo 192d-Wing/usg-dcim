@@ -32,6 +32,18 @@ type fakeQ struct {
 	getErr     error
 	gotCreate  dbq.CreateAdminUserParams
 	gotUpdate  dbq.UpdateAdminUserParams
+
+	// Roles
+	rolesList         []dbq.Role
+	rolesCount        int64
+	roleByName        map[string]dbq.Role
+	roleByID          map[uuid.UUID]dbq.Role
+	roleByIDErr       error
+	roleAssignedCount int64
+	deleteRoleRows    int64
+	deleteRoleErr     error
+	gotRoleCreate     dbq.CreateAdminRoleParams
+	gotRoleUpdate     dbq.UpdateAdminRoleParams
 }
 
 func (f *fakeQ) ListAdminUsers(_ context.Context, _ dbq.ListAdminUsersParams) ([]dbq.User, error) {
@@ -64,6 +76,47 @@ func (f *fakeQ) UpdateAdminUser(_ context.Context, a dbq.UpdateAdminUserParams) 
 		return dbq.User{}, f.updateErr
 	}
 	return dbq.User{ID: a.ID, DisplayName: a.DisplayName, IsActive: defaultBool(a.IsActive, true)}, nil
+}
+
+// ---- Role stubs (PR 75) ----
+
+func (f *fakeQ) ListAdminRoles(_ context.Context, _ dbq.ListAdminRolesParams) ([]dbq.Role, error) {
+	return f.rolesList, nil
+}
+func (f *fakeQ) CountAdminRoles(_ context.Context) (int64, error) { return f.rolesCount, nil }
+func (f *fakeQ) GetAdminRole(_ context.Context, id uuid.UUID) (dbq.Role, error) {
+	if f.roleByIDErr != nil {
+		return dbq.Role{}, f.roleByIDErr
+	}
+	if f.roleByID != nil {
+		if r, ok := f.roleByID[id]; ok {
+			return r, nil
+		}
+	}
+	return dbq.Role{}, pgx.ErrNoRows
+}
+func (f *fakeQ) GetAdminRoleByName(_ context.Context, name string) (dbq.Role, error) {
+	if f.roleByName != nil {
+		if r, ok := f.roleByName[name]; ok {
+			return r, nil
+		}
+	}
+	return dbq.Role{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateAdminRole(_ context.Context, a dbq.CreateAdminRoleParams) (dbq.Role, error) {
+	f.gotRoleCreate = a
+	return dbq.Role{ID: uuid.New(), Name: a.Name, Description: a.Description,
+		PermissionCodes: a.PermissionCodes, IsSystem: false}, nil
+}
+func (f *fakeQ) UpdateAdminRole(_ context.Context, a dbq.UpdateAdminRoleParams) (dbq.Role, error) {
+	f.gotRoleUpdate = a
+	return dbq.Role{ID: a.ID, Description: a.Description, PermissionCodes: a.PermissionCodes}, nil
+}
+func (f *fakeQ) DeleteAdminRole(_ context.Context, _ uuid.UUID) (int64, error) {
+	return f.deleteRoleRows, f.deleteRoleErr
+}
+func (f *fakeQ) CountUserRolesForRole(_ context.Context, _ uuid.UUID) (int64, error) {
+	return f.roleAssignedCount, nil
 }
 
 // audit.Recorder satisfied via the dbq stub on the live build —

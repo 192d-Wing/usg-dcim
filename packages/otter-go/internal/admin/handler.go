@@ -35,6 +35,15 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (dbq.User, error)
 	CreateAdminUser(ctx context.Context, arg dbq.CreateAdminUserParams) (dbq.User, error)
 	UpdateAdminUser(ctx context.Context, arg dbq.UpdateAdminUserParams) (dbq.User, error)
+
+	ListAdminRoles(ctx context.Context, arg dbq.ListAdminRolesParams) ([]dbq.Role, error)
+	CountAdminRoles(ctx context.Context) (int64, error)
+	GetAdminRole(ctx context.Context, id uuid.UUID) (dbq.Role, error)
+	GetAdminRoleByName(ctx context.Context, name string) (dbq.Role, error)
+	CreateAdminRole(ctx context.Context, arg dbq.CreateAdminRoleParams) (dbq.Role, error)
+	UpdateAdminRole(ctx context.Context, arg dbq.UpdateAdminRoleParams) (dbq.Role, error)
+	DeleteAdminRole(ctx context.Context, id uuid.UUID) (int64, error)
+	CountUserRolesForRole(ctx context.Context, roleID uuid.UUID) (int64, error)
 }
 
 type Handler struct {
@@ -47,6 +56,11 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("admin:users:read")).Get("/users", h.listUsers)
 		r.With(auth.RequireCapability("admin:users:create")).Post("/users", h.createUser)
 		r.With(auth.RequireCapability("admin:users:update")).Patch("/users/{id}", h.updateUser)
+
+		r.With(auth.RequireCapability("admin:roles:read")).Get("/roles", h.listRoles)
+		r.With(auth.RequireCapability("admin:roles:create")).Post("/roles", h.createRole)
+		r.With(auth.RequireCapability("admin:roles:update")).Patch("/roles/{id}", h.updateRole)
+		r.With(auth.RequireCapability("admin:roles:delete")).Delete("/roles/{id}", h.deleteRole)
 	})
 }
 

@@ -31,6 +31,55 @@ VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
 RETURNING id, email, display_name, is_active, sso_subject,
           last_login_at, created_at, updated_at;
 
+-- name: ListAdminRoles :many
+-- PR 75 — paginated list for /admin/roles.
+SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+FROM roles
+ORDER BY name
+LIMIT $1 OFFSET $2;
+
+-- name: CountAdminRoles :one
+SELECT count(*)::bigint FROM roles;
+
+-- name: GetAdminRole :one
+SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+FROM roles WHERE id = $1;
+
+-- name: GetAdminRoleByName :one
+SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+FROM roles WHERE name = $1;
+
+-- name: CreateAdminRole :one
+-- PR 75 — admin role creation. is_system is hardcoded FALSE: only
+-- the migration bootstrap creates system roles, never the API.
+INSERT INTO roles (id, name, description, permission_codes, is_system, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3::jsonb, FALSE, NOW(), NOW())
+RETURNING id, name, description, permission_codes, is_system, created_at, updated_at;
+
+-- name: UpdateAdminRole :one
+-- PR 75 — update mutable role fields. is_system is immutable
+-- (the API also refuses to update system roles entirely, but
+-- the SQL guards belt-and-suspenders).
+UPDATE roles
+SET description     = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
+    permission_codes = CASE WHEN sqlc.arg(permission_codes_set)::bool THEN sqlc.narg(permission_codes)::jsonb ELSE permission_codes END,
+    updated_at      = NOW()
+WHERE id = $1 AND is_system = FALSE
+RETURNING id, name, description, permission_codes, is_system, created_at, updated_at;
+
+-- name: DeleteAdminRole :exec
+-- PR 75 — only non-system roles deletable. The API also pre-checks
+-- for assignments and refuses with 409; this SQL is defense-in-
+-- depth (a race between the assignment check and the delete is
+-- still caught by the FK constraint).
+DELETE FROM roles WHERE id = $1 AND is_system = FALSE;
+
+-- name: CountUserRolesForRole :one
+-- PR 75 — pre-delete check: refuse if anyone has this role
+-- assigned. Returning a count rather than a bool so the API can
+-- include the number in the 409 response if useful.
+SELECT count(*)::bigint FROM user_roles WHERE role_id = $1;
+
 -- name: UpdateAdminUser :one
 -- PR 74 — admin update covers display_name + is_active only
 -- (matches Python UserUpdate schema). email is immutable in the
