@@ -440,6 +440,14 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
         # actually claimed in Kea.
         scope.kea_subnet_id = None
     await _record_push_status(db, server, status, err)
+    # PR 80 — a successful push is by construction a re-sync. Clear
+    # the drift cache so LIST and push-drifted reflect reality. Don't
+    # touch it on error — the previous diff result is still the
+    # operator's best information.
+    if status == "ok":
+        scope.last_diff_at = datetime.now(UTC)
+        scope.last_diff_status = "in_sync"
+        scope.last_diff_delta_json = None
     return PushResult(
         scope_id=str(scope.id),
         kea_subnet_id=scope.kea_subnet_id,
@@ -726,6 +734,24 @@ async def diff_scope(
     )
 
 
+def persist_diff_state(scope: DhcpScope, result: DiffResult) -> None:
+    """Mirror a DiffResult into the scope row's last_diff_* columns.
+
+    Called from the API handlers after diff_scope returns (per-scope
+    endpoint, diff-all, push-drifted preflight). The session commit
+    is the caller's responsibility — this just stamps the columns.
+
+    `last_diff_delta_json` only carries a value on status='drifted'
+    (the in-Kea-but-out-of-sync case). in_sync / never_pushed /
+    missing_from_kea / error all clear the column — the delta isn't
+    meaningful and storing a stale one would mislead operators
+    reading the LIST endpoint.
+    """
+    scope.last_diff_at = datetime.now(UTC)
+    scope.last_diff_status = result.status
+    scope.last_diff_delta_json = result.delta if result.status == "drifted" else None
+
+
 # ---------- bulk operations (PR 77) ----------
 
 
@@ -766,6 +792,38 @@ def _tally(statuses: list[str], known: tuple[str, ...]) -> dict[str, int]:
     if other:
         counts["other"] = other
     return counts
+
+
+async def push_drifted_scopes(
+    db: AsyncSession, server: DhcpServer,
+) -> BulkPushReport:
+    """Push only scopes whose persisted drift status is 'drifted'.
+
+    Reads the cached state from PR 80 — operator should diff-all
+    (or wait for the cron) first so the cache is fresh. A scope
+    that was drifted at last check but has since been fixed will
+    still push successfully (push is idempotent), just redundantly.
+
+    Returns the same BulkPushReport shape as push_all_scopes; an
+    empty drifted set comes back with total=0 and all counts at zero.
+    """
+    scopes = (
+        await db.execute(
+            select(DhcpScope)
+            .where(DhcpScope.dhcp_server_id == server.id)
+            .where(DhcpScope.enabled.is_(True))
+            .where(DhcpScope.last_diff_status == "drifted")
+        )
+    ).scalars().all()
+    results: list[PushResult] = []
+    for scope in scopes:
+        results.append(await push_scope(db, scope))
+    return BulkPushReport(
+        server_id=str(server.id),
+        total=len(results),
+        counts=_tally([r.status for r in results], _PUSH_STATUSES),
+        results=results,
+    )
 
 
 async def push_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkPushReport:
@@ -829,7 +887,11 @@ async def diff_all_scopes(db: AsyncSession, server: DhcpServer) -> BulkDiffRepor
     results: list[DiffResult] = []
     for scope in scopes:
         template = templates_by_id.get(scope.template_id) if scope.template_id else None
-        results.append(await diff_scope(scope, server, template))
+        result = await diff_scope(scope, server, template)
+        # PR 80 — persist the drift state on each row so LIST and
+        # push-drifted see fresh data without a second round-trip.
+        persist_diff_state(scope, result)
+        results.append(result)
     return BulkDiffReport(
         server_id=str(server.id),
         total=len(results),

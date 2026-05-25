@@ -1952,6 +1952,7 @@ async def list_dhcp_scopes(
     params: PageParams = Depends(PageParams.from_query),
     ip_family: int | None = Query(None, ge=4, le=6),
     enabled: bool | None = Query(None),
+    diff_status: str | None = Query(None),
     principal: Principal = Depends(require_capability("ipam:dhcp-scopes:read")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1963,6 +1964,14 @@ async def list_dhcp_scopes(
         stmt = stmt.where(DhcpScope.ip_family == ip_family)
     if enabled is not None:
         stmt = stmt.where(DhcpScope.enabled == enabled)
+    # PR 80 — filter on persisted drift state for fleet dashboards.
+    if diff_status is not None:
+        valid = {"in_sync", "drifted", "missing_from_kea", "never_pushed", "error"}
+        if diff_status not in valid:
+            raise ValidationError(
+                f"diff_status must be one of: {sorted(valid)}",
+            )
+        stmt = stmt.where(DhcpScope.last_diff_status == diff_status)
     return await paginate(
         db, stmt, model=DhcpScope, params=params, out_model=DhcpScopeOut,
     )
@@ -2173,11 +2182,15 @@ async def diff_dhcp_scope(
 ) -> dict:
     """Drift check: what DCIM would push vs what Kea currently has.
 
-    Read-only (no DB or Kea mutation). Returns status + delta. Status
-    is one of: in_sync, drifted, missing_from_kea, never_pushed, error.
-    The `delta` field is a per-key map of DCIM-vs-Kea values for every
-    field that differs; an empty delta with status=in_sync means the
-    two sides agree on every field DCIM authors.
+    Returns status + delta. Status is one of: in_sync, drifted,
+    missing_from_kea, never_pushed, error. The `delta` field is a
+    per-key map of DCIM-vs-Kea values for every field that differs;
+    an empty delta with status=in_sync means the two sides agree on
+    every field DCIM authors.
+
+    PR 80: the call persists last_diff_at / last_diff_status /
+    last_diff_delta_json on the scope row before returning, so LIST
+    and push-drifted see the fresh state without a second round-trip.
     """
     obj = await db.get(DhcpScope, scope_id)
     if obj is None:
@@ -2185,7 +2198,15 @@ async def diff_dhcp_scope(
     server = await _enforce_scope_via_server(
         db, principal, obj.dhcp_server_id, "ipam:dhcp-scopes:read",
     )
-    result = await dhcp_push.diff_scope(obj, server)
+    # PR 78 — pre-load the referenced template so the diff reflects
+    # the effective config, not the raw scope row.
+    template = (
+        await db.get(DhcpScopeTemplate, obj.template_id)
+        if obj.template_id else None
+    )
+    result = await dhcp_push.diff_scope(obj, server, template)
+    dhcp_push.persist_diff_state(obj, result)
+    await db.commit()
     return {
         "scope_id": result.scope_id,
         "kea_subnet_id": result.kea_subnet_id,
@@ -2288,6 +2309,39 @@ async def push_all_dhcp_scopes(
     }
 
 
+@router.post("/dhcp/servers/{server_id}/scopes/push-drifted")
+async def push_drifted_dhcp_scopes(
+    server_id: UUID,
+    principal: Principal = Depends(require_capability("ipam:dhcp-scopes:push")),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Push only scopes whose persisted drift status is 'drifted'.
+
+    Reads the cached state PR 80 stores on each scope. The cache is
+    populated by GET /dhcp/scopes/{id}/diff (per-scope) or
+    GET /dhcp/servers/{id}/scopes/diff-all (bulk). Run one of those
+    first so push-drifted is targeting a fresh view; otherwise it
+    may skip scopes that drifted since the last check or hit
+    already-fixed scopes.
+    """
+    server = await _enforce_scope_via_server(
+        db, principal, server_id, "ipam:dhcp-scopes:push",
+    )
+    report = await dhcp_push.push_drifted_scopes(db, server)
+    await audit.record(
+        db, principal, action="dhcp_scope.push_drifted",
+        target_type="dhcp_server", target_id=str(server_id),
+        metadata={"total": report.total, "counts": report.counts},
+    )
+    await db.commit()
+    return {
+        "server_id": report.server_id,
+        "total": report.total,
+        "counts": report.counts,
+        "results": [_push_result_dict(r) for r in report.results],
+    }
+
+
 @router.get("/dhcp/servers/{server_id}/scopes/diff-all")
 async def diff_all_dhcp_scopes(
     server_id: UUID,
@@ -2304,6 +2358,9 @@ async def diff_all_dhcp_scopes(
         db, principal, server_id, "ipam:dhcp-scopes:read",
     )
     report = await dhcp_push.diff_all_scopes(db, server)
+    # PR 80 — diff_all_scopes calls persist_diff_state on each scope;
+    # commit so the changes survive the response.
+    await db.commit()
     return {
         "server_id": report.server_id,
         "total": report.total,

@@ -573,6 +573,14 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
         PgUUID(as_uuid=True),
         ForeignKey("dhcp_scope_templates.id", ondelete="SET NULL"),
     )
+    # PR 80 — persisted drift state. Written by diff_scope callers
+    # (per-scope + diff-all endpoints); reset to in_sync by
+    # push_scope on a successful push. Lets LIST surface drift
+    # without re-checking each row and powers the push-drifted
+    # endpoint.
+    last_diff_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_diff_status: Mapped[str | None] = mapped_column(String(32))
+    last_diff_delta_json: Mapped[dict | None] = mapped_column(JSON)
 
     # Pydantic-friendly property aliases. The model_validate path in
     # DhcpScopeOut sees these names; the API layer mutates the *_json
@@ -592,6 +600,13 @@ class DhcpScope(UUIDPrimaryKey, Timestamped, Base):
     @property
     def reservations(self) -> list:
         return self.reservations_json or []
+
+    @property
+    def last_diff_delta(self) -> dict | None:
+        # PR 80 — column has the _json suffix to match the other JSON
+        # columns on this table; wire shape drops it for symmetry with
+        # last_diff_at / last_diff_status.
+        return self.last_diff_delta_json
 
 
 class DhcpScopeTemplate(UUIDPrimaryKey, Timestamped, Base):

@@ -419,6 +419,11 @@ class DhcpScopeOut(DhcpScopeBase):
     # PR 74 — populated on first push, used as the Kea subnet ID for
     # all subsequent subnet4-update / subnet4-del calls.
     kea_subnet_id: int | None = None
+    # PR 80 — persisted drift state from the last diff_scope call.
+    # Resets to in_sync on successful push.
+    last_diff_at: datetime | None = None
+    last_diff_status: str | None = None
+    last_diff_delta: dict | None = None
     created_at: datetime
     updated_at: datetime
 
