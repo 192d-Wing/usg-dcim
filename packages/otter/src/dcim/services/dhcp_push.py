@@ -522,6 +522,40 @@ def should_auto_push(server: DhcpServer | None, scope: DhcpScope | None = None) 
     return True
 
 
+async def schedule_template_fanout_pushes(
+    db: AsyncSession, template_id,
+) -> list:
+    """PR 82 — list scope ids that should be auto-re-pushed after a
+    template update.
+
+    A template edit changes the effective config of every scope that
+    references it. For each such scope whose parent DhcpServer has
+    auto_push=true (and both the server and scope are enabled),
+    return its id; the API handler enqueues an
+    auto_push_scope_in_background task per id.
+
+    Returns: list of scope UUIDs to dispatch. Empty list = nothing
+    to do (no referencing scopes, no auto_push servers, or all
+    disabled).
+
+    Single SQL JOIN, no per-scope round-trips. The auto-push gate
+    (should_auto_push) is duplicated in pure-Python form here
+    because pushing the gate logic into SQL keeps the index plan
+    simple — server.enabled / server.auto_push / scope.enabled are
+    boolean filters on the joined row.
+    """
+    stmt = (
+        select(DhcpScope.id)
+        .join(DhcpServer, DhcpServer.id == DhcpScope.dhcp_server_id)
+        .where(DhcpScope.template_id == template_id)
+        .where(DhcpScope.enabled.is_(True))
+        .where(DhcpServer.enabled.is_(True))
+        .where(DhcpServer.auto_push.is_(True))
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return list(rows)
+
+
 async def auto_push_scope_in_background(scope_id) -> None:
     """Run as a FastAPI BackgroundTask: open a fresh session, reload
     the scope, push to Kea, log on failure.

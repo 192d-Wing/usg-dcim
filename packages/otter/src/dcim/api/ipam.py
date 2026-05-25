@@ -2469,6 +2469,7 @@ async def get_dhcp_scope_template(
 async def update_dhcp_scope_template(
     template_id: UUID,
     payload: DhcpScopeTemplateUpdate,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_capability("ipam:dhcp-scope-templates:update")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -2506,6 +2507,15 @@ async def update_dhcp_scope_template(
     )
     await db.commit()
     await db.refresh(obj)
+    # PR 82 — template change ripples to every referencing scope whose
+    # parent server has auto_push=true. The fan-out helper returns the
+    # scope ids; we enqueue a background push per id. Each push opens
+    # its own session (auto_push_scope_in_background pattern from PR 79).
+    scope_ids = await dhcp_push.schedule_template_fanout_pushes(db, template_id)
+    for sid in scope_ids:
+        background_tasks.add_task(
+            dhcp_push.auto_push_scope_in_background, sid,
+        )
     return DhcpScopeTemplateOut.model_validate(obj)
 
 
