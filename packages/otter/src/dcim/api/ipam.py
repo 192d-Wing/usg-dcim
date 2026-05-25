@@ -1927,24 +1927,50 @@ async def sync_dhcp_server_now(
 _DHCP_SCOPE_NOT_FOUND = "dhcp scope not found"
 
 
+def _validate_reservations_against_family(
+    reservations, ip_family: int,
+) -> None:
+    """PR 101 — reject reservations whose identifier doesn't match
+    the scope's family.
+
+    v4 (DHCPv4 / RFC 2131): client is bound by 48-bit MAC (chaddr).
+    v6 (DHCPv6 / RFC 8415): client is bound by DUID (Client Identifier
+    option). Mixing the two on a scope renders invalid Kea config,
+    and reconcile (PR 88/94) silently skips the wrong identifier on
+    the wrong family. Reject at the API instead of letting bad data
+    settle in the JSON column.
+
+    Accepts both DhcpReservation Pydantic instances (from Create/
+    Update payloads) and dicts (from already-stored options on the
+    update path). Caller passes whichever shape they have.
+    """
+    for r in reservations:
+        mac = getattr(r, "mac", None) if not isinstance(r, dict) else r.get("mac")
+        duid = getattr(r, "duid", None) if not isinstance(r, dict) else r.get("duid")
+        if ip_family == 4 and duid is not None:
+            raise ValidationError("v4 reservations use `mac`, not `duid`")
+        if ip_family == 6 and mac is not None:
+            raise ValidationError("v6 reservations use `duid`, not `mac`")
+        # PR 101 — a reservation must declare exactly one identifier
+        # appropriate for its family. Missing both = unrecoverable;
+        # accidentally setting both = ambiguous bind.
+        if ip_family == 4 and not mac:
+            raise ValidationError("v4 reservation requires `mac`")
+        if ip_family == 6 and not duid:
+            raise ValidationError("v6 reservation requires `duid`")
+
+
 def _validate_scope_family(payload: DhcpScopeCreate) -> None:
     """Reject family/field mismatches the DB CHECK would also catch,
     but with an actionable message at the API boundary. Mirrors the
     Kea config-set behavior — v6-only fields must not appear on v4
-    scopes; v4-only identifier `mac` must not appear in v6
-    reservations; symmetric for v6 `duid`."""
+    scopes; reservation identifiers must match the family."""
     if payload.ip_family == 4:
         if payload.pd_pools is not None:
             raise ValidationError("pd_pools is v6-only")
         if payload.preferred_lifetime_seconds is not None:
             raise ValidationError("preferred_lifetime_seconds is v6-only")
-        for r in payload.reservations:
-            if r.duid is not None:
-                raise ValidationError("v4 reservations use `mac`, not `duid`")
-    else:
-        for r in payload.reservations:
-            if r.mac is not None:
-                raise ValidationError("v6 reservations use `duid`, not `mac`")
+    _validate_reservations_against_family(payload.reservations, payload.ip_family)
 
 
 async def _enforce_scope_via_server(
@@ -2124,6 +2150,12 @@ async def update_dhcp_scope(
             raise ValidationError("pd_pools is v6-only")
         if "preferred_lifetime_seconds" in diff and diff["preferred_lifetime_seconds"] is not None:
             raise ValidationError("preferred_lifetime_seconds is v6-only")
+    # PR 101 — reservations on update get the same family check
+    # the create path runs. exclude_unset means we only validate
+    # when the caller actually sent `reservations`; passing
+    # null/empty list explicitly is fine (clears the column).
+    if "reservations" in diff and diff["reservations"]:
+        _validate_reservations_against_family(diff["reservations"], obj.ip_family)
     # PR 78 — if the operator is reassigning the template, validate
     # the family matches. Setting template_id=null unbinds and is
     # always fine.
