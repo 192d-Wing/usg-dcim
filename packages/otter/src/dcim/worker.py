@@ -138,6 +138,59 @@ async def rerender_dhcp_bundle(_ctx, server_id: str) -> dict:
     }
 
 
+async def dhcp_scope_tombstone_purge(_ctx) -> dict:
+    """PR 100 — hard-delete soft-deleted DhcpScope rows older than
+    settings.dhcp_tombstone_retention_days. Tombstones (PR 95
+    deleted_at column) accumulate forever without this cron;
+    the recoverable window has a natural lifetime, after which
+    the row should leave the table.
+
+    No Kea-side action: the original DELETE already removed the
+    subnet from Kea (PR 74 delete_scope_from_kea). This task only
+    drops the orphaned tombstone rows from Postgres.
+    """
+    from datetime import timedelta
+
+    from sqlalchemy import delete
+    from .models.ipam import DhcpScope
+    from .settings import get_settings
+
+    settings = get_settings()
+    retention = timedelta(days=settings.dhcp_tombstone_retention_days)
+    cutoff = datetime.now(UTC) - retention
+    started = datetime.now(UTC)
+    async with async_session() as db:
+        rows = (
+            await db.execute(
+                select(DhcpScope.id)
+                .where(DhcpScope.deleted_at.is_not(None))
+                .where(DhcpScope.deleted_at < cutoff)
+            )
+        ).all()
+        if not rows:
+            log.info(
+                "dhcp_scope_tombstone_purge.done",
+                purged=0, cutoff=cutoff.isoformat(),
+            )
+            return {"purged": 0, "cutoff": cutoff.isoformat()}
+        ids = [r[0] for r in rows]
+        await db.execute(delete(DhcpScope).where(DhcpScope.id.in_(ids)))
+        await db.commit()
+    elapsed = (datetime.now(UTC) - started).total_seconds()
+    log.info(
+        "dhcp_scope_tombstone_purge.done",
+        purged=len(rows), cutoff=cutoff.isoformat(),
+        retention_days=settings.dhcp_tombstone_retention_days,
+        elapsed_s=round(elapsed, 3),
+    )
+    return {
+        "purged": len(rows),
+        "cutoff": cutoff.isoformat(),
+        "retention_days": settings.dhcp_tombstone_retention_days,
+        "elapsed_s": elapsed,
+    }
+
+
 async def ipam_utilization_sweep(_ctx) -> dict:
     """PR 99 — populate IPAM utilization gauges across every Subnet
     and Supernet. Three SELECTs:
@@ -452,6 +505,7 @@ class WorkerSettings:
         evaluate_alerts, sweep_collectors, dns_health_checks,
         freshness_sweep,
         dhcp_sync, dhcp_age_out, dhcp_drift_check, rerender_dhcp_bundle,
+        dhcp_scope_tombstone_purge,
         ipam_utilization_sweep,
         dns_sync_from_ipam,
         dns_rotate_zsks, dns_purge_metrics,
@@ -483,6 +537,12 @@ class WorkerSettings:
         # against the indexed columns; well under a second on
         # realistic fleets.
         cron(ipam_utilization_sweep, minute=set(range(3, 60, 5))),
+        # PR 100 — DHCP tombstone purge runs once daily at 03:30 UTC
+        # (off-peak, after DNS ZSK rotation at 03:17 so the two
+        # heavier off-hours tasks don't pile up). Retention is
+        # configurable via settings.dhcp_tombstone_retention_days
+        # (default 30); zero or negative effectively disables.
+        cron(dhcp_scope_tombstone_purge, hour={3}, minute={30}),
         # DNS IPAM-projection: 5 minutes offset from DHCP so a freshly-
         # ingested lease has time to land before its DNS record renders.
         cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))),

@@ -141,6 +141,12 @@ class Settings(BaseSettings):
     alert_eval_interval_seconds: int = 30
     alert_dedupe_window_seconds: int = 300
 
+    # DHCP scope tombstone retention (PR 100). Soft-deleted scopes
+    # (PR 95) survive for this long before a daily cron task hard-
+    # deletes them. 30 days gives operators a generous undo window
+    # while bounding the dhcp_scopes table size.
+    dhcp_tombstone_retention_days: int = 30
+
     # Object storage
     s3_endpoint: str | None = None
     s3_bucket: str = "dcim-reports"
