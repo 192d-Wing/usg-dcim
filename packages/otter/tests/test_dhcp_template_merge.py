@@ -57,16 +57,16 @@ class _Template:
 
 
 def _v4_scope(**over) -> _Scope:
-    base = dict(
-        id=uuid4(), dhcp_server_id=uuid4(), ip_family=4, prefix="10.0.0.0/24",
-        pools_json=[{"first": "10.0.0.10", "last": "10.0.0.250"}],
-    )
+    base = {
+        "id": uuid4(), "dhcp_server_id": uuid4(), "ip_family": 4, "prefix": "10.0.0.0/24",
+        "pools_json": [{"first": "10.0.0.10", "last": "10.0.0.250"}],
+    }
     base.update(over)
     return _Scope(**base)
 
 
 def _v4_template(**over) -> _Template:
-    base = dict(id=uuid4(), fabric_id=uuid4(), ip_family=4)
+    base = {"id": uuid4(), "fabric_id": uuid4(), "ip_family": 4}
     base.update(over)
     return _Template(**base)
 

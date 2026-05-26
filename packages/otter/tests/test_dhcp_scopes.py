@@ -21,31 +21,30 @@ from dcim.schemas.ipam import (
 )
 from dcim.security.capabilities import CAPABILITY_CATALOG
 
-
 SERVER_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _v4_payload(**over) -> dict:
-    base = dict(
-        dhcp_server_id=SERVER_ID,
-        name="lab-v4",
-        ip_family=4,
-        prefix="10.0.0.0/24",
-        pools=[{"first": "10.0.0.10", "last": "10.0.0.250"}],
-    )
+    base = {
+        "dhcp_server_id": SERVER_ID,
+        "name": "lab-v4",
+        "ip_family": 4,
+        "prefix": "10.0.0.0/24",
+        "pools": [{"first": "10.0.0.10", "last": "10.0.0.250"}],
+    }
     base.update(over)
     return base
 
 
 def _v6_payload(**over) -> dict:
-    base = dict(
-        dhcp_server_id=SERVER_ID,
-        name="lab-v6",
-        ip_family=6,
-        prefix="2001:db8::/64",
-        pools=[{"first": "2001:db8::10", "last": "2001:db8::ffff"}],
-        preferred_lifetime_seconds=1800,
-    )
+    base = {
+        "dhcp_server_id": SERVER_ID,
+        "name": "lab-v6",
+        "ip_family": 6,
+        "prefix": "2001:db8::/64",
+        "pools": [{"first": "2001:db8::10", "last": "2001:db8::ffff"}],
+        "preferred_lifetime_seconds": 1800,
+    }
     base.update(over)
     return base
 

@@ -125,7 +125,7 @@ alert_eval_runs = _go_ported(Counter(
 # AND per fabric without a Prometheus join. Status is the same
 # taxonomy services.dhcp_push uses (in_sync | drifted |
 # missing_from_kea | never_pushed | error). Cardinality is bounded
-# by (servers × 5 statuses) + servers — small for any real fleet.
+# by (servers x 5 statuses) + servers — small for any real fleet.
 dhcp_drift_scope_status = Gauge(
     "dcim_dhcp_drift_scope_status",
     "Per-server count of DhcpScope rows in each drift-status bucket.",

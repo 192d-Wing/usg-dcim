@@ -45,22 +45,22 @@ def _server(**over) -> _Server:
 
 
 def _v4_scope(server_id, **over) -> _Scope:
-    base = dict(
-        id=uuid4(), dhcp_server_id=server_id, ip_family=4,
-        prefix="10.0.0.0/24",
-        pools_json=[{"first": "10.0.0.10", "last": "10.0.0.250"}],
-    )
+    base = {
+        "id": uuid4(), "dhcp_server_id": server_id, "ip_family": 4,
+        "prefix": "10.0.0.0/24",
+        "pools_json": [{"first": "10.0.0.10", "last": "10.0.0.250"}],
+    }
     base.update(over)
     return _Scope(**base)
 
 
 def _v6_scope(server_id, **over) -> _Scope:
-    base = dict(
-        id=uuid4(), dhcp_server_id=server_id, ip_family=6,
-        prefix="2001:db8::/64",
-        pools_json=[{"first": "2001:db8::10", "last": "2001:db8::ffff"}],
-        preferred_lifetime_seconds=1800,
-    )
+    base = {
+        "id": uuid4(), "dhcp_server_id": server_id, "ip_family": 6,
+        "prefix": "2001:db8::/64",
+        "pools_json": [{"first": "2001:db8::10", "last": "2001:db8::ffff"}],
+        "preferred_lifetime_seconds": 1800,
+    }
     base.update(over)
     return _Scope(**base)
 

@@ -16,7 +16,6 @@ from dcim.services.dhcp_push import (
     _tally,
 )
 
-
 # ----- _tally(): fixed-key count map -----
 
 def test_empty_push_status_list_returns_zero_for_each_known_key():

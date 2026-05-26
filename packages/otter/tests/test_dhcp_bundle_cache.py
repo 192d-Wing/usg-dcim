@@ -12,7 +12,6 @@ import inspect
 from dcim import worker
 from dcim.services import dhcp_push
 
-
 # ----- worker task registration -----
 
 def test_rerender_dhcp_bundle_is_registered_in_worker_functions():

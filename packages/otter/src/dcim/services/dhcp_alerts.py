@@ -162,7 +162,7 @@ async def notify_drift_transitions(
                 resolved += 1
             else:
                 continue
-        except Exception as e:  # noqa: BLE001 — never crash the cron
+        except Exception as e:
             failed += 1
             log.warning(
                 "dhcp_alert.dispatch_failed",

@@ -73,8 +73,9 @@ def test_none_scope_with_auto_push_off_still_skips():
 # ----- schema knob -----
 
 def test_dhcp_server_schema_carries_auto_push_with_default_false():
-    from dcim.schemas.ipam import DhcpServerCreate
     from uuid import uuid4
+
+    from dcim.schemas.ipam import DhcpServerCreate
     payload = DhcpServerCreate(
         name="kea-east-1", fabric_id=uuid4(),
         kea_url="https://kea.east.example.mil:8000",
@@ -85,8 +86,9 @@ def test_dhcp_server_schema_carries_auto_push_with_default_false():
 
 
 def test_dhcp_server_schema_accepts_auto_push_true():
-    from dcim.schemas.ipam import DhcpServerCreate
     from uuid import uuid4
+
+    from dcim.schemas.ipam import DhcpServerCreate
     payload = DhcpServerCreate(
         name="kea-east-1", fabric_id=uuid4(),
         kea_url="https://kea.east.example.mil:8000",

@@ -193,7 +193,10 @@ func TestFreeSpaceInSubnets_FabricVrfFiltersPassToDB(t *testing.T) {
 func TestFreeSpaceInSubnets_BadFabricIDIsRejected(t *testing.T) {
 	srv := httptest.NewServer(mountFreeSpace(&fakeFreeSpaceQ{}))
 	defer srv.Close()
-	resp, _ := http.Get(srv.URL + "/ipam/free-space/in-subnets?fabric_id=not-a-uuid")
+	resp, err := http.Get(srv.URL + "/ipam/free-space/in-subnets?fabric_id=not-a-uuid")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
@@ -203,7 +206,10 @@ func TestFreeSpaceInSubnets_BadFabricIDIsRejected(t *testing.T) {
 func TestFreeSpaceInSubnets_BadFamilyIsRejected(t *testing.T) {
 	srv := httptest.NewServer(mountFreeSpace(&fakeFreeSpaceQ{}))
 	defer srv.Close()
-	resp, _ := http.Get(srv.URL + "/ipam/free-space/in-subnets?family=v7")
+	resp, err := http.Get(srv.URL + "/ipam/free-space/in-subnets?family=v7")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 for unknown family", resp.StatusCode)

@@ -29,10 +29,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
-from ..models.ipam import DhcpScope, DhcpScopeTemplate, DhcpServer
+from ..models.ipam import DhcpScope, DhcpServer
 from .dhcp_push import (
     merge_template_into_scope,
     render_kea_subnet4,
