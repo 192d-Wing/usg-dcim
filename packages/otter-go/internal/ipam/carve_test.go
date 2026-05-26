@@ -191,7 +191,10 @@ func TestFreeSpacePrefixes_HappyPath(t *testing.T) {
 func TestFreeSpacePrefixes_RequiresPrefixSize(t *testing.T) {
 	srv := httptest.NewServer(mountCarver(&fakeCarverQ{}))
 	defer srv.Close()
-	resp, _ := http.Get(srv.URL + "/ipam/free-space/prefixes")
+	resp, err := http.Get(srv.URL + "/ipam/free-space/prefixes")
+	if err != nil {
+		t.Fatalf("GET failed: %v", err)
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)

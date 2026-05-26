@@ -13,7 +13,6 @@ from dcim.api.ipam import _validate_reservations_against_family
 from dcim.errors import ValidationError
 from dcim.schemas.ipam import DhcpReservation
 
-
 # ----- v4 scope: must have mac; rejects duid -----
 
 def test_v4_reservation_with_mac_passes():

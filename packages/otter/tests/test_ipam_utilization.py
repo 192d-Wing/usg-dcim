@@ -12,7 +12,6 @@ from prometheus_client import generate_latest
 from dcim import metrics, worker
 from dcim.services import ipam_metrics
 
-
 # ----- capacity math -----
 
 def test_v4_24_prefix_capacity_is_254():

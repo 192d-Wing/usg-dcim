@@ -152,6 +152,7 @@ async def dhcp_scope_tombstone_purge(_ctx) -> dict:
     from datetime import timedelta
 
     from sqlalchemy import delete
+
     from .models.ipam import DhcpScope
     from .settings import get_settings
 
@@ -276,7 +277,8 @@ async def dhcp_drift_check(_ctx) -> dict:
     """
     from . import metrics
     from .models.ipam import DhcpServer  # local — same defer pattern as dhcp_sync
-    from .services import dhcp_alerts, dhcp_push as dhcp_push_svc
+    from .services import dhcp_alerts
+    from .services import dhcp_push as dhcp_push_svc
 
     started = datetime.now(UTC)
     per_server: dict[str, dict] = {}
@@ -320,7 +322,7 @@ async def dhcp_drift_check(_ctx) -> dict:
                     "counts": report.counts,
                     "alerts": alert_summary,
                 }
-            except Exception as e:  # noqa: BLE001 — log + continue
+            except Exception as e:
                 errors += 1
                 per_server[str(srv.id)] = {"error": f"{type(e).__name__}: {e}"}
                 log.error(

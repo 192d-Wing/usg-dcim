@@ -95,10 +95,8 @@ from ..schemas.ipam import (
 from ..security import audit
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
-from ..services import dhcp_bundle
+from ..services import dhcp_bundle, dhcp_push, dhcp_reconcile
 from ..services import dhcp_drift_summary as dhcp_drift_summary_svc
-from ..services import dhcp_push
-from ..services import dhcp_reconcile
 from ..services import ipam as ipam_svc
 from ..services import kea as kea_svc
 from ._pagination import empty_page, paginate
@@ -2172,7 +2170,7 @@ async def update_dhcp_scope(
     # the create path runs. exclude_unset means we only validate
     # when the caller actually sent `reservations`; passing
     # null/empty list explicitly is fine (clears the column).
-    if "reservations" in diff and diff["reservations"]:
+    if diff.get("reservations"):
         _validate_reservations_against_family(diff["reservations"], obj.ip_family)
     # PR 78 — if the operator is reassigning the template, validate
     # the family matches. Setting template_id=null unbinds and is
@@ -2197,7 +2195,10 @@ async def update_dhcp_scope(
     for k, v in diff.items():
         col = column_map.get(k, k)
         if k in column_map and v is not None:
-            setattr(obj, col, [item if isinstance(item, dict) else item.model_dump(exclude_none=True) for item in v])
+            setattr(obj, col, [
+                item if isinstance(item, dict) else item.model_dump(exclude_none=True)
+                for item in v
+            ])
         elif k in column_map and v is None:
             setattr(obj, col, None if col == "pd_pools_json" else [])
         else:

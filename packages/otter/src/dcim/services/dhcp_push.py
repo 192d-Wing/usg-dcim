@@ -455,9 +455,9 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
                     else client.subnet6_add(subnet_def)
                 )
                 await client.config_write(["dhcp6"])
-        except Exception as e:  # noqa: BLE001 — surface any transport error verbatim
+        except Exception as e:
             status, err = "error", f"{type(e).__name__}: {e}"
-            timer.status = status  # noqa: B010 — context manager holder
+            timer.status = status
             log.error("dhcp_push.transport_error", scope_id=str(scope.id), error=err)
             await _record_push_status(db, server, status, err)
             # PR 104 — record before the id rollback so the history
@@ -477,7 +477,7 @@ async def push_scope(db: AsyncSession, scope: DhcpScope) -> PushResult:
             )
 
         status, err = _interpret_kea_response(resp)
-        timer.status = status  # noqa: B010
+        timer.status = status
     duration_ms = int((time.perf_counter() - push_start) * 1000)
     await _record_push_history(db, scope, server, operation, status, err, duration_ms)
     if status != "ok" and not is_update:
@@ -537,8 +537,8 @@ async def delete_scope_from_kea(
             else:
                 resp = await client.subnet6_del(scope.kea_subnet_id)
                 await client.config_write(["dhcp6"])
-        except Exception as e:  # noqa: BLE001
-            timer.status = "error"  # noqa: B010
+        except Exception as e:
+            timer.status = "error"
             err = f"{type(e).__name__}: {e}"
             duration_ms = int((time.perf_counter() - delete_start) * 1000)
             if db is not None:
@@ -550,7 +550,7 @@ async def delete_scope_from_kea(
                 status="error", error=err, raw=None,
             )
         status, err = _interpret_kea_response(resp)
-        timer.status = status  # noqa: B010
+        timer.status = status
     duration_ms = int((time.perf_counter() - delete_start) * 1000)
     if db is not None:
         await _record_push_history(
@@ -668,7 +668,7 @@ async def enqueue_bundle_rerender(server_id) -> bool:
         finally:
             await pool.close()
         return True
-    except Exception as e:  # noqa: BLE001 — handler shouldn't fail on enqueue
+    except Exception as e:
         log.warning(
             "dhcp_bundle_rerender.enqueue_failed",
             server_id=str(server_id), error=f"{type(e).__name__}: {e}",
@@ -734,7 +734,7 @@ async def auto_push_scope_in_background(scope_id) -> None:
             return
         try:
             result = await push_scope(db, scope)
-        except Exception as e:  # noqa: BLE001 — background task swallows
+        except Exception as e:
             log.error(
                 "dhcp_auto_push.unexpected",
                 scope_id=str(scope_id), error=f"{type(e).__name__}: {e}",
@@ -891,10 +891,10 @@ async def diff_scope(
                 resp = await client.subnet4_get(scope.kea_subnet_id)
             else:
                 resp = await client.subnet6_get(scope.kea_subnet_id)
-            timer.status = "ok"  # noqa: B010
-        except Exception as e:  # noqa: BLE001
+            timer.status = "ok"
+        except Exception as e:
             err = f"{type(e).__name__}: {e}"
-            timer.status = "error"  # noqa: B010
+            timer.status = "error"
             log.error("dhcp_diff.transport_error", scope_id=str(scope.id), error=err)
             return DiffResult(
                 scope_id=str(scope.id), kea_subnet_id=scope.kea_subnet_id,

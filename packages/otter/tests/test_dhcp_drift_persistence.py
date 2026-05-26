@@ -8,7 +8,7 @@ cache on successful push.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 
 from dcim.services.dhcp_push import DiffResult, persist_diff_state

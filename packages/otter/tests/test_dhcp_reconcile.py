@@ -36,7 +36,7 @@ class _Src:
 @dataclass
 class _Scope:
     id: UUID
-    subnet_id: UUID | None = uuid4()
+    subnet_id: UUID | None = field(default_factory=uuid4)
     reservations_json: list = field(default_factory=list)
 
 

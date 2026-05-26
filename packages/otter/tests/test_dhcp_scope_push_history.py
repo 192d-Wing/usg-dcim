@@ -16,7 +16,6 @@ from dcim.api import ipam as ipam_api
 from dcim.models.ipam import DhcpScopePushHistory
 from dcim.services import dhcp_push
 
-
 # ----- model shape -----
 
 def test_push_history_table_name():

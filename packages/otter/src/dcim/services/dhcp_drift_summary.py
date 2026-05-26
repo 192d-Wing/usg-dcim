@@ -17,9 +17,8 @@ extra indexes; the prefix is a substring of an indexed column.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
-
 
 # Status taxonomy mirrors services.dhcp_push._DIFF_STATUSES.
 _DIFF_STATUSES = ("in_sync", "drifted", "missing_from_kea", "never_pushed", "error")
