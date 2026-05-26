@@ -164,6 +164,10 @@ func TestApiTokenBearer_BuildsPrincipalFromTokenCaps(t *testing.T) {
 	tokenID := uuid.New()
 	raw, digest, _ := generateAPIToken()
 	q := &apiBearerFakeQ{
+		fakeQ: fakeQ{
+			user:     dbq.User{ID: uid, IsActive: true},
+			userCaps: []string{"dns:zones:read"},
+		},
 		row: dbq.ApiToken{
 			ID: tokenID, OwnerUserID: uid, TokenHash: digest,
 			PermissionCodes: json.RawMessage(`["dns:zones:read"]`),
@@ -190,6 +194,64 @@ func TestApiTokenBearer_BuildsPrincipalFromTokenCaps(t *testing.T) {
 	}
 	if got.Label != "token:"+tokenID.String() {
 		t.Errorf("label: %q", got.Label)
+	}
+}
+
+func TestApiTokenBearer_RejectsInactiveOwner(t *testing.T) {
+	uid := uuid.New()
+	raw, digest, _ := generateAPIToken()
+	q := &apiBearerFakeQ{
+		fakeQ: fakeQ{
+			user:     dbq.User{ID: uid, IsActive: false},
+			userCaps: []string{"dns:zones:read"},
+		},
+		row: dbq.ApiToken{
+			ID: uuid.New(), OwnerUserID: uid, TokenHash: digest,
+			PermissionCodes: json.RawMessage(`["dns:zones:read"]`),
+		},
+	}
+	mw := Verifying(nopLogger(), q, VerifierConfig{PrimarySecret: []byte("s")})
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("want 401 (inactive owner), got %d", rec.Code)
+	}
+}
+
+func TestApiTokenBearer_IntersectsCapsWithOwner(t *testing.T) {
+	uid := uuid.New()
+	tokenID := uuid.New()
+	raw, digest, _ := generateAPIToken()
+	q := &apiBearerFakeQ{
+		fakeQ: fakeQ{
+			user:     dbq.User{ID: uid, IsActive: true},
+			userCaps: []string{"dns:zones:read"},
+		},
+		row: dbq.ApiToken{
+			ID: tokenID, OwnerUserID: uid, TokenHash: digest,
+			PermissionCodes: json.RawMessage(`["dns:zones:read","admin:users:create"]`),
+		},
+	}
+	mw := Verifying(nopLogger(), q, VerifierConfig{PrimarySecret: []byte("s")})
+	var got Principal
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = From(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest("GET", "/x", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if len(got.Capabilities) != 1 || got.Capabilities[0] != "dns:zones:read" {
+		t.Errorf("expected admin:users:create to be filtered out by owner-cap intersection; got %v", got.Capabilities)
 	}
 }
 

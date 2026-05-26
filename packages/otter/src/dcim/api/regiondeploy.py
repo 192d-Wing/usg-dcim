@@ -8,7 +8,7 @@ from uuid import UUID
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from redis.asyncio import from_url as redis_from_url
 from sqlalchemy import select
@@ -27,6 +27,7 @@ from ..models.regiondeploy import (
 from ..regiondeploy import events as rd_events
 from ..regiondeploy import preflight
 from ..regiondeploy.k8s import K8sClient
+from ..regiondeploy.tokens import compare_callback_token, derive_callback_token
 from ..schemas.common import Page, PageParams
 from ..schemas.regiondeploy import (
     PreflightCheckOut,
@@ -170,7 +171,7 @@ async def create_region_deployment(
     accidentally power-cycle nodes.
     """
     await enforce_site_scope(
-        db, principal.capabilities, CAP_CREATE, payload.site_id,
+        db, principal.capabilities, payload.site_id, cap_code=CAP_CREATE,
     )
     row = RegionDeployment(
         site_id=payload.site_id,
@@ -251,34 +252,66 @@ async def start_region_deployment(
 async def post_kubeconfig_callback(
     deployment_id: UUID,
     payload: RegionDeploymentKubeconfigCallback,
+    authorization: str | None = Header(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """Receive the kubeadm-generated kubeconfig from a first
     control-plane node.
 
     The Workflow template's `kubeconfig-write` action posts here
-    after `kubeadm init` succeeds. Today we only record receipt —
-    actually persisting the kubeconfig as a k8s Secret on central
-    needs the k8s-client + RBAC work that's still pending. The
-    deployment row's `kubeconfig_secret_ref` is set to a placeholder
-    name (`tinkerbell/kubeconfig-<id>`) so the orchestrator's
-    joining stage knows what Secret to look for once the create
-    side lands.
+    after `kubeadm init` succeeds. The handler writes the
+    kubeconfig to a k8s Secret in the central cluster's
+    `tinkerbell` namespace and records the ref on the deployment
+    row.
 
-    Auth: deliberately NOT behind require_capability. The Tink
-    Worker action runs from a freshly-booted node that doesn't have
-    a DCIM token. The endpoint is hardened by:
+    Auth: this endpoint is NOT behind require_capability — the
+    Tink Worker action runs from a freshly-booted node that has no
+    DCIM session/API token. Instead it requires a per-deployment
+    bootstrap token in the `Authorization: Bearer …` header. The
+    token is HMAC-SHA256 derived from `regiondeploy_callback_secret`
+    + the deployment UUID (see dcim.regiondeploy.tokens) and the
+    orchestrator embeds it in the node's Ignition payload at
+    /etc/dcim/callback.token. Without the matching token the
+    handler returns 401.
 
-      * accepting only deployments in `joining` or `provisioning`
-        state (post-PXE, pre-finalize);
+    Additional gates:
+      * the deployment must be in `joining` or `provisioning` state
+        (post-PXE, pre-finalize);
       * the deployment_id is path-scoped — a node only knows its
-        own deployment id, baked into the Ignition payload.
+        own deployment id, baked into Ignition.
 
-    Once the central-cluster Secret-write path lands, the endpoint
-    will additionally require a one-shot bootstrap token minted at
-    deploy-start and embedded in the Workflow template. Tracked in
-    docs/dev/region-deploy.md §3a kubeconfig workstream.
+    If `regiondeploy_callback_secret` is unset, the endpoint fails
+    closed with 503 — there is no plaintext fallback by design.
     """
+    settings = get_settings()
+    expected = derive_callback_token(
+        deployment_id, settings.regiondeploy_callback_secret,
+    )
+    if expected is None:
+        # Fail closed: the operator has not configured the bootstrap
+        # secret, so we can't verify any callback. Returning 503 rather
+        # than 401 distinguishes a server-side misconfig from a bad
+        # token in operator logs.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"error": {
+                "code": "callback_secret_unset",
+                "message": "regiondeploy_callback_secret is not configured",
+            }},
+        )
+    presented: str | None = None
+    if authorization:
+        scheme, _, value = authorization.partition(" ")
+        if scheme.lower() == "bearer":
+            presented = value.strip()
+    if not compare_callback_token(presented, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": {
+                "code": "invalid_callback_token",
+                "message": "missing or invalid kubeconfig-callback token",
+            }},
+        )
     row = await db.get(RegionDeployment, deployment_id)
     if row is None:
         raise NotFoundError(NOT_FOUND_MSG)
@@ -330,7 +363,6 @@ async def post_kubeconfig_callback(
     # Best-effort event for the SSE stream — confirms the callback
     # fired and whether the Secret-write succeeded, without exposing
     # the kubeconfig content in the event log itself.
-    settings = get_settings()
     redis = redis_from_url(str(settings.redis_dsn), decode_responses=True)
     try:
         if write_succeeded:

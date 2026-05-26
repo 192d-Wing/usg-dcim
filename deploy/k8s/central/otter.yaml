@@ -78,6 +78,19 @@ spec:
               value: "false"
             - name: DCIM_OIDC_VERIFY_SSL
               value: "false"
+            # Region-deploy kubeconfig-callback wiring. The secret
+            # is the HMAC key the orchestrator + endpoint share to
+            # mint/verify per-deployment bootstrap tokens. The URL
+            # is what the in-cluster kubeconfig-callback.service
+            # unit POSTs to once kubeadm-init succeeds. Required
+            # only if the region-deploy flow is in use.
+            - name: DCIM_REGIONDEPLOY_CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: regiondeploy-callback-secret
+            - name: DCIM_REGIONDEPLOY_CENTRAL_URL
+              value: https://dcim.prod.dev.mil
           livenessProbe:
             httpGet:
               path: /healthz

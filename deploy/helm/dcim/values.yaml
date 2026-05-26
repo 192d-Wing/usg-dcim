@@ -33,6 +33,15 @@ global:
       clientSecretRef: ""
     saml:
       metadataUrl: ""
+    # Region-deploy kubeconfig-callback wiring. `centralUrl` is the
+    # public base URL the in-cluster kubeconfig-callback.service
+    # unit POSTs to (scheme://host[:port], no trailing /api). The
+    # secret is the HMAC key used to derive per-deployment bootstrap
+    # tokens; when left as PROVIDE_VIA_SECRET the callback endpoint
+    # fails closed with 503. Required for the region-deploy flow.
+    regiondeploy:
+      callbackSecret: "PROVIDE_VIA_SECRET"
+      centralUrl:     ""
 
   otel:
     enabled: false

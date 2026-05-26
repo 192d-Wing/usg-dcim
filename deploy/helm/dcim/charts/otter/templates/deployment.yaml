@@ -29,6 +29,11 @@ spec:
             - { name: DCIM_OIDC_ISSUER,    value: {{ .Values.global.config.oidc.issuer | quote }} }
             - { name: DCIM_OIDC_CLIENT_ID, value: {{ .Values.global.config.oidc.clientId | quote }} }
             - { name: DCIM_COLLECTOR_STALE_SECONDS, value: {{ .Values.global.config.collectorStaleSeconds | quote }} }
+            {{- with .Values.global.config.regiondeploy }}
+            - name: DCIM_REGIONDEPLOY_CALLBACK_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: regiondeploy_callback_secret } }
+            - { name: DCIM_REGIONDEPLOY_CENTRAL_URL, value: {{ .centralUrl | quote }} }
+            {{- end }}
             {{- if .Values.global.otel.enabled }}
             - { name: DCIM_OTEL_ENABLED, value: "true" }
             - { name: DCIM_OTEL_EXPORTER_ENDPOINT, value: {{ .Values.global.otel.exporterEndpoint | quote }} }

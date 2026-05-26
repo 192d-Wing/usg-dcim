@@ -32,9 +32,13 @@ func generateAPIToken() (string, string, error) {
 }
 
 // apiTokenPrincipal looks up `raw` (the Authorization header value
-// starting with "dcim_") in api_tokens, validates not-revoked +
-// not-expired, and returns a Principal whose capabilities come
-// straight from the token row's permission_codes.
+// starting with "dcim_") in api_tokens and validates that the token
+// is usable. Beyond not-revoked + not-expired, the owner must still
+// exist and be active, and the returned Capabilities are the token's
+// permission_codes intersected with the owner's current effective
+// capabilities. This mirrors the Python _principal_from_api_token in
+// dcim/security/deps.py so that deactivating an owner or revoking a
+// role propagates to outstanding tokens without an explicit revoke.
 func apiTokenPrincipal(ctx context.Context, q Querier, raw string) (Principal, bool) {
 	if !strings.HasPrefix(raw, "dcim_") {
 		return Principal{}, false
@@ -49,16 +53,40 @@ func apiTokenPrincipal(ctx context.Context, q Querier, raw string) (Principal, b
 	if tok.ExpiresAt != nil && tok.ExpiresAt.Before(time.Now()) {
 		return Principal{}, false
 	}
-	caps, err := decodeStringArray(tok.PermissionCodes)
+	// Owner must still exist and be active. A deactivated owner — or
+	// one deleted out from under the token — invalidates every token
+	// they ever issued, without operators having to walk api_tokens.
+	owner, err := q.GetUser(ctx, tok.OwnerUserID)
 	if err != nil {
 		return Principal{}, false
+	}
+	if !owner.IsActive {
+		return Principal{}, false
+	}
+	requested, err := decodeStringArray(tok.PermissionCodes)
+	if err != nil {
+		return Principal{}, false
+	}
+	// Re-bound the token to the owner's current effective caps. If the
+	// owner's role was downgraded after the token was issued, the
+	// downgrade takes effect here — any cap the owner can no longer
+	// grant is dropped from the token's effective set.
+	ownerCaps, err := q.GetUserCapabilities(ctx, owner.ID)
+	if err != nil {
+		return Principal{}, false
+	}
+	effective := make([]string, 0, len(requested))
+	for _, code := range requested {
+		if HasCapability(ownerCaps, code) {
+			effective = append(effective, code)
+		}
 	}
 	// Best-effort last_used_at touch; failures are swallowed so a
 	// stats-table problem doesn't break auth.
 	_ = q.TouchApiTokenLastUsed(ctx, tok.ID)
 	return Principal{
 		Subject:      tok.OwnerUserID,
-		Capabilities: caps,
+		Capabilities: effective,
 		Label:        "token:" + tok.ID.String(),
 	}, true
 }

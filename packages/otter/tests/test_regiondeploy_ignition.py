@@ -36,6 +36,7 @@ def _deployment(config=None, **overrides):
 
 def _node(role="control_plane", **overrides):
     base = {
+        "id": UUID("11111111-2222-3333-4444-555555555555"),
         "hostname": "control-1",
         "role": role,
         "primary_ip_v6": "fd00:site:42:0::10",
@@ -148,6 +149,67 @@ def test_render_handles_string_role_or_enum():
 
     cfg = build_ignition(_deployment(), _node(role=_Role()))
     assert cfg["systemd"]["units"][0]["name"] == "kubeadm-init.service"
+
+
+def test_callback_token_and_unit_only_emitted_when_both_provided():
+    # First-CP node with both wired: token file appears and the
+    # kubeconfig-callback unit lands alongside kubeadm-init.
+    cfg = build_ignition(
+        _deployment(), _node(),
+        callback_token="abc123" * 10,
+        central_url="https://otter.example/",
+    )
+    files = {f["path"]: f for f in cfg["storage"]["files"]}
+    assert "/etc/dcim/callback.token" in files
+    assert files["/etc/dcim/callback.token"]["mode"] == 0o600
+    names = [u["name"] for u in cfg["systemd"]["units"]]
+    assert names == ["kubeadm-init.service", "kubeconfig-callback.service"]
+    cb = next(
+        u for u in cfg["systemd"]["units"]
+        if u["name"] == "kubeconfig-callback.service"
+    )["contents"]
+    assert "Authorization: Bearer $TOKEN" in cb
+    assert "kubeconfig_b64" in cb
+    assert "/api/v1/region-deployments/$DCIM_DEPLOYMENT_ID/kubeconfig/callback" in cb
+
+
+def test_callback_unit_omitted_when_central_url_missing():
+    # Token without central_url means we can't form a POST URL —
+    # fall back to writing nothing rather than baking a broken unit.
+    cfg = build_ignition(
+        _deployment(), _node(),
+        callback_token="abc123" * 10,
+        central_url=None,
+    )
+    names = [u["name"] for u in cfg["systemd"]["units"]]
+    assert "kubeconfig-callback.service" not in names
+
+
+def test_callback_unit_not_emitted_on_join_nodes():
+    # Worker nodes never callback; even with a token+url they get
+    # only the join unit.
+    cfg = build_ignition(
+        _deployment(), _node(role="worker"),
+        kubeadm_join_token="t.xxx",
+        control_plane_ep="[fd00:site:42:0::1]:6443",
+        callback_token="abc123" * 10,
+        central_url="https://otter.example/",
+    )
+    names = [u["name"] for u in cfg["systemd"]["units"]]
+    assert names == ["kubeadm-join.service"]
+
+
+def test_cluster_env_carries_deployment_and_node_ids():
+    cfg = build_ignition(
+        _deployment(), _node(), central_url="https://otter.example",
+    )
+    env = next(
+        f for f in cfg["storage"]["files"]
+        if f["path"] == "/etc/dcim/cluster.env"
+    )["contents"]["inline"]
+    assert f"DCIM_DEPLOYMENT_ID={DEP_ID}" in env
+    assert "DCIM_NODE_ID=11111111-2222-3333-4444-555555555555" in env
+    assert "DCIM_CENTRAL_URL=https://otter.example" in env
 
 
 def test_missing_config_keys_render_empty_values():

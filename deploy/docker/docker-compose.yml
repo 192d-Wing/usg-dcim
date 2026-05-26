@@ -147,6 +147,13 @@ services:
       DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
       DCIM_OTEL_SERVICE_NAME: dcim-otter
       DCIM_OTEL_ENVIRONMENT: dev
+      # Region-deploy kubeconfig-callback wiring. The secret is the
+      # HMAC key for per-deployment bootstrap tokens; when unset the
+      # callback endpoint fails closed with 503. The URL is what the
+      # in-cluster kubeconfig-callback.service unit POSTs to once
+      # kubeadm-init succeeds on the first control-plane.
+      DCIM_REGIONDEPLOY_CALLBACK_SECRET: "${DCIM_REGIONDEPLOY_CALLBACK_SECRET:-}"
+      DCIM_REGIONDEPLOY_CENTRAL_URL: "${DCIM_REGIONDEPLOY_CENTRAL_URL:-http://dcim.prod.dev.mil}"
     ports: ["8000:8000"]
     extra_hosts:
       # On Docker Desktop this is automatic; declared explicitly for
@@ -179,6 +186,12 @@ services:
       DCIM_OTEL_EXPORTER_ENDPOINT: "${DCIM_OTEL_EXPORTER_ENDPOINT:-http://otel-collector:4318}"
       DCIM_OTEL_SERVICE_NAME: dcim-otter-worker
       DCIM_OTEL_ENVIRONMENT: dev
+      # Worker shares the regiondeploy callback wiring with the api:
+      # the orchestrator (which runs here) needs the secret to derive
+      # the token it bakes into Ignition, and the central URL to embed
+      # in /etc/dcim/cluster.env.
+      DCIM_REGIONDEPLOY_CALLBACK_SECRET: "${DCIM_REGIONDEPLOY_CALLBACK_SECRET:-}"
+      DCIM_REGIONDEPLOY_CENTRAL_URL: "${DCIM_REGIONDEPLOY_CENTRAL_URL:-http://dcim.prod.dev.mil}"
     # NET_RAW lets the worker open ICMP sockets for the DNS
     # health-check engine's `icmp` protocol probes. Without it the
     # probe falls back to unprivileged SOCK_DGRAM ICMP, which only
