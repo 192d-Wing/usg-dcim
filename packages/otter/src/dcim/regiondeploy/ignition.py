@@ -49,6 +49,8 @@ def render_ignition_for_node(
     kubeadm_join_token: str | None = None,
     control_plane_ep: str | None = None,
     ssh_keys: list[str] | None = None,
+    callback_token: str | None = None,
+    central_url: str | None = None,
 ) -> str:
     """Render an Ignition JSON string for a single node.
 
@@ -62,6 +64,21 @@ def render_ignition_for_node(
     token after `kubeadm init` succeeds and feeds it to subsequent
     nodes' Ignition.
 
+    `callback_token` is the per-deployment HMAC the first
+    control-plane needs to authenticate its POST to
+    /regiondeploy/{id}/kubeconfig/callback. The orchestrator derives
+    it via dcim.regiondeploy.tokens.derive_callback_token and the
+    renderer writes it to /etc/dcim/callback.token (mode 0600) so
+    the Workflow action can read it. Only required for the first
+    control-plane; pass None for nodes that don't call back.
+
+    `central_url` is the base URL of the central API
+    (scheme://host[:port]). When `callback_token` is set the renderer
+    emits a `kubeconfig-callback.service` systemd unit that POSTs
+    `/api/v1/region-deployments/{id}/kubeconfig/callback` to that URL
+    with `Authorization: Bearer <callback_token>`. Both inputs are
+    required to wire the callback path end-to-end.
+
     Returns the JSON as a string (Workflow CR consumes a string).
     """
     cfg = build_ignition(
@@ -69,6 +86,8 @@ def render_ignition_for_node(
         kubeadm_join_token=kubeadm_join_token,
         control_plane_ep=control_plane_ep,
         ssh_keys=ssh_keys,
+        callback_token=callback_token,
+        central_url=central_url,
     )
     # separators set for deterministic, compact output — Ignition is
     # never read by humans and the Workflow CR carries the bytes
@@ -83,6 +102,8 @@ def build_ignition(
     kubeadm_join_token: str | None = None,
     control_plane_ep: str | None = None,
     ssh_keys: list[str] | None = None,
+    callback_token: str | None = None,
+    central_url: str | None = None,
 ) -> dict:
     """Build the Ignition config as a dict. Split from
     render_ignition_for_node so tests can assert on structure
@@ -102,15 +123,33 @@ def build_ignition(
         # changing the unit.
         _file(
             "/etc/dcim/cluster.env",
-            _cluster_env(deployment, control_plane_ep),
+            _cluster_env(
+                deployment, node, control_plane_ep, central_url,
+            ),
             mode=0o600,
         ),
     ]
+    if callback_token:
+        # Mode 0600 — only root reads it. The kubeconfig-callback
+        # systemd unit runs as root and includes the file's contents
+        # as `Authorization: Bearer …` when POSTing the kubeconfig
+        # back to central.
+        storage_files.append(
+            _file(
+                "/etc/dcim/callback.token",
+                callback_token + "\n",
+                mode=0o600,
+            ),
+        )
 
     systemd_units: list[dict] = []
     if role == "control_plane" and kubeadm_join_token is None:
         # First control-plane node — runs kubeadm init.
         systemd_units.append(_kubeadm_init_unit(deployment))
+        # And, when a callback token + central URL are wired, runs
+        # the post-init unit that POSTs admin.conf back to central.
+        if callback_token and central_url:
+            systemd_units.append(_kubeconfig_callback_unit())
     else:
         # Worker / edge / additional control-plane — runs kubeadm join.
         if kubeadm_join_token is None or control_plane_ep is None:
@@ -154,21 +193,32 @@ def _node_role(node: Any) -> str:
     return getattr(role, "value", role)
 
 
-def _cluster_env(deployment: Any, control_plane_ep: str | None) -> str:
+def _cluster_env(
+    deployment: Any,
+    node: Any,
+    control_plane_ep: str | None,
+    central_url: str | None,
+) -> str:
     """Render /etc/dcim/cluster.env — key=value lines, shell-safe.
 
     Read by the kubeadm-{init,join}.service units to source pod CIDR,
-    service CIDR, and the control-plane endpoint. Falls back to
-    sensible defaults when the deployment config is missing keys,
-    so a partial config still produces a renderable Ignition (the
-    install will fail later with a clear error rather than at render
-    time)."""
+    service CIDR, and the control-plane endpoint, and by
+    kubeconfig-callback.service to know where to POST back. Falls
+    back to sensible defaults when the deployment config is missing
+    keys, so a partial config still produces a renderable Ignition
+    (the install will fail later with a clear error rather than at
+    render time)."""
     config = getattr(deployment, "config", None) or {}
     lines = [
         f"POD_CIDR_V6={config.get('pod_cidr_v6', '')}",
         f"SVC_CIDR_V6={config.get('svc_cidr_v6', '')}",
         f"CONTROL_PLANE_EP={control_plane_ep or config.get('vip_v6', '')}",
         f"CILIUM_VERSION={config.get('cilium_version', '1.19.3')}",
+        # Central URL + ids so the kubeconfig-callback unit can POST
+        # without having to embed any of these into its ExecStart.
+        f"DCIM_CENTRAL_URL={central_url or ''}",
+        f"DCIM_DEPLOYMENT_ID={deployment.id}",
+        f"DCIM_NODE_ID={node.id}",
     ]
     return "\n".join(lines) + "\n"
 
@@ -246,6 +296,68 @@ def _kubeadm_join_unit(*, role: str, token: str, control_plane_ep: str) -> dict:
         f" --token {token}"
         " --discovery-token-unsafe-skip-ca-verification"
         f"{cp_flag}\n"
+        "\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+    return {
+        "name": name,
+        "enabled": True,
+        "contents": contents,
+    }
+
+
+def _kubeconfig_callback_unit() -> dict:
+    """Post-init unit that POSTs admin.conf back to central.
+
+    Runs once, after `kubeadm-init.service` succeeds. Reads the
+    callback token from /etc/dcim/callback.token, base64-encodes
+    /etc/kubernetes/admin.conf to dodge YAML-to-JSON escaping, and
+    POSTs `{node_id, kubeconfig_b64}` with `Authorization: Bearer`
+    to `$DCIM_CENTRAL_URL/api/v1/region-deployments/$DCIM_DEPLOYMENT_ID/kubeconfig/callback`.
+
+    `ConditionPathExists=!/var/lib/dcim/callback-sent` plus the post-
+    success touch make this idempotent — a node reboot won't re-POST
+    a kubeconfig central already has. `curl --retry` covers transient
+    network blips during early-boot DNS / routing convergence.
+    """
+    name = "kubeconfig-callback.service"
+    # Inline bash. base64 -w0 on the kubeconfig keeps the JSON body
+    # on a single line; printf builds the body without needing jq
+    # (Flatcar base image doesn't ship it). The trailing touch marks
+    # the unit "done" so reboots don't re-fire the POST.
+    exec_start = (
+        "/usr/bin/bash -c '"
+        "TOKEN=$(cat /etc/dcim/callback.token) && "
+        "KCFG=$(base64 -w0 /etc/kubernetes/admin.conf) && "
+        "BODY=$(printf "
+        "\"{\\\"node_id\\\":\\\"%s\\\",\\\"kubeconfig_b64\\\":\\\"%s\\\"}\" "
+        "\"$DCIM_NODE_ID\" \"$KCFG\") && "
+        "curl --fail --silent --show-error "
+        "--retry 30 --retry-delay 10 --retry-connrefused "
+        "-H \"Authorization: Bearer $TOKEN\" "
+        "-H \"Content-Type: application/json\" "
+        "--data \"$BODY\" "
+        "\"$DCIM_CENTRAL_URL/api/v1/region-deployments/$DCIM_DEPLOYMENT_ID/kubeconfig/callback\""
+        "'"
+    )
+    contents = (
+        "[Unit]\n"
+        "Description=POST kubeadm-generated kubeconfig back to DCIM central\n"
+        "After=kubeadm-init.service network-online.target\n"
+        "Requires=kubeadm-init.service\n"
+        "Wants=network-online.target\n"
+        "ConditionPathExists=/etc/kubernetes/admin.conf\n"
+        "ConditionPathExists=/etc/dcim/callback.token\n"
+        "ConditionPathExists=!/var/lib/dcim/callback-sent\n"
+        "\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "RemainAfterExit=yes\n"
+        "EnvironmentFile=/etc/dcim/cluster.env\n"
+        f"ExecStart={exec_start}\n"
+        "ExecStartPost=/usr/bin/install -d -m 0700 /var/lib/dcim\n"
+        "ExecStartPost=/usr/bin/touch /var/lib/dcim/callback-sent\n"
         "\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"

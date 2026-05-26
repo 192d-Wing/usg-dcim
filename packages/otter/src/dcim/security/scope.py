@@ -328,6 +328,19 @@ async def enforce_fabric_scope(
 ) -> None:
     """Single-resource fabric-ABAC check. Raises ForbiddenError when
     the principal's cap is fabric-scoped and `fabric_id` isn't in scope."""
+    # Fail loud on swapped args (cap_code in fabric_id slot, UUID in cap_code
+    # slot). Without this guard the swap silently no-ops the check.
+    if fabric_id is not None and not isinstance(fabric_id, UUID):
+        raise TypeError(
+            f"enforce_fabric_scope: fabric_id must be UUID or None, got "
+            f"{type(fabric_id).__name__}; check argument order vs (db, "
+            f"capabilities, fabric_id, cap_code)."
+        )
+    if not isinstance(cap_code, str):
+        raise TypeError(
+            f"enforce_fabric_scope: cap_code must be str, got "
+            f"{type(cap_code).__name__}; check argument order."
+        )
     if fabric_id is None:
         return
     from .deps import find_matching_capability
@@ -349,6 +362,19 @@ async def enforce_site_scope(
     """Single-resource ABAC: raise ForbiddenError if the principal holds
     `cap_code` but `site_id` is outside their scope. Global / unscoped
     grants and resources with no site (`site_id=None`) pass."""
+    # Fail loud on swapped args (cap_code in site_id slot, UUID in cap_code
+    # slot). Without this guard the swap silently no-ops the check.
+    if site_id is not None and not isinstance(site_id, UUID):
+        raise TypeError(
+            f"enforce_site_scope: site_id must be UUID or None, got "
+            f"{type(site_id).__name__}; check argument order vs (db, "
+            f"capabilities, site_id, cap_code)."
+        )
+    if not isinstance(cap_code, str):
+        raise TypeError(
+            f"enforce_site_scope: cap_code must be str, got "
+            f"{type(cap_code).__name__}; check argument order."
+        )
     if site_id is None:
         return
     # Local import to keep the security package free of api/* dependencies.

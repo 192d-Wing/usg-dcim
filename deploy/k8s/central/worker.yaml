@@ -40,6 +40,17 @@ spec:
                 secretKeyRef:
                   name: app-secrets
                   key: dnssec-secret
+            # Worker shares the regiondeploy callback wiring with
+            # the api: the orchestrator (which runs here) needs the
+            # secret to derive the token it bakes into Ignition,
+            # and the central URL to embed in /etc/dcim/cluster.env.
+            - name: DCIM_REGIONDEPLOY_CALLBACK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: regiondeploy-callback-secret
+            - name: DCIM_REGIONDEPLOY_CENTRAL_URL
+              value: https://dcim.prod.dev.mil
           securityContext:
             capabilities:
               add:

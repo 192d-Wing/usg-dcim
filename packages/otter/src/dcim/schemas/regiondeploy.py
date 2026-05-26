@@ -10,7 +10,9 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+import base64
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..models.regiondeploy import (
     RegionDeploymentEventLevel,
@@ -130,7 +132,30 @@ class RegionDeploymentKubeconfigCallback(BaseModel):
     # kubeconfig: full YAML content of /etc/kubernetes/admin.conf.
     # Treated as opaque on the central side; the orchestrator uses
     # it as a kubeconfig file for client-go / kubectl wrapping.
-    kubeconfig: str
+    # Optional when `kubeconfig_b64` is supplied — the in-cluster
+    # bash unit that POSTs the callback can avoid YAML→JSON escaping
+    # by base64-encoding the file instead.
+    kubeconfig: str | None = None
+    # Base64-encoded alternative to `kubeconfig`. Exactly one of the
+    # two fields must be present. The validator decodes this into
+    # `kubeconfig` so handlers downstream only ever see the plain
+    # YAML string.
+    kubeconfig_b64: str | None = None
+
+    @model_validator(mode="after")
+    def _normalize_kubeconfig(self) -> RegionDeploymentKubeconfigCallback:
+        if self.kubeconfig is not None and self.kubeconfig_b64 is not None:
+            raise ValueError("supply either kubeconfig or kubeconfig_b64, not both")
+        if self.kubeconfig is None and self.kubeconfig_b64 is None:
+            raise ValueError("kubeconfig or kubeconfig_b64 is required")
+        if self.kubeconfig_b64 is not None:
+            try:
+                decoded = base64.b64decode(self.kubeconfig_b64, validate=True)
+            except ValueError as exc:
+                raise ValueError(f"kubeconfig_b64 is not valid base64: {exc}") from exc
+            self.kubeconfig = decoded.decode("utf-8")
+            self.kubeconfig_b64 = None
+        return self
 
 
 class PreflightCheckOut(BaseModel):

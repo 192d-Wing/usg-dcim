@@ -52,12 +52,14 @@ from ..models.regiondeploy import (
     RegionDeploymentEventLevel,
     RegionDeploymentStatus,
 )
+from ..settings import get_settings
 from . import apps as apps_gen
 from . import cilium as cilium_gen
 from . import crd as crd_gen
 from . import events, preflight
 from . import ignition as ignition_gen
 from . import verify as verify_mod
+from .tokens import derive_callback_token
 
 log = structlog.get_logger("dcim.regiondeploy.orchestrator")
 
@@ -260,14 +262,40 @@ async def _stage_render(
     cfg = row.config or {}
     image_url = cfg.get("flatcar_image_url", "")
 
+    # The first control-plane node is the one that runs `kubeadm init`
+    # and POSTs the resulting kubeconfig back to central. It needs the
+    # per-deployment HMAC bootstrap token so the callback endpoint
+    # accepts the POST, and the central URL so kubeconfig-callback.service
+    # knows where to send it. Other nodes don't call back; pass None
+    # for them so the token never leaves the cluster's first-CP image.
+    settings = get_settings()
+    callback_token = derive_callback_token(
+        row.id, settings.regiondeploy_callback_secret,
+    )
+    central_url = settings.regiondeploy_central_url
+    first_cp_id: str | None = None
+    for node in row.nodes:
+        if ignition_gen._node_role(node) == "control_plane":
+            first_cp_id = str(node.id)
+            break
+
     ignitions: dict[str, dict] = {}
     ignition_strs: dict[str, str] = {}
     for node in row.nodes:
         try:
-            cfg_dict = ignition_gen.build_ignition(row, node)
+            node_callback = (
+                callback_token if str(node.id) == first_cp_id else None
+            )
+            cfg_dict = ignition_gen.build_ignition(
+                row, node,
+                callback_token=node_callback,
+                central_url=central_url,
+            )
             ignitions[str(node.id)] = cfg_dict
             ignition_strs[str(node.id)] = ignition_gen.render_ignition_for_node(
                 row, node,
+                callback_token=node_callback,
+                central_url=central_url,
             )
         except ValueError as e:
             # ValueError fires when a non-first-CP node has no

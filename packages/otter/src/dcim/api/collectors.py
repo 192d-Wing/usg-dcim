@@ -56,7 +56,7 @@ async def enroll_collector(
     """Issue a one-time enrollment token. The collector exchanges it for an mTLS cert + API token."""
     # Operators can't enroll a collector at a site outside their scope.
     await enforce_site_scope(
-        db, principal.capabilities, payload.site_id, "collectors:collectors:enroll",
+        db, principal.capabilities, payload.site_id, cap_code="collectors:collectors:enroll",
     )
     raw = "enroll_" + secrets.token_urlsafe(32)
     obj = Collector(
@@ -126,7 +126,7 @@ async def patch_collector_config(
     if coll is None:
         raise NotFoundError("collector not found")
     await enforce_site_scope(
-        db, principal.capabilities, "collectors:collectors:update", coll.site_id,
+        db, principal.capabilities, coll.site_id, cap_code="collectors:collectors:update",
     )
     # model_dump(exclude_unset=False) so an explicit null in the payload
     # is honoured as "clear this override" — without it, the operator
@@ -158,7 +158,7 @@ async def set_collector_enabled(
     if coll is None:
         raise NotFoundError("collector not found")
     await enforce_site_scope(
-        db, principal.capabilities, "collectors:collectors:update", coll.site_id,
+        db, principal.capabilities, coll.site_id, cap_code="collectors:collectors:update",
     )
     coll.enabled = payload.enabled
     await audit.record(
@@ -184,7 +184,7 @@ async def decommission_collector(
     if coll is None:
         raise NotFoundError("collector not found")
     await enforce_site_scope(
-        db, principal.capabilities, "collectors:collectors:update", coll.site_id,
+        db, principal.capabilities, coll.site_id, cap_code="collectors:collectors:update",
     )
     coll.status = CollectorStatus.decommissioned
     await audit.record(
