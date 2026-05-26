@@ -7,10 +7,9 @@ once the shape requirements are concrete.
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from uuid import UUID
-
-import base64
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
