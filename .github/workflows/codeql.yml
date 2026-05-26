@@ -43,9 +43,13 @@ jobs:
 
       # The Go module lives under packages/wolf/coredns-nsec3sign; autobuild
       # from repo root would no-op. Build explicitly so the extractor
-      # captures the call graph.
+      # captures the call graph. GOWORK=off mirrors the CI shard for this
+      # module — it's intentionally not in the repo-root go.work because
+      # its coredns transitive deps would slow the other Go shards.
       - if: matrix.language == 'go'
         working-directory: packages/wolf/coredns-nsec3sign
+        env:
+          GOWORK: "off"
         run: go build ./...
 
       - uses: github/codeql-action/analyze@v4
