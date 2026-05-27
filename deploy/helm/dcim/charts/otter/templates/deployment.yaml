@@ -28,6 +28,13 @@ spec:
               valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_secret } }
             - { name: DCIM_OIDC_ISSUER,    value: {{ .Values.global.config.oidc.issuer | quote }} }
             - { name: DCIM_OIDC_CLIENT_ID, value: {{ .Values.global.config.oidc.clientId | quote }} }
+            {{- if .Values.global.config.oidc.clientSecret }}
+            - name: DCIM_OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: oidc_client_secret } }
+            {{- end }}
+            {{- with .Values.global.config.oidc.redirectUri }}
+            - { name: DCIM_OIDC_REDIRECT_URI, value: {{ . | quote }} }
+            {{- end }}
             - { name: DCIM_COLLECTOR_STALE_SECONDS, value: {{ .Values.global.config.collectorStaleSeconds | quote }} }
             {{- with .Values.global.config.regiondeploy }}
             - name: DCIM_REGIONDEPLOY_CALLBACK_SECRET
