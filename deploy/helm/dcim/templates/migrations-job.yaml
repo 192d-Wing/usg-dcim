@@ -7,7 +7,11 @@ metadata:
     {{- include "dcim.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrations
   annotations:
-    "helm.sh/hook": post-install,post-upgrade
+    # pre-install so the schema is in place before otter / otter-worker
+    # / heron / magpie / beagle / finch come up and start opening pools.
+    # With post-install + --wait, this hook never fired because the
+    # deployments couldn't go ready against an empty database.
+    "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-5"
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
@@ -17,7 +21,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: alembic
-          image: {{ .Values.global.image.registry }}/otter:{{ .Values.global.image.tag }}
+          image: {{ .Values.global.image.registry }}/dcim-otter:{{ .Values.global.image.tag }}
           command: ["alembic", "upgrade", "head"]
           env:
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.global.postgresql.dsn | quote }} }

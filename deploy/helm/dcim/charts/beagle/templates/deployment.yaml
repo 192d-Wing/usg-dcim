@@ -20,17 +20,22 @@ spec:
             - { name: admin, containerPort: {{ .Values.service.adminPort }} }
           env:
             - { name: DNS_PROBE_HEALTH_ADDR, value: ":{{ .Values.service.adminPort }}" }
-            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ .Values.global.postgresql.dsn | quote }} }
+            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ regexReplaceAll "^postgresql\\+asyncpg" .Values.global.postgresql.dsn "postgres" | quote }} }
             - { name: DNS_PROBE_TICK,        value: {{ .Values.config.tick | quote }} }
             - { name: DNS_PROBE_CONCURRENCY, value: {{ .Values.config.concurrency | quote }} }
-          {{- if .Values.capNetRaw }}
           securityContext:
+            # The beagle image's USER is `probe` (uid 65532), which the
+            # kubelet can't verify against the pod's runAsNonRoot policy
+            # without an explicit numeric UID. Pin it here so probe runs
+            # match the image's adduser uid.
+            runAsUser: 65532
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            {{- if .Values.capNetRaw }}
             capabilities:
               add: ["NET_RAW"]
               drop: ["ALL"]
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-          {{- end }}
+            {{- end }}
           readinessProbe:
             httpGet: { path: /healthz, port: admin }
             initialDelaySeconds: 5

@@ -15,5 +15,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "heron.image" -}}
-{{ .Values.global.image.registry }}/heron:{{ .Values.global.image.tag }}
+{{ .Values.global.image.registry }}/dcim-heron:{{ .Values.global.image.tag }}
 {{- end -}}

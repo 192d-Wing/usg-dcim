@@ -15,5 +15,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "magpie.image" -}}
-{{ .Values.global.image.registry }}/magpie:{{ .Values.global.image.tag }}
+{{ .Values.global.image.registry }}/dcim-magpie:{{ .Values.global.image.tag }}
 {{- end -}}
