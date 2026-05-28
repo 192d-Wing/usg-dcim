@@ -31,10 +31,13 @@ import (
 // under the `lir` domain in
 // packages/otter/src/dcim/security/capabilities.py.
 const (
-	capPoolsRead   = "lir:pools:read"
-	capPoolsCreate = "lir:pools:create"
-	capPoolsUpdate = "lir:pools:update"
-	capPoolsDelete = "lir:pools:delete"
+	capPoolsRead      = "lir:pools:read"
+	capPoolsCreate    = "lir:pools:create"
+	capPoolsUpdate    = "lir:pools:update"
+	capPoolsDelete    = "lir:pools:delete"
+	capRequestsCreate = "lir:requests:create"
+	capRequestsRead   = "lir:requests:read"
+	capRequestsCancel = "lir:requests:cancel"
 )
 
 // Querier is the slice of sqlc methods this handler needs. Tests
@@ -57,6 +60,13 @@ type Querier interface {
 	DetachSupernetFromPool(ctx context.Context, arg dbq.DetachSupernetFromPoolParams) error
 	DetachAllPoolSupernets(ctx context.Context, poolID uuid.UUID) error
 	CountAllocationsForPoolSupernet(ctx context.Context, poolSupernetID uuid.UUID) (int64, error)
+
+	// Requests
+	CreateLirRequest(ctx context.Context, arg dbq.CreateLirRequestParams) (dbq.LirRequest, error)
+	GetLirRequest(ctx context.Context, id uuid.UUID) (dbq.LirRequest, error)
+	ListLirRequests(ctx context.Context, arg dbq.ListLirRequestsParams) ([]dbq.LirRequest, error)
+	CountLirRequests(ctx context.Context, arg dbq.CountLirRequestsParams) (int64, error)
+	CancelLirRequest(ctx context.Context, arg dbq.CancelLirRequestParams) (dbq.LirRequest, error)
 }
 
 type Handler struct {
@@ -78,6 +88,14 @@ func (h *Handler) Mount(r chi.Router) {
 					r.With(auth.RequireCapability(capPoolsUpdate)).Post("/", h.attachPoolSupernet)
 					r.With(auth.RequireCapability(capPoolsUpdate)).Delete("/{supernet_id}", h.detachPoolSupernet)
 				})
+			})
+		})
+		r.Route("/requests", func(r chi.Router) {
+			r.With(auth.RequireCapability(capRequestsRead)).Get("/", h.listRequests)
+			r.With(auth.RequireCapability(capRequestsCreate)).Post("/", h.submitRequest)
+			r.Route("/{id}", func(r chi.Router) {
+				r.With(auth.RequireCapability(capRequestsRead)).Get("/", h.getRequest)
+				r.With(auth.RequireCapability(capRequestsCancel)).Post("/cancel", h.cancelRequest)
 			})
 		})
 	})

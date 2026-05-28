@@ -327,6 +327,36 @@ type SupernetLirAttachRow struct {
 	Prefix              string     `json:"prefix"`
 }
 
+// LirRequest — tenant-submitted request for IP space. status moves
+// through the state machine pinned by CHECK ck_lir_request_status in
+// migration 0065:
+//
+//	pending_approval → approved | rejected | cancelled | failed
+//
+// decided_at + decided_by_user_id are NULL on pending/cancelled rows
+// and non-NULL on approved/rejected/failed (enforced by
+// ck_lir_request_decision_consistency).
+type LirRequest struct {
+	ID                uuid.UUID  `json:"id"`
+	OrganizationID    uuid.UUID  `json:"organization_id"`
+	RequesterUserID   uuid.UUID  `json:"requester_user_id"`
+	PoolID            *uuid.UUID `json:"pool_id"`
+	SiteID            *uuid.UUID `json:"site_id"`
+	IpFamily          int16      `json:"ip_family"`
+	PrefixLength      int16      `json:"prefix_length"`
+	Purpose           *string    `json:"purpose"`
+	Classification    *string    `json:"classification"`
+	Justification     string     `json:"justification"`
+	Status            string     `json:"status"`
+	SubmittedAt       time.Time  `json:"submitted_at"`
+	DecidedAt         *time.Time `json:"decided_at"`
+	DecidedByUserID   *uuid.UUID `json:"decided_by_user_id"`
+	DecisionNotes     *string    `json:"decision_notes"`
+	ApprovedPoolID    *uuid.UUID `json:"approved_pool_id"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
 type Subnet struct {
 	ID          uuid.UUID  `json:"id"`
 	SupernetID  uuid.UUID  `json:"supernet_id"`

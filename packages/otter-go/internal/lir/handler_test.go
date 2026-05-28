@@ -25,12 +25,15 @@ import (
 type fakeQ struct {
 	pools     map[uuid.UUID]dbq.LirPool
 	supernets map[uuid.UUID]dbq.SupernetLirAttachRow
+	requests  map[uuid.UUID]dbq.LirRequest
 	// recorded effects
-	created  *dbq.CreateLirPoolParams
-	updated  *dbq.UpdateLirPoolParams
-	deleted  *uuid.UUID
-	attached *dbq.AttachSupernetToPoolParams
-	detached *dbq.DetachSupernetFromPoolParams
+	created        *dbq.CreateLirPoolParams
+	updated        *dbq.UpdateLirPoolParams
+	deleted        *uuid.UUID
+	attached       *dbq.AttachSupernetToPoolParams
+	detached       *dbq.DetachSupernetFromPoolParams
+	createdRequest *dbq.CreateLirRequestParams
+	lastListReq    *dbq.ListLirRequestsParams
 	// controls for failure-path tests
 	allocCountByPool         map[uuid.UUID]int64
 	allocCountByPoolSupernet map[uuid.UUID]int64
