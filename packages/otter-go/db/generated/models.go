@@ -427,6 +427,27 @@ type SystemSetting struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+// SupernetForMoveRow — the projection the IPAM move handler reads
+// to validate a relocation: current fabric/VRF (for the source
+// landing-fabric check), owner org (for ABAC), prefix (for the
+// audit metadata), and the source fabric's slug.
+type SupernetForMoveRow struct {
+	ID                  uuid.UUID  `json:"id"`
+	CurrentFabricID     uuid.UUID  `json:"current_fabric_id"`
+	CurrentVrfID        uuid.UUID  `json:"current_vrf_id"`
+	OwnerOrganizationID *uuid.UUID `json:"owner_organization_id"`
+	Prefix              string     `json:"prefix"`
+	CurrentFabricSlug   string     `json:"current_fabric_slug"`
+}
+
+// VrfForMoveRow — minimal (id, fabric_id) projection used to verify
+// the target VRF belongs to the target fabric before issuing the
+// move UPDATE.
+type VrfForMoveRow struct {
+	ID       uuid.UUID `json:"id"`
+	FabricID uuid.UUID `json:"fabric_id"`
+}
+
 // ArinRemoveJobRow — the joined projection the worker claims for the
 // deassignment direction. Smaller than the submit job since DELETE
 // only needs the allocation's own net handle and the parent's (for

@@ -138,6 +138,19 @@ func (f *fakeQ) DeleteSupernet(_ context.Context, _ uuid.UUID) error { return ni
 func (f *fakeQ) GetSupernetVrfAndFabric(_ context.Context, _ uuid.UUID) (dbq.SupernetVrfAndFabric, error) {
 	return dbq.SupernetVrfAndFabric{VrfID: uuid.New(), FabricID: uuid.New()}, nil
 }
+
+// Move endpoint stubs — concrete behavior lives on moveFakeQ in
+// move_test.go; the base fake satisfies the Querier interface with
+// "not found" so tests that don't exercise the move path build.
+func (f *fakeQ) GetSupernetForMove(_ context.Context, _ uuid.UUID) (dbq.SupernetForMoveRow, error) {
+	return dbq.SupernetForMoveRow{}, pgx.ErrNoRows
+}
+func (f *fakeQ) GetVrfForMove(_ context.Context, _ uuid.UUID) (dbq.VrfForMoveRow, error) {
+	return dbq.VrfForMoveRow{}, pgx.ErrNoRows
+}
+func (f *fakeQ) MoveSupernet(_ context.Context, _ dbq.MoveSupernetParams) (dbq.Supernet, error) {
+	return dbq.Supernet{}, nil
+}
 func (f *fakeQ) CreateSubnet(_ context.Context, a dbq.CreateSubnetParams) (dbq.Subnet, error) {
 	return dbq.Subnet{ID: uuid.New(), SupernetID: a.SupernetID, FabricID: a.FabricID, VrfID: a.VrfID, Prefix: a.Prefix}, nil
 }
