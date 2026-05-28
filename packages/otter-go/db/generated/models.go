@@ -272,6 +272,61 @@ type Vrf struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// LirPool — named bucket of supernet space DoW NIC sub-allocates from.
+// Pinned to a single IP family; max/min prefix length bound the carve
+// sizes the pool will issue. arin_parent_net_handle is the upstream
+// ARIN net handle that successful approvals reassign under; NULL means
+// the pool is LIR-internal (no Reg-RWS feed-up). Schema authority lives
+// in Alembic migration 20260528_0065.
+type LirPool struct {
+	ID                     uuid.UUID  `json:"id"`
+	Name                   string     `json:"name"`
+	Slug                   string     `json:"slug"`
+	Description            *string    `json:"description"`
+	IpFamily               int16      `json:"ip_family"`
+	FabricID               *uuid.UUID `json:"fabric_id"`
+	Classification         *string    `json:"classification"`
+	MinPrefixLength        int16      `json:"min_prefix_length"`
+	MaxPrefixLength        int16      `json:"max_prefix_length"`
+	DefaultSupernetPurpose *string    `json:"default_supernet_purpose"`
+	ArinParentNetHandle    *string    `json:"arin_parent_net_handle"`
+	Enabled                bool       `json:"enabled"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
+// PoolSourceSupernetRow is the row shape returned by
+// ListPoolSourceSupernets — the supernet plus its LIR linkage. Distinct
+// from the existing Supernet row type so we don't have to update every
+// IPAM scan helper to carry the new lir_pool_id /
+// owner_organization_id columns yet. Once the IPAM Go module is
+// updated to expose those fields generally, this type can be retired.
+type PoolSourceSupernetRow struct {
+	ID                  uuid.UUID  `json:"id"`
+	FabricID            uuid.UUID  `json:"fabric_id"`
+	VrfID               uuid.UUID  `json:"vrf_id"`
+	SiteID              *uuid.UUID `json:"site_id"`
+	Prefix              string     `json:"prefix"`
+	Name                *string    `json:"name"`
+	Description         *string    `json:"description"`
+	Purpose             *string    `json:"purpose"`
+	LirPoolID           *uuid.UUID `json:"lir_pool_id"`
+	OwnerOrganizationID *uuid.UUID `json:"owner_organization_id"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+// SupernetLirAttachRow is the compact projection used by the attach
+// pre-check: just the fields the handler needs to decide if the
+// supernet is eligible (current pool, owner org, prefix for family
+// derivation).
+type SupernetLirAttachRow struct {
+	ID                  uuid.UUID  `json:"id"`
+	LirPoolID           *uuid.UUID `json:"lir_pool_id"`
+	OwnerOrganizationID *uuid.UUID `json:"owner_organization_id"`
+	Prefix              string     `json:"prefix"`
+}
+
 type Subnet struct {
 	ID          uuid.UUID  `json:"id"`
 	SupernetID  uuid.UUID  `json:"supernet_id"`
