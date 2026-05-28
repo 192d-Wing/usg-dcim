@@ -84,6 +84,14 @@ from .ipam import (
     VtepRole,
     VtepVniMembership,
 )
+from .lir import (
+    LirAllocation,
+    LirAllocationStatus,
+    LirArinStatus,
+    LirPool,
+    LirRequest,
+    LirRequestStatus,
+)
 from .notifications import ChannelKind, NotificationChannel
 from .organization import Organization
 from .power import Outlet, PowerConnection
@@ -154,6 +162,12 @@ __all__ = [
     "IpAddressRole",
     "IpAddressSource",
     "IpAddressStatus",
+    "LirAllocation",
+    "LirAllocationStatus",
+    "LirArinStatus",
+    "LirPool",
+    "LirRequest",
+    "LirRequestStatus",
     "MaintenanceWindow",
     "NotificationChannel",
     "Organization",

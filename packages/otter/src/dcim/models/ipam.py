@@ -159,6 +159,11 @@ class Fabric(UUIDPrimaryKey, Timestamped, Base):
         default=RecursiveDnsEngine.coredns,
         nullable=False,
     )
+    # System-managed fabric (LIR landing, future bootstrap fabrics).
+    # The API rejects DELETE on rows where this is TRUE so operators
+    # can't fat-finger the holding fabric out from under pending
+    # allocations.
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     vrfs: Mapped[list[Vrf]] = relationship(back_populates="fabric")
 
@@ -266,6 +271,17 @@ class Supernet(UUIDPrimaryKey, Timestamped, Base):
     name: Mapped[str | None] = mapped_column(String(128))
     description: Mapped[str | None] = mapped_column(String(512))
     purpose: Mapped[str | None] = mapped_column(String(32))
+    # LIR linkage. Mutually exclusive (CHECK ck_supernet_lir_xor_owner
+    # in migration 0065). lir_pool_id set ⇒ this row is a pool source
+    # DoW carves from; owner_organization_id set ⇒ this row is a
+    # tenant allocation created by an approved LirRequest. Neither
+    # set ⇒ plain non-LIR supernet (the rest of IPAM).
+    lir_pool_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("lir_pools.id"),
+    )
+    owner_organization_id: Mapped[UUID | None] = mapped_column(
+        PgUUID(as_uuid=True), ForeignKey("organizations.id"),
+    )
 
 
 class Subnet(UUIDPrimaryKey, Timestamped, Base):

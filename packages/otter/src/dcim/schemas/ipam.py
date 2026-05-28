@@ -84,6 +84,10 @@ class FabricUpdate(BaseModel):
 class FabricOut(FabricBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    # Read-only on the API surface — set by migrations/seed for fabrics
+    # that protect platform behavior (e.g. the LIR landing fabric).
+    # Not on FabricCreate/Update so operators can't mint system rows.
+    is_system: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -178,6 +182,12 @@ class SupernetUpdate(BaseModel):
 class SupernetOut(SupernetBase):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
+    # LIR linkage exposed read-only. Writes come through the LIR module's
+    # pool/allocation endpoints, not generic IPAM CRUD — so they're
+    # absent from Create/Update on purpose. Tenants viewing their
+    # 'unassigned' tab in IPAM filter by owner_organization_id.
+    lir_pool_id: UUID | None = None
+    owner_organization_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 

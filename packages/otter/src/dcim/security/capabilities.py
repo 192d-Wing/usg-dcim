@@ -130,6 +130,25 @@ CAPABILITY_CATALOG: dict[str, dict[str, list[str]]] = {
             "start", "abort", "download-kubeconfig",
         ],
     },
+    # Local Internet Registry — pools (admin), requests (tenant
+    # workflow), allocations (issued blocks + ARIN feed-up + return
+    # lifecycle). Split into three resources so a tenant role can
+    # hold `requests:create + read + cancel` and
+    # `allocations:read + return-request` without touching the
+    # approval surface; NIC roles add `approve` / `reject` /
+    # `return-confirm` / `arin-retry`; admin roles get `pools:*`.
+    "lir": {
+        "pools": ["create", "read", "update", "delete"],
+        "requests": [
+            "create", "read", "cancel",
+            "approve", "reject",
+        ],
+        "allocations": [
+            "read",
+            "return-request", "return-confirm",
+            "arin-retry",
+        ],
+    },
 }
 
 # Specialty codes that don't fit the resource:action shape. The picker UI
@@ -146,6 +165,7 @@ _TELEMETRY_ALL = "telemetry:*"
 _COLLECTORS_READ = "collectors:collectors:read"
 _ALERTS_READ = "alerts:alerts:read"
 _REGION_DEPLOY_READ = "infrastructure:region-deployments:read"
+_INVENTORY_SITES_READ = "inventory:sites:read"
 
 
 def all_granular_codes() -> set[str]:
@@ -168,6 +188,7 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
     "RegionalAdmin": [
         "inventory:*",
         "ipam:*",
+        "lir:*",
         "dns:zones:create", "dns:zones:read", "dns:zones:update",
         "dns:records:*", "dns:servers:read", "dns:servers:bundle",
         "dns:fabrics:read", "dns:upstreams:read", "dns:blocklists:*",
@@ -184,7 +205,7 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
     "SiteAdmin": [
         "inventory:racks:*", "inventory:rows:*", "inventory:rooms:*",
         "inventory:buildings:*", "inventory:assets:*",
-        "inventory:sites:read", "inventory:regions:read", "inventory:stencils:read",
+        _INVENTORY_SITES_READ, "inventory:regions:read", "inventory:stencils:read",
         _COLLECTORS_READ, "collectors:collectors:update",
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         "alerts:*",
@@ -199,14 +220,14 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
     ],
     "DataCenterManager": [
         "inventory:racks:*", "inventory:assets:*",
-        "inventory:rooms:read", "inventory:rows:read", "inventory:sites:read",
+        "inventory:rooms:read", "inventory:rows:read", _INVENTORY_SITES_READ,
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         _ALERTS_READ, "alerts:alerts:ack", "alerts:rules:read",
     ],
     "Technician": [
         "inventory:racks:read", "inventory:racks:update",
         "inventory:assets:*",
-        "inventory:rooms:read", "inventory:rows:read", "inventory:sites:read",
+        "inventory:rooms:read", "inventory:rows:read", _INVENTORY_SITES_READ,
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         _ALERTS_READ, "alerts:alerts:ack",
     ],
@@ -218,6 +239,7 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
     ],
     "Auditor": [
         "inventory:*:read", "ipam:*:read", "dns:*:read",
+        "lir:*:read",
         _COLLECTORS_READ, "alerts:*:read",
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         "maintenance:windows:read",
@@ -228,9 +250,23 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
     ],
     "Viewer": [
         "inventory:*:read", "ipam:*:read", "dns:*:read",
+        "lir:*:read",
         _COLLECTORS_READ, "alerts:*:read",
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         _REGION_DEPLOY_READ,
+    ],
+    # Workflow role for the DoW NIC team running the LIR approval
+    # queue. Mirrors PowerOperator's shape (workflow-scoped, narrow
+    # outside the workflow): full lir:* plus the read caps needed to
+    # see context (which org submitted, which sites it covers, which
+    # IPAM supernets are pool sources). Typically org-scoped via
+    # RoleScope so a NIC only sees requests from their orgs.
+    "LirNicOperator": [
+        "lir:*",
+        "inventory:organizations:read",
+        _INVENTORY_SITES_READ,
+        "ipam:fabrics:read", "ipam:supernets:read", "ipam:subnets:read",
+        _ALERTS_READ,
     ],
     "ApiServiceAccount": [
         "inventory:*:read",
