@@ -79,6 +79,17 @@ func NewClient(cfg Config, h *http.Client) *Client {
 	return &Client{cfg: cfg, http: h}
 }
 
+// contentTypeXML is the MIME type Reg-RWS sends and accepts. Set on
+// both the request Content-Type (POST payloads) and the response
+// Accept header.
+const contentTypeXML = "application/xml"
+
+// fmtArinHTTPErr is the canonical "%w: arin http %d: %s" template
+// used by both classifyResponse (submit) and classifyRemoveResponse
+// (delete). Keeps the error shape consistent across directions so
+// operator dashboards can parse a single format.
+const fmtArinHTTPErr = "%w: arin http %d: %s"
+
 // ErrTransient marks an error the caller should retry per the backoff
 // schedule (5xx, network failure, timeout). Wrapped errors keep their
 // original cause for logging.
@@ -96,6 +107,65 @@ var ErrPermanent = errors.New("arin permanent error")
 type SubmitResult struct {
 	NetHandle string
 	RawXML    string // for audit / debugging
+}
+
+// RemoveReassignment issues a DELETE on /rest/net/{net_handle} to
+// dissolve a previously-reassigned sub-allocation. Returns the same
+// ErrTransient / ErrPermanent error classification as the submit
+// path; phase 6's worker drives this for allocations confirmed as
+// returned that had previously registered with ARIN.
+//
+// On success the worker stamps arin_status='removed'; the existing
+// arin_net_handle column stays for the audit trail. ARIN returns
+// 200 OK on a successful deassignment with a (sometimes empty)
+// XML body — we don't parse it beyond status code.
+func (c *Client) RemoveReassignment(ctx context.Context, parentNetHandle, netHandle string) error {
+	if !c.cfg.Enabled {
+		return fmt.Errorf("%w: arin integration disabled", ErrPermanent)
+	}
+	if strings.TrimSpace(c.cfg.APIKey) == "" {
+		return fmt.Errorf("%w: arin api key not configured", ErrPermanent)
+	}
+	if strings.TrimSpace(netHandle) == "" {
+		// A 'registered' row should always carry a handle. If it
+		// doesn't, that's a data bug — permanent so the operator
+		// sees it instead of hammering ARIN.
+		return fmt.Errorf("%w: allocation has no arin_net_handle", ErrPermanent)
+	}
+	endpoint := strings.TrimRight(c.cfg.Endpoint, "/")
+	if endpoint == "" {
+		endpoint = EndpointOTE
+	}
+	target := fmt.Sprintf("%s/rest/net/%s?apikey=%s",
+		endpoint, url.PathEscape(netHandle), url.QueryEscape(c.cfg.APIKey))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, target, nil)
+	if err != nil {
+		return fmt.Errorf("%w: build request: %v", ErrPermanent, err)
+	}
+	req.Header.Set("Accept", contentTypeXML)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%w: http: %v", ErrTransient, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return classifyRemoveResponse(resp.StatusCode, body)
+}
+
+// classifyRemoveResponse mirrors classifyResponse for the DELETE
+// direction. We don't need to extract a handle from the body — a
+// successful DELETE is just an HTTP status check.
+func classifyRemoveResponse(status int, body []byte) error {
+	switch {
+	case status >= 200 && status < 300:
+		return nil
+	case status >= 500:
+		return fmt.Errorf(fmtArinHTTPErr,
+			ErrTransient, status, truncateBody(body))
+	default:
+		return fmt.Errorf(fmtArinHTTPErr,
+			ErrPermanent, status, truncateBody(body))
+	}
 }
 
 // SubmitReassignDetailed POSTs the payload built from `job` to
@@ -126,8 +196,8 @@ func (c *Client) SubmitReassignDetailed(ctx context.Context, job dbq.ArinSubmitJ
 	if err != nil {
 		return SubmitResult{}, fmt.Errorf("%w: build request: %v", ErrPermanent, err)
 	}
-	req.Header.Set("Content-Type", "application/xml")
-	req.Header.Set("Accept", "application/xml")
+	req.Header.Set("Content-Type", contentTypeXML)
+	req.Header.Set("Accept", contentTypeXML)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		// Network / timeout / DNS — all transient.
@@ -155,14 +225,14 @@ func classifyResponse(status int, body []byte) (SubmitResult, error) {
 		}
 		return SubmitResult{NetHandle: handle, RawXML: string(body)}, nil
 	case status >= 500:
-		return SubmitResult{}, fmt.Errorf("%w: arin http %d: %s",
+		return SubmitResult{}, fmt.Errorf(fmtArinHTTPErr,
 			ErrTransient, status, truncateBody(body))
 	default:
 		// 4xx: bad payload, bad handle, auth, throttling. ARIN's 429
 		// is rare and we treat it as permanent here so the operator
 		// sees it — switching to transient would risk burning auto-
 		// retries against a misconfig.
-		return SubmitResult{}, fmt.Errorf("%w: arin http %d: %s",
+		return SubmitResult{}, fmt.Errorf(fmtArinHTTPErr,
 			ErrPermanent, status, truncateBody(body))
 	}
 }

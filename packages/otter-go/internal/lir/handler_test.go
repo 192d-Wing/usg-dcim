@@ -162,6 +162,44 @@ func (f *fakeQ) ResetArinJobForRetry(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// RequestReturnLirAllocation mirrors the SQL WHERE status='active'
+// guard: only active allocations flip to return_requested; anything
+// else makes RETURNING empty (pgx.ErrNoRows) so the handler returns
+// 409.
+func (f *fakeQ) RequestReturnLirAllocation(_ context.Context, arg dbq.RequestReturnLirAllocationParams) (dbq.LirAllocation, error) {
+	a, ok := f.allocations[arg.ID]
+	if !ok || a.Status != "active" {
+		return dbq.LirAllocation{}, pgx.ErrNoRows
+	}
+	a.Status = "return_requested"
+	by := arg.ReturnRequestedByUserID
+	a.ReturnRequestedByUserID = &by
+	a.ReturnReason = &arg.ReturnReason
+	f.allocations[arg.ID] = a
+	return a, nil
+}
+
+// ConfirmReturnLirAllocation mirrors the SQL: only status='return_requested'
+// flips to 'returned'; arin_status='registered' co-promotes to
+// 'removing' with attempt counters reset; other arin states stay.
+func (f *fakeQ) ConfirmReturnLirAllocation(_ context.Context, arg dbq.ConfirmReturnLirAllocationParams) (dbq.LirAllocation, error) {
+	a, ok := f.allocations[arg.ID]
+	if !ok || a.Status != "return_requested" {
+		return dbq.LirAllocation{}, pgx.ErrNoRows
+	}
+	a.Status = "returned"
+	by := arg.ReturnedByUserID
+	a.ReturnedByUserID = &by
+	if a.ArinStatus == "registered" {
+		a.ArinStatus = "removing"
+		a.ArinAttempts = 0
+		a.ArinLastAttemptAt = nil
+		a.ArinLastError = nil
+	}
+	f.allocations[arg.ID] = a
+	return a, nil
+}
+
 // ---- harness ----
 
 func mount(f *fakeQ) http.Handler {

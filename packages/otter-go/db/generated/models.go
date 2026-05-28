@@ -427,6 +427,19 @@ type SystemSetting struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+// ArinRemoveJobRow — the joined projection the worker claims for the
+// deassignment direction. Smaller than the submit job since DELETE
+// only needs the allocation's own net handle and the parent's (for
+// constructing the Reg-RWS URL).
+type ArinRemoveJobRow struct {
+	AllocationID    uuid.UUID `json:"allocation_id"`
+	ArinStatus      string    `json:"arin_status"`
+	ArinAttempts    int32     `json:"arin_attempts"`
+	Prefix          string    `json:"prefix"`
+	NetHandle       string    `json:"net_handle"`
+	ParentNetHandle string    `json:"parent_net_handle"`
+}
+
 // ArinSubmitJobRow — the joined projection the worker claims. Bundles
 // allocation identity, the ARIN parent net handle from the pool, and
 // every Organization POC + address field needed to build a Reg-RWS
