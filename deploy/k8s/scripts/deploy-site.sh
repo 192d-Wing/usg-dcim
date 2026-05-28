@@ -70,6 +70,11 @@ usage() {
   sed -nE 's/^# ?//;1,/^$/p' "$0" | sed -nE '/^Deploy a/,/^Defaults/p'
   cat <<EOF
 
+Config file (optional):
+  --config <path>            YAML file with the variables below. See
+                             deploy/k8s/scripts/sites/example.yaml.
+                             CLI flags override values in the file.
+
 Required:
   --site-code <code>         Short site identifier (kebab-case). Drives namespace name.
   --otter-base-url <url>     Base URL of central otter API (e.g. https://dcim.xtic.dev.mil).
@@ -108,9 +113,113 @@ EOF
 err() { echo "deploy-site: ERROR: $*" >&2; exit 1; }
 log() { echo "deploy-site: $*"; }
 
-# ─── arg parse ────────────────────────────────────────────────────────
+# ─── config file (first pass: pick up --config so flags can override) ─
+CONFIG_FILE=""
+KUBECONFIG_FROM_CONFIG=""
+KUBECTL_CONTEXT=""
+CLUSTER_HOSTNAME=""
+for ((i=1; i<=$#; i++)); do
+  if [[ "${!i}" == "--config" ]]; then
+    j=$((i+1))
+    [[ $j -gt $# ]] && err "--config requires a path"
+    CONFIG_FILE="${!j}"
+    break
+  fi
+done
+if [[ -n "$CONFIG_FILE" ]]; then
+  [[ -f "$CONFIG_FILE" ]] || err "config file not found: $CONFIG_FILE"
+  command -v python3 >/dev/null || err "python3 required to parse --config YAML"
+  # Python emits shell-safe `KEY=value` lines for scalars and
+  # bash array literals for repeating fields. Anything blank/null is
+  # skipped so subsequent flag-parsing keeps the script's defaults.
+  CONFIG_ENV="$(python3 - "$CONFIG_FILE" <<'PY' 2>&1
+import sys, shlex, yaml
+with open(sys.argv[1]) as f:
+    d = yaml.safe_load(f) or {}
+def q(v): return shlex.quote(str(v))
+def out(k, v):
+    if v is None: return
+    if isinstance(v, bool):
+        v = "true" if v else "false"
+    if isinstance(v, str) and v == "":
+        return
+    print(f"{k}={q(v)}")
+def arr(k, v):
+    if not v: return
+    items = " ".join(q(str(x)) for x in v)
+    print(f"{k}=({items})")
+c = d.get("cluster", {}) or {}
+out("CLUSTER_HOSTNAME",     c.get("hostname"))
+out("KUBECONFIG_FROM_CONFIG", c.get("kubeconfig"))
+out("KUBECTL_CONTEXT",      c.get("context"))
+s = d.get("site", {}) or {}
+out("SITE_CODE",            s.get("code"))
+out("NAMESPACE",            s.get("namespace"))
+lb = s.get("lbPoolLabel", {}) or {}
+out("LB_POOL_LABEL_KEY",    lb.get("key"))
+out("LB_POOL_LABEL_VALUE",  lb.get("value"))
+o = d.get("otter", {}) or {}
+out("OTTER_BASE_URL",       o.get("baseUrl"))
+out("OTTER_TOKEN",          o.get("token"))
+out("OTTER_TOKEN_FILE",     o.get("tokenFile"))
+dns = d.get("dns", {}) or {}
+if dns.get("enabled") is False:
+    print("SKIP_DNS=true")
+out("DNS_SERVER_ID",        dns.get("serverId"))
+out("DNS_SERVER_NAME",      dns.get("serverName"))
+out("DNS_ROLE",             dns.get("role"))
+out("DNS_FABRIC_ID",        dns.get("fabricId"))
+out("DNS_SITE_ID",          dns.get("siteId"))
+arr("DNS_ANYCAST_IPS",      dns.get("anycastIps"))
+img = dns.get("image", {}) or {}
+for sub, prefix in (("collector","DNS_COLLECTOR"), ("auth","DNS_AUTH"), ("recursive","DNS_RECURSIVE")):
+    si = img.get(sub, {}) or {}
+    out(f"{prefix}_REPO", si.get("repository"))
+    out(f"{prefix}_TAG",  si.get("tag"))
+dhcp = d.get("dhcp", {}) or {}
+if dhcp.get("enabled") is False:
+    print("SKIP_DHCP=true")
+out("DHCP_SERVER_ID",       dhcp.get("serverId"))
+out("DHCP_SERVER_NAME",     dhcp.get("serverName"))
+out("DHCP_FABRIC_ID",       dhcp.get("fabricId"))
+arr("DHCP_ANYCAST_IPS",     dhcp.get("anycastIps"))
+if dhcp.get("v6") is True:
+    print("DHCP_V6=true")
+kba = dhcp.get("keaBasicAuth", {}) or {}
+out("KEA_BASIC_USER",       kba.get("username"))
+out("KEA_BASIC_PASSWORD",   kba.get("password"))
+img = dhcp.get("image", {}) or {}
+for sub, prefix in (("ctrlAgent","KEA_CTRL_AGENT"), ("dhcp6","KEA_DHCP6")):
+    si = img.get(sub, {}) or {}
+    out(f"{prefix}_REPO", si.get("repository"))
+    out(f"{prefix}_TAG",  si.get("tag"))
+h = d.get("helm", {}) or {}
+out("HELM_TIMEOUT",         h.get("timeout"))
+if h.get("wait") is False:
+    print("WAIT=false")
+PY
+)"
+  if echo "$CONFIG_ENV" | grep -q "^Traceback\|YAMLError"; then
+    err "failed to parse config: $CONFIG_ENV"
+  fi
+  eval "$CONFIG_ENV"
+  # Resolve tokenFile if no inline token was given
+  if [[ -z "${OTTER_TOKEN:-}" && -n "${OTTER_TOKEN_FILE:-}" ]]; then
+    [[ -r "$OTTER_TOKEN_FILE" ]] || err "otter.tokenFile unreadable: $OTTER_TOKEN_FILE"
+    OTTER_TOKEN="$(head -n1 "$OTTER_TOKEN_FILE")"
+  fi
+  # Pick up kubeconfig from the config file (CLI --kubeconfig wins later if added).
+  if [[ -n "$KUBECONFIG_FROM_CONFIG" ]]; then
+    # Expand leading ~ to $HOME (yaml-loaded value is literal).
+    KUBECONFIG_FROM_CONFIG="${KUBECONFIG_FROM_CONFIG/#~/$HOME}"
+    export KUBECONFIG="$KUBECONFIG_FROM_CONFIG"
+  fi
+fi
+
+# ─── arg parse (flags win over --config) ──────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --config) shift 2;;   # already consumed above
     --site-code) SITE_CODE="$2"; shift 2;;
     --namespace) NAMESPACE="$2"; shift 2;;
     --otter-base-url) OTTER_BASE_URL="$2"; shift 2;;
@@ -183,8 +292,13 @@ CHART_DIR="${CHART_DIR:-$(cd "$(dirname "$0")/../../helm" && pwd)}"
   || err "chart dir missing dns-site or dhcp-site: $CHART_DIR"
 
 # ─── execute ──────────────────────────────────────────────────────────
+if [[ -n "$KUBECTL_CONTEXT" ]]; then
+  kubectl config use-context "$KUBECTL_CONTEXT" >/dev/null \
+    || err "kubectl context not found: $KUBECTL_CONTEXT"
+fi
 log "namespace: $NAMESPACE"
 log "site-code: $SITE_CODE"
+[[ -n "$CLUSTER_HOSTNAME" ]] && log "target cluster: $CLUSTER_HOSTNAME"
 log "LB pool selector: ${LB_POOL_LABEL_KEY}=${LB_POOL_LABEL_VALUE}"
 
 kubectl get ns "$NAMESPACE" >/dev/null 2>&1 \

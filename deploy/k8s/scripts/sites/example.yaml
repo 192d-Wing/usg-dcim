@@ -1,0 +1,138 @@
+# Variables for one site deployment. Pass to deploy-site.sh via:
+#
+#     ./deploy-site.sh --config deploy/k8s/scripts/sites/<name>.yaml
+#
+# Copy this file, rename to <site-code>.yaml, edit, run.
+# Flags passed on the command line override anything in the file.
+#
+# Empty strings, omitted keys, and `null` all mean "use the default."
+
+cluster:
+  # Public hostname of the kubernetes cluster's API server. Used as
+  # documentation and to switch contexts when `context:` is set;
+  # deploy-site.sh does NOT itself resolve the hostname — it uses
+  # whatever your kubeconfig points at.
+  hostname: k8-01.xtic.dev.mil
+
+  # Optional. If set, deploy-site.sh exports KUBECONFIG to this path
+  # before invoking kubectl/helm. Leave empty to inherit from the
+  # environment (e.g. when running inside CI with KUBECONFIG already
+  # set).
+  kubeconfig: ~/.kube/k8-01.config
+
+  # Optional. If set, switches to this context before deploying.
+  # Combine with `kubeconfig:` for fully-isolated multi-cluster
+  # operations.
+  context: ""
+
+site:
+  # Short site identifier. Drives namespace name and helm release
+  # suffixes. kebab-case recommended (no spaces, lowercase, dashes).
+  code: kfk-002
+
+  # Optional. Defaults to `dcim-site-<code>`.
+  namespace: ""
+
+  # Cilium LB-IPAM pool selector. The dns-site/dhcp-site Services
+  # carry this label so the right Cilium pool picks them up. On
+  # k8-01 today the existing pool selector is sbc.usg/site=kfk-001.
+  lbPoolLabel:
+    key:   sbc.usg/site
+    value: kfk-001    # default: same as site.code
+
+otter:
+  # Base URL the in-site bundle puller / collectors call back to.
+  # No trailing slash; no /api path component (the chart appends).
+  baseUrl: https://dcim.xtic.dev.mil
+
+  # Bearer the puller presents in `Authorization: Bearer …`. Either
+  # inline `token:` or `tokenFile:` (path; first line is read).
+  # Either-or — set one and leave the other empty.
+  token: ""
+  tokenFile: /tmp/dcim-collector-token
+
+dns:
+  # Set false (or omit the whole `dns:` block) to skip the DNS side.
+  enabled: true
+
+  # DnsServer.id from POST /api/v1/dns/servers. Create the row in
+  # the DCIM UI first, then paste its UUID here.
+  serverId: 00000000-0000-0000-0000-000000000000
+
+  # Helm release suffix (the full release name is `dns-<this>`).
+  serverName: kfk-002-dns-recursive
+
+  # auth | recursive. Drives which CoreDNS image the chart uses.
+  role: recursive
+
+  # Informational labels on the Service / pods. Set even if you
+  # don't track fabrics yet — the dcim UI uses them for filtering.
+  fabricId: 00000000-0000-0000-0000-000000000000
+  siteId:   00000000-0000-0000-0000-000000000000
+
+  # LB IPs the Service claims through Cilium LB-IPAM. At least one
+  # required when dns.enabled=true.
+  anycastIps:
+    - 10.50.2.53
+
+  # Optional image overrides. Chart defaults are wrong as of today
+  # (collector default points at a non-existent ghcr org). Set the
+  # collector explicitly; leave auth/recursive empty to use the
+  # chart's CoreDNS defaults.
+  image:
+    collector:
+      repository: ghcr.io/192d-wing/dcim-badger
+      tag:        latest
+    auth:
+      repository: ""
+      tag:        ""
+    recursive:
+      repository: ""
+      tag:        ""
+
+dhcp:
+  # Set false (or omit the whole block) to skip DHCP.
+  enabled: true
+
+  serverId:   00000000-0000-0000-0000-000000000000
+  serverName: kfk-002-dhcp
+  fabricId:   00000000-0000-0000-0000-000000000000
+
+  # LB IPs Kea ctrl-agent listens on. At least one required.
+  anycastIps:
+    - 10.50.2.67
+
+  # If true, the chart also exposes UDP/547 (DHCPv6) on the same
+  # LB IP. DHCPv4 (UDP/67) is broadcast at the network edge and
+  # NOT served from this Service — see deploy/helm/dhcp-site/Chart.yaml.
+  v6: false
+
+  keaBasicAuth:
+    username: kea
+    # Empty: deploy-site.sh generates a random password and prints
+    # it once. Set explicitly when re-deploying so the operator's
+    # tooling keeps working.
+    password: ""
+
+  # Optional image overrides. Chart defaults reference a Docker Hub
+  # path (internetsystemsconsortium/kea-ctrl-agent) that doesn't
+  # exist; set these explicitly until the chart default is fixed.
+  image:
+    ctrlAgent:
+      repository: ""
+      tag:        ""
+    dhcp6:
+      repository: ""
+      tag:        ""
+
+helm:
+  # `helm install --timeout` value. Bump if your registry is slow or
+  # the readiness probes take a while to settle.
+  timeout: 3m
+
+  # When false, `helm install` returns immediately after kubectl
+  # apply without waiting for pods to go Ready. Useful when the
+  # chart's pods crash on first boot pending a bundle from otter
+  # (the dns-site bundle-puller flow) — wait for the bundle, not
+  # for kubelet.
+  wait: true
