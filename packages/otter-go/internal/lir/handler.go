@@ -38,9 +38,10 @@ const (
 	capRequestsCreate  = "lir:requests:create"
 	capRequestsRead    = "lir:requests:read"
 	capRequestsCancel  = "lir:requests:cancel"
-	capRequestsApprove = "lir:requests:approve"
-	capRequestsReject  = "lir:requests:reject"
-	capAllocationsRead = "lir:allocations:read"
+	capRequestsApprove      = "lir:requests:approve"
+	capRequestsReject       = "lir:requests:reject"
+	capAllocationsRead      = "lir:allocations:read"
+	capAllocationsArinRetry = "lir:allocations:arin-retry"
 )
 
 // LandingFabricSlug is the seeded slug from migration 0065. Looked up
@@ -86,6 +87,10 @@ type Querier interface {
 	GetLirAllocation(ctx context.Context, id uuid.UUID) (dbq.LirAllocation, error)
 	ListLirAllocations(ctx context.Context, arg dbq.ListLirAllocationsParams) ([]dbq.LirAllocation, error)
 	CountLirAllocations(ctx context.Context, arg dbq.CountLirAllocationsParams) (int64, error)
+
+	// ARIN manual retry (worker-side claim/mark methods live on
+	// *dbq.Queries directly — the API surface only needs reset).
+	ResetArinJobForRetry(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -121,7 +126,11 @@ func (h *Handler) Mount(r chi.Router) {
 		})
 		r.Route("/allocations", func(r chi.Router) {
 			r.With(auth.RequireCapability(capAllocationsRead)).Get("/", h.listAllocations)
-			r.With(auth.RequireCapability(capAllocationsRead)).Get("/{id}", h.getAllocation)
+			r.Route("/{id}", func(r chi.Router) {
+				r.With(auth.RequireCapability(capAllocationsRead)).Get("/", h.getAllocation)
+				r.With(auth.RequireCapability(capAllocationsArinRetry)).
+					Post("/arin/retry", h.retryAllocationArin)
+			})
 		})
 	})
 }

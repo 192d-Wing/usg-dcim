@@ -142,6 +142,26 @@ func (f *fakeQ) CountAllocationsForPoolSupernet(_ context.Context, id uuid.UUID)
 	return f.allocCountByPoolSupernet[id], nil
 }
 
+// ResetArinJobForRetry mirrors the SQL's WHERE arin_status IN
+// ('failed', 'none') guard so the test surface includes the
+// already-pending / already-registered no-op behavior.
+func (f *fakeQ) ResetArinJobForRetry(_ context.Context, id uuid.UUID) error {
+	a, ok := f.allocations[id]
+	if !ok {
+		return nil
+	}
+	if a.ArinStatus != "failed" && a.ArinStatus != "none" {
+		return nil
+	}
+	a.ArinStatus = "pending"
+	a.ArinAttempts = 0
+	a.ArinNetHandle = nil
+	a.ArinLastAttemptAt = nil
+	a.ArinLastError = nil
+	f.allocations[id] = a
+	return nil
+}
+
 // ---- harness ----
 
 func mount(f *fakeQ) http.Handler {

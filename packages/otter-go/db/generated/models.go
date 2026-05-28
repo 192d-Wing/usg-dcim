@@ -418,6 +418,45 @@ type ApprovalResultRow struct {
 	TenantSupernetID uuid.UUID `json:"tenant_supernet_id"`
 }
 
+// SystemSetting — generic key/JSON-value config row. The Python side
+// stores ARIN endpoint, API key, and the kill-switch under
+// arin.regrws.endpoint / .api_key / .enabled keys.
+type SystemSetting struct {
+	Key       string          `json:"key"`
+	Value     json.RawMessage `json:"value"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// ArinSubmitJobRow — the joined projection the worker claims. Bundles
+// allocation identity, the ARIN parent net handle from the pool, and
+// every Organization POC + address field needed to build a Reg-RWS
+// reassign-detailed payload in one round-trip.
+type ArinSubmitJobRow struct {
+	AllocationID     uuid.UUID `json:"allocation_id"`
+	ArinStatus       string    `json:"arin_status"`
+	ArinAttempts     int32     `json:"arin_attempts"`
+	Prefix           string    `json:"prefix"`
+	OrganizationID   uuid.UUID `json:"organization_id"`
+	ParentNetHandle  string    `json:"parent_net_handle"`
+	OrgName          string    `json:"org_name"`
+	OrgArinHandle    *string   `json:"org_arin_handle"`
+	AddressLine1     string    `json:"address_line1"`
+	AddressLine2     *string   `json:"address_line2"`
+	City             string    `json:"city"`
+	StateProvince    *string   `json:"state_province"`
+	PostalCode       *string   `json:"postal_code"`
+	Country          string    `json:"country"`
+	AdminPocName     string    `json:"admin_poc_name"`
+	AdminPocEmail    string    `json:"admin_poc_email"`
+	AdminPocPhone    *string   `json:"admin_poc_phone"`
+	TechPocName      string    `json:"tech_poc_name"`
+	TechPocEmail     string    `json:"tech_poc_email"`
+	TechPocPhone     *string   `json:"tech_poc_phone"`
+	AbusePocName     string    `json:"abuse_poc_name"`
+	AbusePocEmail    string    `json:"abuse_poc_email"`
+	AbusePocPhone    *string   `json:"abuse_poc_phone"`
+}
+
 type Subnet struct {
 	ID          uuid.UUID  `json:"id"`
 	SupernetID  uuid.UUID  `json:"supernet_id"`
