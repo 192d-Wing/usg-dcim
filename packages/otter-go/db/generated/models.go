@@ -357,6 +357,67 @@ type LirRequest struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
+// LirAllocation — the issued allocation tied 1:1 to an approved
+// LirRequest. ARIN columns drive the async Reg-RWS feed-up worker
+// (phase 5); the worker reads rows where arin_status ∈ ('pending',
+// 'failed', 'removing') to find work.
+type LirAllocation struct {
+	ID                       uuid.UUID  `json:"id"`
+	RequestID                uuid.UUID  `json:"request_id"`
+	OrganizationID           uuid.UUID  `json:"organization_id"`
+	PoolID                   uuid.UUID  `json:"pool_id"`
+	PoolSupernetID           uuid.UUID  `json:"pool_supernet_id"`
+	TenantSupernetID         uuid.UUID  `json:"tenant_supernet_id"`
+	Prefix                   string     `json:"prefix"`
+	AllocatedAt              time.Time  `json:"allocated_at"`
+	AllocatedByUserID        uuid.UUID  `json:"allocated_by_user_id"`
+	Status                   string     `json:"status"`
+	ReturnRequestedAt        *time.Time `json:"return_requested_at"`
+	ReturnRequestedByUserID  *uuid.UUID `json:"return_requested_by_user_id"`
+	ReturnReason             *string    `json:"return_reason"`
+	ReturnedAt               *time.Time `json:"returned_at"`
+	ReturnedByUserID         *uuid.UUID `json:"returned_by_user_id"`
+	ArinStatus               string     `json:"arin_status"`
+	ArinNetHandle            *string    `json:"arin_net_handle"`
+	ArinLastAttemptAt        *time.Time `json:"arin_last_attempt_at"`
+	ArinLastError            *string    `json:"arin_last_error"`
+	ArinAttempts             int32      `json:"arin_attempts"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
+}
+
+// LandingFabricRow — the (fabric_id, default_vrf_id) tuple the
+// approval handler stamps on the carved tenant Supernet. Looked up
+// by slug ('lir-unassigned' for the system landing fabric).
+type LandingFabricRow struct {
+	FabricID     uuid.UUID `json:"fabric_id"`
+	DefaultVrfID uuid.UUID `json:"default_vrf_id"`
+}
+
+// PoolSupernetForCarveRow — minimal projection the Go carver
+// consumes when picking a free sub-prefix from a pool source supernet.
+type PoolSupernetForCarveRow struct {
+	ID     uuid.UUID `json:"id"`
+	Prefix string    `json:"prefix"`
+}
+
+// AllocatedPrefixRow — existing allocations the carver subtracts
+// from the pool supernet's range. pool_supernet_id is the FK back
+// to the source supernet so the handler can bucket by parent.
+type AllocatedPrefixRow struct {
+	PoolSupernetID uuid.UUID `json:"pool_supernet_id"`
+	Prefix         string    `json:"prefix"`
+}
+
+// ApprovalResultRow — the trio returned by the atomic CTE: which
+// request was flipped to approved, which allocation row got inserted,
+// and which tenant supernet now belongs to the tenant.
+type ApprovalResultRow struct {
+	RequestID        uuid.UUID `json:"request_id"`
+	AllocationID     uuid.UUID `json:"allocation_id"`
+	TenantSupernetID uuid.UUID `json:"tenant_supernet_id"`
+}
+
 type Subnet struct {
 	ID          uuid.UUID  `json:"id"`
 	SupernetID  uuid.UUID  `json:"supernet_id"`

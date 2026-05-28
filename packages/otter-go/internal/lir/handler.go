@@ -35,10 +35,19 @@ const (
 	capPoolsCreate    = "lir:pools:create"
 	capPoolsUpdate    = "lir:pools:update"
 	capPoolsDelete    = "lir:pools:delete"
-	capRequestsCreate = "lir:requests:create"
-	capRequestsRead   = "lir:requests:read"
-	capRequestsCancel = "lir:requests:cancel"
+	capRequestsCreate  = "lir:requests:create"
+	capRequestsRead    = "lir:requests:read"
+	capRequestsCancel  = "lir:requests:cancel"
+	capRequestsApprove = "lir:requests:approve"
+	capRequestsReject  = "lir:requests:reject"
+	capAllocationsRead = "lir:allocations:read"
 )
+
+// LandingFabricSlug is the seeded slug from migration 0065. Looked up
+// at approve time so allocated tenant Supernets land in the system
+// holding fabric; the tenant relocates them via the IPAM 'move'
+// endpoint (phase 7 frontend / phase 4-followup backend).
+const LandingFabricSlug = "lir-unassigned"
 
 // Querier is the slice of sqlc methods this handler needs. Tests
 // substitute an in-memory fake; *dbq.Queries satisfies it.
@@ -67,6 +76,16 @@ type Querier interface {
 	ListLirRequests(ctx context.Context, arg dbq.ListLirRequestsParams) ([]dbq.LirRequest, error)
 	CountLirRequests(ctx context.Context, arg dbq.CountLirRequestsParams) (int64, error)
 	CancelLirRequest(ctx context.Context, arg dbq.CancelLirRequestParams) (dbq.LirRequest, error)
+
+	// Allocation engine (approve / reject + reads)
+	GetLandingFabric(ctx context.Context, slug string) (dbq.LandingFabricRow, error)
+	ListPoolSupernetsForCarve(ctx context.Context, poolID uuid.UUID) ([]dbq.PoolSupernetForCarveRow, error)
+	ListAllocatedPrefixesInPool(ctx context.Context, poolID uuid.UUID) ([]dbq.AllocatedPrefixRow, error)
+	ApproveLirRequest(ctx context.Context, arg dbq.ApproveLirRequestParams) (dbq.ApprovalResultRow, error)
+	RejectLirRequest(ctx context.Context, arg dbq.RejectLirRequestParams) (dbq.LirRequest, error)
+	GetLirAllocation(ctx context.Context, id uuid.UUID) (dbq.LirAllocation, error)
+	ListLirAllocations(ctx context.Context, arg dbq.ListLirAllocationsParams) ([]dbq.LirAllocation, error)
+	CountLirAllocations(ctx context.Context, arg dbq.CountLirAllocationsParams) (int64, error)
 }
 
 type Handler struct {
@@ -96,7 +115,13 @@ func (h *Handler) Mount(r chi.Router) {
 			r.Route("/{id}", func(r chi.Router) {
 				r.With(auth.RequireCapability(capRequestsRead)).Get("/", h.getRequest)
 				r.With(auth.RequireCapability(capRequestsCancel)).Post("/cancel", h.cancelRequest)
+				r.With(auth.RequireCapability(capRequestsApprove)).Post("/approve", h.approveRequest)
+				r.With(auth.RequireCapability(capRequestsReject)).Post("/reject", h.rejectRequest)
 			})
+		})
+		r.Route("/allocations", func(r chi.Router) {
+			r.With(auth.RequireCapability(capAllocationsRead)).Get("/", h.listAllocations)
+			r.With(auth.RequireCapability(capAllocationsRead)).Get("/{id}", h.getAllocation)
 		})
 	})
 }

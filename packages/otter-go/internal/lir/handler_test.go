@@ -23,9 +23,16 @@ import (
 // ---- fake querier ----
 
 type fakeQ struct {
-	pools     map[uuid.UUID]dbq.LirPool
-	supernets map[uuid.UUID]dbq.SupernetLirAttachRow
-	requests  map[uuid.UUID]dbq.LirRequest
+	pools       map[uuid.UUID]dbq.LirPool
+	supernets   map[uuid.UUID]dbq.SupernetLirAttachRow
+	requests    map[uuid.UUID]dbq.LirRequest
+	allocations map[uuid.UUID]dbq.LirAllocation
+	// carver inputs, keyed by pool_id
+	carveSources   map[uuid.UUID][]dbq.PoolSupernetForCarveRow
+	carveAllocated map[uuid.UUID][]dbq.AllocatedPrefixRow
+	// system landing fabric — nil to simulate the deployment-missing
+	// path (GetLandingFabric returns ErrNoRows).
+	landing *dbq.LandingFabricRow
 	// recorded effects
 	created        *dbq.CreateLirPoolParams
 	updated        *dbq.UpdateLirPoolParams
@@ -34,6 +41,7 @@ type fakeQ struct {
 	detached       *dbq.DetachSupernetFromPoolParams
 	createdRequest *dbq.CreateLirRequestParams
 	lastListReq    *dbq.ListLirRequestsParams
+	approveCalled  *dbq.ApproveLirRequestParams
 	// controls for failure-path tests
 	allocCountByPool         map[uuid.UUID]int64
 	allocCountByPoolSupernet map[uuid.UUID]int64
