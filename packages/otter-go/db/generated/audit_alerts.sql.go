@@ -26,28 +26,31 @@ WHERE ($3::uuid        IS NULL OR actor_user_id = $3)
   AND ($9::timestamptz IS NULL OR occurred_at  >= $9)
   AND ($10::timestamptz IS NULL OR occurred_at <= $10)
   AND ($11::bool       IS NULL OR success       = $11)
+  AND ($12::uuid[]     IS NULL OR site_id       = ANY($12::uuid[]))
 ORDER BY occurred_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListAuditLogParams struct {
-	Limit       int32      `json:"limit"`
-	Offset      int32      `json:"offset"`
-	ActorUserID *uuid.UUID `json:"actor_user_id"`
-	Action      *string    `json:"action"`
-	TargetType  *string    `json:"target_type"`
-	TargetID    *string    `json:"target_id"`
-	TargetIDs   []string   `json:"target_ids"`
-	SiteID      *uuid.UUID `json:"site_id"`
-	Since       *time.Time `json:"since"`
-	Until       *time.Time `json:"until"`
-	Success     *bool      `json:"success"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	ActorUserID  *uuid.UUID  `json:"actor_user_id"`
+	Action       *string     `json:"action"`
+	TargetType   *string     `json:"target_type"`
+	TargetID     *string     `json:"target_id"`
+	TargetIDs    []string    `json:"target_ids"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	Since        *time.Time  `json:"since"`
+	Until        *time.Time  `json:"until"`
+	Success      *bool       `json:"success"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListAuditLog(ctx context.Context, arg ListAuditLogParams) ([]AuditLog, error) {
 	rows, err := q.db.Query(ctx, listAuditLog,
 		arg.Limit, arg.Offset, arg.ActorUserID, arg.Action, arg.TargetType,
-		arg.TargetID, arg.TargetIDs, arg.SiteID, arg.Since, arg.Until, arg.Success)
+		arg.TargetID, arg.TargetIDs, arg.SiteID, arg.Since, arg.Until, arg.Success,
+		arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -77,35 +80,44 @@ WHERE ($1::uuid        IS NULL OR actor_user_id = $1)
   AND ($7::timestamptz IS NULL OR occurred_at  >= $7)
   AND ($8::timestamptz IS NULL OR occurred_at  <= $8)
   AND ($9::bool        IS NULL OR success       = $9)
+  AND ($10::uuid[]     IS NULL OR site_id       = ANY($10::uuid[]))
 `
 
 type CountAuditLogParams struct {
-	ActorUserID *uuid.UUID `json:"actor_user_id"`
-	Action      *string    `json:"action"`
-	TargetType  *string    `json:"target_type"`
-	TargetID    *string    `json:"target_id"`
-	TargetIDs   []string   `json:"target_ids"`
-	SiteID      *uuid.UUID `json:"site_id"`
-	Since       *time.Time `json:"since"`
-	Until       *time.Time `json:"until"`
-	Success     *bool      `json:"success"`
+	ActorUserID  *uuid.UUID  `json:"actor_user_id"`
+	Action       *string     `json:"action"`
+	TargetType   *string     `json:"target_type"`
+	TargetID     *string     `json:"target_id"`
+	TargetIDs    []string    `json:"target_ids"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	Since        *time.Time  `json:"since"`
+	Until        *time.Time  `json:"until"`
+	Success      *bool       `json:"success"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAuditLog,
 		arg.ActorUserID, arg.Action, arg.TargetType, arg.TargetID,
-		arg.TargetIDs, arg.SiteID, arg.Since, arg.Until, arg.Success)
+		arg.TargetIDs, arg.SiteID, arg.Since, arg.Until, arg.Success,
+		arg.ScopeSiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err
 }
 
 const listAuditActions = `-- name: ListAuditActions :many
-SELECT DISTINCT action FROM audit_log ORDER BY action
+SELECT DISTINCT action FROM audit_log
+WHERE ($1::uuid[] IS NULL OR site_id = ANY($1::uuid[]))
+ORDER BY action
 `
 
-func (q *Queries) ListAuditActions(ctx context.Context) ([]string, error) {
-	rows, err := q.db.Query(ctx, listAuditActions)
+type ListAuditActionsParams struct {
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
+}
+
+func (q *Queries) ListAuditActions(ctx context.Context, arg ListAuditActionsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listAuditActions, arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}

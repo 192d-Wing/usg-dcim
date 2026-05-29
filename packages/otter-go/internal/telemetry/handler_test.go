@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 )
 
 type fakeQ struct {
@@ -29,10 +30,23 @@ func mount(f *fakeQ) http.Handler {
 	(&Handler{Q: f}).Mount(r)
 	return r
 }
+// authedPrincipal carries the telemetry read cap so the test harness
+// passes RequireCapability("telemetry:metrics:read") on every request.
+// Tests that want to assert the cap gate works do so explicitly via
+// TestSeries_RequiresCap below.
+func authedPrincipal() auth.Principal {
+	return auth.Principal{
+		Capabilities: []string{"telemetry:metrics:read"},
+		Label:        "test",
+	}
+}
+
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+	req := httptest.NewRequest("GET", p, nil)
+	req = req.WithContext(auth.WithPrincipal(req.Context(), authedPrincipal()))
+	h.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -91,5 +105,20 @@ func TestSeries_BadTimestamps(t *testing.T) {
 	rec := do(t, mount(&fakeQ{}), "/telemetry/series?site_id="+sid.String()+"&asset_id="+aid.String()+"&metric=m&start=garbage")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("got %d", rec.Code)
+	}
+}
+
+// TestSeries_RejectsWithoutCap proves the RequireCapability gate
+// fires. Without `telemetry:metrics:read` the request 403s before
+// the handler runs (no query params parsed, no DB call).
+func TestSeries_RejectsWithoutCap(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/telemetry/series?site_id="+uuid.New().String()+
+		"&asset_id="+uuid.New().String()+"&metric=temp_c", nil)
+	noCap := auth.Principal{Capabilities: []string{"some:other:cap"}}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), noCap))
+	mount(&fakeQ{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
 	}
 }

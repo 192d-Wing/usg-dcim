@@ -14,23 +14,34 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
 type Querier interface {
 	ListAuditLog(ctx context.Context, arg dbq.ListAuditLogParams) ([]dbq.AuditLog, error)
 	CountAuditLog(ctx context.Context, arg dbq.CountAuditLogParams) (int64, error)
-	ListAuditActions(ctx context.Context) ([]string, error)
+	ListAuditActions(ctx context.Context, arg dbq.ListAuditActionsParams) ([]string, error)
+	// Embedded so we can call auth.ScopedSiteFilter — site-scope
+	// expansion walks direct + region + site-group + organization.
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
 type Handler struct {
 	Q Querier
 }
 
+// capRead is the capability both /log and /actions gate on, and the
+// scope code ScopedSiteFilter uses to compute the per-caller site set.
+const capRead = "audit:events:read"
+
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/audit", func(r chi.Router) {
-		r.Get("/log", h.listLog)
-		r.Get("/actions", h.listActions)
+		// Mirror api/audit.py — both endpoints require capRead.
+		// Without these wraps any authenticated principal could read
+		// the full audit log.
+		r.With(auth.RequireCapability(capRead)).Get("/log", h.listLog)
+		r.With(auth.RequireCapability(capRead)).Get("/actions", h.listActions)
 	})
 }
 
@@ -45,11 +56,25 @@ func (h *Handler) listLog(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
 	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	p, _ := auth.From(r.Context())
+	scopeSiteIDs, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capRead)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// Scoped caller whose scope expands to zero sites: short-circuit.
+	// Mirrors Python's `if not in_scope: return empty_page(...)`.
+	if scoped && len(scopeSiteIDs) == 0 {
+		httpx.JSON(w, http.StatusOK, logPage{Items: []dbq.AuditLog{}, Total: 0, Limit: limit, Offset: offset})
+		return
+	}
 	params := dbq.ListAuditLogParams{
 		Limit: limit, Offset: offset,
-		Action:     strPtr(q.Get("action")),
-		TargetType: strPtr(q.Get("target_type")),
-		TargetID:   strPtr(q.Get("target_id")),
+		Action:       strPtr(q.Get("action")),
+		TargetType:   strPtr(q.Get("target_type")),
+		TargetID:     strPtr(q.Get("target_id")),
+		ScopeSiteIds: scopeSiteIDs,
 	}
 	if v := q.Get("actor_user_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -97,11 +122,12 @@ func (h *Handler) listLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	total, err := h.Q.CountAuditLog(r.Context(), dbq.CountAuditLogParams{
-		ActorUserID: params.ActorUserID, Action: params.Action,
-		TargetType: params.TargetType, TargetID: params.TargetID,
-		TargetIDs: params.TargetIDs,
-		SiteID:    params.SiteID, Since: params.Since, Until: params.Until,
-		Success: params.Success,
+		ActorUserID:  params.ActorUserID, Action: params.Action,
+		TargetType:   params.TargetType, TargetID: params.TargetID,
+		TargetIDs:    params.TargetIDs,
+		SiteID:       params.SiteID, Since: params.Since, Until: params.Until,
+		Success:      params.Success,
+		ScopeSiteIds: params.ScopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -112,7 +138,22 @@ func (h *Handler) listLog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) listActions(w http.ResponseWriter, r *http.Request) {
-	actions, err := h.Q.ListAuditActions(r.Context())
+	p, _ := auth.From(r.Context())
+	scopeSiteIDs, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capRead)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// Scoped caller whose scope expands to zero sites should see an
+	// empty action list — Python returns `[]` in this case (audit.py).
+	if scoped && len(scopeSiteIDs) == 0 {
+		httpx.JSON(w, http.StatusOK, []string{})
+		return
+	}
+	actions, err := h.Q.ListAuditActions(r.Context(), dbq.ListAuditActionsParams{
+		ScopeSiteIds: scopeSiteIDs,
+	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

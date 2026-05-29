@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -24,7 +25,10 @@ type Handler struct{ Q Querier }
 
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/telemetry", func(r chi.Router) {
-		r.Get("/series", h.getSeries)
+		// Python (api/telemetry.py:get_series) gates on
+		// `telemetry:metrics:read`; mirror that here so the cutover
+		// from Python to Go doesn't widen access.
+		r.With(auth.RequireCapability("telemetry:metrics:read")).Get("/series", h.getSeries)
 	})
 }
 

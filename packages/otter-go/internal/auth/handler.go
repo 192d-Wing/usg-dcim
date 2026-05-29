@@ -29,6 +29,9 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post("/login", h.login)
 		r.Post("/logout", h.logout)
 		r.Post("/refresh", h.refresh)
+		// /tokens GET/POST/DELETE check admin:api-tokens:{read,create,
+		// delete} inline inside the handlers (handler_local.go) rather
+		// than via middleware — same effect, just a different layer.
 		r.Get("/tokens", h.listTokens)
 		r.Post("/tokens", h.issueToken)
 		r.Delete("/tokens/{id}", h.revokeToken)

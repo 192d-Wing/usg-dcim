@@ -1,4 +1,11 @@
 -- ===== Audit log =====
+-- scope_site_ids is the ABAC LIST filter (mirrors Python
+-- security.scope.scope_filtered_site_ids in api/audit.py): NULL = no
+-- restriction (global caller); a non-NULL slice restricts to rows whose
+-- site_id is in the set. NULL-site rows (user.create, login.failed,
+-- role.update etc.) are intentionally NOT visible to scoped callers,
+-- matching Python — `NULL = ANY(arr)` is NULL ≈ false, so the filter
+-- naturally drops them.
 -- name: ListAuditLog :many
 SELECT id, occurred_at, actor_user_id, actor_token_id, actor_label, actor_ip,
        action, target_type, target_id, site_id, request_id, success,
@@ -13,6 +20,7 @@ WHERE (sqlc.narg(actor_user_id)::uuid IS NULL OR actor_user_id = sqlc.narg(actor
   AND (sqlc.narg(since)::timestamptz  IS NULL OR occurred_at  >= sqlc.narg(since))
   AND (sqlc.narg(until)::timestamptz  IS NULL OR occurred_at  <= sqlc.narg(until))
   AND (sqlc.narg(success)::bool       IS NULL OR success       = sqlc.narg(success))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]))
 ORDER BY occurred_at DESC
 LIMIT $1 OFFSET $2;
 
@@ -27,11 +35,17 @@ WHERE (sqlc.narg(actor_user_id)::uuid IS NULL OR actor_user_id = sqlc.narg(actor
   AND (sqlc.narg(site_id)::uuid       IS NULL OR site_id       = sqlc.narg(site_id))
   AND (sqlc.narg(since)::timestamptz  IS NULL OR occurred_at  >= sqlc.narg(since))
   AND (sqlc.narg(until)::timestamptz  IS NULL OR occurred_at  <= sqlc.narg(until))
-  AND (sqlc.narg(success)::bool       IS NULL OR success       = sqlc.narg(success));
+  AND (sqlc.narg(success)::bool       IS NULL OR success       = sqlc.narg(success))
+  AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]));
 
 -- name: ListAuditActions :many
 -- Distinct actions seen in the log — drives the action-filter dropdown.
-SELECT DISTINCT action FROM audit_log ORDER BY action;
+-- scope_site_ids matches the read scope: a regional admin shouldn't see
+-- action names from events outside their reach (would leak the
+-- existence of e.g. `user.create` events).
+SELECT DISTINCT action FROM audit_log
+WHERE (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]))
+ORDER BY action;
 
 -- ===== Alert Rules =====
 -- name: ListAlertRules :many
