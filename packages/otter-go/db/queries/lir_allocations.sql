@@ -64,18 +64,37 @@ WHERE pool_id = $1 AND status != 'returned';
 -- $10 supernet_purpose      (nullable — from pool default or request)
 -- $11 arin_initial_status   ('none' when pool has no ARIN handle,
 --                            'pending' when it does — handler decides)
-WITH new_supernet AS (
+--
+-- IMPORTANT: PostgreSQL data-modifying CTEs in WITH always execute
+-- regardless of whether their RETURNING is consumed downstream. To
+-- prevent leaking an orphan Supernet + LirAllocation when the request
+-- raced out of pending, the INSERTs MUST be chained off
+-- `updated_request` so they yield zero rows when the UPDATE missed.
+-- That's why new_supernet uses `INSERT ... SELECT ... FROM
+-- updated_request` instead of `INSERT ... VALUES (...)`.
+WITH updated_request AS (
+    UPDATE lir_requests
+    SET status = 'approved',
+        decided_at = NOW(),
+        decided_by_user_id = $2::uuid,
+        decision_notes = sqlc.narg(decision_notes)::text,
+        approved_pool_id = $4::uuid,
+        updated_at = NOW()
+    WHERE id = $1::uuid AND status = 'pending_approval'
+    RETURNING id
+),
+new_supernet AS (
     INSERT INTO supernets (
         id, fabric_id, vrf_id, prefix,
         owner_organization_id, purpose,
         created_at, updated_at
     )
-    VALUES (
+    SELECT
         gen_random_uuid(),
         $8::uuid, $9::uuid, $7::cidr,
         $6::uuid, sqlc.narg(supernet_purpose)::text,
         NOW(), NOW()
-    )
+    FROM updated_request
     RETURNING id, host(prefix) || '/' || masklen(prefix) AS prefix
 ),
 new_allocation AS (
@@ -90,17 +109,6 @@ new_allocation AS (
         'active', sqlc.arg(arin_initial_status)::text, 0, NOW(), NOW()
     FROM new_supernet
     RETURNING id, tenant_supernet_id
-),
-updated_request AS (
-    UPDATE lir_requests
-    SET status = 'approved',
-        decided_at = NOW(),
-        decided_by_user_id = $2::uuid,
-        decision_notes = sqlc.narg(decision_notes)::text,
-        approved_pool_id = $4::uuid,
-        updated_at = NOW()
-    WHERE id = $1::uuid AND status = 'pending_approval'
-    RETURNING id
 )
 SELECT
     updated_request.id   AS request_id,

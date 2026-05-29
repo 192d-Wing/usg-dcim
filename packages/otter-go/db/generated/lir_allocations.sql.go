@@ -78,18 +78,34 @@ func (q *Queries) ListAllocatedPrefixesInPool(ctx context.Context, poolID uuid.U
 // ---- Approve (atomic CTE) ----
 
 const approveLirRequest = `-- name: ApproveLirRequest :one
-WITH new_supernet AS (
+-- The data-modifying CTE branches must be chained off updated_request
+-- so a raced-out-of-pending request leaves no orphan rows. See the
+-- IMPORTANT comment in db/queries/lir_allocations.sql for why
+-- new_supernet uses INSERT ... SELECT ... FROM updated_request
+-- instead of INSERT ... VALUES.
+WITH updated_request AS (
+    UPDATE lir_requests
+    SET status = 'approved',
+        decided_at = NOW(),
+        decided_by_user_id = $2::uuid,
+        decision_notes = $3::text,
+        approved_pool_id = $4::uuid,
+        updated_at = NOW()
+    WHERE id = $1::uuid AND status = 'pending_approval'
+    RETURNING id
+),
+new_supernet AS (
     INSERT INTO supernets (
         id, fabric_id, vrf_id, prefix,
         owner_organization_id, purpose,
         created_at, updated_at
     )
-    VALUES (
+    SELECT
         gen_random_uuid(),
         $8::uuid, $9::uuid, $7::cidr,
         $6::uuid, $10::text,
         NOW(), NOW()
-    )
+    FROM updated_request
     RETURNING id, host(prefix) || '/' || masklen(prefix) AS prefix
 ),
 new_allocation AS (
@@ -104,17 +120,6 @@ new_allocation AS (
         'active', $11::text, 0, NOW(), NOW()
     FROM new_supernet
     RETURNING id, tenant_supernet_id
-),
-updated_request AS (
-    UPDATE lir_requests
-    SET status = 'approved',
-        decided_at = NOW(),
-        decided_by_user_id = $2::uuid,
-        decision_notes = $3::text,
-        approved_pool_id = $4::uuid,
-        updated_at = NOW()
-    WHERE id = $1::uuid AND status = 'pending_approval'
-    RETURNING id
 )
 SELECT
     updated_request.id   AS request_id,

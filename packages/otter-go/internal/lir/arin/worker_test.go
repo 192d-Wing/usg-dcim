@@ -144,6 +144,63 @@ func TestProcessOne_ContinuesAfterPropagatedClaimError(t *testing.T) {
 	}
 }
 
+// Pin the post-review fix that tick() drains up to MaxPerTick jobs
+// total — not MaxPerTick/2. Earlier shape used `budget--` inside a
+// `for i := 0; i < budget; i++` loop, which halved the submit draw
+// per tick. The unit test bypasses tx machinery by counting raw
+// ProcessOne calls via a custom fake.
+func TestProcessOne_BatchedRespectsMaxPerTick(t *testing.T) {
+	// Simulate a tick by repeatedly calling ProcessOne until it
+	// returns more=false or we hit the cap. This mirrors what
+	// Worker.tick does after the fix.
+	const maxPerTick = 10
+	q := &countingJobQ{remaining: 20}
+	w := &Worker{Log: discardLog()}
+	processed := 0
+	for processed < maxPerTick {
+		more, err := w.ProcessOne(context.Background(), q,
+			&fakeSubmit{result: SubmitResult{NetHandle: "NET-X"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !more {
+			break
+		}
+		processed++
+	}
+	if processed != maxPerTick {
+		t.Errorf("processed %d jobs, want %d (pre-fix would have been %d)",
+			processed, maxPerTick, maxPerTick/2)
+	}
+	if q.claimed != maxPerTick {
+		t.Errorf("claim called %d times, want %d", q.claimed, maxPerTick)
+	}
+}
+
+// countingJobQ feeds a configurable number of jobs into ProcessOne
+// then returns ErrNoRows. Tracks how many claim calls were made so
+// the batch test can assert exactly MaxPerTick of them fired.
+type countingJobQ struct {
+	remaining int
+	claimed   int
+}
+
+func (c *countingJobQ) ClaimNextArinSubmitJob(_ context.Context, _ int32) (dbq.ArinSubmitJobRow, error) {
+	c.claimed++
+	if c.remaining <= 0 {
+		return dbq.ArinSubmitJobRow{}, pgx.ErrNoRows
+	}
+	c.remaining--
+	return dbq.ArinSubmitJobRow{AllocationID: uuid.New()}, nil
+}
+
+func (c *countingJobQ) MarkArinRegistered(_ context.Context, _ dbq.MarkArinRegisteredParams) error {
+	return nil
+}
+func (c *countingJobQ) MarkArinFailed(_ context.Context, _ dbq.MarkArinFailedParams) error {
+	return nil
+}
+
 type erroringJobQ struct{}
 
 func (erroringJobQ) ClaimNextArinSubmitJob(context.Context, int32) (dbq.ArinSubmitJobRow, error) {

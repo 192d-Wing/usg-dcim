@@ -129,11 +129,13 @@ func (w *Worker) tick(ctx context.Context) {
 		return
 	}
 	client := w.NewClient(cfg)
-	// Drain the submit queue first, then the remove queue. Capping
-	// the combined draw at MaxPerTick keeps the tick bounded even
-	// when both queues are full.
-	budget := w.MaxPerTick
-	for i := 0; i < budget; i++ {
+	// Drain the submit queue first, then the remove queue, sharing a
+	// single processed counter against MaxPerTick. (Earlier shape used
+	// `budget--` inside a `for i := 0; i < budget; i++` loop, which
+	// counted each submit twice and silently capped the submit half at
+	// MaxPerTick/2.)
+	processed := 0
+	for processed < w.MaxPerTick {
 		more, err := w.processOneTxWrapped(ctx, client)
 		if err != nil {
 			w.Log.Error("arin_worker_tick_error", "direction", "submit", "err", err)
@@ -142,9 +144,9 @@ func (w *Worker) tick(ctx context.Context) {
 		if !more {
 			break
 		}
-		budget--
+		processed++
 	}
-	for i := 0; i < budget; i++ {
+	for processed < w.MaxPerTick {
 		more, err := w.processOneRemoveTxWrapped(ctx, client)
 		if err != nil {
 			w.Log.Error("arin_worker_tick_error", "direction", "remove", "err", err)
@@ -153,6 +155,7 @@ func (w *Worker) tick(ctx context.Context) {
 		if !more {
 			return
 		}
+		processed++
 	}
 }
 

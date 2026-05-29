@@ -294,15 +294,28 @@ type orgXML struct {
 	PostCode string `xml:"postalCode,omitempty"`
 	Country  string `xml:"iso3166-1>code2"`
 
-	POCLinks struct {
-		Admin pocLinkXML `xml:"pocLinkRef"`
-	} `xml:"pocLinks,omitempty"`
+	// ARIN reassign-detailed requires Admin + Tech + Abuse POC content
+	// on the customerOrg. We don't have ARIN-assigned POC handles for
+	// tenant rows, so we embed inline POC payloads (name + email +
+	// optional phone) under <pocs>. Operators with pre-existing ARIN
+	// POC handles can switch to <pocLinks><pocLinkRef> by adding a
+	// handle column on Organization and emitting that instead.
+	POCs pocsXML `xml:"pocs"`
 }
 
-type pocLinkXML struct {
-	Description string `xml:"description,attr,omitempty"`
-	Function    string `xml:"function,attr"`
-	Handle      string `xml:"handle,attr,omitempty"`
+type pocsXML struct {
+	Admin pocXML `xml:"admin"`
+	Tech  pocXML `xml:"tech"`
+	Abuse pocXML `xml:"abuse"`
+}
+
+type pocXML struct {
+	Name  string `xml:"pocName"`
+	Email string `xml:"pocEmail"`
+	// Phone is optional in ARIN's schema; omit the element when
+	// the source row leaves it null/empty so we don't ship
+	// <pocPhone></pocPhone> which some ARIN validators reject.
+	Phone string `xml:"pocPhone,omitempty"`
 }
 
 // netBlockNS is the XMLNS attr Reg-RWS expects on the root element.
@@ -337,6 +350,15 @@ func buildReassignDetailedXML(job dbq.ArinSubmitJobRow) ([]byte, error) {
 	}
 	if job.PostalCode != nil {
 		doc.CustomerOrg.PostCode = *job.PostalCode
+	}
+	// Populate the three required POCs from the joined Organization
+	// fields. ClaimNextArinSubmitJob already SELECTs them; before this
+	// patch they were silently dropped, and ARIN rejected the payload
+	// 4xx 'Required POC references missing' for every submission.
+	doc.CustomerOrg.POCs = pocsXML{
+		Admin: pocXML{Name: job.AdminPocName, Email: job.AdminPocEmail, Phone: strDeref(job.AdminPocPhone)},
+		Tech:  pocXML{Name: job.TechPocName, Email: job.TechPocEmail, Phone: strDeref(job.TechPocPhone)},
+		Abuse: pocXML{Name: job.AbusePocName, Email: job.AbusePocEmail, Phone: strDeref(job.AbusePocPhone)},
 	}
 	out, err := xml.MarshalIndent(doc, "", "  ")
 	if err != nil {
@@ -384,6 +406,16 @@ func parsePrefixRange(prefix string) (string, string, int, error) {
 		return "", "", 0, err
 	}
 	return start.String(), end.String(), p.Bits(), nil
+}
+
+// strDeref returns the pointed-at string, or "" when the pointer is
+// nil. Used to flatten *string POC-phone fields into the pocXML
+// struct, which uses omitempty to suppress empty elements.
+func strDeref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 // broadcastAddr returns the highest address in the prefix's range —

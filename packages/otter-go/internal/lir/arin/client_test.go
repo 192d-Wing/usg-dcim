@@ -156,6 +156,51 @@ func TestBuildXML_RejectsBadPrefix(t *testing.T) {
 	}
 }
 
+// Pins the post-review fix that ARIN reassign-detailed requires
+// Admin + Tech + Abuse POC content embedded in customerOrg. Before
+// the fix, only the Admin slot was declared on orgXML and Tech/Abuse
+// fields were silently dropped, causing every production submission
+// to fail 4xx 'Required POC references missing.'
+func TestBuildXML_IncludesAllThreePOCs(t *testing.T) {
+	x, err := buildReassignDetailedXML(sampleJob())
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	s := string(x)
+	for _, needle := range []string{
+		"<pocs>",
+		"<admin>",
+		"<pocName>Pat Admin</pocName>",
+		"<pocEmail>admin@example.com</pocEmail>",
+		"<tech>",
+		"<pocName>Pat Tech</pocName>",
+		"<pocEmail>tech@example.com</pocEmail>",
+		"<abuse>",
+		"<pocName>Pat Abuse</pocName>",
+		"<pocEmail>abuse@example.com</pocEmail>",
+	} {
+		if !strings.Contains(s, needle) {
+			t.Errorf("payload missing %q:\n%s", needle, s)
+		}
+	}
+}
+
+func TestBuildXML_OmitsEmptyPocPhone(t *testing.T) {
+	// pocXML.Phone has omitempty — when the Organization row left
+	// the phone column null/blank, the element should not appear.
+	job := sampleJob()
+	job.AdminPocPhone = nil
+	job.TechPocPhone = nil
+	job.AbusePocPhone = nil
+	x, err := buildReassignDetailedXML(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(x), "<pocPhone>") {
+		t.Errorf("nil phones should be omitted, got:\n%s", x)
+	}
+}
+
 // ---- parseNetHandle ----
 
 func TestParseNetHandle_OK(t *testing.T) {
