@@ -22,3 +22,20 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "dcim.subchartService" -}}
 {{- printf "%s-%s" .ctx.Release.Name .name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
+
+{{/*
+  Postgres DSN as pgx wants it. The umbrella value
+  `global.postgresql.dsn` is authored in SQLAlchemy form
+  (`postgresql+asyncpg://…`) because Python otter is the canonical
+  consumer. Go services (otter-go, heron, magpie, beagle) use pgx
+  which rejects the `+asyncpg` driver hint. Stripping it here keeps
+  the one-DSN-per-deploy contract while letting Go pods parse it.
+
+  Idempotent: when the operator already supplies `postgres://…`
+  (or `postgresql://…`) the regex doesn't match and the value
+  passes through unchanged. `^` anchors at start so a password
+  containing the substring `+asyncpg` survives.
+*/}}
+{{- define "dcim.goDsn" -}}
+{{- regexReplaceAll "^postgresql\\+asyncpg" .Values.global.postgresql.dsn "postgres" -}}
+{{- end -}}

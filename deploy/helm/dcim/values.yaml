@@ -217,9 +217,14 @@ ingress:
   hosts:
     - host: dcim.example.mil
       paths:
-        # nginx-ingress evaluates longest-path-first by spec for Prefix rules,
-        # but ImplementationSpecific regex rules are tried first when use-regex
-        # is on — so the supernets/.../move regex catches before /api Prefix.
+        # The Kubernetes Ingress spec mandates longest-prefix-match for
+        # Prefix rules regardless of declaration order — both nginx-ingress
+        # and the Gateway API HTTPRoute resource follow this. On other
+        # controllers (Traefik IngressRoute, AWS ALB rule priorities)
+        # ordering can matter; we keep specific-first as a defensive
+        # convention. ImplementationSpecific paths take precedence over
+        # Prefix when use-regex is on (nginx behavior), which is what makes
+        # the supernets/.../move regex catch before the /api Prefix.
         - path: /api/v1/ipam/supernets/[^/]+/move
           pathType: ImplementationSpecific
           backend: otter-go

@@ -27,9 +27,13 @@ resources:
   requests: { cpu: 100m, memory: 128Mi }
   limits:   { cpu: 1,    memory: 512Mi }
 
-# Set to "off" to disable the always-on stub middleware. Production
-# leaves this unset / empty so the real OIDC middleware engages; set
-# to "true" only in sealed dev envs.
+# Force-enable the in-process auth stub that grants `*` capabilities
+# to every request. Only ever truthy in a sealed dev env. The Go
+# binary picks the stub vs the real JWT middleware based on whether
+# DCIM_JWT_SECRET is set, not on this flag — this flag is read by
+# MustStub() in internal/auth/middleware.go to refuse-to-start unless
+# the operator opts in. Allowed values: "true" / "1" / "yes" / "on"
+# (see envTruthy()). Leave empty in production.
 insecureAuthStub: ""
 
 readinessProbe:

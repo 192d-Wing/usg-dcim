@@ -20,6 +20,7 @@ A multi-site DCIM with:
 usg-dcim/
 ├── packages/                  Animal-named components (see WORKSPACE.md)
 │   ├── otter/                 FastAPI app — central API, workers, auth, alerting
+│   ├── otter-go/              Go port of otter — LIR + IPAM move + auth/regions/collectors (Python-canonical migration in progress)
 │   ├── finch/                 React + TypeScript + Vite dashboard
 │   ├── badger/                Go SNMP/Redfish/Modbus/REST/IPMI site collector
 │   ├── heron/                 Go telemetry ingest service
