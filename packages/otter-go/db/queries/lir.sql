@@ -142,6 +142,12 @@ SET lir_pool_id = NULL, updated_at = NOW()
 WHERE lir_pool_id = $1;
 
 -- name: CountAllocationsForPoolSupernet :one
--- Refuses detach while allocations still trace back to this pool
--- supernet (LirAllocation.pool_supernet_id).
-SELECT count(*)::bigint FROM lir_allocations WHERE pool_supernet_id = $1;
+-- Refuses detach while LIVE allocations still trace back to this
+-- pool supernet. Returned allocations are excluded because their
+-- carved ranges are already reusable (the carver's
+-- ListAllocatedPrefixesInPool also filters status='returned'), so
+-- counting them here would permanently trap the supernet after any
+-- tenant has ever returned.
+SELECT count(*)::bigint
+FROM lir_allocations
+WHERE pool_supernet_id = $1 AND status != 'returned';

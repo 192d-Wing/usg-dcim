@@ -155,11 +155,23 @@ func (c *Client) RemoveReassignment(ctx context.Context, parentNetHandle, netHan
 // classifyRemoveResponse mirrors classifyResponse for the DELETE
 // direction. We don't need to extract a handle from the body — a
 // successful DELETE is just an HTTP status check.
+//
+// 404 is treated as success because DELETE on an already-removed
+// handle is the canonical idempotency case (the handle is gone,
+// which is the desired outcome). 429 + 5xx are transient so the
+// backoff schedule can absorb them.
 func classifyRemoveResponse(status int, body []byte) error {
 	switch {
 	case status >= 200 && status < 300:
 		return nil
-	case status >= 500:
+	case status == http.StatusNotFound:
+		// Idempotent: handle is already deleted upstream. Same
+		// observable outcome as a fresh successful DELETE. Without
+		// this branch, a retry after a local-tx-commit failure
+		// (worker DELETEs but tx rollback re-enqueues the row) would
+		// hit a 404 and burn the row's retry cap.
+		return nil
+	case status == http.StatusTooManyRequests || status >= 500:
 		return fmt.Errorf(fmtArinHTTPErr,
 			ErrTransient, status, truncateBody(body))
 	default:
@@ -224,13 +236,16 @@ func classifyResponse(status int, body []byte) (SubmitResult, error) {
 			return SubmitResult{}, fmt.Errorf("%w: unparseable success body: %v", ErrTransient, perr)
 		}
 		return SubmitResult{NetHandle: handle, RawXML: string(body)}, nil
-	case status >= 500:
+	case status == http.StatusTooManyRequests || status >= 500:
+		// 429 and 5xx are transient — let backoff clear them. The
+		// earlier shape lumped 429 into the 4xx permanent bucket,
+		// which burned the 5-attempt cap on short throttle bursts
+		// that the backoff schedule would otherwise have absorbed.
 		return SubmitResult{}, fmt.Errorf(fmtArinHTTPErr,
 			ErrTransient, status, truncateBody(body))
 	default:
-		// 4xx: bad payload, bad handle, auth, throttling. ARIN's 429
-		// is rare and we treat it as permanent here so the operator
-		// sees it — switching to transient would risk burning auto-
+		// Remaining 4xx: bad payload, bad handle, auth. Permanent so
+		// the operator sees the underlying cause instead of burning
 		// retries against a misconfig.
 		return SubmitResult{}, fmt.Errorf(fmtArinHTTPErr,
 			ErrPermanent, status, truncateBody(body))

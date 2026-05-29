@@ -287,13 +287,25 @@ type validationError struct{ msg string }
 func (e *validationError) Error() string { return e.msg }
 func validationErr(msg string) error     { return &validationError{msg: msg} }
 
-func writeValidationError(w http.ResponseWriter, err error) bool {
+// writeValidationError writes an HTTP error response for any err
+// returned by the package's validators. *validationError surfaces
+// as 422 with the field-specific message; any other non-nil error
+// surfaces as the httpx default-mapped status (typically 500) so
+// nothing falls through to a handler executing with bad input.
+//
+// Earlier shape returned bool and callers wrapped it in
+// `if writeValidationError(...) { return }` — a non-validation
+// error path silently skipped the return. The current shape
+// always writes a response and the callers always return after
+// calling.
+func writeValidationError(w http.ResponseWriter, err error) {
 	var v *validationError
 	if errors.As(err, &v) {
 		httpx.Error(w, http.StatusUnprocessableEntity, v.msg)
-		return true
+		return
 	}
-	return false
+	status, msg := httpx.Mapped(err)
+	httpx.Error(w, status, msg)
 }
 
 func decodeBody(w http.ResponseWriter, r *http.Request, dst any) bool {

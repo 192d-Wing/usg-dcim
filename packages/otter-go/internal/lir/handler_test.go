@@ -143,8 +143,11 @@ func (f *fakeQ) CountAllocationsForPoolSupernet(_ context.Context, id uuid.UUID)
 }
 
 // ResetArinJobForRetry mirrors the SQL's WHERE arin_status IN
-// ('failed', 'none') guard so the test surface includes the
-// already-pending / already-registered no-op behavior.
+// ('failed', 'none') guard plus the direction-aware CASE: rows
+// with a net_handle (remove-direction failures) reset to
+// 'removing'; rows without a handle reset to 'pending'. Earlier
+// fake always wrote 'pending' which masked the orphan bug
+// reported in code-review finding #4.
 func (f *fakeQ) ResetArinJobForRetry(_ context.Context, id uuid.UUID) error {
 	a, ok := f.allocations[id]
 	if !ok {
@@ -153,9 +156,12 @@ func (f *fakeQ) ResetArinJobForRetry(_ context.Context, id uuid.UUID) error {
 	if a.ArinStatus != "failed" && a.ArinStatus != "none" {
 		return nil
 	}
-	a.ArinStatus = "pending"
+	if a.ArinNetHandle == nil {
+		a.ArinStatus = "pending"
+	} else {
+		a.ArinStatus = "removing"
+	}
 	a.ArinAttempts = 0
-	a.ArinNetHandle = nil
 	a.ArinLastAttemptAt = nil
 	a.ArinLastError = nil
 	f.allocations[id] = a

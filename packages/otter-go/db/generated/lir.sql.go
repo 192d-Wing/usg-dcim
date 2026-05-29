@@ -304,7 +304,12 @@ func (q *Queries) DetachAllPoolSupernets(ctx context.Context, poolID uuid.UUID) 
 }
 
 const countAllocationsForPoolSupernet = `-- name: CountAllocationsForPoolSupernet :one
-SELECT count(*)::bigint FROM lir_allocations WHERE pool_supernet_id = $1
+-- Excludes status='returned' rows so a pool supernet stops being
+-- trapped once allocations carved from it are returned. See the
+-- comment in lir.sql for the full rationale.
+SELECT count(*)::bigint
+FROM lir_allocations
+WHERE pool_supernet_id = $1 AND status != 'returned'
 `
 
 func (q *Queries) CountAllocationsForPoolSupernet(ctx context.Context, poolSupernetID uuid.UUID) (int64, error) {

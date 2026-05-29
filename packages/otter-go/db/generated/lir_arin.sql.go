@@ -148,8 +148,16 @@ func (q *Queries) MarkArinFailed(ctx context.Context, arg MarkArinFailedParams) 
 }
 
 const resetArinJobForRetry = `-- name: ResetArinJobForRetry :exec
+-- Direction-aware reset: rows that never registered (arin_net_handle
+-- IS NULL) re-enter the submit queue as 'pending'; rows that
+-- registered but failed the deassign (handle non-null) re-enter the
+-- remove queue as 'removing'. Earlier shape always wrote 'pending'
+-- which orphaned the remove direction.
 UPDATE lir_allocations
-SET arin_status        = 'pending',
+SET arin_status        = CASE
+        WHEN arin_net_handle IS NULL THEN 'pending'
+        ELSE 'removing'
+    END,
     arin_attempts      = 0,
     arin_last_attempt_at = NULL,
     arin_last_error    = NULL,

@@ -114,12 +114,23 @@ SET arin_status        = 'failed',
 WHERE id = $1;
 
 -- name: ResetArinJobForRetry :exec
--- Operator-triggered: zeroes the attempt counter, clears the last
--- error, flips status back to 'pending' so the next worker tick
--- picks it up. Refuses if the allocation is already registered —
--- that case is a deassign request (phase 6), not a retry.
+-- Operator-triggered retry. Routes by direction (inferred from
+-- arin_net_handle): rows with no handle were submit failures and
+-- get flipped back to 'pending' for the submit claim; rows with a
+-- handle were remove failures and get flipped back to 'removing'
+-- for the remove claim. Earlier shape always wrote 'pending' which
+-- orphaned remove-direction rows — the submit-claim query refuses
+-- them on `arin_net_handle IS NULL` and the remove-claim query
+-- refuses them on status not in ('removing','failed').
+--
+-- Refuses if the allocation is already 'registered' or in-flight
+-- ('pending'/'removing') — that case isn't a retry; the worker
+-- is either already handling it or it succeeded.
 UPDATE lir_allocations
-SET arin_status        = 'pending',
+SET arin_status        = CASE
+        WHEN arin_net_handle IS NULL THEN 'pending'
+        ELSE 'removing'
+    END,
     arin_attempts      = 0,
     arin_last_attempt_at = NULL,
     arin_last_error    = NULL,

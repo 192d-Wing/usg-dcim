@@ -275,6 +275,17 @@ func TestClassify_4xxIsPermanent(t *testing.T) {
 	}
 }
 
+// Pins post-review fix #8: 429 Too Many Requests is throttling and
+// must be transient so the backoff schedule absorbs it. Earlier
+// shape lumped 429 into the 4xx permanent bucket, which burned the
+// 5-attempt cap on short throttle bursts.
+func TestClassify_429IsTransient(t *testing.T) {
+	_, err := classifyResponse(429, []byte("Rate limit exceeded"))
+	if !errors.Is(err, ErrTransient) {
+		t.Errorf("429 should be transient, got %v", err)
+	}
+}
+
 func TestClassify_LongBodyTruncated(t *testing.T) {
 	huge := make([]byte, 5000)
 	for i := range huge {

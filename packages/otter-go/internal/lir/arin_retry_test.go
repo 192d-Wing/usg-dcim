@@ -94,6 +94,45 @@ func TestArinRetry_OutOfScopeIs404(t *testing.T) {
 	}
 }
 
+// Pin the post-review fix that ResetArinJobForRetry routes by the
+// allocation's direction (inferred from arin_net_handle). A
+// previously-registered allocation that failed during the remove
+// direction must reset to 'removing' so the remove-claim query
+// picks it up. The earlier shape always wrote 'pending' which
+// orphaned the row — submit-claim refused it (net_handle non-null),
+// remove-claim refused it (status not 'removing'/'failed').
+func TestArinRetry_RemoveDirectionResetsToRemoving(t *testing.T) {
+	f := newFake()
+	allocID := uuid.New()
+	handle := "NET-OK-1"
+	errMsg := "transient: timeout during delete"
+	f.allocations = map[uuid.UUID]dbq.LirAllocation{
+		allocID: {
+			ID:             allocID,
+			OrganizationID: uuid.New(),
+			ArinStatus:     "failed",
+			ArinAttempts:   5,
+			ArinNetHandle:  &handle,
+			ArinLastError:  &errMsg,
+		},
+	}
+	rec := do(t, mountWith(f, globalPrincipal()),
+		"POST", "/lir/allocations/"+allocID.String()+"/arin/retry", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	after := f.allocations[allocID]
+	if after.ArinStatus != "removing" {
+		t.Errorf("remove-direction reset should flip to 'removing', got %q", after.ArinStatus)
+	}
+	if after.ArinAttempts != 0 {
+		t.Errorf("attempts should reset to 0, got %d", after.ArinAttempts)
+	}
+	if after.ArinNetHandle == nil || *after.ArinNetHandle != handle {
+		t.Errorf("net_handle must NOT be cleared (deassignment still targets it), got %+v", after.ArinNetHandle)
+	}
+}
+
 func TestArinRetry_NoneStatusAlsoResets(t *testing.T) {
 	// arin_status='none' covers pools with no ARIN handle. The retry
 	// endpoint still accepts it — flipping to 'pending' lets the

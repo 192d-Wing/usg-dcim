@@ -45,14 +45,12 @@ func (h *Handler) createPool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateFamilyPrefix(req.IpFamily, req.MaxPrefixLength); err != nil {
-		if writeValidationError(w, err) {
-			return
-		}
+		writeValidationError(w, err)
+		return
 	}
 	if err := validateFamilyPrefix(req.IpFamily, req.MinPrefixLength); err != nil {
-		if writeValidationError(w, err) {
-			return
-		}
+		writeValidationError(w, err)
+		return
 	}
 	fabricID, ok := parseOptionalUUID(w, req.FabricID, "fabric_id")
 	if !ok {
@@ -175,14 +173,12 @@ func (h *Handler) updatePool(w http.ResponseWriter, r *http.Request) {
 	// persisted family so a PATCH that pushes max past the cap fails
 	// cleanly with 422.
 	if err := validateFamilyPrefix(cur.IpFamily, newMax); err != nil {
-		if writeValidationError(w, err) {
-			return
-		}
+		writeValidationError(w, err)
+		return
 	}
 	if err := validateFamilyPrefix(cur.IpFamily, newMin); err != nil {
-		if writeValidationError(w, err) {
-			return
-		}
+		writeValidationError(w, err)
+		return
 	}
 	fabricID, ok := parseOptionalUUID(w, req.FabricID, "fabric_id")
 	if !ok {

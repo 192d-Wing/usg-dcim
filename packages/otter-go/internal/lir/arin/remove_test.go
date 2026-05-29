@@ -59,9 +59,31 @@ func TestRemoveClassify_5xxIsTransient(t *testing.T) {
 }
 
 func TestRemoveClassify_4xxIsPermanent(t *testing.T) {
-	err := classifyRemoveResponse(404, []byte("handle not found"))
+	// 400 stands in for a bona-fide permanent 4xx (bad auth, bad
+	// payload). 404 is excluded — that's the DELETE idempotency case
+	// and is tested separately below.
+	err := classifyRemoveResponse(400, []byte("malformed request"))
 	if !errors.Is(err, ErrPermanent) {
 		t.Errorf("got %v", err)
+	}
+}
+
+// Pins post-review fix #5: DELETE on an already-removed handle
+// returns 404, which is the canonical idempotency outcome (handle
+// gone = desired end state). Earlier shape mapped 404 to
+// ErrPermanent, so a worker retry after a local-tx-commit failure
+// would burn the row's retry cap.
+func TestRemoveClassify_404IsIdempotentSuccess(t *testing.T) {
+	if err := classifyRemoveResponse(404, []byte("Net not found")); err != nil {
+		t.Errorf("404 on remove should be success (nil), got %v", err)
+	}
+}
+
+// Pins post-review fix #8: 429 throttling is transient on remove too.
+func TestRemoveClassify_429IsTransient(t *testing.T) {
+	err := classifyRemoveResponse(429, []byte("Rate limit exceeded"))
+	if !errors.Is(err, ErrTransient) {
+		t.Errorf("429 should be transient, got %v", err)
 	}
 }
 

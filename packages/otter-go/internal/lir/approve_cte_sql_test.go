@@ -22,6 +22,42 @@ import (
 	"testing"
 )
 
+// Pin post-review fix #6: CountAllocationsForPoolSupernet must
+// exclude status='returned' rows so a pool supernet stops being
+// trapped once its allocations are returned. Earlier shape
+// counted every allocation indefinitely.
+func TestCountAllocationsForPoolSupernet_ExcludesReturned(t *testing.T) {
+	sql := readSiblingSQL(t, "db/queries/lir.sql")
+	q := extractQueryByName(sql, "CountAllocationsForPoolSupernet")
+	if q == "" {
+		t.Fatal("CountAllocationsForPoolSupernet query not found in lir.sql")
+	}
+	if !strings.Contains(q, "status != 'returned'") {
+		t.Errorf("count must filter out returned allocations, got:\n%s", q)
+	}
+}
+
+// Pin post-review fix #4: ResetArinJobForRetry must be direction-
+// aware — rows with arin_net_handle set are remove-direction
+// failures and must reset to 'removing', not 'pending'. Earlier
+// shape always wrote 'pending' which orphaned the row.
+func TestResetArinJobForRetry_DirectionAware(t *testing.T) {
+	sql := readSiblingSQL(t, "db/queries/lir_arin.sql")
+	q := extractQueryByName(sql, "ResetArinJobForRetry")
+	if q == "" {
+		t.Fatal("ResetArinJobForRetry query not found in lir_arin.sql")
+	}
+	// The CASE on arin_net_handle is the load-bearing direction
+	// switch. Without it the SQL always wrote 'pending', which
+	// stranded rows that had registered upstream.
+	if !strings.Contains(q, "WHEN arin_net_handle IS NULL THEN 'pending'") {
+		t.Errorf("reset must route by direction; missing CASE on net_handle:\n%s", q)
+	}
+	if !strings.Contains(q, "ELSE 'removing'") {
+		t.Errorf("reset must route remove-direction rows to 'removing':\n%s", q)
+	}
+}
+
 func TestApproveCTE_NewSupernetChainsOffUpdatedRequest(t *testing.T) {
 	sql := readSiblingSQL(t, "db/queries/lir_allocations.sql")
 	// Slice out the ApproveLirRequest query block — the file has

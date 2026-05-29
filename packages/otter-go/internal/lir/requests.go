@@ -59,9 +59,8 @@ func (h *Handler) submitRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateFamilyPrefix(req.IpFamily, req.PrefixLength); err != nil {
-		if writeValidationError(w, err) {
-			return
-		}
+		writeValidationError(w, err)
+		return
 	}
 	orgIDPtr, ok := parseOptionalUUID(w, &req.OrganizationID, "organization_id")
 	if !ok {
