@@ -4,7 +4,6 @@ from fastapi import APIRouter
 
 from .admin import router as admin_router
 from .alerts import router as alerts_router
-from .audit import router as audit_router
 from .bgp import router as bgp_router
 from .collectors import router as collectors_router
 from .dashboards import router as dashboards_router
@@ -40,7 +39,11 @@ router.include_router(dashboards_router)
 router.include_router(search_router)
 router.include_router(stencils_router)
 router.include_router(power_router)
-router.include_router(audit_router)
+# /api/v1/audit/* moved to otter-go (PR 180). The umbrella chart
+# routes /api/v1/audit → otter-go; Python no longer registers the
+# router so a misrouted internal call fails loud instead of silently
+# double-serving. The audit_log table + the security.audit.record()
+# helper still live in Python (mutation handlers write to it).
 router.include_router(admin_router)
 router.include_router(notifications_router)
 router.include_router(organization_router)

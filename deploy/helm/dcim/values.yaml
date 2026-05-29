@@ -242,6 +242,21 @@ ingress:
         - path: /api/v1/auth
           pathType: Prefix
           backend: otter-go
+        # PR 180 cutover: /api/v1/audit/* moves to otter-go. PR 177
+        # landed the RequireCapability("audit:events:read") wrap and
+        # the scope_site_ids ABAC filter on ListAuditLog /
+        # CountAuditLog / ListAuditActions, plus the audit_log
+        # (site_id, action) index migration (0066). Refine pagination
+        # (?page=N) handled by audit handler's parseOffset. Page-body
+        # shape is the otter-go canonical {items, total, limit,
+        # offset} rather than Python's {items, page, page_size, total,
+        # has_more}; finch's data-provider reads only items+total so
+        # the table renders correctly. Lower blast radius than auth
+        # — finch hits /audit only when an operator opens the audit
+        # page.
+        - path: /api/v1/audit
+          pathType: Prefix
+          backend: otter-go
         # PR 178 cutover: telemetry read path moves to otter-go.
         # /api/v1/ingest/telemetry (POST) is intentionally NOT in this
         # set — it stays on Python otter until a Go port lands (heron
