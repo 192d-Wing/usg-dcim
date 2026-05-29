@@ -2,7 +2,7 @@
 // feed each pool. The "Source supernets" modal is the bridge between
 // IPAM (where supernets live) and LIR (which pools they back).
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -204,8 +204,13 @@ function PoolFormModal({ visible, editing, onClose }: {
 
   // Reset form when target changes — opening create after editing
   // shouldn't carry the old values, and re-editing the same pool
-  // shouldn't either if the user dismissed without saving.
-  useMemo(() => {
+  // shouldn't either if the user dismissed without saving. useEffect
+  // (not useMemo) because this is a side effect, not a derived
+  // value; useMemo runs during render so setState inside its
+  // factory triggers React's "cannot update a component while
+  // rendering a different component" warning under StrictMode +
+  // concurrent rendering.
+  useEffect(() => {
     setForm(editing ? fromPool(editing) : emptyForm());
   }, [editing?.id, visible]);
 
@@ -392,7 +397,7 @@ function SourceSupernetsModal({ pool, canWrite, onClose }: {
   const [attachInput, setAttachInput] = useState('');
   const [attaching, setAttaching] = useState(false);
 
-  useMemo(() => { setAttachInput(''); }, [pool?.id]);
+  useEffect(() => { setAttachInput(''); }, [pool?.id]);
 
   const supernetsQ = useQuery({
     queryKey: ['lir-pool-supernets', pool?.id],

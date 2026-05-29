@@ -6,7 +6,7 @@
 // dropdown filters to eligible pools client-side too as a UX
 // shortcut.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
@@ -159,8 +159,13 @@ function ApproveModal({ target, onClose }: {
   const [submitting, setSubmitting] = useState(false);
 
   // Reset state when target changes — opening a different row
-  // shouldn't carry the previous selection.
-  useMemo(() => {
+  // shouldn't carry the previous selection. useEffect (not
+  // useMemo) because this is a side effect, not a derived value;
+  // useMemo runs during render and calling setState from a memo
+  // factory triggers React's 'cannot update a component while
+  // rendering a different component' warning under StrictMode +
+  // concurrent rendering.
+  useEffect(() => {
     setPoolOpt(null);
     setNotes('');
   }, [target?.id]);
@@ -268,7 +273,7 @@ function RejectModal({ target, onClose }: {
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  useMemo(() => { setReason(''); }, [target?.id]);
+  useEffect(() => { setReason(''); }, [target?.id]);
 
   async function doReject() {
     if (!target) return;

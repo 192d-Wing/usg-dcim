@@ -6,7 +6,7 @@
 // stale click on an already-moved row gets a clean 409 — the
 // tab refetches on success and the row drops out.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useGetIdentity } from '@refinedev/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -157,8 +157,12 @@ function MoveModal({
   const [moving, setMoving] = useState(false);
 
   // Reset selections when target changes — opening the modal twice
-  // shouldn't carry stale picks.
-  useMemo(() => {
+  // shouldn't carry stale picks. useEffect (not useMemo) because
+  // this is a side effect, not a derived value; useMemo runs during
+  // render and calling setState from a memo factory triggers
+  // React's "cannot update a component while rendering a different
+  // component" warning under StrictMode + concurrent rendering.
+  useEffect(() => {
     setFabricOpt(null);
     setVrfOpt(null);
   }, [target?.id]);

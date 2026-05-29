@@ -128,7 +128,12 @@ export function LirPage() {
   const tabs: { id: string; label: string; content: React.ReactNode }[] = [];
   if (canCreate) tabs.push({ id: 'request', label: 'Request', content: <RequestForm /> });
   if (canReadReq) tabs.push({ id: 'my-requests', label: 'My requests', content: <MyRequestsTab canCancel={canCancel} /> });
-  if (canReadAlloc) tabs.push({ id: 'my-allocations', label: 'My allocations', content: <MyAllocationsTab caps={caps} /> });
+  // Tab label is "Allocations" (not "My allocations") because
+  // /lir/allocations is org-scope filtered server-side: a tenant
+  // sees their own; a global-scope NIC or Auditor sees every
+  // tenant's. The earlier "My" label misled the latter into
+  // thinking they were looking at a self-view.
+  if (canReadAlloc) tabs.push({ id: 'allocations', label: 'Allocations', content: <MyAllocationsTab caps={caps} /> });
   if (canApprove || canReject) {
     tabs.push({
       id: 'approval-queue', label: 'Approval queue',
@@ -276,7 +281,16 @@ function RequestForm() {
             <Select
               selectedOption={familyOpt}
               options={FAMILY_OPTS}
-              onChange={(e) => setFamilyOpt(e.detail.selectedOption)}
+              onChange={(e) => {
+                setFamilyOpt(e.detail.selectedOption);
+                // Clear poolOpt — the new family invalidates the
+                // existing selection. Without this, a previously-
+                // picked v6 pool would persist after flipping to v4
+                // (the dropdown filters it out, but the Select
+                // control retains its stale value) and submit would
+                // forward a cross-family pool_id with the new family.
+                setPoolOpt(null);
+              }}
             />
           </FormField>
           <FormField
@@ -540,7 +554,7 @@ function MyAllocationsTab({ caps }: { caps: readonly string[] }) {
         loadingText="Loading allocations…"
         items={allocs}
         trackBy="id"
-        header={<Header counter={`(${allocs.length})`}>My allocations</Header>}
+        header={<Header counter={`(${allocs.length})`}>Allocations</Header>}
         empty={<Box color="text-status-inactive">No allocations yet.</Box>}
         columnDefinitions={[
           {
