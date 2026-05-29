@@ -1,4 +1,4 @@
-.PHONY: help sync up down logs build migrate seed test lint fmt collector finch frontend otter backend worker clean
+.PHONY: help sync up down logs build migrate seed seed-lir seed-lir-local test lint fmt collector finch frontend otter backend worker clean
 
 help:
 	@echo "USG DCIM dev tasks (Python via uv)"
@@ -8,6 +8,7 @@ help:
 	@echo "  make logs         tail all service logs"
 	@echo "  make migrate      apply Alembic migrations against running stack"
 	@echo "  make seed         load demo enterprise dataset"
+	@echo "  make seed-lir     load LIR sample (pool + supernet + pending request)"
 	@echo "  make test         backend pytest + frontend vitest"
 	@echo "  make lint         ruff + eslint"
 	@echo "  make fmt          ruff format + prettier"
@@ -42,6 +43,12 @@ migrate-local:
 
 seed-local:
 	uv run --project packages/otter python -m dcim.scripts.seed_demo
+
+seed-lir:
+	podman compose -f deploy/docker/docker-compose.yml exec api python -m dcim.scripts.seed_lir
+
+seed-lir-local:
+	uv run --project packages/otter python -m dcim.scripts.seed_lir
 
 test:
 	uv run --project packages/otter pytest packages/otter/tests -q
