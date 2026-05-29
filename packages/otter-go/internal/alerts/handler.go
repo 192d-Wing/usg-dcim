@@ -83,12 +83,12 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability("alerts:maintenance-windows:delete")).Delete("/alerts/maintenance-windows/{id}", h.deleteMW)
 }
 
-type alertsPage struct {
-	Items  []dbq.Alert `json:"items"`
-	Total  int64       `json:"total"`
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
-}
+// alertsPage is the wire shape for /alerts. Alias of httpx.Page[T] so
+// the {Items, Total, Limit, Offset} layout stays in lockstep with
+// every other paginated handler and the empty-page short-circuit
+// path picks up the non-nil empty Items invariant from
+// httpx.EmptyPage.
+type alertsPage = httpx.Page[dbq.Alert]
 
 func (h *Handler) listAlerts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -102,7 +102,10 @@ func (h *Handler) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scoped && len(scopeSiteIds) == 0 {
-		httpx.JSON(w, http.StatusOK, alertsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		// EmptyPage[dbq.Alert] forces Items=[]Alert{} so the JSON
+		// payload is `"items": []`, not `"items": null` — finch's
+		// data.items.map() can't survive null.
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Alert](limit, offset))
 		return
 	}
 	params := dbq.ListAlertsParams{

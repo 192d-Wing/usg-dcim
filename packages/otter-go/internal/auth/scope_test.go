@@ -217,6 +217,100 @@ func TestFindScope_WildcardFallsBackToGlobal(t *testing.T) {
 	}
 }
 
+// ---- wildcard-evasion fix ----
+
+// TestFindScope_WildcardKeyedScopeApplies is the regression for the
+// "wildcard cap, scope keyed on the wildcard" evasion. Pre-fix:
+// FindScope("audit:events:read") missed the exact code key, missed
+// the bare `*` key, and fell through to GlobalScope — silently
+// dropping the SiteA binding and serving fleet-wide audit data.
+// Post-fix: the `audit:*:*` pattern matches the `audit:events:read`
+// target via segmented wildcard rules, and the scope it carries is
+// applied. Cap codes are 3-segment (module:resource:action) so a
+// genuinely-wildcarded audit cap is `audit:*:*`, not `audit:*`.
+func TestFindScope_WildcardKeyedScopeApplies(t *testing.T) {
+	siteA := uuid.New()
+	p := Principal{
+		Capabilities: []string{"audit:*:*"},
+		Scopes: map[string]Scope{
+			"audit:*:*": {SiteIDs: singletonUUID(siteA)},
+		},
+	}
+	s := FindScope(p, "audit:events:read")
+	if s == nil {
+		t.Fatal("FindScope returned nil for held cap")
+	}
+	if s.IsGlobal {
+		t.Error("expected scope-restricted, got GlobalScope (wildcard-evasion regression)")
+	}
+	if _, ok := s.SiteIDs[siteA]; !ok {
+		t.Errorf("expected SiteIDs to contain siteA from the audit:*:* binding, got %+v", s.SiteIDs)
+	}
+}
+
+// TestFindScope_ExactWinsOverWildcard verifies precedence: when a
+// principal has BOTH an exact-code scope binding and a wildcard
+// binding that would also match, the exact one wins (more-specific
+// scope row).
+func TestFindScope_ExactWinsOverWildcard(t *testing.T) {
+	exactSite, wildcardSite := uuid.New(), uuid.New()
+	p := Principal{
+		Capabilities: []string{"audit:events:read", "audit:*:*"},
+		Scopes: map[string]Scope{
+			"audit:events:read": {SiteIDs: singletonUUID(exactSite)},
+			"audit:*:*":         {SiteIDs: singletonUUID(wildcardSite)},
+		},
+	}
+	s := FindScope(p, "audit:events:read")
+	if _, ok := s.SiteIDs[exactSite]; !ok {
+		t.Errorf("expected exact scope binding to win, got %+v", s.SiteIDs)
+	}
+	if _, ok := s.SiteIDs[wildcardSite]; ok {
+		t.Errorf("wildcard scope should not be unioned when exact match exists, got %+v", s.SiteIDs)
+	}
+}
+
+// TestFindScope_MultipleMatchingPatternsUnion verifies that when two
+// patterns match the same code (e.g. audit:*:* and audit:events:*
+// both matching audit:events:read) and neither is the exact key, the
+// resulting scope is the union — the caller is granted the broadest
+// reach any pattern row authorizes.
+func TestFindScope_MultipleMatchingPatternsUnion(t *testing.T) {
+	siteA, siteB := uuid.New(), uuid.New()
+	p := Principal{
+		Capabilities: []string{"audit:*:*"},
+		Scopes: map[string]Scope{
+			"audit:*:*":      {SiteIDs: singletonUUID(siteA)},
+			"audit:events:*": {SiteIDs: singletonUUID(siteB)},
+		},
+	}
+	s := FindScope(p, "audit:events:read")
+	if _, ok := s.SiteIDs[siteA]; !ok {
+		t.Errorf("expected siteA from audit:*:* binding, got %+v", s.SiteIDs)
+	}
+	if _, ok := s.SiteIDs[siteB]; !ok {
+		t.Errorf("expected siteB from audit:events:* binding, got %+v", s.SiteIDs)
+	}
+}
+
+// TestFindScope_BareGlobalKeyShortCircuits keeps the legacy precedence:
+// when p.Scopes carries a bare "*" key, it short-circuits before any
+// segmented walk. Mirrors Python's find_matching_capability.
+func TestFindScope_BareGlobalKeyShortCircuits(t *testing.T) {
+	siteOther := uuid.New()
+	p := Principal{
+		Capabilities: []string{"*"},
+		Scopes: map[string]Scope{
+			"*":         {SiteIDs: singletonUUID(siteOther)},
+			"audit:*:*": GlobalScope(), // would otherwise also match
+		},
+	}
+	s := FindScope(p, "audit:events:read")
+	if _, ok := s.SiteIDs[siteOther]; !ok {
+		t.Errorf("bare * key should win, got %+v", s)
+	}
+}
+
 // ---- PR 61: enclave + classification ----
 
 func TestEnclaveMatches(t *testing.T) {
@@ -446,5 +540,93 @@ func TestResolveUserScopes_ClassificationDim(t *testing.T) {
 	}
 	if _, has := scope.Classifications["unclassified"]; !has {
 		t.Errorf("classification dim not populated, got %+v", scope.Classifications)
+	}
+}
+
+// ---- per-request memoization (PR-177 follow-up) ----
+
+// scopeCountingExpander wraps a returned slice with a call counter
+// so memoization tests can assert ListSiteIDsForExpansion is invoked
+// at most once per (ctx, capCode).
+type scopeCountingExpander struct {
+	ids   []uuid.UUID
+	calls int
+}
+
+func (s *scopeCountingExpander) ListSiteIDsForExpansion(_ context.Context, _ dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	s.calls++
+	return s.ids, nil
+}
+
+func TestScopedSiteFilter_MemoizesPerRequest(t *testing.T) {
+	siteA := uuid.New()
+	p := Principal{
+		Capabilities: []string{"audit:events:read"},
+		Scopes: map[string]Scope{
+			"audit:events:read": {SiteIDs: singletonUUID(siteA)},
+		},
+	}
+	e := &scopeCountingExpander{ids: []uuid.UUID{siteA}}
+	ctx := WithScopeFilterCache(context.Background())
+
+	// First resolve runs the expansion.
+	ids1, scoped1, err1 := ScopedSiteFilter(ctx, e, p, "audit:events:read")
+	if err1 != nil || !scoped1 || len(ids1) != 1 || ids1[0] != siteA {
+		t.Fatalf("first call: ids=%v scoped=%v err=%v", ids1, scoped1, err1)
+	}
+	if e.calls != 1 {
+		t.Errorf("first call should invoke ListSiteIDsForExpansion once, got %d", e.calls)
+	}
+
+	// Second resolve on the same context reuses the cache.
+	ids2, scoped2, err2 := ScopedSiteFilter(ctx, e, p, "audit:events:read")
+	if err2 != nil || !scoped2 || len(ids2) != 1 || ids2[0] != siteA {
+		t.Fatalf("second call: ids=%v scoped=%v err=%v", ids2, scoped2, err2)
+	}
+	if e.calls != 1 {
+		t.Errorf("second call should hit cache, got expansion call count %d", e.calls)
+	}
+}
+
+func TestScopedSiteFilter_GlobalCallerCached(t *testing.T) {
+	// Global callers also memoize — the cache stores Scoped=false,
+	// IDs=nil so the second call short-circuits at the cache layer
+	// instead of re-running FindScope.
+	p := Principal{Capabilities: []string{"*"}}
+	e := &scopeCountingExpander{}
+	ctx := WithScopeFilterCache(context.Background())
+
+	for i := 0; i < 3; i++ {
+		ids, scoped, err := ScopedSiteFilter(ctx, e, p, "audit:events:read")
+		if err != nil || scoped || ids != nil {
+			t.Fatalf("iter %d: expected (nil,false,nil), got (%v,%v,%v)", i, ids, scoped, err)
+		}
+	}
+	if e.calls != 0 {
+		t.Errorf("global caller should never hit ListSiteIDsForExpansion, got %d", e.calls)
+	}
+}
+
+func TestScopedSiteFilter_NoCacheStillWorks(t *testing.T) {
+	// Backward compatibility: callers that don't run through Verifying
+	// (e.g. direct test invocations) still get correct results, just
+	// without the memoization.
+	siteA := uuid.New()
+	p := Principal{
+		Capabilities: []string{"audit:events:read"},
+		Scopes: map[string]Scope{
+			"audit:events:read": {SiteIDs: singletonUUID(siteA)},
+		},
+	}
+	e := &scopeCountingExpander{ids: []uuid.UUID{siteA}}
+	ctx := context.Background() // no cache attached
+
+	ids1, _, _ := ScopedSiteFilter(ctx, e, p, "audit:events:read")
+	ids2, _, _ := ScopedSiteFilter(ctx, e, p, "audit:events:read")
+	if e.calls != 2 {
+		t.Errorf("without cache, expected 2 expansion calls, got %d", e.calls)
+	}
+	if len(ids1) != 1 || len(ids2) != 1 {
+		t.Errorf("result shape: ids1=%v ids2=%v", ids1, ids2)
 	}
 }
