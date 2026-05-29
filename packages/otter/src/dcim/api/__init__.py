@@ -18,7 +18,6 @@ from .power import router as power_router
 from .regiondeploy import router as regiondeploy_router
 from .search import router as search_router
 from .stencils import router as stencils_router
-from .telemetry import router as telemetry_router
 
 router = APIRouter()
 # /api/v1/auth/* moved to otter-go (PR 179). The umbrella chart
@@ -29,8 +28,13 @@ router = APIRouter()
 # models}/auth.py — they back DB rows other Python paths still read.
 router.include_router(inventory_router)
 router.include_router(collectors_router)
+# /api/v1/ingest/telemetry remains on Python until the high-throughput
+# fallback gets a Go port; heron already owns the mTLS path.
 router.include_router(ingest_router)
-router.include_router(telemetry_router)
+# /api/v1/telemetry/series moved to otter-go (PR 178). The umbrella
+# chart routes /api/v1/telemetry → otter-go; Python no longer registers
+# the router so a misrouted internal call fails loud instead of
+# silently double-serving.
 router.include_router(alerts_router)
 router.include_router(dashboards_router)
 router.include_router(search_router)
