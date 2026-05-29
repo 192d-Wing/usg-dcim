@@ -1,0 +1,69 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "otter-go.fullname" . }}
+  labels: {{- include "otter-go.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "otter-go.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "otter-go.labels" . | nindent 8 }}
+    spec:
+      # Merge: subchart-local wins (distroless image's nonroot UID is
+      # 65532, not the umbrella's default 10001), but any other keys
+      # operators set on global.podSecurityContext (fsGroup, seccompProfile,
+      # supplementalGroups, sysctls, …) propagate.
+      securityContext: {{- toYaml (mergeOverwrite (deepCopy .Values.global.podSecurityContext) .Values.podSecurityContext) | nindent 8 }}
+      containers:
+        - name: otter-go
+          image: {{ include "otter-go.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8000 }
+          env:
+            - { name: OTTER_GO_ADDR, value: ":8000" }
+            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ include "dcim.goDsn" . | quote }} }
+            - { name: DCIM_REDIS_DSN, value: {{ .Values.global.redis.dsn | quote }} }
+            # Auth — shares JWT signing key with Python otter so a
+            # session minted on one is honored by the other.
+            - name: DCIM_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_secret } }
+            {{- if .Values.global.config.jwtOldSecrets }}
+            # Required during JWT secret rotation so otter-go and
+            # Python otter accept the previous keys symmetrically.
+            # Without this, /api/v1/lir/* 401s as soon as the active
+            # key changes while Python /api/* still validates.
+            - name: DCIM_JWT_OLD_SECRETS
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_old_secrets } }
+            {{- end }}
+            - { name: DCIM_OIDC_ISSUER,    value: {{ .Values.global.config.oidc.issuer    | quote }} }
+            - { name: DCIM_OIDC_CLIENT_ID, value: {{ .Values.global.config.oidc.clientId  | quote }} }
+            {{- if .Values.global.config.oidc.clientSecret }}
+            - name: DCIM_OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: oidc_client_secret } }
+            {{- end }}
+            {{- if .Values.global.config.oidc.redirectUri }}
+            - { name: DCIM_OIDC_REDIRECT_URI, value: {{ .Values.global.config.oidc.redirectUri | quote }} }
+            {{- end }}
+            {{- if .Values.global.config.dnssecSecret }}
+            # Fernet key for DNSSEC private-key encryption at rest.
+            # Optional — when unset, otter-go falls back to plaintext
+            # storage (loud-warning log line) which only suits sealed
+            # dev envs. Set in production via `global.config.dnssecSecret`.
+            - name: DCIM_DNS_DNSSEC_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: dnssec_secret } }
+            {{- end }}
+            {{- if .Values.insecureAuthStub }}
+            - { name: OTTER_GO_INSECURE_AUTH_STUB, value: {{ .Values.insecureAuthStub | quote }} }
+            {{- end }}
+          readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
+          livenessProbe:  {{- toYaml .Values.livenessProbe  | nindent 12 }}
+          resources:      {{- toYaml .Values.resources      | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+{{- end }}

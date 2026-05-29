@@ -24,13 +24,32 @@ global:
 
   config:
     jwtSecret:                "PROVIDE_VIA_SECRET"
+    # CSV of base64-or-plain previous JWT secrets, ordered newest first.
+    # On rotation: move the current jwtSecret here, set the new one
+    # above. Both otter (Python) and otter-go validate against the
+    # primary + every old secret until tokens carrying old kids
+    # naturally expire (jwt_ttl_seconds, 15 min by default). Drop old
+    # entries after the TTL has elapsed. Empty disables rotation
+    # support — sessions minted under the previous key 401 immediately.
+    jwtOldSecrets:            ""
     collectorTokenSecret:     "PROVIDE_VIA_SECRET"
     collectorStaleSeconds:    600
     alertEvalIntervalSeconds: 30
     oidc:
       issuer: ""
       clientId: ""
-      clientSecretRef: ""
+      # Client secret minted by the IdP. Stamped into dcim-secrets
+      # (key `oidc_client_secret`) and surfaced to both otter + otter-go
+      # via DCIM_OIDC_CLIENT_SECRET. Required for confidential clients
+      # — leave "" only when using a public client (PKCE).
+      clientSecret: ""
+      # Browser-facing callback URL the SPA hands the IdP at /auth/oidc/login.
+      # Must match a redirectUri registered on the IdP client (Keycloak
+      # admin → clients → <id> → Valid Redirect URIs). The token-exchange
+      # leg must send this byte-for-byte same value back to the IdP, so
+      # scheme matters: https vs http mismatches with the SPA origin
+      # show up as "Incorrect redirect_uri" at token exchange.
+      redirectUri: ""
     saml:
       metadataUrl: ""
     # Region-deploy kubeconfig-callback wiring. `centralUrl` is the
@@ -42,6 +61,16 @@ global:
     regiondeploy:
       callbackSecret: "PROVIDE_VIA_SECRET"
       centralUrl:     ""
+    # Fernet key used for at-rest encryption of two distinct columns,
+    # all reached via DCIM_DNS_DNSSEC_SECRET:
+    #   * DnsKey.private_pem            — Python otter services/dns.py
+    #   * User.idp_refresh_token        — otter-go internal/auth + Python
+    # Same key everywhere so any pod can decrypt rows any other pod
+    # wrote; rotating it requires re-encrypting both columns. Empty ->
+    # plaintext fallback with a loud structlog/slog warning; only
+    # acceptable in sealed dev environments. Generate via
+    # `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    dnssecSecret: ""
 
   otel:
     enabled: false
@@ -91,6 +120,15 @@ otter:
     labels: {}
     annotations: {}
     loadBalancerClass: ""
+
+otter-go:
+  enabled: true
+  # Endpoints currently owned by otter-go and routed via the
+  # umbrella's ingress (`ingress.hosts[].paths`):
+  #   /api/v1/lir/*                        LIR pools/requests/allocations
+  #   /api/v1/ipam/supernets/{id}/move     tenant supernet move
+  # replicaCount + PDB + service.port live in the subchart's own
+  # values.yaml; override here only when a deployment needs different.
 
 otter-worker:
   enabled: true
@@ -168,15 +206,37 @@ badger:
 ingress:
   enabled: true
   className: nginx
+  # nginx-ingress regex support is required for the /api/v1/ipam/supernets/{id}/move
+  # rule below — that endpoint lives in otter-go but Python otter owns the rest
+  # of /api/v1/ipam/supernets/* CRUD. Without use-regex an ImplementationSpecific
+  # path falls back to literal matching. Operators on non-nginx controllers
+  # need a controller-specific equivalent (Traefik middleware, Gateway API
+  # HTTPRouteRule with a URLRewrite).
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
   hosts:
     - host: dcim.example.mil
       paths:
-        - path: /
+        # The Kubernetes Ingress spec mandates longest-prefix-match for
+        # Prefix rules regardless of declaration order — both nginx-ingress
+        # and the Gateway API HTTPRoute resource follow this. On other
+        # controllers (Traefik IngressRoute, AWS ALB rule priorities)
+        # ordering can matter; we keep specific-first as a defensive
+        # convention. ImplementationSpecific paths take precedence over
+        # Prefix when use-regex is on (nginx behavior), which is what makes
+        # the supernets/.../move regex catch before the /api Prefix.
+        - path: /api/v1/ipam/supernets/[^/]+/move
+          pathType: ImplementationSpecific
+          backend: otter-go
+        - path: /api/v1/lir
           pathType: Prefix
-          backend: finch
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter
+        - path: /
+          pathType: Prefix
+          backend: finch
   tls:
     - secretName: dcim-tls
       hosts: [dcim.example.mil]

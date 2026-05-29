@@ -4,6 +4,10 @@ kind: Ingress
 metadata:
   name: {{ include "dcim.fullname" . }}
   labels: {{- include "dcim.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   tls: {{- toYaml .Values.ingress.tls | nindent 4 }}
@@ -17,9 +21,13 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "dcim.subchartService" (dict "ctx" $ "name" .backend) }}
+                # Subchart convention: Service name {Release.Name}-{subchart},
+                # port from .Values.<subchart>.service.port. `index` is used
+                # because `.Values.otter-go.x` parses as subtraction. Unknown
+                # backend → template error at render time.
+                name: {{ printf "%s-%s" $.Release.Name .backend }}
                 port:
-                  number: {{ if eq .backend "otter" }}{{ $.Values.otter.service.port }}{{ else }}{{ $.Values.finch.service.port }}{{ end }}
+                  number: {{ index $.Values .backend "service" "port" }}
           {{- end }}
     {{- end }}
 {{- end }}

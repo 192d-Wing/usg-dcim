@@ -2,8 +2,9 @@ apiVersion: v2
 name: dcim
 description: |
   USG DCIM enterprise platform. Umbrella chart bundling per-animal
-  subcharts (otter, otter-worker, finch, heron, magpie, beagle, badger)
-  plus shared ingress, network policy, secrets, and Alembic migrations.
+  subcharts (otter, otter-go, otter-worker, finch, heron, magpie,
+  beagle, badger) plus shared ingress, network policy, secrets, and
+  Alembic migrations.
 type: application
 version: 0.2.0
 appVersion: "0.1.0"
@@ -15,6 +16,7 @@ keywords: [dcim, datacenter, infrastructure, monitoring]
 # Each subchart's enabled flag is set in values.yaml (per-animal block).
 dependencies:
   - { name: otter,        version: 0.1.0, condition: otter.enabled }
+  - { name: otter-go,     version: 0.1.0, condition: otter-go.enabled }
   - { name: otter-worker, version: 0.1.0, condition: otter-worker.enabled }
   - { name: finch,        version: 0.1.0, condition: finch.enabled }
   - { name: heron,        version: 0.1.0, condition: heron.enabled }

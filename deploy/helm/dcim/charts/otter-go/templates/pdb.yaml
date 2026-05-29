@@ -1,0 +1,11 @@
+{{- if and .Values.enabled .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "otter-go.fullname" . }}
+  labels: {{- include "otter-go.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels: {{- include "otter-go.selectorLabels" . | nindent 6 }}
+{{- end }}

@@ -45,6 +45,14 @@ heron:
 finch:
   replicaCount: 1
 
+# Single replica on k3d so a single-node cluster doesn't fail
+# scheduling the second pod for the default PDB. PDB explicitly
+# disabled — k3d drains would deadlock.
+otter-go:
+  replicaCount: 1
+  podDisruptionBudget:
+    enabled: false
+
 magpie:
   enabled: false
 
@@ -54,11 +62,16 @@ beagle:
 ingress:
   enabled: true
   className: traefik
+  # Traefik handles regex paths via IngressRoute CRD rather than nginx's
+  # use-regex annotation. On k3d we rely on Prefix-only routing and
+  # accept that /api/v1/ipam/supernets/{id}/move won't hit otter-go —
+  # the LIR Unassigned-Move modal isn't load-bearing for local dev.
   hosts:
     - host: dcim.local
       paths:
-        - { path: /,    pathType: Prefix, backend: finch }
-        - { path: /api, pathType: Prefix, backend: otter }
+        - { path: /api/v1/lir, pathType: Prefix, backend: otter-go }
+        - { path: /api,        pathType: Prefix, backend: otter    }
+        - { path: /,           pathType: Prefix, backend: finch    }
   tls: []
 
 monitoring:

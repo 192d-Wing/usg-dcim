@@ -24,7 +24,7 @@ spec:
           env:
             - { name: INGEST_ADDR, value: ":8443" }
             - { name: HERON_ADMIN_ADDR, value: ":{{ .Values.service.adminPort }}" }
-            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ regexReplaceAll "^postgresql\\+asyncpg" .Values.global.postgresql.dsn "postgres" | quote }} }
+            - { name: DCIM_POSTGRES_DSN_RAW, value: {{ include "dcim.goDsn" . | quote }} }
             {{- if .Values.mtls.enabled }}
             - { name: INGEST_TLS_CERT, value: "/etc/heron/tls/tls.crt" }
             - { name: INGEST_TLS_KEY,  value: "/etc/heron/tls/tls.key" }
