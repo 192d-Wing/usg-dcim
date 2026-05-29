@@ -47,15 +47,11 @@ class Settings(BaseSettings):
     # propagates within this window. 15 minutes is the tradeoff between
     # security (faster propagation) and UX (less-frequent re-auth).
     jwt_ttl_seconds: int = 900
-    # When true, /auth/login (form login with email+password) returns 403.
-    # admin@dcim.local remains in the DB for break-glass via the API token
-    # path if the seed creates one. Flip on in any deployment with SSO.
-    local_login_disabled: bool = False
-    # Sliding-window rate limit on /auth/login, keyed by (client_ip, email).
-    # 5 attempts per 60s by default — generous for fat-fingered passwords,
-    # tight enough to slow credential stuffing. Set max to 0 to disable.
-    login_rate_limit_max: int = 5
-    login_rate_limit_window_seconds: int = 60
+    # /auth/* moved to otter-go (PR 179) — the equivalent of
+    # local_login_disabled + the login rate limit live in
+    # packages/otter-go/internal/auth. The Python-side settings have
+    # been retired to avoid drift; if you need to disable local form
+    # login or tune the rate limit, do it in otter-go's config.
     # Capabilities that require the IdP to have performed multi-factor
     # auth. The session JWT carries an `mfa` boolean derived from the
     # id_token's `amr` claim (RFC 8176: "mfa", "otp", "hwk", etc.);

@@ -32,6 +32,11 @@ def test_openapi_published() -> None:
         "/api/v1/alerts",
         "/api/v1/dashboards/enterprise",
         "/api/v1/search",
-        "/api/v1/auth/me",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
+    # /api/v1/auth/* moved to otter-go (PR 179) — assert it's *gone*
+    # from Python's OpenAPI so this test catches a regression where
+    # the router gets re-included alongside the otter-go canonical.
+    assert not any(p.startswith("/api/v1/auth") for p in paths), (
+        "Python should not advertise /api/v1/auth/* — otter-go is canonical"
+    )

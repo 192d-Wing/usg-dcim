@@ -231,6 +231,17 @@ ingress:
         - path: /api/v1/lir
           pathType: Prefix
           backend: otter-go
+        # PR 179 cutover: /api/v1/auth/* moves to otter-go. Every
+        # authenticated request hits /auth/me, so this is the highest-
+        # blast-radius cutover. Parity verified: Go and Python share
+        # the same jwt_secret + revoked_jtis table + oidc_client_secret
+        # (see PR 176 secrets wiring) and otter-go's middleware was
+        # cap-gate-retrofitted in PR 177 + 178. /auth/me wire shape
+        # matches Python byte-for-byte (user.id, user.email,
+        # via_token, sorted capabilities).
+        - path: /api/v1/auth
+          pathType: Prefix
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter

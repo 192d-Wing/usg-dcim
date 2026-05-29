@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from .admin import router as admin_router
 from .alerts import router as alerts_router
 from .audit import router as audit_router
-from .auth import router as auth_router
 from .bgp import router as bgp_router
 from .collectors import router as collectors_router
 from .dashboards import router as dashboards_router
@@ -22,7 +21,12 @@ from .stencils import router as stencils_router
 from .telemetry import router as telemetry_router
 
 router = APIRouter()
-router.include_router(auth_router)
+# /api/v1/auth/* moved to otter-go (PR 179). The umbrella chart
+# routes /api/v1/auth → otter-go; Python no longer registers the
+# router so a misrouted internal call fails loud instead of silently
+# double-serving login/me/tokens. The schemas + models for User /
+# ApiToken / Role still live under packages/otter/src/dcim/{schemas,
+# models}/auth.py — they back DB rows other Python paths still read.
 router.include_router(inventory_router)
 router.include_router(collectors_router)
 router.include_router(ingest_router)

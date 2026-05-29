@@ -20,29 +20,64 @@ type Handler struct {
 	Audit  AuditRecorder // nil-safe; when set, login/logout/token-CRUD/refresh write audit rows
 }
 
-func (h *Handler) Mount(r chi.Router) {
+// Mount registers every /auth/* route under the parent router's
+// existing middleware chain. The split between public-routes (no
+// bearer required: login, OIDC begin/callback/logout, refresh,
+// logout) and authenticated-routes (/me, /tokens CRUD) is internal:
+// pass a non-nil authMW and the authenticated half gets wrapped
+// inside chi.With(authMW); pass nil and ALL routes inherit the
+// caller's middleware. Production main.go passes the Verifying
+// middleware so unauthenticated login attempts can still reach
+// publicRoutes without being 401'd before the handler runs; tests
+// that pre-inject a Principal can pass nil and exercise both halves
+// through the same chain.
+func (h *Handler) Mount(r chi.Router, authMW ...func(http.Handler) http.Handler) {
 	r.Route("/auth", func(r chi.Router) {
-		// Authentication-only — Verifying middleware upstream of /api/v1
-		// has already validated the bearer.
-		r.Get("/me", h.me)
-		r.Get("/oidc/login", h.oidcLogin)
-		r.Get("/oidc/callback", h.oidcCallback)
-		r.Get("/oidc/logout", h.oidcLogout)
-		r.Post("/login", h.login)
-		r.Post("/logout", h.logout)
-		r.Post("/refresh", h.refresh)
-		// /tokens gates are doubly enforced. The middleware wrap is the
-		// grep-able route-layer convention (matches admin, audit,
-		// telemetry, lir, alerts, …) and the canonical 403 path. The
-		// inline HasCapability checks in handler_local.go remain as
-		// belt-and-suspenders so a future refactor that removes either
-		// layer still fails closed. issueToken additionally walks the
-		// requested permission_codes inline for no-escalation — that
-		// data check can't move to middleware.
-		r.With(RequireCapability("admin:api-tokens:read")).Get("/tokens", h.listTokens)
-		r.With(RequireCapability("admin:api-tokens:create")).Post("/tokens", h.issueToken)
-		r.With(RequireCapability("admin:api-tokens:delete")).Delete("/tokens/{id}", h.revokeToken)
+		h.publicRoutes(r)
+		if len(authMW) == 0 || authMW[0] == nil {
+			h.authenticatedRoutes(r)
+			return
+		}
+		r.Group(func(r chi.Router) {
+			r.Use(authMW[0])
+			h.authenticatedRoutes(r)
+		})
 	})
+}
+
+// publicRoutes wires the no-bearer-required half of /auth. Used by
+// both Mount (single-chain) and MountPublic (split-chain) so the
+// route list lives in exactly one place.
+func (h *Handler) publicRoutes(r chi.Router) {
+	r.Get("/oidc/login", h.oidcLogin)
+	r.Get("/oidc/callback", h.oidcCallback)
+	r.Get("/oidc/logout", h.oidcLogout)
+	r.Post("/login", h.login)
+	// /logout is idempotent — handler 204s on missing/invalid bearer
+	// (handler_local.go) so SPA can call it unconditionally on
+	// session expiry without first checking whether a session exists.
+	r.Post("/logout", h.logout)
+	// /refresh decodes the bearer with WithoutClaimsValidation so an
+	// expired session can still mint a new JWT off the IdP refresh
+	// token. Cannot sit behind Verifying — that would 401 first.
+	r.Post("/refresh", h.refresh)
+}
+
+// authenticatedRoutes wires the half of /auth that requires a valid
+// session. Caller has already attached Verifying.
+func (h *Handler) authenticatedRoutes(r chi.Router) {
+	r.Get("/me", h.me)
+	// /tokens gates are doubly enforced. The middleware wrap is the
+	// grep-able route-layer convention (matches admin, audit,
+	// telemetry, lir, alerts, …) and the canonical 403 path. The
+	// inline HasCapability checks in handler_local.go remain as
+	// belt-and-suspenders so a future refactor that removes either
+	// layer still fails closed. issueToken additionally walks the
+	// requested permission_codes inline for no-escalation — that
+	// data check can't move to middleware.
+	r.With(RequireCapability("admin:api-tokens:read")).Get("/tokens", h.listTokens)
+	r.With(RequireCapability("admin:api-tokens:create")).Post("/tokens", h.issueToken)
+	r.With(RequireCapability("admin:api-tokens:delete")).Delete("/tokens/{id}", h.revokeToken)
 }
 
 type meUser struct {
