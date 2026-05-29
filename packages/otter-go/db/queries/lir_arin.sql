@@ -29,6 +29,14 @@ SELECT key, value, updated_at
 FROM system_settings
 WHERE key = $1;
 
+-- name: GetSystemSettings :many
+-- Batch lookup for the worker's LoadConfig — fetches every ARIN
+-- setting (endpoint, api_key, enabled) in one round-trip instead of
+-- three. Caller materializes a map[key]value on its side.
+SELECT key, value, updated_at
+FROM system_settings
+WHERE key = ANY($1::text[]);
+
 -- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, updated_at)
 VALUES ($1, $2, NOW())

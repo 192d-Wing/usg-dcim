@@ -35,14 +35,6 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
-// landingFabricSlug is the system fabric where LIR allocations land.
-// Duplicated here as a const rather than importing internal/lir to
-// keep the dependency edges sparse — the slug is also defined in
-// packages/otter-go/internal/lir/handler.go (LandingFabricSlug) and
-// seeded by Alembic migration 20260528_0065. Keep these three in
-// sync.
-const landingFabricSlug = "lir-unassigned"
-
 const capSupernetsUpdate = "ipam:supernets:update"
 
 type moveSupernetReq struct {
@@ -115,7 +107,14 @@ func (h *Handler) loadMoveable(
 		mapErr(w, err, "supernet not found")
 		return dbq.SupernetForMoveRow{}, false
 	}
-	if src.CurrentFabricSlug != landingFabricSlug {
+	if !src.CurrentFabricIsSystem {
+		// is_system is set only on platform-managed fabrics (today
+		// just the LIR landing fabric seeded by migration 0065). The
+		// guard used to compare against a hardcoded slug literal
+		// duplicated from the lir package; switching to the column
+		// keeps the contract on the row, not on a string. If a
+		// future deployment adds another is_system fabric, this
+		// check needs a sub-type column to disambiguate.
 		httpx.Error(w, http.StatusConflict,
 			"supernet is not in the LIR landing fabric; nothing to move")
 		return dbq.SupernetForMoveRow{}, false

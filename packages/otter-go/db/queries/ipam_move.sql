@@ -13,14 +13,23 @@
 
 -- name: GetSupernetForMove :one
 -- Joined projection: supernet identity + current fabric/VRF + owner
--- org (for ABAC) + the source fabric's slug (so the handler can
--- verify it's currently in the landing fabric).
+-- org (for ABAC) + the source fabric's is_system flag. Using
+-- is_system instead of slug='lir-unassigned' eliminates a literal
+-- that was previously duplicated across migration 0065,
+-- internal/lir/handler.go, and internal/ipam/move.go. The slug
+-- now lives in just one Go location (LandingFabricSlug in the lir
+-- package, used only by GetLandingFabric in the approve flow).
+--
+-- Assumes the LIR landing fabric is the only is_system fabric in
+-- the deployment (true as of migration 0065). If a future system
+-- fabric is added, tighten this with a system_fabric_purpose
+-- discriminator column on fabrics.
 SELECT s.id,
        s.fabric_id           AS current_fabric_id,
        s.vrf_id              AS current_vrf_id,
        s.owner_organization_id,
        host(s.prefix) || '/' || masklen(s.prefix) AS prefix,
-       f.slug                AS current_fabric_slug
+       f.is_system           AS current_fabric_is_system
 FROM supernets s
 JOIN fabrics f ON f.id = s.fabric_id
 WHERE s.id = $1;

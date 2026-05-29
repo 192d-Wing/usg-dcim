@@ -92,7 +92,10 @@ WITH updated_request AS (
         approved_pool_id = $4::uuid,
         updated_at = NOW()
     WHERE id = $1::uuid AND status = 'pending_approval'
-    RETURNING id
+    RETURNING id, organization_id, requester_user_id, pool_id, site_id,
+              ip_family, prefix_length, purpose, classification, justification,
+              status, submitted_at, decided_at, decided_by_user_id,
+              decision_notes, approved_pool_id, created_at, updated_at
 ),
 new_supernet AS (
     INSERT INTO supernets (
@@ -119,13 +122,30 @@ new_allocation AS (
         new_supernet.id, $7::cidr, NOW(), $2::uuid,
         'active', $11::text, 0, NOW(), NOW()
     FROM new_supernet
-    RETURNING id, tenant_supernet_id
+    RETURNING id, request_id, organization_id, pool_id, pool_supernet_id,
+              tenant_supernet_id,
+              host(prefix) || '/' || masklen(prefix) AS prefix,
+              allocated_at, allocated_by_user_id, status,
+              return_requested_at, return_requested_by_user_id, return_reason,
+              returned_at, returned_by_user_id,
+              arin_status, arin_net_handle, arin_last_attempt_at,
+              arin_last_error, arin_attempts,
+              created_at, updated_at
 )
 SELECT
-    updated_request.id   AS request_id,
-    new_allocation.id    AS allocation_id,
-    new_allocation.tenant_supernet_id AS tenant_supernet_id
-FROM updated_request, new_allocation
+    ur.id, ur.organization_id, ur.requester_user_id, ur.pool_id, ur.site_id,
+    ur.ip_family, ur.prefix_length, ur.purpose, ur.classification, ur.justification,
+    ur.status, ur.submitted_at, ur.decided_at, ur.decided_by_user_id,
+    ur.decision_notes, ur.approved_pool_id, ur.created_at, ur.updated_at,
+    na.id, na.request_id, na.organization_id, na.pool_id, na.pool_supernet_id,
+    na.tenant_supernet_id, na.prefix,
+    na.allocated_at, na.allocated_by_user_id, na.status,
+    na.return_requested_at, na.return_requested_by_user_id, na.return_reason,
+    na.returned_at, na.returned_by_user_id,
+    na.arin_status, na.arin_net_handle, na.arin_last_attempt_at,
+    na.arin_last_error, na.arin_attempts,
+    na.created_at, na.updated_at
+FROM updated_request ur, new_allocation na
 `
 
 type ApproveLirRequestParams struct {
@@ -149,7 +169,33 @@ func (q *Queries) ApproveLirRequest(ctx context.Context, arg ApproveLirRequestPa
 		arg.Prefix, arg.LandingFabricID, arg.LandingVrfID,
 		arg.SupernetPurpose, arg.ArinInitialStatus)
 	var r ApprovalResultRow
-	err := row.Scan(&r.RequestID, &r.AllocationID, &r.TenantSupernetID)
+	// 18 LirRequest columns + 22 LirAllocation columns. Order MUST
+	// match the SELECT list in approveLirRequest above; a column
+	// reorder in the SQL needs a matching reorder here.
+	err := row.Scan(
+		// LirRequest
+		&r.Request.ID, &r.Request.OrganizationID, &r.Request.RequesterUserID,
+		&r.Request.PoolID, &r.Request.SiteID,
+		&r.Request.IpFamily, &r.Request.PrefixLength,
+		&r.Request.Purpose, &r.Request.Classification, &r.Request.Justification,
+		&r.Request.Status, &r.Request.SubmittedAt,
+		&r.Request.DecidedAt, &r.Request.DecidedByUserID,
+		&r.Request.DecisionNotes, &r.Request.ApprovedPoolID,
+		&r.Request.CreatedAt, &r.Request.UpdatedAt,
+		// LirAllocation
+		&r.Allocation.ID, &r.Allocation.RequestID, &r.Allocation.OrganizationID,
+		&r.Allocation.PoolID, &r.Allocation.PoolSupernetID,
+		&r.Allocation.TenantSupernetID, &r.Allocation.Prefix,
+		&r.Allocation.AllocatedAt, &r.Allocation.AllocatedByUserID,
+		&r.Allocation.Status,
+		&r.Allocation.ReturnRequestedAt, &r.Allocation.ReturnRequestedByUserID,
+		&r.Allocation.ReturnReason,
+		&r.Allocation.ReturnedAt, &r.Allocation.ReturnedByUserID,
+		&r.Allocation.ArinStatus, &r.Allocation.ArinNetHandle,
+		&r.Allocation.ArinLastAttemptAt, &r.Allocation.ArinLastError,
+		&r.Allocation.ArinAttempts,
+		&r.Allocation.CreatedAt, &r.Allocation.UpdatedAt,
+	)
 	return r, err
 }
 

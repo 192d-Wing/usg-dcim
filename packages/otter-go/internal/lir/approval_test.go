@@ -106,16 +106,20 @@ func (f *fakeQ) ApproveLirRequest(_ context.Context, a dbq.ApproveLirRequestPara
 	if f.allocations == nil {
 		f.allocations = map[uuid.UUID]dbq.LirAllocation{}
 	}
-	f.allocations[allocID] = dbq.LirAllocation{
+	alloc := dbq.LirAllocation{
 		ID: allocID, RequestID: a.RequestID,
 		OrganizationID: a.OrganizationID, PoolID: a.ApprovedPoolID,
 		PoolSupernetID: a.PoolSupernetID, TenantSupernetID: tenantSupernetID,
 		Prefix: a.Prefix, AllocatedByUserID: a.DecidedByUserID,
 		Status: "active", ArinStatus: a.ArinInitialStatus,
 	}
+	f.allocations[allocID] = alloc
+	// Return the post-update rows the CTE would have produced; the
+	// handler reads result.Request / result.Allocation directly
+	// rather than re-fetching.
 	return dbq.ApprovalResultRow{
-		RequestID: a.RequestID, AllocationID: allocID,
-		TenantSupernetID: tenantSupernetID,
+		Request:    f.requests[a.RequestID],
+		Allocation: alloc,
 	}, nil
 }
 

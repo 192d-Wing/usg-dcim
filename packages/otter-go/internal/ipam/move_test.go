@@ -123,7 +123,7 @@ func happySupernet(orgID uuid.UUID) *dbq.SupernetForMoveRow {
 		CurrentVrfID:        uuid.New(),
 		OwnerOrganizationID: &owner,
 		Prefix:              "10.0.0.0/24",
-		CurrentFabricSlug:   landingFabricSlug,
+		CurrentFabricIsSystem: true,
 	}
 }
 
@@ -171,7 +171,7 @@ func TestMove_SupernetNotFound(t *testing.T) {
 func TestMove_NotInLandingFabricIs409(t *testing.T) {
 	orgID := uuid.New()
 	src := happySupernet(orgID)
-	src.CurrentFabricSlug = "production"
+	src.CurrentFabricIsSystem = false
 	q := &moveFakeQ{supernet: src}
 	rec := sendMove(t, mountMove(q), src.ID, map[string]any{
 		"fabric_id": uuid.NewString(), "vrf_id": uuid.NewString(),

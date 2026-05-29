@@ -58,6 +58,65 @@ func TestResetArinJobForRetry_DirectionAware(t *testing.T) {
 	}
 }
 
+// Pin post-review fix #12: ApproveLirRequest's CTE returns the full
+// LirRequest + LirAllocation rows so the handler doesn't need to
+// re-fetch via GetLirRequest + GetLirAllocation. Earlier shape
+// returned only three UUIDs and the handler issued two extra
+// round-trips per approval.
+func TestApproveCTE_WidenedReturnIncludesFullRows(t *testing.T) {
+	sql := readSiblingSQL(t, "db/queries/lir_allocations.sql")
+	approve := extractQueryByName(sql, "ApproveLirRequest")
+	if approve == "" {
+		t.Fatal("ApproveLirRequest query not found")
+	}
+	// Columns present in the wider LirRequest + LirAllocation
+	// projection but absent from the earlier three-UUID one. A
+	// future edit that narrows the SELECT (and re-introduces
+	// the re-fetches) fails this pin.
+	for _, col := range []string{
+		"ur.justification", "ur.submitted_at", "ur.classification",
+		"na.allocated_at", "na.arin_status", "na.arin_net_handle",
+		"na.created_at",
+	} {
+		if !strings.Contains(approve, col) {
+			t.Errorf("widened CTE must SELECT %s; query:\n%s", col, approve)
+		}
+	}
+}
+
+// Pin post-review fix #13: LoadConfig now uses GetSystemSettings
+// (batch) instead of three sequential GetSystemSetting calls.
+func TestSettings_BatchQueryExists(t *testing.T) {
+	sql := readSiblingSQL(t, "db/queries/lir_arin.sql")
+	q := extractQueryByName(sql, "GetSystemSettings")
+	if q == "" {
+		t.Fatal("GetSystemSettings batch query missing from lir_arin.sql")
+	}
+	if !strings.Contains(q, "ANY($1::text[])") {
+		t.Errorf("batch query must use ANY($1::text[]); got:\n%s", q)
+	}
+}
+
+// Pin post-review fix #14: GetSupernetForMove keys on is_system
+// rather than a slug literal. The earlier projection returned
+// f.slug AS current_fabric_slug, which forced the landing-fabric
+// name to live in three places (migration 0065, lir/handler.go,
+// ipam/move.go). The is_system column is the single source of
+// truth on the row itself.
+func TestMove_GetSupernetUsesIsSystemFlag(t *testing.T) {
+	sql := readSiblingSQL(t, "db/queries/ipam_move.sql")
+	q := extractQueryByName(sql, "GetSupernetForMove")
+	if q == "" {
+		t.Fatal("GetSupernetForMove query not found in ipam_move.sql")
+	}
+	if !strings.Contains(q, "f.is_system") {
+		t.Errorf("move query must read f.is_system, got:\n%s", q)
+	}
+	if strings.Contains(q, "f.slug") {
+		t.Errorf("move query must not depend on f.slug literal anymore:\n%s", q)
+	}
+}
+
 func TestApproveCTE_NewSupernetChainsOffUpdatedRequest(t *testing.T) {
 	sql := readSiblingSQL(t, "db/queries/lir_allocations.sql")
 	// Slice out the ApproveLirRequest query block — the file has

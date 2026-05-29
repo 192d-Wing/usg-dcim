@@ -17,11 +17,18 @@ type fakeSettings struct {
 	rows map[string]json.RawMessage
 }
 
-func (f *fakeSettings) GetSystemSetting(_ context.Context, key string) (dbq.SystemSetting, error) {
-	if v, ok := f.rows[key]; ok {
-		return dbq.SystemSetting{Key: key, Value: v}, nil
+// GetSystemSettings is the batch lookup LoadConfig calls. The fake
+// returns rows for whichever requested keys exist; missing keys are
+// silently absent (matching the SQL's WHERE key = ANY(...) semantic
+// where unmatched values yield no row).
+func (f *fakeSettings) GetSystemSettings(_ context.Context, keys []string) ([]dbq.SystemSetting, error) {
+	out := make([]dbq.SystemSetting, 0, len(keys))
+	for _, k := range keys {
+		if v, ok := f.rows[k]; ok {
+			out = append(out, dbq.SystemSetting{Key: k, Value: v})
+		}
 	}
-	return dbq.SystemSetting{}, pgx.ErrNoRows
+	return out, nil
 }
 
 func TestLoad_AllDefaults(t *testing.T) {

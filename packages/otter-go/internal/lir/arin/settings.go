@@ -26,32 +26,49 @@ const (
 // SettingsQuerier is the slice of sqlc methods the loader needs.
 // *dbq.Queries satisfies it; tests substitute an in-memory fake.
 type SettingsQuerier interface {
-	GetSystemSetting(ctx context.Context, key string) (dbq.SystemSetting, error)
+	GetSystemSettings(ctx context.Context, keys []string) ([]dbq.SystemSetting, error)
 }
 
 // LoadConfig reads the three ARIN-related system_settings rows and
 // builds a Config. Missing rows fall back to defaults — Enabled is
 // false unless explicitly set, so a fresh deployment that hasn't
 // configured ARIN stays inert.
+//
+// Issues a single GetSystemSettings query per call; earlier shape
+// fired one round-trip per key for three round-trips per worker
+// tick.
 func LoadConfig(ctx context.Context, q SettingsQuerier) Config {
 	cfg := Config{
 		Endpoint: EndpointOTE,
 		Enabled:  false,
 	}
-	if row, err := q.GetSystemSetting(ctx, SettingEndpoint); err == nil {
+	rows, err := q.GetSystemSettings(ctx, []string{
+		SettingEndpoint, SettingAPIKey, SettingEnabled,
+	})
+	if err != nil {
+		// DB error — log nothing here (the worker tick logs the
+		// outer error); return defaults so the tick treats ARIN
+		// as disabled and skips the drain.
+		return cfg
+	}
+	byKey := make(map[string]json.RawMessage, len(rows))
+	for _, r := range rows {
+		byKey[r.Key] = r.Value
+	}
+	if v, ok := byKey[SettingEndpoint]; ok {
 		var s string
-		if json.Unmarshal(row.Value, &s) == nil && s != "" {
+		if json.Unmarshal(v, &s) == nil && s != "" {
 			cfg.Endpoint = s
 		}
 	}
-	if row, err := q.GetSystemSetting(ctx, SettingAPIKey); err == nil {
+	if v, ok := byKey[SettingAPIKey]; ok {
 		var s string
-		_ = json.Unmarshal(row.Value, &s)
+		_ = json.Unmarshal(v, &s)
 		cfg.APIKey = s
 	}
-	if row, err := q.GetSystemSetting(ctx, SettingEnabled); err == nil {
+	if v, ok := byKey[SettingEnabled]; ok {
 		var b bool
-		_ = json.Unmarshal(row.Value, &b)
+		_ = json.Unmarshal(v, &b)
 		cfg.Enabled = b
 	}
 	return cfg

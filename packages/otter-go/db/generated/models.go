@@ -409,13 +409,16 @@ type AllocatedPrefixRow struct {
 	Prefix         string    `json:"prefix"`
 }
 
-// ApprovalResultRow — the trio returned by the atomic CTE: which
-// request was flipped to approved, which allocation row got inserted,
-// and which tenant supernet now belongs to the tenant.
+// ApprovalResultRow bundles the post-approval LirRequest and
+// LirAllocation rows the CTE just wrote. Earlier shape returned
+// only three UUIDs (request_id, allocation_id, tenant_supernet_id)
+// and the handler re-fetched both rows for the JSON response — two
+// extra round-trips per approval. Widening the CTE's SELECT to
+// include both row shapes folds the re-fetches into the same
+// query.
 type ApprovalResultRow struct {
-	RequestID        uuid.UUID `json:"request_id"`
-	AllocationID     uuid.UUID `json:"allocation_id"`
-	TenantSupernetID uuid.UUID `json:"tenant_supernet_id"`
+	Request    LirRequest    `json:"request"`
+	Allocation LirAllocation `json:"allocation"`
 }
 
 // SystemSetting — generic key/JSON-value config row. The Python side
@@ -428,16 +431,19 @@ type SystemSetting struct {
 }
 
 // SupernetForMoveRow — the projection the IPAM move handler reads
-// to validate a relocation: current fabric/VRF (for the source
-// landing-fabric check), owner org (for ABAC), prefix (for the
-// audit metadata), and the source fabric's slug.
+// to validate a relocation: current fabric/VRF, owner org (ABAC),
+// prefix (audit metadata), and is_system on the source fabric. The
+// is_system flag (set by migration 0065 on the LIR landing fabric)
+// is what the move handler keys off — earlier shape returned the
+// slug literal which forced the landing-fabric name to live in
+// three places.
 type SupernetForMoveRow struct {
-	ID                  uuid.UUID  `json:"id"`
-	CurrentFabricID     uuid.UUID  `json:"current_fabric_id"`
-	CurrentVrfID        uuid.UUID  `json:"current_vrf_id"`
-	OwnerOrganizationID *uuid.UUID `json:"owner_organization_id"`
-	Prefix              string     `json:"prefix"`
-	CurrentFabricSlug   string     `json:"current_fabric_slug"`
+	ID                     uuid.UUID  `json:"id"`
+	CurrentFabricID        uuid.UUID  `json:"current_fabric_id"`
+	CurrentVrfID           uuid.UUID  `json:"current_vrf_id"`
+	OwnerOrganizationID    *uuid.UUID `json:"owner_organization_id"`
+	Prefix                 string     `json:"prefix"`
+	CurrentFabricIsSystem  bool       `json:"current_fabric_is_system"`
 }
 
 // VrfForMoveRow — minimal (id, fabric_id) projection used to verify

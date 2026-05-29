@@ -25,6 +25,32 @@ func (q *Queries) GetSystemSetting(ctx context.Context, key string) (SystemSetti
 	return s, err
 }
 
+const getSystemSettings = `-- name: GetSystemSettings :many
+SELECT key, value, updated_at
+FROM system_settings
+WHERE key = ANY($1::text[])
+`
+
+// GetSystemSettings returns rows for whichever of `keys` exist in
+// system_settings. Missing keys are simply absent from the result —
+// the caller treats their absence as "use the default."
+func (q *Queries) GetSystemSettings(ctx context.Context, keys []string) ([]SystemSetting, error) {
+	rows, err := q.db.Query(ctx, getSystemSettings, keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SystemSetting
+	for rows.Next() {
+		var s SystemSetting
+		if err := rows.Scan(&s.Key, &s.Value, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
 const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, updated_at)
 VALUES ($1, $2, NOW())

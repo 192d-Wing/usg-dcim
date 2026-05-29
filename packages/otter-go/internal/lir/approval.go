@@ -132,37 +132,29 @@ func writeApprovalCTEError(w http.ResponseWriter, err error) bool {
 	return false
 }
 
-// respondApprovalSuccess re-reads the updated rows, emits the audit
-// event, and writes the response. Pulled out of approveRequest so
-// the orchestrator stays under the cognitive-complexity budget.
+// respondApprovalSuccess emits the audit event and writes the
+// response using the rows the CTE already returned. Earlier shape
+// fired two extra GetLirRequest + GetLirAllocation queries to
+// rebuild the response — wasteful since the CTE's SELECT now
+// includes both row shapes.
 func (h *Handler) respondApprovalSuccess(
 	ctx context.Context, w http.ResponseWriter,
 	requestID, poolID uuid.UUID, chosenPrefix, arinInit string,
 	result dbq.ApprovalResultRow,
 ) {
-	updatedReq, err := h.Q.GetLirRequest(ctx, result.RequestID)
-	if err != nil {
-		mapErr(w, err, "")
-		return
-	}
-	allocation, err := h.Q.GetLirAllocation(ctx, result.AllocationID)
-	if err != nil {
-		mapErr(w, err, "")
-		return
-	}
 	audit.Record(ctx, h.Audit, nil, audit.Event{
 		Action: "lir.request.approve", TargetType: "lir_request",
 		TargetID: requestID.String(),
 		Metadata: map[string]any{
-			"allocation_id":      result.AllocationID.String(),
-			"tenant_supernet_id": result.TenantSupernetID.String(),
+			"allocation_id":      result.Allocation.ID.String(),
+			"tenant_supernet_id": result.Allocation.TenantSupernetID.String(),
 			"approved_pool_id":   poolID.String(),
 			"prefix":             chosenPrefix,
 			"arin_initial":       arinInit,
 		},
 	})
 	httpx.JSON(w, http.StatusOK, approveResponse{
-		Request: updatedReq, Allocation: allocation,
+		Request: result.Request, Allocation: result.Allocation,
 	})
 }
 

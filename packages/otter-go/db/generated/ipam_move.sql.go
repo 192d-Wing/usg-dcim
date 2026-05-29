@@ -15,7 +15,7 @@ SELECT s.id,
        s.vrf_id              AS current_vrf_id,
        s.owner_organization_id,
        host(s.prefix) || '/' || masklen(s.prefix) AS prefix,
-       f.slug                AS current_fabric_slug
+       f.is_system           AS current_fabric_is_system
 FROM supernets s
 JOIN fabrics f ON f.id = s.fabric_id
 WHERE s.id = $1
@@ -26,7 +26,7 @@ func (q *Queries) GetSupernetForMove(ctx context.Context, id uuid.UUID) (Superne
 	var r SupernetForMoveRow
 	err := row.Scan(
 		&r.ID, &r.CurrentFabricID, &r.CurrentVrfID,
-		&r.OwnerOrganizationID, &r.Prefix, &r.CurrentFabricSlug,
+		&r.OwnerOrganizationID, &r.Prefix, &r.CurrentFabricIsSystem,
 	)
 	return r, err
 }
