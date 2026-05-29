@@ -120,6 +120,39 @@ func TestListLog_TargetIDsAndPageSize(t *testing.T) {
 	}
 }
 
+// TestListLog_PageParamComputesOffset verifies the Refine-flavored
+// pagination contract: `?page=N&page_size=M` should land on the
+// underlying query as Limit=M, Offset=(N-1)*M. Without this, finch's
+// audit-log table renders page 1 forever — clicking "Next" issues
+// ?page=2 which the server used to silently discard.
+func TestListLog_PageParamComputesOffset(t *testing.T) {
+	f := &fakeQ{}
+	rec := do(t, mount(f), "/audit/log?page=3&page_size=20")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.last.Limit != 20 {
+		t.Errorf("limit = %d, want 20", f.last.Limit)
+	}
+	if f.last.Offset != 40 {
+		t.Errorf("offset = %d, want 40 (page=3, page_size=20)", f.last.Offset)
+	}
+}
+
+// TestListLog_OffsetOverridesPage pins the precedence: an explicit
+// ?offset wins over ?page so API-token callers and existing curl/script
+// integrations keep working when finch starts sending both.
+func TestListLog_OffsetOverridesPage(t *testing.T) {
+	f := &fakeQ{}
+	rec := do(t, mount(f), "/audit/log?page=3&page_size=20&offset=5")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.last.Offset != 5 {
+		t.Errorf("explicit ?offset should win; got offset=%d", f.last.Offset)
+	}
+}
+
 func TestListLog_BadSince(t *testing.T) {
 	rec := do(t, mount(&fakeQ{}), "/audit/log?since=not-a-time")
 	if rec.Code != http.StatusBadRequest {

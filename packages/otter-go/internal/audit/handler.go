@@ -96,7 +96,7 @@ func (h *Handler) resolveScope(w http.ResponseWriter, r *http.Request, empty fun
 func (h *Handler) listLog(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	offset := parseOffset(q, limit)
 	scopeSiteIDs, done := h.resolveScope(w, r, func() {
 		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.AuditLog](limit, offset))
 	})
@@ -344,6 +344,27 @@ func pageSize(q map[string][]string) string {
 		return v
 	}
 	return first(q, "page_size")
+}
+
+// parseOffset returns the row offset for the list query. finch's Refine
+// data-provider sends `?page=N&page_size=M` (1-indexed); the older
+// `?offset=N` form is kept for API-token callers and tests. Explicit
+// ?offset wins; otherwise we compute (page-1)*limit from ?page.
+//
+// Audit is the first user-facing otter-go endpoint paginated through
+// Refine, so this lives in the handler rather than httpx — the other
+// paginated otter-go endpoints (alerts, ipam, dns, lir, …) have the same
+// gap and should adopt the same helper opportunistically. Until then,
+// dropping it in httpx would suggest a fix that isn't actually applied.
+func parseOffset(q map[string][]string, limit int32) int32 {
+	if v := first(q, "offset"); v != "" {
+		return parseInt32(v, 0, 0, 1_000_000)
+	}
+	if v := first(q, "page"); v != "" {
+		page := parseInt32(v, 1, 1, 1_000_000)
+		return (page - 1) * limit
+	}
+	return 0
 }
 
 func first(q map[string][]string, key string) string {
