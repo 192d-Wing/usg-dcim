@@ -2,7 +2,18 @@
 # off via `otter-go.enabled=false` if the deployment doesn't want
 # the Go endpoints (e.g. while the Python port is canon).
 enabled: true
-replicaCount: 1
+# Two-replica default so a rolling restart / node drain doesn't
+# black-hole /api/v1/lir/* and the IPAM supernet move endpoint, which
+# the umbrella's ingress routes here exclusively.
+replicaCount: 2
+
+# PodDisruptionBudget gates voluntary disruptions (drains, upgrades).
+# minAvailable: 1 forces the cluster autoscaler / kubectl drain to
+# wait for the second replica to come up before evicting the first.
+# Set enabled=false on single-node dev clusters where it'd deadlock.
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
 
 # Image is overridden in the umbrella values.yaml via global.image.tag.
 # Repository defaults match the umbrella's `dcim-<animal>` published

@@ -12,7 +12,11 @@ spec:
     metadata:
       labels: {{- include "otter-go.labels" . | nindent 8 }}
     spec:
-      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      # Merge: subchart-local wins (distroless image's nonroot UID is
+      # 65532, not the umbrella's default 10001), but any other keys
+      # operators set on global.podSecurityContext (fsGroup, seccompProfile,
+      # supplementalGroups, sysctls, …) propagate.
+      securityContext: {{- toYaml (mergeOverwrite (deepCopy .Values.global.podSecurityContext) .Values.podSecurityContext) | nindent 8 }}
       containers:
         - name: otter-go
           image: {{ include "otter-go.image" . }}
@@ -31,6 +35,14 @@ spec:
             # session minted on one is honored by the other.
             - name: DCIM_JWT_SECRET
               valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_secret } }
+            {{- if .Values.global.config.jwtOldSecrets }}
+            # Required during JWT secret rotation so otter-go and
+            # Python otter accept the previous keys symmetrically.
+            # Without this, /api/v1/lir/* 401s as soon as the active
+            # key changes while Python /api/* still validates.
+            - name: DCIM_JWT_OLD_SECRETS
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_old_secrets } }
+            {{- end }}
             - { name: DCIM_OIDC_ISSUER,    value: {{ .Values.global.config.oidc.issuer    | quote }} }
             - { name: DCIM_OIDC_CLIENT_ID, value: {{ .Values.global.config.oidc.clientId  | quote }} }
             {{- if .Values.global.config.oidc.clientSecret }}

@@ -26,6 +26,10 @@ spec:
             - { name: DCIM_REDIS_DSN,    value: {{ .Values.global.redis.dsn | quote }} }
             - name: DCIM_JWT_SECRET
               valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_secret } }
+            {{- if .Values.global.config.jwtOldSecrets }}
+            - name: DCIM_JWT_OLD_SECRETS
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_old_secrets } }
+            {{- end }}
             - { name: DCIM_OIDC_ISSUER,    value: {{ .Values.global.config.oidc.issuer | quote }} }
             - { name: DCIM_OIDC_CLIENT_ID, value: {{ .Values.global.config.oidc.clientId | quote }} }
             {{- if .Values.global.config.oidc.clientSecret }}
@@ -40,6 +44,14 @@ spec:
             - name: DCIM_REGIONDEPLOY_CALLBACK_SECRET
               valueFrom: { secretKeyRef: { name: dcim-secrets, key: regiondeploy_callback_secret } }
             - { name: DCIM_REGIONDEPLOY_CENTRAL_URL, value: {{ .centralUrl | quote }} }
+            {{- end }}
+            {{- if .Values.global.config.dnssecSecret }}
+            # Same Fernet key otter-go uses. Python otter calls it on
+            # DnsKey.private_pem (services/dns.py:285) — required for
+            # symmetric reads when otter-go has been writing encrypted
+            # rows. Unset → plaintext fallback w/ structlog warning.
+            - name: DCIM_DNS_DNSSEC_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: dnssec_secret } }
             {{- end }}
             {{- if .Values.global.otel.enabled }}
             - { name: DCIM_OTEL_ENABLED, value: "true" }
