@@ -1,0 +1,15 @@
+apiVersion: v2
+name: otter-go
+description: |
+  USG DCIM Go API service. Sister to the otter (Python) subchart;
+  serves the newer Go-port endpoints that haven't been ported back
+  to Python (LIR, IPAM move, parts of regions/power/organizations).
+
+  Shares the same Postgres + Redis as the Python otter pod. The
+  umbrella's ingress routes a subset of /api/v1/* paths here while
+  the rest stay on otter — see deploy/helm/dcim/templates/ingress.yaml.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: USG DCIM Team

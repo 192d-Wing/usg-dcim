@@ -1,0 +1,61 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "otter-go.fullname" . }}
+  labels: {{- include "otter-go.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: {{- include "otter-go.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "otter-go.labels" . | nindent 8 }}
+    spec:
+      securityContext: {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: otter-go
+          image: {{ include "otter-go.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8000 }
+          env:
+            - { name: OTTER_GO_ADDR, value: ":8000" }
+            # Strip the SQLAlchemy `+asyncpg` driver suffix so pgx
+            # accepts the DSN. Same regexReplaceAll trick the heron /
+            # magpie / beagle subcharts use — see PR 173.
+            - name: DCIM_POSTGRES_DSN_RAW
+              value: {{ regexReplaceAll "^postgresql\\+asyncpg" .Values.global.postgresql.dsn "postgres" | quote }}
+            - { name: DCIM_REDIS_DSN, value: {{ .Values.global.redis.dsn | quote }} }
+            # Auth — shares JWT signing key with Python otter so a
+            # session minted on one is honored by the other.
+            - name: DCIM_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: jwt_secret } }
+            - { name: DCIM_OIDC_ISSUER,    value: {{ .Values.global.config.oidc.issuer    | quote }} }
+            - { name: DCIM_OIDC_CLIENT_ID, value: {{ .Values.global.config.oidc.clientId  | quote }} }
+            {{- if .Values.global.config.oidc.clientSecret }}
+            - name: DCIM_OIDC_CLIENT_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: oidc_client_secret } }
+            {{- end }}
+            {{- if .Values.global.config.oidc.redirectUri }}
+            - { name: DCIM_OIDC_REDIRECT_URI, value: {{ .Values.global.config.oidc.redirectUri | quote }} }
+            {{- end }}
+            {{- if .Values.global.config.dnssecSecret }}
+            # Fernet key for DNSSEC private-key encryption at rest.
+            # Optional — when unset, otter-go falls back to plaintext
+            # storage (loud-warning log line) which only suits sealed
+            # dev envs. Set in production via `global.config.dnssecSecret`.
+            - name: DCIM_DNS_DNSSEC_SECRET
+              valueFrom: { secretKeyRef: { name: dcim-secrets, key: dnssec_secret } }
+            {{- end }}
+            {{- if .Values.insecureAuthStub }}
+            - { name: OTTER_GO_INSECURE_AUTH_STUB, value: {{ .Values.insecureAuthStub | quote }} }
+            {{- end }}
+          readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
+          livenessProbe:  {{- toYaml .Values.livenessProbe  | nindent 12 }}
+          resources:      {{- toYaml .Values.resources      | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+{{- end }}

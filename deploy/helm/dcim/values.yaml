@@ -42,6 +42,11 @@ global:
     regiondeploy:
       callbackSecret: "PROVIDE_VIA_SECRET"
       centralUrl:     ""
+    # Fernet key for at-rest encryption of DNSSEC private keys in
+    # otter-go's DNS module. Empty -> otter-go falls back to plaintext
+    # (loud warning); only acceptable in sealed dev environments.
+    # Generate via `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    dnssecSecret: ""
 
   otel:
     enabled: false
@@ -91,6 +96,18 @@ otter:
     labels: {}
     annotations: {}
     loadBalancerClass: ""
+
+otter-go:
+  enabled: true
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8000
+  # Endpoints owned by otter-go today are routed via the umbrella's
+  # ingress. Currently:
+  #   /api/v1/lir/*               LIR pools/requests/allocations
+  # The umbrella's ingress template picks these up from
+  # `ingress.hosts[].paths` with backend: otter-go.
 
 otter-worker:
   enabled: true
@@ -171,12 +188,18 @@ ingress:
   hosts:
     - host: dcim.example.mil
       paths:
-        - path: /
+        # Order matters: nginx-ingress longest-prefix-first means more
+        # specific paths must come first or the broader /api Prefix
+        # would shadow them.
+        - path: /api/v1/lir
           pathType: Prefix
-          backend: finch
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter
+        - path: /
+          pathType: Prefix
+          backend: finch
   tls:
     - secretName: dcim-tls
       hosts: [dcim.example.mil]

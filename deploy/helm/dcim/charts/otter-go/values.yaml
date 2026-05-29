@@ -1,0 +1,37 @@
+# otter-go subchart values. Default-enabled in the umbrella; flip
+# off via `otter-go.enabled=false` if the deployment doesn't want
+# the Go endpoints (e.g. while the Python port is canon).
+enabled: true
+replicaCount: 1
+
+# Image is overridden in the umbrella values.yaml via global.image.tag.
+# Repository defaults match the umbrella's `dcim-<animal>` published
+# pattern under ghcr.io/192d-wing.
+
+service:
+  type: ClusterIP
+  port: 8000   # matches the OTTER_GO_ADDR default (":8000")
+
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 1,    memory: 512Mi }
+
+# Set to "off" to disable the always-on stub middleware. Production
+# leaves this unset / empty so the real OIDC middleware engages; set
+# to "true" only in sealed dev envs.
+insecureAuthStub: ""
+
+readinessProbe:
+  httpGet: { path: /readyz, port: http }
+  initialDelaySeconds: 5
+  periodSeconds: 10
+livenessProbe:
+  httpGet: { path: /healthz, port: http }
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532   # matches `USER nonroot:nonroot` in the distroless image
+  fsGroup: 65532
+  seccompProfile: { type: RuntimeDefault }
