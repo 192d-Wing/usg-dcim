@@ -105,7 +105,7 @@ func Verifying(log *slog.Logger, q Querier, cfg VerifierConfig) func(http.Handle
 					httpx.Error(w, http.StatusUnauthorized, "invalid api token")
 					return
 				}
-				ctx := context.WithValue(r.Context(), principalKey, p)
+				ctx := WithScopeFilterCache(context.WithValue(r.Context(), principalKey, p))
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -146,7 +146,10 @@ func Verifying(log *slog.Logger, q Querier, cfg VerifierConfig) func(http.Handle
 				MFA:          claims.MFA,
 				Label:        "user:" + claims.Subject.String(),
 			}
-			ctx := context.WithValue(r.Context(), principalKey, p)
+			// Per-request scope-filter memo (audit / alerts / sites …
+			// share via WithScopeFilterCache; second resolve for the
+			// same capCode is free).
+			ctx := WithScopeFilterCache(context.WithValue(r.Context(), principalKey, p))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -225,7 +228,7 @@ func stubMiddleware(log *slog.Logger) func(http.Handler) http.Handler {
 				"remote", r.RemoteAddr,
 			)
 			p := Principal{Subject: uuid.Nil, Capabilities: []string{"*"}, Label: "stub"}
-			ctx := context.WithValue(r.Context(), principalKey, p)
+			ctx := WithScopeFilterCache(context.WithValue(r.Context(), principalKey, p))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

@@ -119,6 +119,57 @@ func TestLogout_NoBearer_Still204(t *testing.T) {
 	}
 }
 
+// ---- /tokens cap-gate (structural enforcement of the middleware) ----
+//
+// These tests guard the RequireCapability wraps in Mount() so a future
+// refactor that drops them is caught at CI time. The handlers also
+// hold inline HasCapability checks as belt-and-suspenders, but tests
+// belong at the structural layer the convention says is canonical
+// (matches admin's TestRoleMutate_RejectsWithoutCap pattern).
+
+func TestListTokens_RejectsWithoutCap(t *testing.T) {
+	h := &Handler{Q: &fakeQ{}, Mint: MintConfig{Secret: []byte("s"), TTLSecond: 60}}
+	r := chi.NewRouter()
+	h.Mount(r)
+	req := httptest.NewRequest("GET", "/auth/tokens", nil)
+	rec := httptest.NewRecorder()
+	withPrincipal(r, Principal{Subject: uuid.New(), Capabilities: []string{
+		"some:other:cap",
+	}}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (missing admin:api-tokens:read)", rec.Code)
+	}
+}
+
+func TestIssueToken_RejectsWithoutCreateCap(t *testing.T) {
+	h := &Handler{Q: &fakeQ{}, Mint: MintConfig{Secret: []byte("s"), TTLSecond: 60}}
+	r := chi.NewRouter()
+	h.Mount(r)
+	body, _ := json.Marshal(tokenIssueReq{Name: "x", PermissionCodes: []string{}})
+	req := httptest.NewRequest("POST", "/auth/tokens", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	withPrincipal(r, Principal{Subject: uuid.New(), Capabilities: []string{
+		"admin:api-tokens:read", // read, not create
+	}}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (missing admin:api-tokens:create)", rec.Code)
+	}
+}
+
+func TestRevokeToken_RejectsWithoutDeleteCap(t *testing.T) {
+	h := &Handler{Q: &fakeQ{}, Mint: MintConfig{Secret: []byte("s"), TTLSecond: 60}}
+	r := chi.NewRouter()
+	h.Mount(r)
+	req := httptest.NewRequest("DELETE", "/auth/tokens/"+uuid.New().String(), nil)
+	rec := httptest.NewRecorder()
+	withPrincipal(r, Principal{Subject: uuid.New(), Capabilities: []string{
+		"admin:api-tokens:read",
+	}}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 (missing admin:api-tokens:delete)", rec.Code)
+	}
+}
+
 func TestIssueToken_NoEscalation_403(t *testing.T) {
 	h := &Handler{Q: &fakeQ{}, Mint: MintConfig{Secret: []byte("s"), TTLSecond: 60}}
 	r := chi.NewRouter()

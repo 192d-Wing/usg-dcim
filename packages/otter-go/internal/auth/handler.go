@@ -22,6 +22,8 @@ type Handler struct {
 
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/auth", func(r chi.Router) {
+		// Authentication-only — Verifying middleware upstream of /api/v1
+		// has already validated the bearer.
 		r.Get("/me", h.me)
 		r.Get("/oidc/login", h.oidcLogin)
 		r.Get("/oidc/callback", h.oidcCallback)
@@ -29,12 +31,17 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post("/login", h.login)
 		r.Post("/logout", h.logout)
 		r.Post("/refresh", h.refresh)
-		// /tokens GET/POST/DELETE check admin:api-tokens:{read,create,
-		// delete} inline inside the handlers (handler_local.go) rather
-		// than via middleware — same effect, just a different layer.
-		r.Get("/tokens", h.listTokens)
-		r.Post("/tokens", h.issueToken)
-		r.Delete("/tokens/{id}", h.revokeToken)
+		// /tokens gates are doubly enforced. The middleware wrap is the
+		// grep-able route-layer convention (matches admin, audit,
+		// telemetry, lir, alerts, …) and the canonical 403 path. The
+		// inline HasCapability checks in handler_local.go remain as
+		// belt-and-suspenders so a future refactor that removes either
+		// layer still fails closed. issueToken additionally walks the
+		// requested permission_codes inline for no-escalation — that
+		// data check can't move to middleware.
+		r.With(RequireCapability("admin:api-tokens:read")).Get("/tokens", h.listTokens)
+		r.With(RequireCapability("admin:api-tokens:create")).Post("/tokens", h.issueToken)
+		r.With(RequireCapability("admin:api-tokens:delete")).Delete("/tokens/{id}", h.revokeToken)
 	})
 }
 

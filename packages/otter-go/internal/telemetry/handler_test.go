@@ -13,6 +13,7 @@ import (
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 type fakeQ struct {
@@ -33,21 +34,14 @@ func mount(f *fakeQ) http.Handler {
 // authedPrincipal carries the telemetry read cap so the test harness
 // passes RequireCapability("telemetry:metrics:read") on every request.
 // Tests that want to assert the cap gate works do so explicitly via
-// TestSeries_RequiresCap below.
+// TestSeries_RejectsWithoutCap below.
 func authedPrincipal() auth.Principal {
-	return auth.Principal{
-		Capabilities: []string{"telemetry:metrics:read"},
-		Label:        "test",
-	}
+	return authtest.PrincipalWithCaps("telemetry:metrics:read")
 }
 
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", p, nil)
-	req = req.WithContext(auth.WithPrincipal(req.Context(), authedPrincipal()))
-	h.ServeHTTP(rec, req)
-	return rec
+	return authtest.ServeRequest(h, authedPrincipal(), "GET", p, nil)
 }
 
 func TestSeries_RequiresIDs(t *testing.T) {
@@ -112,12 +106,10 @@ func TestSeries_BadTimestamps(t *testing.T) {
 // fires. Without `telemetry:metrics:read` the request 403s before
 // the handler runs (no query params parsed, no DB call).
 func TestSeries_RejectsWithoutCap(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/telemetry/series?site_id="+uuid.New().String()+
-		"&asset_id="+uuid.New().String()+"&metric=temp_c", nil)
-	noCap := auth.Principal{Capabilities: []string{"some:other:cap"}}
-	req = req.WithContext(auth.WithPrincipal(req.Context(), noCap))
-	mount(&fakeQ{}).ServeHTTP(rec, req)
+	noCap := authtest.PrincipalWithCaps("some:other:cap")
+	rec := authtest.ServeRequest(mount(&fakeQ{}), noCap, "GET",
+		"/telemetry/series?site_id="+uuid.New().String()+
+			"&asset_id="+uuid.New().String()+"&metric=temp_c", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", rec.Code)
 	}

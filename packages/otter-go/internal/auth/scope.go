@@ -42,6 +42,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -160,11 +161,46 @@ type siteExpansionQ interface {
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
+// scopeFilterCacheKey is the context key under which a request can
+// memoize ScopedSiteFilter results. Set by the verify middleware
+// (lazy: only allocated when the first ScopedSiteFilter call fires
+// during the request); read on every subsequent call so a handler
+// that resolves the same (principal, capCode) twice — e.g. /audit
+// page-load fanning /audit/log + /audit/actions — only pays one
+// expansion DB round-trip.
+type scopeFilterCacheKey struct{}
+
+// ScopedFilterResult is the memoized result of one ScopedSiteFilter
+// call. IDs may be nil (global), and Scoped tracks the second return.
+type ScopedFilterResult struct {
+	IDs    []uuid.UUID
+	Scoped bool
+}
+
+// scopeFilterCache lives on the request context (when present) and
+// memoizes per-(capCode) expansions. Single goroutine per request, so
+// a plain map is fine.
+type scopeFilterCache map[string]ScopedFilterResult
+
+// WithScopeFilterCache attaches a memoization map to ctx. Returns ctx
+// unchanged when the cache already exists. Called by Verifying at the
+// start of every request so handlers don't have to.
+func WithScopeFilterCache(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(scopeFilterCacheKey{}).(scopeFilterCache); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, scopeFilterCacheKey{}, scopeFilterCache{})
+}
+
 // ScopedSiteFilter resolves the caller's scope for capCode into a
 // concrete site_id set the handler should pass as scope_site_ids on
 // site-rooted LIST/COUNT queries. The expansion walks all three site-
 // reachable dimensions (direct SiteIDs + sites under any RegionID +
 // sites in any SiteGroupID) via a single SQL query.
+//
+// Results are memoized on the request context (see
+// WithScopeFilterCache) so two handlers in the same request that ask
+// for the same capCode share one expansion call.
 //
 // Returns:
 //   - (nil, false, nil)            — principal is global; pass nil to
@@ -180,39 +216,43 @@ type siteExpansionQ interface {
 // reachable dim gets back an empty allowed set — those dimensions
 // can't expand into a site list.
 func ScopedSiteFilter(ctx context.Context, q siteExpansionQ, p Principal, capCode string) ([]uuid.UUID, bool, error) {
+	cache, _ := ctx.Value(scopeFilterCacheKey{}).(scopeFilterCache)
+	// Per-request memoization (see WithScopeFilterCache). When two
+	// handlers in the same request resolve the same (capCode), the
+	// second call returns the cached result instead of re-running
+	// FindScope + ListSiteIDsForExpansion.
+	if cache != nil {
+		if cached, ok := cache[capCode]; ok {
+			return cached.IDs, cached.Scoped, nil
+		}
+	}
+	ids, scoped, err := computeScopedSiteFilter(ctx, q, p, capCode)
+	if err == nil && cache != nil {
+		cache[capCode] = ScopedFilterResult{IDs: ids, Scoped: scoped}
+	}
+	return ids, scoped, err
+}
+
+// computeScopedSiteFilter does the actual work of ScopedSiteFilter
+// (FindScope + dimension extraction + the expansion DB query). Split
+// out so the cache-read/cache-write wrapping above stays a flat 4
+// lines and so the cognitive-complexity linter is happy.
+func computeScopedSiteFilter(ctx context.Context, q siteExpansionQ, p Principal, capCode string) ([]uuid.UUID, bool, error) {
 	s := FindScope(p, capCode)
 	if s == nil || s.IsGlobal {
 		return nil, false, nil
 	}
-	var directs, regions, groups, orgs []uuid.UUID
-	if len(s.SiteIDs) > 0 {
-		directs = make([]uuid.UUID, 0, len(s.SiteIDs))
-		for id := range s.SiteIDs {
-			directs = append(directs, id)
-		}
-	}
-	if len(s.RegionIDs) > 0 {
-		regions = make([]uuid.UUID, 0, len(s.RegionIDs))
-		for id := range s.RegionIDs {
-			regions = append(regions, id)
-		}
-	}
-	if len(s.SiteGroupIDs) > 0 {
-		groups = make([]uuid.UUID, 0, len(s.SiteGroupIDs))
-		for id := range s.SiteGroupIDs {
-			groups = append(groups, id)
-		}
-	}
+	directs := uuidKeys(s.SiteIDs)
+	regions := uuidKeys(s.RegionIDs)
+	groups := uuidKeys(s.SiteGroupIDs)
 	// PR 90 — organization_id is a site-reachable dimension now. A
 	// principal scoped only on an organizations.id UUID sees every
 	// site whose sites.organization_id FK matches.
-	if len(s.OrganizationIDs) > 0 {
-		orgs = make([]uuid.UUID, 0, len(s.OrganizationIDs))
-		for id := range s.OrganizationIDs {
-			orgs = append(orgs, id)
-		}
-	}
+	orgs := uuidKeys(s.OrganizationIDs)
 	if directs == nil && regions == nil && groups == nil && orgs == nil {
+		// Non-site dimensions (Enclaves, Classifications, FabricIDs)
+		// can't expand into a site list; the caller is scoped but
+		// reaches zero sites. Short-circuit without a DB call.
 		return []uuid.UUID{}, true, nil
 	}
 	ids, err := q.ListSiteIDsForExpansion(ctx, dbq.ListSiteIDsForExpansionParams{
@@ -226,6 +266,20 @@ func ScopedSiteFilter(ctx context.Context, q siteExpansionQ, p Principal, capCod
 		ids = []uuid.UUID{}
 	}
 	return ids, true, nil
+}
+
+// uuidKeys returns nil when the set is empty (so the caller can drop
+// the dimension from the SQL params) or a freshly-allocated slice of
+// the map's keys otherwise. Order is not specified.
+func uuidKeys(m map[uuid.UUID]struct{}) []uuid.UUID {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]uuid.UUID, 0, len(m))
+	for id := range m {
+		out = append(out, id)
+	}
+	return out
 }
 
 // ScopedFabricFilter resolves the caller's scope for capCode and turns
@@ -327,20 +381,67 @@ func FindScope(p Principal, code string) *Scope {
 		g := GlobalScope()
 		return &g
 	}
+	// Lookup order, mirroring Python find_matching_capability:
+	//   1. Exact code match wins — most-specific scope binding.
+	//   2. Bare global `*` short-circuits.
+	//   3. Walk every pattern key and union the scopes of all keys
+	//      whose pattern grants `code` under HasCapability's segmented
+	//      wildcard rules. This is the fix for the wildcard-evasion
+	//      bug: a principal granted `audit:*` whose ONLY scope row is
+	//      keyed on `audit:*` (rather than the resolved leaf code) used
+	//      to fall through to GlobalScope here, silently dropping the
+	//      site binding and serving fleet-wide data. Now the
+	//      `audit:*` scope is correctly applied to
+	//      FindScope(p, "audit:events:read").
+	//   4. If nothing matches at the scope layer but HasCapability
+	//      returned true (cap held via some other path), preserve the
+	//      legacy permissive default of GlobalScope — matches Python's
+	//      "held but unscoped → unrestricted" semantic.
 	if s, ok := p.Scopes[code]; ok {
 		return &s
 	}
-	// Held via wildcard but no exact-code scope row — pessimistically
-	// return the matching-pattern's scope if available, else global.
-	// For now: if the principal has a `*` entry, return its scope;
-	// otherwise fall back to GlobalScope. PR 54 may want stricter
-	// behavior (refuse on pattern mismatch); we ship the permissive
-	// version first since today every cap is global anyway.
 	if s, ok := p.Scopes["*"]; ok {
 		return &s
 	}
+	target := strings.Split(code, ":")
+	var matched *Scope
+	for pattern, scope := range p.Scopes {
+		if !patternMatches(pattern, target) {
+			continue
+		}
+		if matched == nil {
+			s := scope // copy: don't return loop-var address
+			matched = &s
+			continue
+		}
+		u := matched.Union(scope)
+		matched = &u
+	}
+	if matched != nil {
+		return matched
+	}
 	g := GlobalScope()
 	return &g
+}
+
+// patternMatches reports whether `pattern` grants the cap code whose
+// `:`-split is `target`. Same segmented wildcard rules as
+// HasCapability: equal segment counts, and each `pattern` segment
+// must be `*` or equal to the matching `target` segment.
+func patternMatches(pattern string, target []string) bool {
+	if pattern == "*" {
+		return true
+	}
+	parts := strings.Split(pattern, ":")
+	if len(parts) != len(target) {
+		return false
+	}
+	for i, p := range parts {
+		if p != "*" && p != target[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // EnforceFabricScope refuses with ErrOutsideScope if the principal
