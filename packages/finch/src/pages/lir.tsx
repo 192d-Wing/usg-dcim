@@ -41,6 +41,8 @@ import Textarea from '@cloudscape-design/components/textarea';
 
 import { hasCap } from '@/lib/caps';
 import { http } from '@/lib/http';
+import { LirApprovalQueue } from '@/components/lir-approval-queue';
+import { LirPoolAdmin } from '@/components/lir-pool-admin';
 
 // ---------- types (match db/generated row shapes via JSON tags) ----------
 
@@ -115,11 +117,30 @@ export function LirPage() {
   const canReadReq = hasCap(caps, 'lir:requests:read');
   const canCancel = hasCap(caps, 'lir:requests:cancel');
   const canReadAlloc = hasCap(caps, 'lir:allocations:read');
+  // NIC-side caps. Tab visibility is union: any of these turns on the
+  // Approval / Pools tab. The inner CTAs further gate by the specific
+  // action cap (e.g. approve vs reject).
+  const canApprove = hasCap(caps, 'lir:requests:approve');
+  const canReject = hasCap(caps, 'lir:requests:reject');
+  const canReadPools = hasCap(caps, 'lir:pools:read');
+  const canWritePools = hasCap(caps, 'lir:pools:create');
 
   const tabs: { id: string; label: string; content: React.ReactNode }[] = [];
   if (canCreate) tabs.push({ id: 'request', label: 'Request', content: <RequestForm /> });
   if (canReadReq) tabs.push({ id: 'my-requests', label: 'My requests', content: <MyRequestsTab canCancel={canCancel} /> });
   if (canReadAlloc) tabs.push({ id: 'my-allocations', label: 'My allocations', content: <MyAllocationsTab caps={caps} /> });
+  if (canApprove || canReject) {
+    tabs.push({
+      id: 'approval-queue', label: 'Approval queue',
+      content: <LirApprovalQueue canApprove={canApprove} canReject={canReject} />,
+    });
+  }
+  if (canReadPools) {
+    tabs.push({
+      id: 'pools', label: 'Pools',
+      content: <LirPoolAdmin canWrite={canWritePools} />,
+    });
+  }
 
   if (tabs.length === 0) {
     return (
@@ -446,6 +467,8 @@ function RequestStatusBadge({ status }: { status: LirRequestStatus }) {
 function MyAllocationsTab({ caps }: { caps: readonly string[] }) {
   const qc = useQueryClient();
   const canReturn = hasCap(caps, 'lir:allocations:return-request');
+  const canConfirmReturn = hasCap(caps, 'lir:allocations:return-confirm');
+  const canArinRetry = hasCap(caps, 'lir:allocations:arin-retry');
   const allocsQ = useQuery({
     queryKey: ['lir-allocations'],
     queryFn: async () => (
@@ -478,6 +501,34 @@ function MyAllocationsTab({ caps }: { caps: readonly string[] }) {
       toast.error(err?.message ?? 'failed to request return');
     } finally {
       setReturning(false);
+    }
+  }
+
+  // NIC-side confirm-return: status='return_requested' → 'returned'.
+  // No reason needed; the audit row records who did it.
+  async function confirmReturn(a: LirAllocation) {
+    if (!globalThis.confirm(
+      `Confirm return of ${a.prefix}? The carved range will be reusable; ARIN deassignment is queued automatically when applicable.`,
+    )) return;
+    try {
+      await http.post(`/lir/allocations/${a.id}/return-confirm`, null);
+      toast.success('Return confirmed');
+      await qc.invalidateQueries({ queryKey: ['lir-allocations'] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed to confirm');
+    }
+  }
+
+  // NIC-side ARIN retry: resets attempts to 0 and flips status back to
+  // 'pending' so the worker picks it up on its next tick. Only valid
+  // on arin_status='failed' / 'none'.
+  async function retryArin(a: LirAllocation) {
+    try {
+      await http.post(`/lir/allocations/${a.id}/arin/retry`, null);
+      toast.success('ARIN retry queued');
+      await qc.invalidateQueries({ queryKey: ['lir-allocations'] });
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed to retry');
     }
   }
 
@@ -518,12 +569,16 @@ function MyAllocationsTab({ caps }: { caps: readonly string[] }) {
           },
           {
             id: 'actions', header: '',
-            cell: (a) => canReturn && a.status === 'active'
-              ? <Button onClick={() => setReturnTarget(a)} variant="link">
-                  Request return
-                </Button>
-              : null,
-            width: 140,
+            cell: (a) => <AllocationActions
+              alloc={a}
+              canReturn={canReturn}
+              canConfirmReturn={canConfirmReturn}
+              canArinRetry={canArinRetry}
+              onRequestReturn={() => setReturnTarget(a)}
+              onConfirmReturn={() => confirmReturn(a)}
+              onArinRetry={() => retryArin(a)}
+            />,
+            width: 220,
           },
         ]}
       />
@@ -559,6 +614,48 @@ function MyAllocationsTab({ caps }: { caps: readonly string[] }) {
         </SpaceBetween>
       </Modal>
     </>
+  );
+}
+
+// AllocationActions composes the per-row buttons: tenant request-return
+// on active rows, NIC confirm-return on return_requested rows, NIC
+// arin-retry on rows whose last attempt failed (or never ran). The
+// backend re-checks each guard so a stale click against a raced row
+// gets a clear 4xx instead of a silent no-op.
+function AllocationActions({
+  alloc, canReturn, canConfirmReturn, canArinRetry,
+  onRequestReturn, onConfirmReturn, onArinRetry,
+}: Readonly<{
+  alloc: LirAllocation;
+  canReturn: boolean;
+  canConfirmReturn: boolean;
+  canArinRetry: boolean;
+  onRequestReturn: () => void;
+  onConfirmReturn: () => void;
+  onArinRetry: () => void;
+}>) {
+  const showRequestReturn = canReturn && alloc.status === 'active';
+  const showConfirmReturn = canConfirmReturn && alloc.status === 'return_requested';
+  // arin_status='none' is also retry-able (the SQL accepts both); a
+  // none row that gets retried flips to 'pending' so the worker picks
+  // it up if the pool was later wired with an ARIN handle.
+  const showArinRetry = canArinRetry && (alloc.arin_status === 'failed' || alloc.arin_status === 'none');
+
+  if (!showRequestReturn && !showConfirmReturn && !showArinRetry) {
+    return null;
+  }
+  return (
+    <SpaceBetween direction="horizontal" size="xs">
+      {showRequestReturn && (
+        <Button onClick={onRequestReturn} variant="link">Request return</Button>
+      )}
+      {showConfirmReturn && (
+        <Button onClick={onConfirmReturn} variant="primary">Confirm return</Button>
+      )}
+      {showArinRetry && alloc.arin_status === 'failed' && (
+        <Button onClick={onArinRetry} variant="link">Retry ARIN</Button>
+      )}
+    </SpaceBetween>
   );
 }
 
