@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -341,4 +342,75 @@ func (f *apiBearerFakeQ) GetApiTokenByHash(_ context.Context, h string) (dbq.Api
 		return dbq.ApiToken{}, pgx.ErrNoRows
 	}
 	return f.row, nil
+}
+
+// ---- MountPublic vs MountAuthenticated routing (the PR 179 split) ----
+//
+// In production, cmd/otter-go/main.go mounts the auth routes in two
+// chi.Groups so the SPA's login flow (POST /login, GET /oidc/login,
+// GET /oidc/callback, POST /refresh, POST /logout) doesn't sit behind
+// the Verifying middleware that 401s anonymous requests. These tests
+// stand up the same wire shape and assert each half answers the way
+// it should when no bearer is present.
+
+// nopLogger is a slog logger that discards every record — the JWT
+// Verifying middleware needs one but the tests don't care about output.
+
+func mountSplit(h *Handler, q Querier) http.Handler {
+	r := chi.NewRouter()
+	verify := Verifying(nopLogger(), q, VerifierConfig{PrimarySecret: []byte("test-secret")})
+	r.Route("/api/v1", func(r chi.Router) {
+		h.Mount(r, verify)
+	})
+	return r
+}
+
+// TestPublicAuth_PostLoginReachableWithoutBearer is the regression
+// for the cutover blocker the code-review caught: SPA's
+// `http.post('/auth/login', ...)` runs at session-start with no
+// Authorization header. If Verifying sits in front, every login
+// attempt 401s "missing bearer token" before the handler runs.
+// MountPublic must route around Verifying.
+func TestPublicAuth_PostLoginReachableWithoutBearer(t *testing.T) {
+	q := &fakeQ{}
+	h := &Handler{Q: q, Mint: MintConfig{Secret: []byte("test-secret"), TTLSecond: 60}}
+	body, _ := json.Marshal(map[string]string{"email": "x@x", "password": "p"})
+	req := httptest.NewRequest("POST", "/api/v1/auth/login", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	mountSplit(h, q).ServeHTTP(rec, req)
+	// Real outcome depends on whether the user exists in the fake
+	// (it doesn't) — but the test only cares that we DIDN'T get the
+	// Verifying middleware's 401 "missing bearer token". Any
+	// auth-internal response is fine; what we're proving is
+	// reachability.
+	if rec.Code == http.StatusUnauthorized {
+		body := rec.Body.String()
+		if body != "" && strings.Contains(body, "missing bearer token") {
+			t.Fatalf("Verifying middleware fired in front of /auth/login: %d %s", rec.Code, body)
+		}
+	}
+}
+
+func TestPublicAuth_GetOIDCLoginReachableWithoutBearer(t *testing.T) {
+	q := &fakeQ{}
+	h := &Handler{Q: q, Mint: MintConfig{Secret: []byte("test-secret"), TTLSecond: 60}}
+	req := httptest.NewRequest("GET", "/api/v1/auth/oidc/login", nil)
+	rec := httptest.NewRecorder()
+	mountSplit(h, q).ServeHTTP(rec, req)
+	// h.OIDC == nil → handler 400s "OIDC not configured", not 401.
+	if rec.Code == http.StatusUnauthorized && strings.Contains(rec.Body.String(), "missing bearer") {
+		t.Fatalf("Verifying middleware fired in front of /auth/oidc/login: %s", rec.Body.String())
+	}
+}
+
+func TestAuthenticatedAuth_GetMeRequiresBearer(t *testing.T) {
+	q := &fakeQ{}
+	h := &Handler{Q: q, Mint: MintConfig{Secret: []byte("test-secret"), TTLSecond: 60}}
+	req := httptest.NewRequest("GET", "/api/v1/auth/me", nil)
+	rec := httptest.NewRecorder()
+	mountSplit(h, q).ServeHTTP(rec, req)
+	// No bearer → Verifying short-circuits with 401 before /me runs.
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401 (Verifying missing bearer)", rec.Code)
+	}
 }

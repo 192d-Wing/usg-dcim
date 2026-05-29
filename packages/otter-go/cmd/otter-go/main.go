@@ -168,27 +168,37 @@ func main() {
 		authMW = auth.MustStub(log)
 	}
 	r.Route("/api/v1", func(r chi.Router) {
-		r.Use(authMW)
-		sh.Mount(r)
-		rh.Mount(r)
-		lh.Mount(r)
-		rkh.Mount(r)
-		ah.Mount(r)
-		ch.Mount(r)
-		ih.Mount(r)
-		lih.Mount(r)
-		ph.Mount(r)
-		bh.Mount(r)
-		dh.Mount(r)
-		auh.Mount(r)
-		alh.Mount(r)
-		nh.Mount(r)
-		coh.Mount(r)
-		oh.Mount(r)
-		sth.Mount(r)
-		th.Mount(r)
-		adh.Mount(r)
-		authHandler.Mount(r)
+		// /api/v1/auth/{login,logout,refresh,oidc/*} must remain
+		// reachable to unauthenticated browsers — the SPA hits these
+		// BEFORE it holds a session. authHandler.Mount(r, authMW)
+		// keeps the login flow public and wraps only the protected
+		// half (/me, /tokens CRUD) in Verifying. Done first so the
+		// public routes register without the middleware that the
+		// other subhandlers register below inside r.Group.
+		authHandler.Mount(r, authMW)
+		// Everything else under /api/v1 requires a verified session.
+		r.Group(func(r chi.Router) {
+			r.Use(authMW)
+			sh.Mount(r)
+			rh.Mount(r)
+			lh.Mount(r)
+			rkh.Mount(r)
+			ah.Mount(r)
+			ch.Mount(r)
+			ih.Mount(r)
+			lih.Mount(r)
+			ph.Mount(r)
+			bh.Mount(r)
+			dh.Mount(r)
+			auh.Mount(r)
+			alh.Mount(r)
+			nh.Mount(r)
+			coh.Mount(r)
+			oh.Mount(r)
+			sth.Mount(r)
+			th.Mount(r)
+			adh.Mount(r)
+		})
 	})
 
 	srv := &http.Server{
