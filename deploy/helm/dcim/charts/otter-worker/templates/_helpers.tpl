@@ -15,5 +15,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "otter-worker.image" -}}
-{{ .Values.global.image.registry }}/otter:{{ .Values.global.image.tag }}
+{{ .Values.global.image.registry }}/dcim-otter:{{ .Values.global.image.tag }}
 {{- end -}}

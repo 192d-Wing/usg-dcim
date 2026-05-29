@@ -15,5 +15,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "badger.image" -}}
-{{ .Values.global.image.registry }}/badger:{{ .Values.global.image.tag }}
+{{ .Values.global.image.registry }}/dcim-badger:{{ .Values.global.image.tag }}
 {{- end -}}

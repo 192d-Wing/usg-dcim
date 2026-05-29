@@ -30,6 +30,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/dns"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/ipam"
+	"github.com/usg-dcim/packages/otter-go/internal/lir"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
 	"github.com/usg-dcim/packages/otter-go/internal/notifications"
 	"github.com/usg-dcim/packages/otter-go/internal/organization"
@@ -68,6 +69,7 @@ func main() {
 	ah := &assets.Handler{Q: q, Audit: q}
 	ch := &cables.Handler{Q: q, Audit: q}
 	ih := &ipam.Handler{Q: q, Audit: q}
+	lih := &lir.Handler{Q: q, Audit: q}
 	ph := &power.Handler{Q: q, Audit: q}
 	bh := &bgp.Handler{Q: q, Audit: q}
 	dh := &dns.Handler{Q: q, Audit: q}
@@ -174,6 +176,7 @@ func main() {
 		ah.Mount(r)
 		ch.Mount(r)
 		ih.Mount(r)
+		lih.Mount(r)
 		ph.Mount(r)
 		bh.Mount(r)
 		dh.Mount(r)

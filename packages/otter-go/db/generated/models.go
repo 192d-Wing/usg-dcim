@@ -272,6 +272,231 @@ type Vrf struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// LirPool — named bucket of supernet space DoW NIC sub-allocates from.
+// Pinned to a single IP family; max/min prefix length bound the carve
+// sizes the pool will issue. arin_parent_net_handle is the upstream
+// ARIN net handle that successful approvals reassign under; NULL means
+// the pool is LIR-internal (no Reg-RWS feed-up). Schema authority lives
+// in Alembic migration 20260528_0065.
+type LirPool struct {
+	ID                     uuid.UUID  `json:"id"`
+	Name                   string     `json:"name"`
+	Slug                   string     `json:"slug"`
+	Description            *string    `json:"description"`
+	IpFamily               int16      `json:"ip_family"`
+	FabricID               *uuid.UUID `json:"fabric_id"`
+	Classification         *string    `json:"classification"`
+	MinPrefixLength        int16      `json:"min_prefix_length"`
+	MaxPrefixLength        int16      `json:"max_prefix_length"`
+	DefaultSupernetPurpose *string    `json:"default_supernet_purpose"`
+	ArinParentNetHandle    *string    `json:"arin_parent_net_handle"`
+	Enabled                bool       `json:"enabled"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
+// PoolSourceSupernetRow is the row shape returned by
+// ListPoolSourceSupernets — the supernet plus its LIR linkage. Distinct
+// from the existing Supernet row type so we don't have to update every
+// IPAM scan helper to carry the new lir_pool_id /
+// owner_organization_id columns yet. Once the IPAM Go module is
+// updated to expose those fields generally, this type can be retired.
+type PoolSourceSupernetRow struct {
+	ID                  uuid.UUID  `json:"id"`
+	FabricID            uuid.UUID  `json:"fabric_id"`
+	VrfID               uuid.UUID  `json:"vrf_id"`
+	SiteID              *uuid.UUID `json:"site_id"`
+	Prefix              string     `json:"prefix"`
+	Name                *string    `json:"name"`
+	Description         *string    `json:"description"`
+	Purpose             *string    `json:"purpose"`
+	LirPoolID           *uuid.UUID `json:"lir_pool_id"`
+	OwnerOrganizationID *uuid.UUID `json:"owner_organization_id"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+// SupernetLirAttachRow is the compact projection used by the attach
+// pre-check: just the fields the handler needs to decide if the
+// supernet is eligible (current pool, owner org, prefix for family
+// derivation).
+type SupernetLirAttachRow struct {
+	ID                  uuid.UUID  `json:"id"`
+	LirPoolID           *uuid.UUID `json:"lir_pool_id"`
+	OwnerOrganizationID *uuid.UUID `json:"owner_organization_id"`
+	Prefix              string     `json:"prefix"`
+}
+
+// LirRequest — tenant-submitted request for IP space. status moves
+// through the state machine pinned by CHECK ck_lir_request_status in
+// migration 0065:
+//
+//	pending_approval → approved | rejected | cancelled | failed
+//
+// decided_at + decided_by_user_id are NULL on pending/cancelled rows
+// and non-NULL on approved/rejected/failed (enforced by
+// ck_lir_request_decision_consistency).
+type LirRequest struct {
+	ID                uuid.UUID  `json:"id"`
+	OrganizationID    uuid.UUID  `json:"organization_id"`
+	RequesterUserID   uuid.UUID  `json:"requester_user_id"`
+	PoolID            *uuid.UUID `json:"pool_id"`
+	SiteID            *uuid.UUID `json:"site_id"`
+	IpFamily          int16      `json:"ip_family"`
+	PrefixLength      int16      `json:"prefix_length"`
+	Purpose           *string    `json:"purpose"`
+	Classification    *string    `json:"classification"`
+	Justification     string     `json:"justification"`
+	Status            string     `json:"status"`
+	SubmittedAt       time.Time  `json:"submitted_at"`
+	DecidedAt         *time.Time `json:"decided_at"`
+	DecidedByUserID   *uuid.UUID `json:"decided_by_user_id"`
+	DecisionNotes     *string    `json:"decision_notes"`
+	ApprovedPoolID    *uuid.UUID `json:"approved_pool_id"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
+// LirAllocation — the issued allocation tied 1:1 to an approved
+// LirRequest. ARIN columns drive the async Reg-RWS feed-up worker
+// (phase 5); the worker reads rows where arin_status ∈ ('pending',
+// 'failed', 'removing') to find work.
+type LirAllocation struct {
+	ID                       uuid.UUID  `json:"id"`
+	RequestID                uuid.UUID  `json:"request_id"`
+	OrganizationID           uuid.UUID  `json:"organization_id"`
+	PoolID                   uuid.UUID  `json:"pool_id"`
+	PoolSupernetID           uuid.UUID  `json:"pool_supernet_id"`
+	TenantSupernetID         uuid.UUID  `json:"tenant_supernet_id"`
+	Prefix                   string     `json:"prefix"`
+	AllocatedAt              time.Time  `json:"allocated_at"`
+	AllocatedByUserID        uuid.UUID  `json:"allocated_by_user_id"`
+	Status                   string     `json:"status"`
+	ReturnRequestedAt        *time.Time `json:"return_requested_at"`
+	ReturnRequestedByUserID  *uuid.UUID `json:"return_requested_by_user_id"`
+	ReturnReason             *string    `json:"return_reason"`
+	ReturnedAt               *time.Time `json:"returned_at"`
+	ReturnedByUserID         *uuid.UUID `json:"returned_by_user_id"`
+	ArinStatus               string     `json:"arin_status"`
+	ArinNetHandle            *string    `json:"arin_net_handle"`
+	ArinLastAttemptAt        *time.Time `json:"arin_last_attempt_at"`
+	ArinLastError            *string    `json:"arin_last_error"`
+	ArinAttempts             int32      `json:"arin_attempts"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
+}
+
+// LandingFabricRow — the (fabric_id, default_vrf_id) tuple the
+// approval handler stamps on the carved tenant Supernet. Looked up
+// by slug ('lir-unassigned' for the system landing fabric).
+type LandingFabricRow struct {
+	FabricID     uuid.UUID `json:"fabric_id"`
+	DefaultVrfID uuid.UUID `json:"default_vrf_id"`
+}
+
+// PoolSupernetForCarveRow — minimal projection the Go carver
+// consumes when picking a free sub-prefix from a pool source supernet.
+type PoolSupernetForCarveRow struct {
+	ID     uuid.UUID `json:"id"`
+	Prefix string    `json:"prefix"`
+}
+
+// AllocatedPrefixRow — existing allocations the carver subtracts
+// from the pool supernet's range. pool_supernet_id is the FK back
+// to the source supernet so the handler can bucket by parent.
+type AllocatedPrefixRow struct {
+	PoolSupernetID uuid.UUID `json:"pool_supernet_id"`
+	Prefix         string    `json:"prefix"`
+}
+
+// ApprovalResultRow bundles the post-approval LirRequest and
+// LirAllocation rows the CTE just wrote. Earlier shape returned
+// only three UUIDs (request_id, allocation_id, tenant_supernet_id)
+// and the handler re-fetched both rows for the JSON response — two
+// extra round-trips per approval. Widening the CTE's SELECT to
+// include both row shapes folds the re-fetches into the same
+// query.
+type ApprovalResultRow struct {
+	Request    LirRequest    `json:"request"`
+	Allocation LirAllocation `json:"allocation"`
+}
+
+// SystemSetting — generic key/JSON-value config row. The Python side
+// stores ARIN endpoint, API key, and the kill-switch under
+// arin.regrws.endpoint / .api_key / .enabled keys.
+type SystemSetting struct {
+	Key       string          `json:"key"`
+	Value     json.RawMessage `json:"value"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// SupernetForMoveRow — the projection the IPAM move handler reads
+// to validate a relocation: current fabric/VRF, owner org (ABAC),
+// prefix (audit metadata), and is_system on the source fabric. The
+// is_system flag (set by migration 0065 on the LIR landing fabric)
+// is what the move handler keys off — earlier shape returned the
+// slug literal which forced the landing-fabric name to live in
+// three places.
+type SupernetForMoveRow struct {
+	ID                     uuid.UUID  `json:"id"`
+	CurrentFabricID        uuid.UUID  `json:"current_fabric_id"`
+	CurrentVrfID           uuid.UUID  `json:"current_vrf_id"`
+	OwnerOrganizationID    *uuid.UUID `json:"owner_organization_id"`
+	Prefix                 string     `json:"prefix"`
+	CurrentFabricIsSystem  bool       `json:"current_fabric_is_system"`
+}
+
+// VrfForMoveRow — minimal (id, fabric_id) projection used to verify
+// the target VRF belongs to the target fabric before issuing the
+// move UPDATE.
+type VrfForMoveRow struct {
+	ID       uuid.UUID `json:"id"`
+	FabricID uuid.UUID `json:"fabric_id"`
+}
+
+// ArinRemoveJobRow — the joined projection the worker claims for the
+// deassignment direction. Smaller than the submit job since DELETE
+// only needs the allocation's own net handle and the parent's (for
+// constructing the Reg-RWS URL).
+type ArinRemoveJobRow struct {
+	AllocationID    uuid.UUID `json:"allocation_id"`
+	ArinStatus      string    `json:"arin_status"`
+	ArinAttempts    int32     `json:"arin_attempts"`
+	Prefix          string    `json:"prefix"`
+	NetHandle       string    `json:"net_handle"`
+	ParentNetHandle string    `json:"parent_net_handle"`
+}
+
+// ArinSubmitJobRow — the joined projection the worker claims. Bundles
+// allocation identity, the ARIN parent net handle from the pool, and
+// every Organization POC + address field needed to build a Reg-RWS
+// reassign-detailed payload in one round-trip.
+type ArinSubmitJobRow struct {
+	AllocationID     uuid.UUID `json:"allocation_id"`
+	ArinStatus       string    `json:"arin_status"`
+	ArinAttempts     int32     `json:"arin_attempts"`
+	Prefix           string    `json:"prefix"`
+	OrganizationID   uuid.UUID `json:"organization_id"`
+	ParentNetHandle  string    `json:"parent_net_handle"`
+	OrgName          string    `json:"org_name"`
+	OrgArinHandle    *string   `json:"org_arin_handle"`
+	AddressLine1     string    `json:"address_line1"`
+	AddressLine2     *string   `json:"address_line2"`
+	City             string    `json:"city"`
+	StateProvince    *string   `json:"state_province"`
+	PostalCode       *string   `json:"postal_code"`
+	Country          string    `json:"country"`
+	AdminPocName     string    `json:"admin_poc_name"`
+	AdminPocEmail    string    `json:"admin_poc_email"`
+	AdminPocPhone    *string   `json:"admin_poc_phone"`
+	TechPocName      string    `json:"tech_poc_name"`
+	TechPocEmail     string    `json:"tech_poc_email"`
+	TechPocPhone     *string   `json:"tech_poc_phone"`
+	AbusePocName     string    `json:"abuse_poc_name"`
+	AbusePocEmail    string    `json:"abuse_poc_email"`
+	AbusePocPhone    *string   `json:"abuse_poc_phone"`
+}
+
 type Subnet struct {
 	ID          uuid.UUID  `json:"id"`
 	SupernetID  uuid.UUID  `json:"supernet_id"`

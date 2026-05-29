@@ -79,6 +79,11 @@ type Querier interface {
 	CountSubnetsInSupernet(ctx context.Context, supernetID uuid.UUID) (int64, error)
 	DeleteSupernet(ctx context.Context, id uuid.UUID) error
 	GetSupernetVrfAndFabric(ctx context.Context, id uuid.UUID) (dbq.SupernetVrfAndFabric, error)
+	// Move endpoint — relocates a tenant-owned supernet out of the LIR
+	// landing fabric. See internal/ipam/move.go.
+	GetSupernetForMove(ctx context.Context, id uuid.UUID) (dbq.SupernetForMoveRow, error)
+	GetVrfForMove(ctx context.Context, id uuid.UUID) (dbq.VrfForMoveRow, error)
+	MoveSupernet(ctx context.Context, arg dbq.MoveSupernetParams) (dbq.Supernet, error)
 	// Subnets
 	CreateSubnet(ctx context.Context, arg dbq.CreateSubnetParams) (dbq.Subnet, error)
 	UpdateSubnet(ctx context.Context, arg dbq.UpdateSubnetParams) (dbq.Subnet, error)
@@ -194,6 +199,11 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("ipam:supernets:create")).Post("/supernets", h.createSupernet)
 		r.With(auth.RequireCapability("ipam:supernets:update")).Patch("/supernets/{id}", h.updateSupernet)
 		r.With(auth.RequireCapability("ipam:supernets:delete")).Delete("/supernets/{id}", h.deleteSupernet)
+		// Move endpoint — relocates a tenant-owned supernet out of the
+		// LIR landing fabric. Same capability as the regular update;
+		// move.go layers source-side guards (landing-fabric, owner-org,
+		// no children) on top.
+		r.With(auth.RequireCapability("ipam:supernets:update")).Post("/supernets/{id}/move", h.moveSupernet)
 
 		r.With(auth.RequireCapability("ipam:subnets:create")).Post("/subnets", h.createSubnet)
 		r.With(auth.RequireCapability("ipam:bulk:execute")).Post("/subnets/bulk", h.bulkCreateSubnets)

@@ -15,5 +15,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "beagle.image" -}}
-{{ .Values.global.image.registry }}/beagle:{{ .Values.global.image.tag }}
+{{ .Values.global.image.registry }}/dcim-beagle:{{ .Values.global.image.tag }}
 {{- end -}}

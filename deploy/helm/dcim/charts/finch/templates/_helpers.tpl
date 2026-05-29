@@ -15,5 +15,5 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "finch.image" -}}
-{{ .Values.global.image.registry }}/finch:{{ .Values.global.image.tag }}
+{{ .Values.global.image.registry }}/dcim-finch:{{ .Values.global.image.tag }}
 {{- end -}}
