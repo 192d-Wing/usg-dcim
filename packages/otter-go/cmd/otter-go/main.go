@@ -37,6 +37,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/power"
 	"github.com/usg-dcim/packages/otter-go/internal/racks"
 	"github.com/usg-dcim/packages/otter-go/internal/regions"
+	"github.com/usg-dcim/packages/otter-go/internal/search"
 	"github.com/usg-dcim/packages/otter-go/internal/sites"
 	"github.com/usg-dcim/packages/otter-go/internal/stencils"
 	"github.com/usg-dcim/packages/otter-go/internal/telemetry"
@@ -95,6 +96,7 @@ func main() {
 		}
 	}
 	adh := &admin.Handler{Q: q, Audit: q, DefaultDnsRecursiveUpstreams: dnsDefault}
+	srh := &search.Handler{Q: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -212,6 +214,7 @@ func main() {
 			sth.Mount(r)
 			th.Mount(r)
 			adh.Mount(r)
+			srh.Mount(r)
 		})
 	})
 

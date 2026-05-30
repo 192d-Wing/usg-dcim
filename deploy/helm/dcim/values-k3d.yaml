@@ -74,6 +74,7 @@ ingress:
         - { path: /api/v1/audit,     pathType: Prefix, backend: otter-go }
         - { path: /api/v1/telemetry, pathType: Prefix, backend: otter-go }
         - { path: /api/v1/admin,     pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/search,    pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []
