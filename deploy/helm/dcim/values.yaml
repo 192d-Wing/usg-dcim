@@ -280,31 +280,11 @@ ingress:
         - path: /api/v1/search
           pathType: Prefix
           backend: otter-go
-        # Dashboards cutover: /enterprise (Phase 1) + /free-space
-        # (Phase 2 — capacity service ported). The rest of
-        # /dashboards/* (sites/at-risk, racks/{id}, assets/{id},
-        # forecasts, sites/{id}) still depends on Python service
-        # helpers (power_chain, forecast, and parts of capacity used
-        # by the per-rack joined view) and stays on Python until
-        # those ports land.
-        - path: /api/v1/dashboards/enterprise
-          pathType: Prefix
-          backend: otter-go
-        - path: /api/v1/dashboards/free-space
-          pathType: Prefix
-          backend: otter-go
-        - path: /api/v1/dashboards/sites/at-risk
-          pathType: Prefix
-          backend: otter-go
-        - path: /api/v1/dashboards/assets
-          pathType: Prefix
-          backend: otter-go
-        # /sites/at-risk above is the longer-prefix sibling — both win
-        # over /sites/{site_id} for their specific paths.
-        - path: /api/v1/dashboards/sites
-          pathType: Prefix
-          backend: otter-go
-        - path: /api/v1/dashboards/racks
+        # /api/v1/dashboards/* fully on otter-go across Phases 1-3
+        # (enterprise + free-space + sites/at-risk + assets/{id} +
+        # sites/{id} + racks/{id} + 3 forecast endpoints). Single
+        # Prefix rule supersedes the per-phase rules that lived here.
+        - path: /api/v1/dashboards
           pathType: Prefix
           backend: otter-go
         - path: /api
