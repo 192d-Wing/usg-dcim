@@ -1,8 +1,10 @@
 // Package dashboards holds enterprise + per-site dashboard endpoints.
-// Phase 1 ports only the enterprise overview — the other endpoints
-// (sites/at-risk, racks/{id}, assets/{id}, free-space, forecasts,
-// sites/{id}) depend on Python service helpers that need their own
-// ports and ship as follow-up PRs.
+// Shipped so far: enterprise overview (Phase 1), free-space (Phase 2
+// — uses internal/capacity), sites/at-risk (Phase 2b — alert_severity
+// ENUM >= compare). Remaining endpoints (racks/{id}, assets/{id},
+// forecasts, sites/{id}) stay on Python until the rest of the
+// services/ helpers (power_chain, forecast, and the sites topology
+// joins) get ported.
 package dashboards
 
 import (
@@ -40,9 +42,14 @@ type Handler struct {
 	CollectorStaleSeconds int
 }
 
+// capDashboardsRead is the cap every /dashboards route gates on.
+// Extracted so the linter doesn't flag the string-literal duplication.
+const capDashboardsRead = "dashboards:dashboards:read"
+
 func (h *Handler) Mount(r chi.Router) {
-	r.With(auth.RequireCapability("dashboards:dashboards:read")).Get("/dashboards/enterprise", h.enterprise)
-	r.With(auth.RequireCapability("dashboards:dashboards:read")).Get("/dashboards/free-space", h.freeSpace)
+	r.With(auth.RequireCapability(capDashboardsRead)).Get("/dashboards/enterprise", h.enterprise)
+	r.With(auth.RequireCapability(capDashboardsRead)).Get("/dashboards/free-space", h.freeSpace)
+	r.With(auth.RequireCapability(capDashboardsRead)).Get("/dashboards/sites/at-risk", h.sitesAtRisk)
 }
 
 // enterpriseOverview is the wire shape returned by GET

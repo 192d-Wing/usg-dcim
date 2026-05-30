@@ -140,6 +140,42 @@ func (q *Queries) ListAssetsByRackIDs(ctx context.Context, rackIDs []uuid.UUID) 
 	return items, rows.Err()
 }
 
+// ---- /dashboards/sites/at-risk ----
+
+const listSitesAtRisk = `-- name: ListSitesAtRisk :many
+SELECT site_id, COUNT(id)::bigint AS alert_count
+FROM alerts
+WHERE state = 'firing'
+  AND severity >= $1::alert_severity
+GROUP BY site_id
+ORDER BY COUNT(id) DESC
+LIMIT 50
+`
+
+// SiteAtRiskRow is the projected aggregation — site_id with its
+// firing-alert count at or above the threshold severity.
+type SiteAtRiskRow struct {
+	SiteID     uuid.UUID `json:"site_id"`
+	AlertCount int64     `json:"alert_count"`
+}
+
+func (q *Queries) ListSitesAtRisk(ctx context.Context, minSeverity string) ([]SiteAtRiskRow, error) {
+	rows, err := q.db.Query(ctx, listSitesAtRisk, minSeverity)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SiteAtRiskRow
+	for rows.Next() {
+		var r SiteAtRiskRow
+		if err := rows.Scan(&r.SiteID, &r.AlertCount); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
 const listPduKwTelemetry = `-- name: ListPduKwTelemetry :many
 SELECT asset_id, metric, last_value
 FROM telemetry_sources

@@ -24,28 +24,10 @@ from ..settings import get_settings
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
-# /api/v1/dashboards/enterprise moved to otter-go (Phase 1 of the
-# dashboards port). The umbrella chart routes that specific path to
-# otter-go via a longer-prefix ingress rule; the rest of /dashboards/*
-# (sites/at-risk, racks/{id}, assets/{id}, free-space, forecasts,
-# sites/{id}) stays here until the service-helper ports land.
-
-@router.get("/sites/at-risk")
-async def sites_at_risk(
-    severity: Severity = Query(Severity.major),
-    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    rows = (
-        await db.execute(
-            select(Alert.site_id, func.count(Alert.id).label("n"))
-            .where(Alert.state == AlertState.firing, Alert.severity >= severity)
-            .group_by(Alert.site_id)
-            .order_by(func.count(Alert.id).desc())
-            .limit(50)
-        )
-    ).all()
-    return {"sites": [{"site_id": str(r.site_id), "alert_count": r.n} for r in rows]}
+# /api/v1/dashboards/enterprise (Phase 1) + /free-space (Phase 2
+# capacity) + /sites/at-risk (Phase 2b) all moved to otter-go. The
+# remaining /dashboards/* routes (racks/{id}, assets/{id}, forecasts,
+# sites/{id}) stay here until the service-helper ports land.
 
 @router.get("/racks/{rack_id}")
 async def rack_detail(
