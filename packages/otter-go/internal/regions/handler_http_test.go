@@ -21,6 +21,9 @@ type fakeQuerier struct {
 	list  func(ctx context.Context, arg dbq.ListRegionsParams) ([]dbq.Region, error)
 	count func(ctx context.Context, arg dbq.CountRegionsParams) (int64, error)
 	get   func(ctx context.Context, id uuid.UUID) (dbq.Region, error)
+	// Region-scope expansion knobs.
+	expandSites     func(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
+	regionsForSites func(ctx context.Context, siteIDs []uuid.UUID) ([]uuid.UUID, error)
 }
 
 func (f *fakeQuerier) ListRegions(ctx context.Context, arg dbq.ListRegionsParams) ([]dbq.Region, error) {
@@ -50,6 +53,20 @@ func (f *fakeQuerier) CreateRegion(_ context.Context, arg dbq.CreateRegionParams
 
 func (f *fakeQuerier) UpdateRegion(_ context.Context, arg dbq.UpdateRegionParams) (dbq.Region, error) {
 	return dbq.Region{ID: arg.ID, Name: derefStr(arg.Name, "x"), Code: "x", Description: arg.Description}, nil
+}
+
+func (f *fakeQuerier) ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	if f.expandSites != nil {
+		return f.expandSites(ctx, arg)
+	}
+	return nil, nil
+}
+
+func (f *fakeQuerier) ListRegionIDsForSiteIDs(ctx context.Context, siteIDs []uuid.UUID) ([]uuid.UUID, error) {
+	if f.regionsForSites != nil {
+		return f.regionsForSites(ctx, siteIDs)
+	}
+	return nil, nil
 }
 
 func derefStr(p *string, def string) string {
@@ -166,4 +183,3 @@ func TestGetRegion_BadID(t *testing.T) {
 		t.Fatalf("got %d, want 400", rec.Code)
 	}
 }
-
