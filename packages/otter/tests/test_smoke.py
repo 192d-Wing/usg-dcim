@@ -31,7 +31,6 @@ def test_openapi_published() -> None:
         "/api/v1/ingest/telemetry",
         "/api/v1/alerts",
         "/api/v1/dashboards/enterprise",
-        "/api/v1/search",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
     # /api/v1/auth/* moved to otter-go (PR 179), /api/v1/telemetry/series
@@ -39,7 +38,7 @@ def test_openapi_published() -> None:
     # fully moved (PR #182 + the capabilities/dns follow-up). Negative-
     # assert each is gone from Python's OpenAPI so a regression that
     # re-includes any of those routers fails CI.
-    for gone in ("/api/v1/auth", "/api/v1/audit", "/api/v1/telemetry/", "/api/v1/admin"):
+    for gone in ("/api/v1/auth", "/api/v1/audit", "/api/v1/telemetry/", "/api/v1/admin", "/api/v1/search"):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
         )

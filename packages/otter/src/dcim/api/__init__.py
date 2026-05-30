@@ -14,7 +14,6 @@ from .notifications import router as notifications_router
 from .organization import router as organization_router
 from .power import router as power_router
 from .regiondeploy import router as regiondeploy_router
-from .search import router as search_router
 from .stencils import router as stencils_router
 
 router = APIRouter()
@@ -35,7 +34,10 @@ router.include_router(ingest_router)
 # silently double-serving.
 router.include_router(alerts_router)
 router.include_router(dashboards_router)
-router.include_router(search_router)
+# /api/v1/search moved to otter-go (PR-search). The umbrella chart
+# routes /api/v1/search → otter-go; Python no longer registers the
+# router so a misrouted internal call fails loud instead of silently
+# double-serving.
 router.include_router(stencils_router)
 router.include_router(power_router)
 # /api/v1/audit/* moved to otter-go (PR 180). The umbrella chart

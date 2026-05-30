@@ -274,6 +274,12 @@ ingress:
         - path: /api/v1/admin
           pathType: Prefix
           backend: otter-go
+        # PR-search cutover: global search moved to otter-go. The
+        # Python implementation hit four tables sequentially under a
+        # single AsyncSession; the Go port keeps the same shape.
+        - path: /api/v1/search
+          pathType: Prefix
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter
