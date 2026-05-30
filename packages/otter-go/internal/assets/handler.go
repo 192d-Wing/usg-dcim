@@ -60,12 +60,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability("inventory:bulk:execute")).Post("/assets/bulk", h.bulkUpsert)
 }
 
-type listResponse struct {
-	Items  []dbq.Asset `json:"items"`
-	Total  int64       `json:"total"`
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
-}
+type listResponse = httpx.Page[dbq.Asset]
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -78,7 +73,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scoped && len(scopeSiteIds) == 0 {
-		httpx.JSON(w, http.StatusOK, listResponse{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Asset](limit, offset))
 		return
 	}
 	params := dbq.ListAssetsParams{

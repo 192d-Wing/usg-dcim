@@ -236,19 +236,14 @@ func (h *Handler) Mount(r chi.Router) {
 	})
 }
 
-type vrfBgpPeersPage struct {
-	Items  []dbq.VrfBgpPeer `json:"items"`
-	Total  int64            `json:"total"`
-	Limit  int32            `json:"limit"`
-	Offset int32            `json:"offset"`
-}
+type vrfBgpPeersPage = httpx.Page[dbq.VrfBgpPeer]
 
 func (h *Handler) listVrfBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vrf-bgp-peers:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, vrfBgpPeersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.VrfBgpPeer](limit, offset))
 		return
 	}
 	params := dbq.ListVrfBgpPeersParams{
@@ -293,19 +288,14 @@ func (h *Handler) listVrfBgpPeers(w http.ResponseWriter, r *http.Request) {
 
 // ---- VRFs ----
 
-type vrfsPage struct {
-	Items  []dbq.Vrf `json:"items"`
-	Total  int64     `json:"total"`
-	Limit  int32     `json:"limit"`
-	Offset int32     `json:"offset"`
-}
+type vrfsPage = httpx.Page[dbq.Vrf]
 
 func (h *Handler) listVrfs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vrfs:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, vrfsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Vrf](limit, offset))
 		return
 	}
 	params := dbq.ListVrfsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -353,19 +343,14 @@ func (h *Handler) getVrf(w http.ResponseWriter, r *http.Request) {
 
 // ---- Subnets ----
 
-type subnetsPage struct {
-	Items  []dbq.Subnet `json:"items"`
-	Total  int64        `json:"total"`
-	Limit  int32        `json:"limit"`
-	Offset int32        `json:"offset"`
-}
+type subnetsPage = httpx.Page[dbq.Subnet]
 
 func (h *Handler) listSubnets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:subnets:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, subnetsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Subnet](limit, offset))
 		return
 	}
 	params := dbq.ListSubnetsParams{Limit: limit, Offset: offset, Purpose: strPtr(q.Get("purpose")), ScopeFabricIds: scopeIds}
@@ -425,19 +410,14 @@ func (h *Handler) getSubnet(w http.ResponseWriter, r *http.Request) {
 
 // ---- IP Addresses ----
 
-type addressesPage struct {
-	Items  []dbq.IPAddress `json:"items"`
-	Total  int64           `json:"total"`
-	Limit  int32           `json:"limit"`
-	Offset int32           `json:"offset"`
-}
+type addressesPage = httpx.Page[dbq.IPAddress]
 
 func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:addresses:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, addressesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.IPAddress](limit, offset))
 		return
 	}
 	params := dbq.ListIPAddressesParams{
@@ -501,19 +481,14 @@ func (h *Handler) getAddress(w http.ResponseWriter, r *http.Request) {
 
 // ---- Fabrics ----
 
-type fabricsPage struct {
-	Items  []dbq.Fabric `json:"items"`
-	Total  int64        `json:"total"`
-	Limit  int32        `json:"limit"`
-	Offset int32        `json:"offset"`
-}
+type fabricsPage = httpx.Page[dbq.Fabric]
 
 func (h *Handler) listFabrics(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:fabrics:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, fabricsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Fabric](limit, offset))
 		return
 	}
 	params := dbq.ListFabricsParams{Limit: limit, Offset: offset, Enclave: strPtr(q.Get("enclave")), ScopeFabricIds: scopeIds}
@@ -553,12 +528,7 @@ func (h *Handler) getFabric(w http.ResponseWriter, r *http.Request) {
 
 // ---- Supernets ----
 
-type supernetsPage struct {
-	Items  []dbq.Supernet `json:"items"`
-	Total  int64          `json:"total"`
-	Limit  int32          `json:"limit"`
-	Offset int32          `json:"offset"`
-}
+type supernetsPage = httpx.Page[dbq.Supernet]
 
 // parentFilter computes the (mode, id) pair the SQL CASE expects.
 // Python semantics:
@@ -566,6 +536,7 @@ type supernetsPage struct {
 //   - parent_supernet_id="null" (literal)  → mode='null'
 //   - parent_supernet_id=<uuid>            → mode='eq', id=<uuid>
 //   - neither                              → mode='any'
+//
 // top_level wins if both are present.
 func parentFilter(q map[string][]string) (mode string, id *uuid.UUID, err error) {
 	if first(q, "top_level") == "true" || first(q, "top_level") == "1" {
@@ -595,7 +566,7 @@ func (h *Handler) listSupernets(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeIds, ok := scopedListFilter(r, "ipam:supernets:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, supernetsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Supernet](limit, offset))
 		return
 	}
 	params := dbq.ListSupernetsParams{
@@ -659,19 +630,14 @@ func (h *Handler) getSupernet(w http.ResponseWriter, r *http.Request) {
 
 // ---- Overlays ----
 
-type overlaysPage struct {
-	Items  []dbq.Overlay `json:"items"`
-	Total  int64         `json:"total"`
-	Limit  int32         `json:"limit"`
-	Offset int32         `json:"offset"`
-}
+type overlaysPage = httpx.Page[dbq.Overlay]
 
 func (h *Handler) listOverlays(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:overlays:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, overlaysPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Overlay](limit, offset))
 		return
 	}
 	params := dbq.ListOverlaysParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -700,19 +666,14 @@ func (h *Handler) listOverlays(w http.ResponseWriter, r *http.Request) {
 
 // ---- VNIs ----
 
-type vnisPage struct {
-	Items  []dbq.Vni `json:"items"`
-	Total  int64     `json:"total"`
-	Limit  int32     `json:"limit"`
-	Offset int32     `json:"offset"`
-}
+type vnisPage = httpx.Page[dbq.Vni]
 
 func (h *Handler) listVnis(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vnis:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, vnisPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Vni](limit, offset))
 		return
 	}
 	params := dbq.ListVnisParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind")), ScopeFabricIds: scopeIds}
@@ -752,19 +713,14 @@ func (h *Handler) listVnis(w http.ResponseWriter, r *http.Request) {
 
 // ---- VTEPs ----
 
-type vtepsPage struct {
-	Items  []dbq.Vtep `json:"items"`
-	Total  int64      `json:"total"`
-	Limit  int32      `json:"limit"`
-	Offset int32      `json:"offset"`
-}
+type vtepsPage = httpx.Page[dbq.Vtep]
 
 func (h *Handler) listVteps(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vteps:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, vtepsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Vtep](limit, offset))
 		return
 	}
 	params := dbq.ListVtepsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -801,19 +757,14 @@ func (h *Handler) listVteps(w http.ResponseWriter, r *http.Request) {
 
 // ---- VTEP/VNI memberships ----
 
-type membershipsPage struct {
-	Items  []dbq.VtepVniMembership `json:"items"`
-	Total  int64                   `json:"total"`
-	Limit  int32                   `json:"limit"`
-	Offset int32                   `json:"offset"`
-}
+type membershipsPage = httpx.Page[dbq.VtepVniMembership]
 
 func (h *Handler) listVtepMemberships(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vtep-memberships:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, membershipsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.VtepVniMembership](limit, offset))
 		return
 	}
 	params := dbq.ListVtepMembershipsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -854,19 +805,14 @@ func (h *Handler) listVtepMemberships(w http.ResponseWriter, r *http.Request) {
 
 // ---- DHCP servers ----
 
-type dhcpServersPage struct {
-	Items  []dbq.DhcpServer `json:"items"`
-	Total  int64            `json:"total"`
-	Limit  int32            `json:"limit"`
-	Offset int32            `json:"offset"`
-}
+type dhcpServersPage = httpx.Page[dbq.DhcpServer]
 
 func (h *Handler) listDhcpServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:dhcp-servers:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, dhcpServersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DhcpServer](limit, offset))
 		return
 	}
 	params := dbq.ListDhcpServersParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}

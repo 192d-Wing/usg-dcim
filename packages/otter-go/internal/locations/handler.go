@@ -50,26 +50,11 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability("inventory:rows:create")).Post("/rows", h.createRow)
 }
 
-type buildingsPage struct {
-	Items  []dbq.Building `json:"items"`
-	Total  int64          `json:"total"`
-	Limit  int32          `json:"limit"`
-	Offset int32          `json:"offset"`
-}
+type buildingsPage = httpx.Page[dbq.Building]
 
-type roomsPage struct {
-	Items  []dbq.Room `json:"items"`
-	Total  int64      `json:"total"`
-	Limit  int32      `json:"limit"`
-	Offset int32      `json:"offset"`
-}
+type roomsPage = httpx.Page[dbq.Room]
 
-type rowsPage struct {
-	Items  []dbq.Row `json:"items"`
-	Total  int64     `json:"total"`
-	Limit  int32     `json:"limit"`
-	Offset int32     `json:"offset"`
-}
+type rowsPage = httpx.Page[dbq.Row]
 
 func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -82,7 +67,7 @@ func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scoped && len(scopeSiteIds) == 0 {
-		httpx.JSON(w, http.StatusOK, buildingsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Building](limit, offset))
 		return
 	}
 	params := dbq.ListBuildingsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
@@ -123,7 +108,7 @@ func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scoped && len(scopeSiteIds) == 0 {
-		httpx.JSON(w, http.StatusOK, roomsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Room](limit, offset))
 		return
 	}
 	params := dbq.ListRoomsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
@@ -164,7 +149,7 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scoped && len(scopeSiteIds) == 0 {
-		httpx.JSON(w, http.StatusOK, rowsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Row](limit, offset))
 		return
 	}
 	params := dbq.ListRowsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
