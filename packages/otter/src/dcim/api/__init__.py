@@ -44,6 +44,12 @@ router.include_router(power_router)
 # router so a misrouted internal call fails loud instead of silently
 # double-serving. The audit_log table + the security.audit.record()
 # helper still live in Python (mutation handlers write to it).
+#
+# /api/v1/admin/* mostly moved to otter-go (PR-admin). The two
+# unported routes (capabilities/catalog + system/dns-settings) stay
+# on Python; ingress longest-prefix-match keeps them reachable via
+# /api/v1/admin/capabilities + /api/v1/admin/system paths. The
+# admin_router below now only registers those two surfaces.
 router.include_router(admin_router)
 router.include_router(notifications_router)
 router.include_router(organization_router)

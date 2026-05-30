@@ -69,12 +69,19 @@ ingress:
   hosts:
     - host: dcim.local
       paths:
-        - { path: /api/v1/lir,       pathType: Prefix, backend: otter-go }
-        - { path: /api/v1/auth,      pathType: Prefix, backend: otter-go }
-        - { path: /api/v1/audit,     pathType: Prefix, backend: otter-go }
-        - { path: /api/v1/telemetry, pathType: Prefix, backend: otter-go }
-        - { path: /api,              pathType: Prefix, backend: otter    }
-        - { path: /,                 pathType: Prefix, backend: finch    }
+        - { path: /api/v1/lir,                  pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/auth,                 pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/audit,                pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/telemetry,            pathType: Prefix, backend: otter-go }
+        # /api/v1/admin/capabilities + /api/v1/admin/system stay on
+        # Python until those two routes get ported (capabilities catalog
+        # + system DNS settings). Listed BEFORE /api/v1/admin so Traefik
+        # (which doesn't do longest-prefix automatically) honors them.
+        - { path: /api/v1/admin/capabilities,   pathType: Prefix, backend: otter    }
+        - { path: /api/v1/admin/system,         pathType: Prefix, backend: otter    }
+        - { path: /api/v1/admin,                pathType: Prefix, backend: otter-go }
+        - { path: /api,                         pathType: Prefix, backend: otter    }
+        - { path: /,                            pathType: Prefix, backend: finch    }
   tls: []
 
 monitoring:
