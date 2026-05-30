@@ -51,6 +51,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability(capDashboardsRead)).Get("/dashboards/free-space", h.freeSpace)
 	r.With(auth.RequireCapability(capDashboardsRead)).Get("/dashboards/sites/at-risk", h.sitesAtRisk)
 	r.With(auth.RequireCapability(capDashboardsRead)).Get("/dashboards/assets/{asset_id}", h.assetDetail)
+	r.With(auth.RequireCapability(capDashboardsRead)).Get("/dashboards/sites/{site_id}", h.siteDetail)
 }
 
 // enterpriseOverview is the wire shape returned by GET

@@ -7,7 +7,6 @@ device lists.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -15,12 +14,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models.alerts import Alert, AlertState, Severity
-from ..models.collectors import Collector, CollectorStatus
-from ..models.inventory import Asset, Building, LifecycleState, Rack, Region, Room, Row, Site
+from ..models.alerts import Alert, AlertState
+from ..models.inventory import Asset, Rack, Site
 from ..models.telemetry_meta import TelemetrySource
 from ..security.deps import Principal, require_capability
-from ..settings import get_settings
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
@@ -208,229 +205,13 @@ async def site_forecast(
         return {"error": "not_found"}
     return await compute_site_forecast(db, site_id)
 
-def _enum_val(v):
-    return v.value if hasattr(v, "value") else v
 
-async def _load_site_topology(
-    db: AsyncSession, site_id: UUID,
-) -> tuple[list[Building], list[Room], list[Row], list[Rack], list[Asset]]:
-    buildings = (
-        await db.execute(
-            select(Building).where(Building.site_id == site_id).order_by(Building.code)
-        )
-    ).scalars().all()
-    building_ids = [b.id for b in buildings]
-    rooms: list[Room] = []
-    if building_ids:
-        rooms = list(
-            (
-                await db.execute(
-                    select(Room).where(Room.building_id.in_(building_ids)).order_by(Room.code)
-                )
-            ).scalars().all()
-        )
-    room_ids = [r.id for r in rooms]
-    rows: list[Row] = []
-    if room_ids:
-        rows = list(
-            (
-                await db.execute(
-                    select(Row).where(Row.room_id.in_(room_ids)).order_by(Row.code)
-                )
-            ).scalars().all()
-        )
-    racks = list(
-        (
-            await db.execute(
-                select(Rack).where(Rack.site_id == site_id).order_by(Rack.code)
-            )
-        ).scalars().all()
-    )
-    site_assets = list(
-        (await db.execute(select(Asset).where(Asset.site_id == site_id))).scalars().all()
-    )
-    return list(buildings), rooms, rows, racks, site_assets
-
-async def _site_capacity_rollup(
-    db: AsyncSession, racks: list[Rack], assets_by_rack: dict[UUID, list[Asset]],
-) -> tuple[dict[UUID, dict], dict]:
-    """Per-rack capacity dict + summed site rollup, in one pass over racks."""
-    from ..services.capacity import compute_rack_capacity
-
-    rack_caps: dict[UUID, dict] = {}
-    u_used = 0
-    u_total = 0
-    kw_max_sum = 0.0
-    kw_current_sum = 0.0
-    kw_max_known = False
-    kw_current_known = False
-    for r in racks:
-        cap = await compute_rack_capacity(db, r, assets_by_rack.get(r.id, []))
-        rack_caps[r.id] = cap
-        u_used += cap["u_used"]
-        u_total += cap["u_total"]
-        if cap["kw_max"] is not None:
-            kw_max_sum += cap["kw_max"]
-            kw_max_known = True
-        if cap["kw_current"] is not None:
-            kw_current_sum += cap["kw_current"]
-            kw_current_known = True
-
-    rollup = {
-        "u_used": u_used,
-        "u_total": u_total,
-        "u_free": max(0, u_total - u_used),
-        "u_pct": round(100.0 * u_used / u_total, 1) if u_total else 0.0,
-        "kw_max_sum": round(kw_max_sum, 2) if kw_max_known else None,
-        "kw_current": round(kw_current_sum, 3) if kw_current_known else None,
-        "kw_pct": (
-            round(100.0 * kw_current_sum / kw_max_sum, 1)
-            if kw_max_known and kw_current_known and kw_max_sum > 0
-            else None
-        ),
-        "racks_total": len(racks),
-        "racks_with_kw_rating": sum(1 for r in racks if r.max_kw is not None),
-    }
-    return rack_caps, rollup
-
-async def _site_alerts_kpi(db: AsyncSession, site_id: UUID) -> dict[str, int]:
-    rows = (
-        await db.execute(
-            select(Alert.severity, func.count(Alert.id))
-            .where(Alert.site_id == site_id, Alert.state == AlertState.firing)
-            .group_by(Alert.severity)
-        )
-    ).all()
-    out: dict[str, int] = {s.value: 0 for s in Severity}
-    for sev, n in rows:
-        out[_enum_val(sev)] = int(n)
-    out["total"] = sum(out.values())
-    return out
-
-async def _site_collectors_kpi(db: AsyncSession, site_id: UUID) -> dict[str, int]:
-    collectors = (
-        await db.execute(select(Collector).where(Collector.site_id == site_id))
-    ).scalars().all()
-    stale_threshold = datetime.now(UTC) - timedelta(
-        seconds=get_settings().collector_stale_seconds
-    )
-    out: dict[str, int] = {st.value: 0 for st in CollectorStatus}
-    out["total"] = len(collectors)
-    out["stale"] = 0
-    for c in collectors:
-        out[_enum_val(c.status)] += 1
-        if c.enabled and (c.last_seen_at is None or c.last_seen_at < stale_threshold):
-            out["stale"] += 1
-    return out
-
-def _assets_by_lifecycle(site_assets: list[Asset]) -> dict[str, int]:
-    out: dict[str, int] = {ls.value: 0 for ls in LifecycleState}
-    out["total"] = len(site_assets)
-    for a in site_assets:
-        out[_enum_val(a.lifecycle_state)] += 1
-    return out
-
-def _build_hierarchy(
-    buildings: list[Building], rooms: list[Room], rows: list[Row], racks: list[Rack],
-    rack_caps: dict[UUID, dict], assets_by_rack: dict[UUID, list[Asset]],
-) -> tuple[list[dict], list[dict]]:
-    rooms_by_building: dict[UUID, list[Room]] = {}
-    for room in rooms:
-        rooms_by_building.setdefault(room.building_id, []).append(room)
-    rows_by_room: dict[UUID, list[Row]] = {}
-    for row in rows:
-        rows_by_room.setdefault(row.room_id, []).append(row)
-    racks_by_row: dict[UUID, list[Rack]] = {}
-    for rk in racks:
-        racks_by_row.setdefault(rk.row_id, []).append(rk)
-
-    def rack_node(rk: Rack) -> dict:
-        cap = rack_caps[rk.id]
-        return {
-            "id": str(rk.id), "name": rk.name, "code": rk.code,
-            "u_height": rk.u_height, "u_used": cap["u_used"], "u_pct": cap["u_pct"],
-            "kw_max": cap["kw_max"], "kw_current": cap["kw_current"],
-            "asset_count": len(assets_by_rack.get(rk.id, [])),
-        }
-
-    def row_node(rw: Row) -> dict:
-        return {
-            "id": str(rw.id), "name": rw.name, "code": rw.code,
-            "racks": [rack_node(rk) for rk in racks_by_row.get(rw.id, [])],
-        }
-
-    def room_node(rm: Room) -> dict:
-        return {
-            "id": str(rm.id), "name": rm.name, "code": rm.code,
-            "design_kw": float(rm.design_kw) if rm.design_kw is not None else None,
-            "rows": [row_node(rw) for rw in rows_by_room.get(rm.id, [])],
-        }
-
-    hierarchy = [
-        {
-            "id": str(b.id), "name": b.name, "code": b.code,
-            "rooms": [room_node(rm) for rm in rooms_by_building.get(b.id, [])],
-        }
-        for b in buildings
-    ]
-    # Orphan racks (rack.row chain not anchored under this site's buildings list —
-    # shouldn't happen with our schema, but surface defensively so the page
-    # never silently drops a rack).
-    placed = {rk.id for rw in rows for rk in racks_by_row.get(rw.id, [])}
-    orphans = [rack_node(rk) for rk in racks if rk.id not in placed]
-    return hierarchy, orphans
-
-@router.get("/sites/{site_id}")
-async def site_detail(
-    site_id: UUID,
-    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Site identity + KPIs + capacity rollup + buildings/rooms/rows/racks hierarchy.
-
-    The hierarchy is the drill-down target from the sites list and dashboards;
-    the KPIs are sized for a single overview screen. Capacity per rack reuses
-    `compute_rack_capacity` so site-level numbers stay consistent with the rack
-    page.
-    """
-    site = await db.get(Site, site_id)
-    if site is None:
-        return {"error": "not_found"}
-    region = await db.get(Region, site.region_id)
-
-    buildings, rooms, rows, racks, site_assets = await _load_site_topology(db, site_id)
-    assets_by_rack: dict[UUID, list[Asset]] = {}
-    for a in site_assets:
-        if a.rack_id is not None:
-            assets_by_rack.setdefault(a.rack_id, []).append(a)
-    rack_caps, capacity = await _site_capacity_rollup(db, racks, assets_by_rack)
-    hierarchy, orphan_racks = _build_hierarchy(
-        buildings, rooms, rows, racks, rack_caps, assets_by_rack,
-    )
-
-    return {
-        "site": {
-            "id": str(site.id), "name": site.name, "code": site.code,
-            "address": site.address, "timezone": site.timezone,
-            "region_id": str(site.region_id),
-            "majcom": site.majcom,
-            "organization_id": str(site.organization_id) if site.organization_id else None,
-            "mission_owner": site.mission_owner, "enclave": site.enclave,
-            "classification": site.classification,
-            "lifecycle_state": _enum_val(site.lifecycle_state),
-        },
-        "region": (
-            {"id": str(region.id), "name": region.name, "code": region.code}
-            if region is not None else None
-        ),
-        "kpis": {
-            "buildings": len(buildings), "rooms": len(rooms),
-            "rows": len(rows), "racks": len(racks),
-            "assets": _assets_by_lifecycle(site_assets),
-            "alerts_firing": await _site_alerts_kpi(db, site_id),
-            "collectors": await _site_collectors_kpi(db, site_id),
-        },
-        "capacity": capacity,
-        "hierarchy": hierarchy,
-        "orphan_racks": orphan_racks,
-    }
+# /api/v1/dashboards/sites/{site_id} moved to otter-go (Phase 2d).
+# Site identity + region + KPIs (buildings/rooms/rows/racks + assets-
+# by-lifecycle + alerts-by-severity + collectors-by-status) + capacity
+# rollup + buildings/rooms/rows/racks hierarchy + orphan-rack
+# defensive surface, all assembled from internal/capacity.
+# ComputeManyRackCapacity + a half-dozen topology/KPI queries. The
+# _enum_val / _load_site_topology / _site_capacity_rollup /
+# _site_alerts_kpi / _site_collectors_kpi / _assets_by_lifecycle /
+# _build_hierarchy helpers retired with the route.

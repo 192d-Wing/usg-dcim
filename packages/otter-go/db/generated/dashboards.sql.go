@@ -62,6 +62,236 @@ func (q *Queries) CountStaleTelemetrySources(ctx context.Context) (int64, error)
 	return n, err
 }
 
+// ---- /dashboards/sites/{site_id} — topology + KPIs ----
+
+const listBuildingsBySite = `-- name: ListBuildingsBySite :many
+SELECT id, name, code FROM buildings
+WHERE site_id = $1
+ORDER BY code
+`
+
+// SiteBuildingRow is the topology projection — id/name/code only,
+// since the response hierarchy doesn't carry created_at, etc.
+type SiteBuildingRow struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+	Code string    `json:"code"`
+}
+
+func (q *Queries) ListBuildingsBySite(ctx context.Context, siteID uuid.UUID) ([]SiteBuildingRow, error) {
+	rows, err := q.db.Query(ctx, listBuildingsBySite, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SiteBuildingRow
+	for rows.Next() {
+		var r SiteBuildingRow
+		if err := rows.Scan(&r.ID, &r.Name, &r.Code); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listRoomsByBuildingIDs = `-- name: ListRoomsByBuildingIDs :many
+SELECT id, building_id, name, code, design_kw::text AS design_kw
+FROM rooms
+WHERE building_id = ANY($1::uuid[])
+ORDER BY code
+`
+
+// SiteRoomRow — design_kw scans as *string (NUMERIC textual form);
+// caller parses to float at the response boundary.
+type SiteRoomRow struct {
+	ID         uuid.UUID `json:"id"`
+	BuildingID uuid.UUID `json:"building_id"`
+	Name       string    `json:"name"`
+	Code       string    `json:"code"`
+	DesignKw   *string   `json:"design_kw"`
+}
+
+func (q *Queries) ListRoomsByBuildingIDs(ctx context.Context, ids []uuid.UUID) ([]SiteRoomRow, error) {
+	rows, err := q.db.Query(ctx, listRoomsByBuildingIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SiteRoomRow
+	for rows.Next() {
+		var r SiteRoomRow
+		if err := rows.Scan(&r.ID, &r.BuildingID, &r.Name, &r.Code, &r.DesignKw); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listRowsByRoomIDs = `-- name: ListRowsByRoomIDs :many
+SELECT id, room_id, name, code FROM rows
+WHERE room_id = ANY($1::uuid[])
+ORDER BY code
+`
+
+type SiteRowRow struct {
+	ID     uuid.UUID `json:"id"`
+	RoomID uuid.UUID `json:"room_id"`
+	Name   string    `json:"name"`
+	Code   string    `json:"code"`
+}
+
+func (q *Queries) ListRowsByRoomIDs(ctx context.Context, ids []uuid.UUID) ([]SiteRowRow, error) {
+	rows, err := q.db.Query(ctx, listRowsByRoomIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SiteRowRow
+	for rows.Next() {
+		var r SiteRowRow
+		if err := rows.Scan(&r.ID, &r.RoomID, &r.Name, &r.Code); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listRacksBySite = `-- name: ListRacksBySite :many
+SELECT id, site_id, row_id, name, code, u_height, max_kw,
+       max_weight_lbs, serial, created_at, updated_at
+FROM racks
+WHERE site_id = $1
+ORDER BY code
+`
+
+func (q *Queries) ListRacksBySite(ctx context.Context, siteID uuid.UUID) ([]Rack, error) {
+	rows, err := q.db.Query(ctx, listRacksBySite, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Rack
+	for rows.Next() {
+		var r Rack
+		if err := rows.Scan(
+			&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listAssetsBySite = `-- name: ListAssetsBySite :many
+SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
+       kind::text AS kind, manufacturer, model, serial, firmware,
+       rack_position_u, rack_units,
+       face::text AS face, mount::text AS mount,
+       pdu_side, psu_count, port_count,
+       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+       lifecycle_state::text AS lifecycle_state,
+       install_date, warranty_expires, metadata_json,
+       created_at, updated_at
+FROM assets
+WHERE site_id = $1
+`
+
+func (q *Queries) ListAssetsBySite(ctx context.Context, siteID uuid.UUID) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, listAssetsBySite, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var a Asset
+		if err := rows.Scan(
+			&a.ID, &a.SiteID, &a.RackID, &a.ParentAssetID, &a.Name, &a.Hostname,
+			&a.Kind, &a.Manufacturer, &a.Model, &a.Serial, &a.Firmware,
+			&a.RackPositionU, &a.RackUnits,
+			&a.Face, &a.Mount,
+			&a.PduSide, &a.PsuCount, &a.PortCount,
+			&a.MgmtIP, &a.MgmtProtocol, &a.MgmtPort, &a.MgmtCredentialsRef,
+			&a.LifecycleState,
+			&a.InstallDate, &a.WarrantyExpires, &a.MetadataJson,
+			&a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	return items, rows.Err()
+}
+
+const listSiteAlertsBySeverity = `-- name: ListSiteAlertsBySeverity :many
+SELECT severity::text AS severity, COUNT(id)::bigint AS n
+FROM alerts
+WHERE site_id = $1 AND state = 'firing'
+GROUP BY severity
+`
+
+// SiteAlertSeverityRow rolls a single (severity, count) pair from
+// the firing-alerts aggregation.
+type SiteAlertSeverityRow struct {
+	Severity string `json:"severity"`
+	N        int64  `json:"n"`
+}
+
+func (q *Queries) ListSiteAlertsBySeverity(ctx context.Context, siteID uuid.UUID) ([]SiteAlertSeverityRow, error) {
+	rows, err := q.db.Query(ctx, listSiteAlertsBySeverity, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SiteAlertSeverityRow
+	for rows.Next() {
+		var r SiteAlertSeverityRow
+		if err := rows.Scan(&r.Severity, &r.N); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listSiteCollectors = `-- name: ListSiteCollectors :many
+SELECT id, status::text AS status, enabled, last_seen_at
+FROM collectors
+WHERE site_id = $1
+`
+
+// SiteCollectorRow — projection for the collectors KPI breakdown.
+// The handler computes the stale-vs-fresh split using the same env
+// stale-seconds value the enterprise overview reads.
+type SiteCollectorRow struct {
+	ID         uuid.UUID  `json:"id"`
+	Status     string     `json:"status"`
+	Enabled    bool       `json:"enabled"`
+	LastSeenAt *time.Time `json:"last_seen_at"`
+}
+
+func (q *Queries) ListSiteCollectors(ctx context.Context, siteID uuid.UUID) ([]SiteCollectorRow, error) {
+	rows, err := q.db.Query(ctx, listSiteCollectors, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SiteCollectorRow
+	for rows.Next() {
+		var r SiteCollectorRow
+		if err := rows.Scan(&r.ID, &r.Status, &r.Enabled, &r.LastSeenAt); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
 // ---- /dashboards/free-space (Phase 2) — rack capacity rollup ----
 
 const listRacksForFreeSpace = `-- name: ListRacksForFreeSpace :many
