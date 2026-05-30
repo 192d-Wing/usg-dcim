@@ -41,12 +41,12 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
 // Scope mirrors security.scope.Scope. An empty Scope (zero value
@@ -524,7 +524,11 @@ func EnforceClassification(p Principal, classification *string, capCode string) 
 
 // ErrOutsideScope is the canonical error the handlers map to 403.
 // Mirrors Python's ForbiddenError("resource is outside your scope").
-var ErrOutsideScope = errors.New("resource is outside your scope")
+// ErrOutsideScope aliases the canonical sentinel in httpx so
+// errors.Is(err, auth.ErrOutsideScope) and errors.Is(err,
+// httpx.ErrOutsideScope) both match the same value. httpx is the
+// owner because Mapped needs to map it to 403 without importing auth.
+var ErrOutsideScope = httpx.ErrOutsideScope
 
 // ---- Resolver ----
 

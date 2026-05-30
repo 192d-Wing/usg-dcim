@@ -21,6 +21,20 @@ type fakeQ struct {
 	lastB     dbq.ListBuildingsParams
 	lastR     dbq.ListRoomsParams
 	lastRow   dbq.ListRowsParams
+	// PATCH/DELETE knobs
+	getBuildingErr error
+	getBuilding    dbq.Building
+	getRoomErr     error
+	getRoom        dbq.Room
+	getRowErr      error
+	getRow         dbq.Row
+	siteIDForRoom  uuid.UUID
+	siteIDForRow   uuid.UUID
+	lastUpdateB    dbq.UpdateBuildingParams
+	lastUpdateR    dbq.UpdateRoomParams
+	lastUpdateRow  dbq.UpdateRowParams
+	deleted        []string // "building:<id>" / "room:<id>" / "row:<id>"
+	deleteErr      error
 }
 
 func (f *fakeQ) ListBuildings(_ context.Context, a dbq.ListBuildingsParams) ([]dbq.Building, error) {
@@ -56,6 +70,64 @@ func (f *fakeQ) CreateRow(_ context.Context, a dbq.CreateRowParams) (dbq.Row, er
 
 // PR 63 — site-scope expansion for buildings LIST scope filter.
 func (f *fakeQ) ListSiteIDsForExpansion(_ context.Context, _ dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (f *fakeQ) GetBuilding(_ context.Context, _ uuid.UUID) (dbq.Building, error) {
+	return f.getBuilding, f.getBuildingErr
+}
+func (f *fakeQ) GetRoom(_ context.Context, _ uuid.UUID) (dbq.Room, error) {
+	return f.getRoom, f.getRoomErr
+}
+func (f *fakeQ) GetRow(_ context.Context, _ uuid.UUID) (dbq.Row, error) {
+	return f.getRow, f.getRowErr
+}
+func (f *fakeQ) SiteIDForRoom(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return f.siteIDForRoom, nil
+}
+func (f *fakeQ) SiteIDForRow(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return f.siteIDForRow, nil
+}
+func (f *fakeQ) UpdateBuilding(_ context.Context, a dbq.UpdateBuildingParams) (dbq.Building, error) {
+	f.lastUpdateB = a
+	return dbq.Building{ID: a.ID, SiteID: f.getBuilding.SiteID}, nil
+}
+func (f *fakeQ) UpdateRoom(_ context.Context, a dbq.UpdateRoomParams) (dbq.Room, error) {
+	f.lastUpdateR = a
+	return dbq.Room{ID: a.ID}, nil
+}
+func (f *fakeQ) UpdateRow(_ context.Context, a dbq.UpdateRowParams) (dbq.Row, error) {
+	f.lastUpdateRow = a
+	return dbq.Row{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteBuilding(_ context.Context, id uuid.UUID) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deleted = append(f.deleted, "building:"+id.String())
+	return nil
+}
+func (f *fakeQ) DeleteRoom(_ context.Context, id uuid.UUID) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deleted = append(f.deleted, "room:"+id.String())
+	return nil
+}
+func (f *fakeQ) DeleteRow(_ context.Context, id uuid.UUID) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deleted = append(f.deleted, "row:"+id.String())
+	return nil
+}
+func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (f *fakeQ) GetSiteOrganizationID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
 	return nil, nil
 }
 

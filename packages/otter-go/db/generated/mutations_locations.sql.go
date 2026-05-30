@@ -214,6 +214,156 @@ func (q *Queries) CreateRow(ctx context.Context, arg CreateRowParams) (Row, erro
 	return rw, err
 }
 
+// ---- Building / Room / Row Get / Update / Delete ----
+
+const getBuilding = `-- name: GetBuilding :one
+SELECT id, site_id, name, code, created_at, updated_at
+FROM buildings WHERE id = $1
+`
+
+func (q *Queries) GetBuilding(ctx context.Context, id uuid.UUID) (Building, error) {
+	row := q.db.QueryRow(ctx, getBuilding, id)
+	var b Building
+	err := row.Scan(&b.ID, &b.SiteID, &b.Name, &b.Code, &b.CreatedAt, &b.UpdatedAt)
+	return b, err
+}
+
+const getRoom = `-- name: GetRoom :one
+SELECT id, building_id, name, code, floor_area_sqft, created_at, updated_at
+FROM rooms WHERE id = $1
+`
+
+func (q *Queries) GetRoom(ctx context.Context, id uuid.UUID) (Room, error) {
+	row := q.db.QueryRow(ctx, getRoom, id)
+	var rm Room
+	err := row.Scan(&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft, &rm.CreatedAt, &rm.UpdatedAt)
+	return rm, err
+}
+
+const getRow = `-- name: GetRow :one
+SELECT id, room_id, name, code, created_at, updated_at
+FROM rows WHERE id = $1
+`
+
+func (q *Queries) GetRow(ctx context.Context, id uuid.UUID) (Row, error) {
+	row := q.db.QueryRow(ctx, getRow, id)
+	var rw Row
+	err := row.Scan(&rw.ID, &rw.RoomID, &rw.Name, &rw.Code, &rw.CreatedAt, &rw.UpdatedAt)
+	return rw, err
+}
+
+const siteIDForRoom = `SELECT b.site_id FROM rooms r JOIN buildings b ON b.id = r.building_id WHERE r.id = $1`
+
+func (q *Queries) SiteIDForRoom(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, siteIDForRoom, id)
+	var sid uuid.UUID
+	err := row.Scan(&sid)
+	return sid, err
+}
+
+const siteIDForRow = `SELECT b.site_id
+FROM rows w
+JOIN rooms r    ON r.id = w.room_id
+JOIN buildings b ON b.id = r.building_id
+WHERE w.id = $1`
+
+func (q *Queries) SiteIDForRow(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, siteIDForRow, id)
+	var sid uuid.UUID
+	err := row.Scan(&sid)
+	return sid, err
+}
+
+const updateBuilding = `-- name: UpdateBuilding :one
+UPDATE buildings
+SET name       = COALESCE($2::text, name),
+    code       = COALESCE($3::text, code),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, site_id, name, code, created_at, updated_at
+`
+
+type UpdateBuildingParams struct {
+	ID   uuid.UUID `json:"id"`
+	Name *string   `json:"name"`
+	Code *string   `json:"code"`
+}
+
+func (q *Queries) UpdateBuilding(ctx context.Context, arg UpdateBuildingParams) (Building, error) {
+	row := q.db.QueryRow(ctx, updateBuilding, arg.ID, arg.Name, arg.Code)
+	var b Building
+	err := row.Scan(&b.ID, &b.SiteID, &b.Name, &b.Code, &b.CreatedAt, &b.UpdatedAt)
+	return b, err
+}
+
+const updateRoom = `-- name: UpdateRoom :one
+UPDATE rooms
+SET name            = COALESCE($2::text, name),
+    code            = COALESCE($3::text, code),
+    floor_area_sqft = CASE WHEN $4::bool THEN $5::int ELSE floor_area_sqft END,
+    updated_at      = NOW()
+WHERE id = $1
+RETURNING id, building_id, name, code, floor_area_sqft, created_at, updated_at
+`
+
+type UpdateRoomParams struct {
+	ID                uuid.UUID `json:"id"`
+	Name              *string   `json:"name"`
+	Code              *string   `json:"code"`
+	FloorAreaSqftSet  bool      `json:"floor_area_sqft_set"`
+	FloorAreaSqft     *int32    `json:"floor_area_sqft"`
+}
+
+func (q *Queries) UpdateRoom(ctx context.Context, arg UpdateRoomParams) (Room, error) {
+	row := q.db.QueryRow(ctx, updateRoom, arg.ID, arg.Name, arg.Code, arg.FloorAreaSqftSet, arg.FloorAreaSqft)
+	var rm Room
+	err := row.Scan(&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft, &rm.CreatedAt, &rm.UpdatedAt)
+	return rm, err
+}
+
+const updateRow = `-- name: UpdateRow :one
+UPDATE rows
+SET name       = COALESCE($2::text, name),
+    code       = COALESCE($3::text, code),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, room_id, name, code, created_at, updated_at
+`
+
+type UpdateRowParams struct {
+	ID   uuid.UUID `json:"id"`
+	Name *string   `json:"name"`
+	Code *string   `json:"code"`
+}
+
+func (q *Queries) UpdateRow(ctx context.Context, arg UpdateRowParams) (Row, error) {
+	row := q.db.QueryRow(ctx, updateRow, arg.ID, arg.Name, arg.Code)
+	var rw Row
+	err := row.Scan(&rw.ID, &rw.RoomID, &rw.Name, &rw.Code, &rw.CreatedAt, &rw.UpdatedAt)
+	return rw, err
+}
+
+const deleteBuilding = `DELETE FROM buildings WHERE id = $1`
+
+func (q *Queries) DeleteBuilding(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteBuilding, id)
+	return err
+}
+
+const deleteRoom = `DELETE FROM rooms WHERE id = $1`
+
+func (q *Queries) DeleteRoom(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRoom, id)
+	return err
+}
+
+const deleteRow = `DELETE FROM rows WHERE id = $1`
+
+func (q *Queries) DeleteRow(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRow, id)
+	return err
+}
+
 // ---- Racks ----
 
 const rackRetCols = `id, site_id, row_id, name, code, u_height, max_kw,
