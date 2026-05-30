@@ -56,6 +56,15 @@ type Querier interface {
 	CreateRouteMapEntry(ctx context.Context, arg dbq.CreateRouteMapEntryParams) (dbq.RouteMapEntry, error)
 	UpdateRouteMapEntry(ctx context.Context, arg dbq.UpdateRouteMapEntryParams) (dbq.RouteMapEntry, error)
 	DeleteRouteMapEntry(ctx context.Context, id uuid.UUID) error
+
+	// TCP AO key-chains (PR — this PR). Keys + rotate-batch deferred.
+	ListTcpAoKeyChains(ctx context.Context, arg dbq.ListTcpAoKeyChainsParams) ([]dbq.TcpAoKeyChain, error)
+	CountTcpAoKeyChains(ctx context.Context) (int64, error)
+	GetTcpAoKeyChain(ctx context.Context, id uuid.UUID) (dbq.TcpAoKeyChain, error)
+	CreateTcpAoKeyChain(ctx context.Context, arg dbq.CreateTcpAoKeyChainParams) (dbq.TcpAoKeyChain, error)
+	UpdateTcpAoKeyChain(ctx context.Context, arg dbq.UpdateTcpAoKeyChainParams) (dbq.TcpAoKeyChain, error)
+	DeleteTcpAoKeyChain(ctx context.Context, id uuid.UUID) error
+	CountKeysInTcpAoKeyChain(ctx context.Context, keyChainID uuid.UUID) (int64, error)
 }
 
 type Handler struct {
@@ -95,8 +104,23 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("routing:route-map-entries:create")).Post("/route-map-entries", h.createRouteMapEntry)
 		r.With(auth.RequireCapability("routing:route-map-entries:update")).Patch("/route-map-entries/{id}", h.updateRouteMapEntry)
 		r.With(auth.RequireCapability("routing:route-map-entries:delete")).Delete("/route-map-entries/{id}", h.deleteRouteMapEntry)
+
+		// ---- TCP AO key-chains (this PR; keys + rotate-batch follow) ----
+		// Each GET is gated explicitly — there's no implicit site-scope
+		// ABAC for BGP since chains aren't site-rooted, so an open GET
+		// would leak chain names + descriptions to any logged-in user.
+		r.With(auth.RequireCapability(capTcpAoChainsRead)).Get("/tcp-ao-key-chains", h.listTcpAoKeyChains)
+		r.With(auth.RequireCapability(capTcpAoChainsRead)).Get(tcpAoChainByID, h.getTcpAoKeyChain)
+		r.With(auth.RequireCapability("routing:tcp-ao-key-chains:create")).Post("/tcp-ao-key-chains", h.createTcpAoKeyChain)
+		r.With(auth.RequireCapability("routing:tcp-ao-key-chains:update")).Patch(tcpAoChainByID, h.updateTcpAoKeyChain)
+		r.With(auth.RequireCapability("routing:tcp-ao-key-chains:delete")).Delete(tcpAoChainByID, h.deleteTcpAoKeyChain)
 	})
 }
+
+const (
+	capTcpAoChainsRead = "routing:tcp-ao-key-chains:read"
+	tcpAoChainByID     = "/tcp-ao-key-chains/{id}"
+)
 
 type asnsPage struct {
 	Items  []dbq.Asn `json:"items"`

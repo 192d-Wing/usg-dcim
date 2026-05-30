@@ -142,6 +142,17 @@ type Asn struct {
 	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
+// TcpAoKeyChain mirrors the SQLAlchemy TcpAoKeyChain in
+// packages/otter/src/dcim/models/bgp.py. Named group of TCP AO keys
+// with overlapping send/accept lifetimes for hitless rotation.
+type TcpAoKeyChain struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type PrefixList struct {
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`
