@@ -63,6 +63,70 @@ INSERT INTO rows (id, room_id, name, code, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
 RETURNING id, room_id, name, code, created_at, updated_at;
 
+-- name: GetBuilding :one
+SELECT id, site_id, name, code, created_at, updated_at
+FROM buildings WHERE id = $1;
+
+-- name: GetRoom :one
+SELECT id, building_id, name, code, floor_area_sqft, created_at, updated_at
+FROM rooms WHERE id = $1;
+
+-- name: GetRow :one
+SELECT id, room_id, name, code, created_at, updated_at
+FROM rows WHERE id = $1;
+
+-- Site-id walkers for ABAC. Room → building → site, row → room →
+-- building → site. Used by the locations PATCH/DELETE handlers to
+-- resolve a row/room/building to its owning site for EnforceSiteScope.
+-- name: SiteIDForRoom :one
+SELECT b.site_id FROM rooms r JOIN buildings b ON b.id = r.building_id WHERE r.id = $1;
+
+-- name: SiteIDForRow :one
+SELECT b.site_id
+FROM rows w
+JOIN rooms r    ON r.id = w.room_id
+JOIN buildings b ON b.id = r.building_id
+WHERE w.id = $1;
+
+-- name: UpdateBuilding :one
+-- Parent FK (site_id) is intentionally not patchable — moving a
+-- building across sites would orphan downstream racks/assets and the
+-- audit trail. Operators delete + recreate if they need to relocate.
+UPDATE buildings
+SET name       = COALESCE(sqlc.narg(name)::text, name),
+    code       = COALESCE(sqlc.narg(code)::text, code),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, site_id, name, code, created_at, updated_at;
+
+-- name: UpdateRoom :one
+UPDATE rooms
+SET name            = COALESCE(sqlc.narg(name)::text, name),
+    code            = COALESCE(sqlc.narg(code)::text, code),
+    floor_area_sqft = CASE WHEN sqlc.arg(floor_area_sqft_set)::bool THEN sqlc.narg(floor_area_sqft)::int ELSE floor_area_sqft END,
+    updated_at      = NOW()
+WHERE id = $1
+RETURNING id, building_id, name, code, floor_area_sqft, created_at, updated_at;
+
+-- name: UpdateRow :one
+UPDATE rows
+SET name       = COALESCE(sqlc.narg(name)::text, name),
+    code       = COALESCE(sqlc.narg(code)::text, code),
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, room_id, name, code, created_at, updated_at;
+
+-- Deletes rely on FK constraints to refuse when downstream rows
+-- (rooms in a building, rows in a room, racks in a row) still exist.
+-- name: DeleteBuilding :exec
+DELETE FROM buildings WHERE id = $1;
+
+-- name: DeleteRoom :exec
+DELETE FROM rooms WHERE id = $1;
+
+-- name: DeleteRow :exec
+DELETE FROM rows WHERE id = $1;
+
 -- ===== Racks =====
 -- name: CreateRack :one
 INSERT INTO racks (id, site_id, row_id, name, code, u_height, max_kw,
