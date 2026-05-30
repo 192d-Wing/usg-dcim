@@ -7,7 +7,6 @@ package bgp
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -108,8 +107,7 @@ type asnsPage struct {
 
 func (h *Handler) listAsns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	params := dbq.ListAsnsParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind"))}
 	items, err := h.Q.ListAsns(r.Context(), params)
 	if err != nil {
@@ -135,8 +133,7 @@ type prefixListsPage struct {
 
 func (h *Handler) listPrefixLists(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	params := dbq.ListPrefixListsParams{Limit: limit, Offset: offset, Family: strPtr(q.Get("family"))}
 	items, err := h.Q.ListPrefixLists(r.Context(), params)
 	if err != nil {
@@ -162,8 +159,7 @@ type prefixListEntriesPage struct {
 
 func (h *Handler) listPrefixListEntries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	params := dbq.ListPrefixListEntriesParams{Limit: limit, Offset: offset}
 	if v := q.Get("prefix_list_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -199,8 +195,7 @@ type communityListsPage struct {
 
 func (h *Handler) listCommunityLists(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	params := dbq.ListCommunityListsParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind"))}
 	items, err := h.Q.ListCommunityLists(r.Context(), params)
 	if err != nil {
@@ -228,8 +223,7 @@ type communityListEntriesPage struct {
 
 func (h *Handler) listCommunityListEntries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	params := dbq.ListCommunityListEntriesParams{Limit: limit, Offset: offset}
 	if v := q.Get("community_list_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -265,8 +259,7 @@ type routeMapsPage struct {
 
 func (h *Handler) listRouteMaps(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	items, err := h.Q.ListRouteMaps(r.Context(), dbq.ListRouteMapsParams{Limit: limit, Offset: offset})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -293,8 +286,7 @@ type routeMapEntriesPage struct {
 
 func (h *Handler) listRouteMapEntries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	params := dbq.ListRouteMapEntriesParams{Limit: limit, Offset: offset}
 	if v := q.Get("route_map_id"); v != "" {
 		id, err := uuid.Parse(v)
@@ -324,36 +316,4 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func parseInt32(s string, def, lo, hi int32) int32 {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	v := int32(n)
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-func pageSize(q map[string][]string) string {
-	if v := first(q, "limit"); v != "" {
-		return v
-	}
-	return first(q, "page_size")
-}
-
-func first(q map[string][]string, key string) string {
-	if vs := q[key]; len(vs) > 0 {
-		return vs[0]
-	}
-	return ""
 }

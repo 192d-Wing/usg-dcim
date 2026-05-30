@@ -245,8 +245,7 @@ type vrfBgpPeersPage struct {
 
 func (h *Handler) listVrfBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vrf-bgp-peers:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, vrfBgpPeersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -303,8 +302,7 @@ type vrfsPage struct {
 
 func (h *Handler) listVrfs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vrfs:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, vrfsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -364,8 +362,7 @@ type subnetsPage struct {
 
 func (h *Handler) listSubnets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:subnets:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, subnetsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -437,8 +434,7 @@ type addressesPage struct {
 
 func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:addresses:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, addressesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -514,8 +510,7 @@ type fabricsPage struct {
 
 func (h *Handler) listFabrics(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:fabrics:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, fabricsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -592,8 +587,7 @@ func parentFilter(q map[string][]string) (mode string, id *uuid.UUID, err error)
 
 func (h *Handler) listSupernets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	mode, parentID, err := parentFilter(q)
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "parent_supernet_id is not a uuid or 'null'")
@@ -674,8 +668,7 @@ type overlaysPage struct {
 
 func (h *Handler) listOverlays(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:overlays:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, overlaysPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -716,8 +709,7 @@ type vnisPage struct {
 
 func (h *Handler) listVnis(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vnis:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, vnisPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -769,8 +761,7 @@ type vtepsPage struct {
 
 func (h *Handler) listVteps(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vteps:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, vtepsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -819,8 +810,7 @@ type membershipsPage struct {
 
 func (h *Handler) listVtepMemberships(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vtep-memberships:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, membershipsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -873,8 +863,7 @@ type dhcpServersPage struct {
 
 func (h *Handler) listDhcpServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:dhcp-servers:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, dhcpServersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -927,13 +916,6 @@ func parseInt32(s string, def, lo, hi int32) int32 {
 		return hi
 	}
 	return v
-}
-
-func pageSize(q map[string][]string) string {
-	if v := first(q, "limit"); v != "" {
-		return v
-	}
-	return first(q, "page_size")
 }
 
 func first(q map[string][]string, key string) string {

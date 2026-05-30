@@ -140,8 +140,7 @@ func scopedOrgIDs(p auth.Principal, capCode string) (ids []uuid.UUID, scoped boo
 func (h *Handler) listRequests(w http.ResponseWriter, r *http.Request) {
 	p, _ := auth.From(r.Context())
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	var statusFilter *string
 	if v := q.Get("status"); v != "" {
 		statusFilter = &v

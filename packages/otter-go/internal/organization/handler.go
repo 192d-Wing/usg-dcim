@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -52,8 +51,7 @@ type listResponse struct {
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	items, err := h.Q.ListOrganizations(r.Context(), dbq.ListOrganizationsParams{Limit: limit, Offset: offset})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -88,34 +86,3 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, obj)
 }
 
-func parseInt32(s string, def, lo, hi int32) int32 {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	v := int32(n)
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-func pageSize(q map[string][]string) string {
-	if v := first(q, "limit"); v != "" {
-		return v
-	}
-	return first(q, "page_size")
-}
-
-func first(q map[string][]string, key string) string {
-	if vs := q[key]; len(vs) > 0 {
-		return vs[0]
-	}
-	return ""
-}

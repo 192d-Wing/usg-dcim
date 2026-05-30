@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -282,8 +281,7 @@ type blocklistsPage struct {
 
 func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	fid, ok := fabricIDFromQuery(w, q)
 	if !ok {
 		return
@@ -342,16 +340,15 @@ func (h *Handler) listBlocklistEntries(w http.ResponseWriter, r *http.Request) {
 	p, _ := auth.From(r.Context())
 	if _, scoped := auth.ScopedFabricFilter(p, "dns:blocklists:read"); scoped {
 		if err := auth.EnforceFabricScope(p, bl.FabricID, "dns:blocklists:read"); err != nil {
+			limit, offset := httpx.PageBounds(r.URL.Query())
 			httpx.JSON(w, http.StatusOK, blocklistEntriesPage{Items: nil, Total: 0,
-				Limit:  parseInt32(pageSize(r.URL.Query()), 50, 1, 500),
-				Offset: parseInt32(r.URL.Query().Get("offset"), 0, 0, 1_000_000),
+				Limit: limit, Offset: offset,
 			})
 			return
 		}
 	}
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	items, err := h.Q.ListDnsBlocklistEntries(r.Context(), dbq.ListDnsBlocklistEntriesParams{
 		Limit: limit, Offset: offset, BlocklistID: id,
 	})
@@ -378,8 +375,7 @@ type viewsPage struct {
 
 func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	fid, ok := fabricIDFromQuery(w, q)
 	if !ok {
 		return
@@ -413,8 +409,7 @@ type healthChecksPage struct {
 
 func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	fid, ok := fabricIDFromQuery(w, q)
 	if !ok {
 		return
@@ -448,8 +443,7 @@ type bgpPeersPage struct {
 
 func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	// PR 63 — bgp_peers.site_id is NOT NULL (no enterprise-default
 	// semantic), so short-circuit on empty allowed set.
 	p, _ := auth.From(r.Context())
@@ -496,8 +490,7 @@ type anycastBindingsPage struct {
 
 func (h *Handler) listAnycastBindings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:anycast-bindings:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, anycastBindingsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -547,8 +540,7 @@ type serversPage struct {
 
 func (h *Handler) listServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:servers:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, serversPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -617,8 +609,7 @@ type anycastGroupsPage struct {
 
 func (h *Handler) listAnycastGroups(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:anycast-groups:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, anycastGroupsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -660,8 +651,7 @@ type forwardersPage struct {
 
 func (h *Handler) listForwarders(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:forwarders:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, forwardersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -700,8 +690,7 @@ type catalogZonesPage struct {
 
 func (h *Handler) listCatalogZones(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:catalog-zones:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, catalogZonesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -740,8 +729,7 @@ type zonesPage struct {
 
 func (h *Handler) listZones(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:zones:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, zonesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -810,8 +798,7 @@ type recordsPage struct {
 
 func (h *Handler) listRecords(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:records:read")
 	if !ok {
 		httpx.JSON(w, http.StatusOK, recordsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
@@ -853,31 +840,6 @@ func strPtr(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-func parseInt32(s string, def, lo, hi int32) int32 {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	v := int32(n)
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-func pageSize(q map[string][]string) string {
-	if v := first(q, "limit"); v != "" {
-		return v
-	}
-	return first(q, "page_size")
 }
 
 func first(q map[string][]string, key string) string {

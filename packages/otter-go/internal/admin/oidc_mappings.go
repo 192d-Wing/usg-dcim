@@ -105,8 +105,7 @@ type listOidcMappingsResponse struct {
 
 func (h *Handler) listOidcMappings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	rows, err := h.Q.ListOidcRoleMappings(r.Context(), dbq.ListOidcRoleMappingsParams{
 		Limit: limit, Offset: offset,
 	})

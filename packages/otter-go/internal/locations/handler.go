@@ -10,7 +10,6 @@ package locations
 import (
 	"context"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -74,8 +73,7 @@ type rowsPage struct {
 
 func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	p, _ := auth.From(r.Context())
 	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:buildings:read")
 	if err != nil {
@@ -113,8 +111,7 @@ func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	// PR 96 — 2-hop ABAC: room → building → site. ScopedSiteFilter
 	// expands the principal's site dims into a concrete site_id set;
 	// the SQL JOIN against buildings filters rooms by parent site.
@@ -157,8 +154,7 @@ func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	// PR 96 — 3-hop ABAC: row → room → building → site.
 	p, _ := auth.From(r.Context())
 	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:rows:read")
@@ -195,22 +191,4 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, rowsPage{Items: items, Total: total, Limit: limit, Offset: offset})
-}
-
-func parseInt32(s string, def, lo, hi int32) int32 {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	v := int32(n)
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }

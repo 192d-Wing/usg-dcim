@@ -35,8 +35,7 @@ type listRolesResponse struct {
 
 func (h *Handler) listRoles(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	items, err := h.Q.ListAdminRoles(r.Context(), dbq.ListAdminRolesParams{
 		Limit: limit, Offset: offset,
 	})

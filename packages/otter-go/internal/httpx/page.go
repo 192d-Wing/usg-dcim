@@ -1,5 +1,10 @@
 package httpx
 
+import (
+	"net/url"
+	"strconv"
+)
+
 // Page is the canonical {Items, Total, Limit, Offset} wrapper otter-go
 // uses for paginated responses. Historically each handler package
 // declared its own concrete page struct (logPage, alertsPage,
@@ -37,4 +42,61 @@ func EmptyPage[T any](limit, offset int32) Page[T] {
 		Limit:  limit,
 		Offset: offset,
 	}
+}
+
+// PageBounds parses a paginated list query's limit + offset from URL
+// values, resolving the three conventions otter-go has had to support:
+//
+//   - canonical: ?limit=N&offset=M (API tokens, curl, scripts)
+//   - finch / Refine data-provider: ?page=N&page_size=M (1-indexed)
+//   - mixed: ?page_size=N&offset=M (an older finch path)
+//
+// Precedence is "explicit wins": ?limit beats ?page_size, ?offset
+// beats ?page→(page-1)*limit. Bounds match what every handler used to
+// inline by hand (default page_size=50, clamped [1, 500]; default
+// offset=0, clamped [0, 1_000_000]).
+//
+// Returns clamped int32 values ready to pass straight into a
+// ListXParams.Limit / .Offset. Centralised here so a future
+// pagination-shape change is one edit instead of fifty.
+func PageBounds(q url.Values) (limit, offset int32) {
+	limit = parseBoundedInt32(firstNonEmpty(q.Get("limit"), q.Get("page_size")), 50, 1, 500)
+	if v := q.Get("offset"); v != "" {
+		offset = parseBoundedInt32(v, 0, 0, 1_000_000)
+		return
+	}
+	if v := q.Get("page"); v != "" {
+		page := parseBoundedInt32(v, 1, 1, 1_000_000)
+		offset = (page - 1) * limit
+	}
+	return
+}
+
+// parseBoundedInt32 returns the int32 form of s clamped to [lo, hi].
+// Empty or unparseable s yields def. Used by PageBounds; not exported
+// because every other handler-local int32 parser has slightly
+// different defaults and is better off staying handler-local.
+func parseBoundedInt32(s string, def, lo, hi int32) int32 {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	v := int32(n)
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }

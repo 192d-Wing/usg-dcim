@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -156,38 +155,6 @@ func mapErr(w http.ResponseWriter, err error, notFoundMsg string) {
 	httpx.Error(w, status, msg)
 }
 
-func parseInt32(s string, def, lo, hi int32) int32 {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def
-	}
-	v := int32(n)
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-func pageSize(q map[string][]string) string {
-	if v := first(q, "limit"); v != "" {
-		return v
-	}
-	return first(q, "page_size")
-}
-
-func first(q map[string][]string, key string) string {
-	if vs := q[key]; len(vs) > 0 {
-		return vs[0]
-	}
-	return ""
-}
-
 func parseUUIDParam(w http.ResponseWriter, r *http.Request, key string) (uuid.UUID, bool) {
 	id, err := uuid.Parse(chi.URLParam(r, key))
 	if err != nil {
@@ -229,8 +196,7 @@ type listPoolsResponse struct {
 
 func (h *Handler) listPools(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(pageSize(q), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	items, err := h.Q.ListLirPools(r.Context(), dbq.ListLirPoolsParams{Limit: limit, Offset: offset})
 	if err != nil {
 		mapErr(w, err, "")
