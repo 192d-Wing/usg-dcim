@@ -272,12 +272,7 @@ func fabricIDFromQuery(w http.ResponseWriter, q map[string][]string) (*uuid.UUID
 	return &id, true
 }
 
-type blocklistsPage struct {
-	Items  []dbq.DnsBlocklist `json:"items"`
-	Total  int64              `json:"total"`
-	Limit  int32              `json:"limit"`
-	Offset int32              `json:"offset"`
-}
+type blocklistsPage = httpx.Page[dbq.DnsBlocklist]
 
 func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -288,7 +283,7 @@ func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeIds, ok := scopedListFilter(r, "dns:blocklists:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, blocklistsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsBlocklist](limit, offset))
 		return
 	}
 	params := dbq.ListDnsBlocklistsParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds}
@@ -362,12 +357,7 @@ func (h *Handler) listBlocklistEntries(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, blocklistEntriesPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type viewsPage struct {
-	Items  []dbq.DnsView `json:"items"`
-	Total  int64         `json:"total"`
-	Limit  int32         `json:"limit"`
-	Offset int32         `json:"offset"`
-}
+type viewsPage = httpx.Page[dbq.DnsView]
 
 func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -378,7 +368,7 @@ func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeIds, ok := scopedListFilter(r, "dns:views:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, viewsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsView](limit, offset))
 		return
 	}
 	items, err := h.Q.ListDnsViews(r.Context(), dbq.ListDnsViewsParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds})
@@ -396,12 +386,7 @@ func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, viewsPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type healthChecksPage struct {
-	Items  []dbq.DnsHealthCheck `json:"items"`
-	Total  int64                `json:"total"`
-	Limit  int32                `json:"limit"`
-	Offset int32                `json:"offset"`
-}
+type healthChecksPage = httpx.Page[dbq.DnsHealthCheck]
 
 func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -412,7 +397,7 @@ func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeIds, ok := scopedListFilter(r, "dns:health-checks:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, healthChecksPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsHealthCheck](limit, offset))
 		return
 	}
 	items, err := h.Q.ListDnsHealthChecks(r.Context(), dbq.ListDnsHealthChecksParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds})
@@ -430,12 +415,7 @@ func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, healthChecksPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type bgpPeersPage struct {
-	Items  []dbq.BgpPeer `json:"items"`
-	Total  int64         `json:"total"`
-	Limit  int32         `json:"limit"`
-	Offset int32         `json:"offset"`
-}
+type bgpPeersPage = httpx.Page[dbq.BgpPeer]
 
 func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -450,7 +430,7 @@ func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scoped && len(scopeSiteIds) == 0 {
-		httpx.JSON(w, http.StatusOK, bgpPeersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.BgpPeer](limit, offset))
 		return
 	}
 	params := dbq.ListBgpPeersParams{Limit: limit, Offset: offset, ScopeSiteIds: scopeSiteIds}
@@ -477,19 +457,14 @@ func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, bgpPeersPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type anycastBindingsPage struct {
-	Items  []dbq.AnycastBgpBinding `json:"items"`
-	Total  int64                   `json:"total"`
-	Limit  int32                   `json:"limit"`
-	Offset int32                   `json:"offset"`
-}
+type anycastBindingsPage = httpx.Page[dbq.AnycastBgpBinding]
 
 func (h *Handler) listAnycastBindings(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:anycast-bindings:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, anycastBindingsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.AnycastBgpBinding](limit, offset))
 		return
 	}
 	params := dbq.ListAnycastBindingsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -527,19 +502,14 @@ func (h *Handler) listAnycastBindings(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, anycastBindingsPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type serversPage struct {
-	Items  []dbq.DnsServer `json:"items"`
-	Total  int64           `json:"total"`
-	Limit  int32           `json:"limit"`
-	Offset int32           `json:"offset"`
-}
+type serversPage = httpx.Page[dbq.DnsServer]
 
 func (h *Handler) listServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:servers:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, serversPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsServer](limit, offset))
 		return
 	}
 	params := dbq.ListDnsServersParams{Limit: limit, Offset: offset, Role: strPtr(q.Get("role")), ScopeFabricIds: scopeIds}
@@ -596,19 +566,14 @@ func (h *Handler) getServer(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, obj)
 }
 
-type anycastGroupsPage struct {
-	Items  []dbq.AnycastGroup `json:"items"`
-	Total  int64              `json:"total"`
-	Limit  int32              `json:"limit"`
-	Offset int32              `json:"offset"`
-}
+type anycastGroupsPage = httpx.Page[dbq.AnycastGroup]
 
 func (h *Handler) listAnycastGroups(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:anycast-groups:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, anycastGroupsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.AnycastGroup](limit, offset))
 		return
 	}
 	params := dbq.ListAnycastGroupsParams{Limit: limit, Offset: offset, Service: strPtr(q.Get("service")), ScopeFabricIds: scopeIds}
@@ -638,19 +603,14 @@ func (h *Handler) listAnycastGroups(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, anycastGroupsPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type forwardersPage struct {
-	Items  []dbq.DnsForwarder `json:"items"`
-	Total  int64              `json:"total"`
-	Limit  int32              `json:"limit"`
-	Offset int32              `json:"offset"`
-}
+type forwardersPage = httpx.Page[dbq.DnsForwarder]
 
 func (h *Handler) listForwarders(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:forwarders:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, forwardersPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsForwarder](limit, offset))
 		return
 	}
 	params := dbq.ListDnsForwardersParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -677,19 +637,14 @@ func (h *Handler) listForwarders(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, forwardersPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type catalogZonesPage struct {
-	Items  []dbq.DnsCatalogZone `json:"items"`
-	Total  int64                `json:"total"`
-	Limit  int32                `json:"limit"`
-	Offset int32                `json:"offset"`
-}
+type catalogZonesPage = httpx.Page[dbq.DnsCatalogZone]
 
 func (h *Handler) listCatalogZones(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:catalog-zones:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, catalogZonesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsCatalogZone](limit, offset))
 		return
 	}
 	params := dbq.ListDnsCatalogZonesParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -716,19 +671,14 @@ func (h *Handler) listCatalogZones(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, catalogZonesPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type zonesPage struct {
-	Items  []dbq.DnsZone `json:"items"`
-	Total  int64         `json:"total"`
-	Limit  int32         `json:"limit"`
-	Offset int32         `json:"offset"`
-}
+type zonesPage = httpx.Page[dbq.DnsZone]
 
 func (h *Handler) listZones(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:zones:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, zonesPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsZone](limit, offset))
 		return
 	}
 	params := dbq.ListDnsZonesParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind")), ScopeFabricIds: scopeIds}
@@ -785,19 +735,14 @@ func (h *Handler) getZone(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, z)
 }
 
-type recordsPage struct {
-	Items  []dbq.DnsRecord `json:"items"`
-	Total  int64           `json:"total"`
-	Limit  int32           `json:"limit"`
-	Offset int32           `json:"offset"`
-}
+type recordsPage = httpx.Page[dbq.DnsRecord]
 
 func (h *Handler) listRecords(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:records:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, recordsPage{Items: nil, Total: 0, Limit: limit, Offset: offset})
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsRecord](limit, offset))
 		return
 	}
 	params := dbq.ListDnsRecordsParams{
