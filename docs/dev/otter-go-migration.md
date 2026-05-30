@@ -90,6 +90,108 @@ the bottom of this doc.
 - [x] Vertical slice: `/healthz`, `/readyz`, `/api/v1/sites` GET list + GET by id
 - [x] Containerfile, go.work entry, CI matrix shard, Taskfile
 
+## Current cutover status (snapshot — 2026-05-30)
+
+Most route-level work from Phases 1–3 is done. The remaining work is
+either small route-level gaps (single-PR each) or infrastructure-scale
+(DHCP stack, scheduler, Alembic→Atlas). Anything not listed here
+should be assumed shipped — see `git log packages/otter-go` for the
+authoritative record.
+
+### Shipped — module fully on otter-go
+
+| Module | PRs | Notes |
+| --- | --- | --- |
+| Auth (`/api/v1/auth/*`) | #179 | JWT verify, OIDC, MFA AMR check |
+| Audit (`/api/v1/audit/*`) | #180 | read endpoint + SQL-level scope filter |
+| Telemetry (`/api/v1/telemetry/series`) | #178 | freshness + range queries |
+| Admin (`/api/v1/admin/*`) | #182 + #184 | 17 routes; 256-cap catalog byte-for-byte parity |
+| Search (`/api/v1/search`) | #187 | 4 result buckets + IP-parse bulk enrichment |
+| Dashboards (`/api/v1/dashboards/*`) | #188 → #194 | 9 endpoints, 3 service helpers (capacity/powerchain/forecast) |
+| Inventory (`/api/v1/inventory/*`) | #195, #197, #198, #199 | sites/regions/buildings/rooms/rows/racks/assets/cables; PATCH+DELETE for locations; per-region ABAC |
+| LIR (`/api/v1/lir`) | #175 | Go-canonical from day one |
+| IPAM `/move` | #175 | nginx regex ingress |
+
+### Cutover queue — small route-level gaps (1–3 PRs each)
+
+- [ ] **Region-deploy API** (9 Python routes, 0 Go). Tinkerbell CRDs,
+      Cilium policy, Ignition rendering, SSE event stream, kubeconfig
+      callback. Stateful; finch consumer at
+      `packages/finch/src/pages/region-deploy-new.tsx`. ~2–3 PRs.
+- [ ] **Finish alerts** (6 of 12 routes ported). Remaining: arq-driven
+      evaluation + delivery loops. Will need the Go scheduler before
+      the cron paths can move. ~3–5 PRs.
+- [ ] **BGP TCP-AO keychain CRUD**. 37 Python routes total, 8 on Go;
+      this is the highest-value gap. ~1–2 PRs.
+- [ ] **Notifications channel test action**. Single endpoint that
+      triggers a test notification on the configured channel. ~1 PR.
+
+### Cutover queue — infrastructure-scale (multi-PR)
+
+- [ ] **Go scheduler**. Pick `gocron` or `robfig/cron`. Port the
+      simplest cron first (`dns_purge_metrics`) to validate the
+      ergonomics, then escalate. Blocks the DHCP cron paths and the
+      alerts evaluation loop. ~10–15 PRs.
+- [ ] **DHCP stack**. ~5000 lines across `services/dhcp_*.py` plus the
+      `api/ipam.py` `/dhcp/*` endpoints. Push/drift/reconcile/
+      bundle-cache/push-history; Kea Control Agent integration via
+      JSON-RPC; tombstone purge + bundle re-render are cron jobs that
+      need the scheduler first. Operator-accepted risk: unit tests pin
+      shapes but don't validate against real Kea — paired-running
+      staging validation required before cutover. ~25–30 PRs.
+- [ ] **Region-deploy orchestrator** (separate from the API above).
+      The SSE event stream + kubeconfig callback + Cilium policy
+      apply paths. Likely lands after the region-deploy API. ~5–10 PRs.
+
+### Infrastructure-level moves
+
+- [ ] **Alembic → Atlas or Goose**. 66 revisions to migrate or
+      co-own. Plan: freeze Alembic during the cutover (already in
+      the risk register), build Atlas baseline against a clone of
+      prod, verify `atlas migrate status` matches `alembic current`,
+      then ratchet over.
+- [ ] **DHCP bundle rendering**. Compile-time codegen is likely
+      faster than template rendering at the scales we're seeing.
+      Investigate after the DHCP API port is stable.
+- [ ] **Delete `packages/otter/` entirely** once every queue item
+      above is green in Go and the dual-deploy soak window expires.
+
+### Established patterns to reuse in remaining work
+
+- New paginated reads should use `httpx.Page[T]` + `httpx.EmptyPage[T]`
+  with `httpx.PageBounds`; per-handler page-struct aliases are typedef
+  ed to `httpx.Page[T]`.
+- Capability gate on every route via `auth.RequireCapability(capCode)`.
+  Don't rely on `ScopedSiteFilter` to gate access on its own — without
+  the capability check, `FindScope→nil` makes the filter signal
+  "global view" and leaks data.
+- Per-row ABAC on get-by-id via `auth.EnforceSiteScope` (or
+  `EnforceRegionScope` for region-rooted resources). PATCH/DELETE
+  scope-check the existing row's site, and if the patch moves the row
+  to a new site, scope-check that one too.
+- `httpx.Mapped` translates `pgx.ErrNoRows → 404`,
+  `auth.ErrOutsideScope → 403`, FK 23503 → 409. Handlers should
+  delegate via `writeMapped(w, err)` rather than emit status codes by
+  hand.
+- Sequential SQL writes are the codebase posture (no pgx tx wrapper
+  yet). Partial-failure semantics documented in each handler comment;
+  recovery is idempotent re-run.
+- Audit on every mutation via `audit.Record(ctx, h.Audit, nil,
+  audit.Event{Action, TargetType, TargetID, SiteID, Diff})`.
+- Hand-edited generated code lives in `db/generated/*.sql.go` and
+  must match `db/queries/*.sql` — CI's `sqlc drift check` job
+  enforces this.
+
+### Operational risk notes (user-accepted 2026-05-25)
+
+Unit tests pin shapes + call contracts but **do not** validate behavior
+against real Kea / collector / IdP / Tinkerbell. A "green" DHCP or
+region-deploy port could still break in prod when external systems
+return unexpected error codes. **Staging soak + paired-running
+required before any cron-job or orchestration cutover.**
+
+---
+
 ### Phase 1 — Read-side ports (target: 6–8 weeks)
 
 Move all GET endpoints. No state mutations, no audit log writes — so
