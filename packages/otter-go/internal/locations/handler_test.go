@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 type fakeQ struct {
@@ -66,8 +67,11 @@ func mount(f *fakeQ) http.Handler {
 
 func do(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Wildcard principal — inventory:{buildings,rooms,rows}:read
+	// gates added in the inventory cutover block test traffic.
+	req := authtest.Request("GET", path, authtest.PrincipalWithCaps("*"), nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+	h.ServeHTTP(rec, req)
 	return rec
 }
 

@@ -21,11 +21,12 @@ def test_openapi_published() -> None:
     r = client.get("/openapi.json")
     assert r.status_code == 200
     paths = r.json()["paths"]
-    # spot-check the key surfaces are mounted
+    # spot-check the key surfaces are mounted. Cables is the only
+    # /inventory route still on Python (PATCH not yet ported to Go);
+    # the umbrella chart uses a longer-prefix ingress rule to keep
+    # /api/v1/inventory/cables on otter while /api/v1/inventory
+    # serves from otter-go.
     for needle in [
-        "/api/v1/inventory/sites",
-        "/api/v1/inventory/racks",
-        "/api/v1/inventory/assets",
         "/api/v1/inventory/cables",
         "/api/v1/collectors",
         "/api/v1/ingest/telemetry",
@@ -36,9 +37,10 @@ def test_openapi_published() -> None:
     # /api/v1/audit/* (PR 180), /api/v1/admin/* (PR #182 + capabilities/
     # dns follow-up), /api/v1/search (PR #187), /api/v1/dashboards/
     # enterprise (Phase 1) + /api/v1/dashboards/free-space (Phase 2
-    # capacity port) all on otter-go. Negative-assert each is gone
-    # from Python's OpenAPI so a regression that re-includes any of
-    # those routers fails CI.
+    # capacity port), /api/v1/inventory/{sites,regions,buildings,rooms,
+    # rows,racks,assets} (inventory cutover) all on otter-go. Negative-
+    # assert each is gone from Python's OpenAPI so a regression that
+    # re-includes any of those routers fails CI.
     for gone in (
         "/api/v1/auth",
         "/api/v1/audit",
@@ -48,6 +50,13 @@ def test_openapi_published() -> None:
         "/api/v1/dashboards/enterprise",
         "/api/v1/dashboards/free-space",
         "/api/v1/dashboards",
+        "/api/v1/inventory/sites",
+        "/api/v1/inventory/regions",
+        "/api/v1/inventory/buildings",
+        "/api/v1/inventory/rooms",
+        "/api/v1/inventory/rows",
+        "/api/v1/inventory/racks",
+        "/api/v1/inventory/assets",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

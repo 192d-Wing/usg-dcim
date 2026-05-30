@@ -42,9 +42,12 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/buildings", h.listBuildings)
-	r.Get("/rooms", h.listRooms)
-	r.Get("/rows", h.listRows)
+	// Read paths gated by the matching :read capability — see
+	// sites/Mount for why ScopedSiteFilter alone doesn't keep cap-less
+	// principals out.
+	r.With(auth.RequireCapability("inventory:buildings:read")).Get("/buildings", h.listBuildings)
+	r.With(auth.RequireCapability("inventory:rooms:read")).Get("/rooms", h.listRooms)
+	r.With(auth.RequireCapability("inventory:rows:read")).Get("/rows", h.listRows)
 	r.With(auth.RequireCapability("inventory:buildings:create")).Post("/buildings", h.createBuilding)
 	r.With(auth.RequireCapability("inventory:rooms:create")).Post("/rooms", h.createRoom)
 	r.With(auth.RequireCapability("inventory:rows:create")).Post("/rows", h.createRow)

@@ -75,6 +75,11 @@ ingress:
         - { path: /api/v1/telemetry, pathType: Prefix, backend: otter-go }
         - { path: /api/v1/admin,     pathType: Prefix, backend: otter-go }
         - { path: /api/v1/search,    pathType: Prefix, backend: otter-go }
+        # Inventory cutover: /cables stays on Python (PATCH not yet
+        # ported). Listed BEFORE /inventory so Traefik honors longest-
+        # prefix.
+        - { path: /api/v1/inventory/cables, pathType: Prefix, backend: otter    }
+        - { path: /api/v1/inventory,        pathType: Prefix, backend: otter-go }
         # /api/v1/dashboards/* fully on otter-go after Phase 3. Single
         # Prefix rule supersedes the per-phase rules that lived here.
         - { path: /api/v1/dashboards, pathType: Prefix, backend: otter-go }

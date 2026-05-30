@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 type fakeQ struct {
@@ -65,8 +66,11 @@ func mount(f *fakeQ) http.Handler {
 }
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Wildcard principal — inventory:racks:read gate added in the
+	// inventory cutover blocks otherwise-anonymous test traffic.
+	req := authtest.Request("GET", p, authtest.PrincipalWithCaps("*"), nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+	h.ServeHTTP(rec, req)
 	return rec
 }
 

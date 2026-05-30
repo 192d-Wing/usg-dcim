@@ -19,6 +19,8 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+const capRegionsRead = "inventory:regions:read"
+
 // Querier is the slice of sqlc-generated *Queries this package uses;
 // declared as an interface so tests don't need a live Postgres.
 type Querier interface {
@@ -35,8 +37,12 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/regions", h.list)
-	r.Get("/regions/{id}", h.get)
+	// Read paths gated by inventory:regions:read so the cutover
+	// doesn't open a fleet-wide region enumeration to cap-less
+	// principals. Per-region ABAC scope filtering is a separate
+	// follow-up — see the comment on list() below.
+	r.With(auth.RequireCapability(capRegionsRead)).Get("/regions", h.list)
+	r.With(auth.RequireCapability(capRegionsRead)).Get("/regions/{id}", h.get)
 	r.With(auth.RequireCapability("inventory:regions:create")).Post("/regions", h.create)
 	r.With(auth.RequireCapability("inventory:regions:update")).Patch("/regions/{id}", h.update)
 }

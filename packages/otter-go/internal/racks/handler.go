@@ -17,6 +17,8 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+const capRacksRead = "inventory:racks:read"
+
 type Querier interface {
 	ListRacks(ctx context.Context, arg dbq.ListRacksParams) ([]dbq.Rack, error)
 	CountRacks(ctx context.Context, arg dbq.CountRacksParams) (int64, error)
@@ -40,8 +42,10 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/racks", h.list)
-	r.Get("/racks/{id}", h.get)
+	// Read paths gated by inventory:racks:read — see sites/Mount for
+	// why ScopedSiteFilter alone doesn't keep cap-less principals out.
+	r.With(auth.RequireCapability(capRacksRead)).Get("/racks", h.list)
+	r.With(auth.RequireCapability(capRacksRead)).Get("/racks/{id}", h.get)
 	r.With(auth.RequireCapability("inventory:racks:create")).Post("/racks", h.create)
 	r.With(auth.RequireCapability("inventory:racks:update")).Patch("/racks/{id}", h.update)
 }
@@ -52,7 +56,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	p, _ := auth.From(r.Context())
-	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:racks:read")
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capRacksRead)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -107,6 +111,13 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// Per-row ABAC: scoped principals can't read racks outside scope.
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, rack.SiteID, capRacksRead); serr != nil {
+		status, msg := httpx.Mapped(serr)
 		httpx.Error(w, status, msg)
 		return
 	}
