@@ -176,6 +176,136 @@ func (q *Queries) ListSitesAtRisk(ctx context.Context, minSeverity string) ([]Si
 	return items, rows.Err()
 }
 
+// ---- /dashboards/assets/{asset_id} ----
+
+const listAssetTelemetrySources = `-- name: ListAssetTelemetrySources :many
+SELECT metric, unit, source_system,
+       freshness::text AS freshness,
+       last_value, last_reading_at, last_success_at, poll_interval_seconds
+FROM telemetry_sources
+WHERE asset_id = $1
+ORDER BY metric
+`
+
+// AssetTelemetrySourceRow projects only the columns the asset-detail
+// response shape exposes (Python's TelemetrySource projection at
+// dashboards.py:188-199).
+type AssetTelemetrySourceRow struct {
+	Metric              string     `json:"metric"`
+	Unit                *string    `json:"unit"`
+	SourceSystem        *string    `json:"source_system"`
+	Freshness           string     `json:"freshness"`
+	LastValue           *float64   `json:"last_value"`
+	LastReadingAt       *time.Time `json:"last_reading_at"`
+	LastSuccessAt       *time.Time `json:"last_success_at"`
+	PollIntervalSeconds int32      `json:"poll_interval_seconds"`
+}
+
+func (q *Queries) ListAssetTelemetrySources(ctx context.Context, assetID uuid.UUID) ([]AssetTelemetrySourceRow, error) {
+	rows, err := q.db.Query(ctx, listAssetTelemetrySources, assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AssetTelemetrySourceRow
+	for rows.Next() {
+		var r AssetTelemetrySourceRow
+		if err := rows.Scan(
+			&r.Metric, &r.Unit, &r.SourceSystem, &r.Freshness,
+			&r.LastValue, &r.LastReadingAt, &r.LastSuccessAt, &r.PollIntervalSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listAssetIPAddresses = `-- name: ListAssetIPAddresses :many
+SELECT id, subnet_id,
+       host(address) AS address,
+       role::text AS role, status::text AS status, source::text AS source,
+       dns_name, description, dhcp_lease_expires_at
+FROM ip_addresses
+WHERE asset_id = $1
+ORDER BY role, address
+`
+
+// AssetIPAddressRow projects the IPAddress columns the asset-detail
+// response shape carries. `address` is the host-only string.
+type AssetIPAddressRow struct {
+	ID                 uuid.UUID  `json:"id"`
+	SubnetID           uuid.UUID  `json:"subnet_id"`
+	Address            string     `json:"address"`
+	Role               string     `json:"role"`
+	Status             string     `json:"status"`
+	Source             string     `json:"source"`
+	DnsName            *string    `json:"dns_name"`
+	Description        *string    `json:"description"`
+	DhcpLeaseExpiresAt *time.Time `json:"dhcp_lease_expires_at"`
+}
+
+func (q *Queries) ListAssetIPAddresses(ctx context.Context, assetID uuid.UUID) ([]AssetIPAddressRow, error) {
+	rows, err := q.db.Query(ctx, listAssetIPAddresses, assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AssetIPAddressRow
+	for rows.Next() {
+		var r AssetIPAddressRow
+		if err := rows.Scan(
+			&r.ID, &r.SubnetID, &r.Address,
+			&r.Role, &r.Status, &r.Source,
+			&r.DnsName, &r.Description, &r.DhcpLeaseExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listRecentAssetAlerts = `-- name: ListRecentAssetAlerts :many
+SELECT id, severity::text AS severity, state::text AS state,
+       summary, first_seen_at, last_seen_at
+FROM alerts
+WHERE asset_id = $1
+ORDER BY last_seen_at DESC
+LIMIT 10
+`
+
+// RecentAssetAlertRow projects the alert columns the asset-detail
+// response shape carries (the 10 most-recent alerts on the asset).
+type RecentAssetAlertRow struct {
+	ID          uuid.UUID `json:"id"`
+	Severity    string    `json:"severity"`
+	State       string    `json:"state"`
+	Summary     string    `json:"summary"`
+	FirstSeenAt time.Time `json:"first_seen_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+}
+
+func (q *Queries) ListRecentAssetAlerts(ctx context.Context, assetID uuid.UUID) ([]RecentAssetAlertRow, error) {
+	rows, err := q.db.Query(ctx, listRecentAssetAlerts, assetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RecentAssetAlertRow
+	for rows.Next() {
+		var r RecentAssetAlertRow
+		if err := rows.Scan(
+			&r.ID, &r.Severity, &r.State,
+			&r.Summary, &r.FirstSeenAt, &r.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
 const listPduKwTelemetry = `-- name: ListPduKwTelemetry :many
 SELECT asset_id, metric, last_value
 FROM telemetry_sources

@@ -53,6 +53,7 @@ def test_openapi_published() -> None:
         "/api/v1/dashboards/enterprise",
         "/api/v1/dashboards/free-space",
         "/api/v1/dashboards/sites/at-risk",
+        "/api/v1/dashboards/assets/",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

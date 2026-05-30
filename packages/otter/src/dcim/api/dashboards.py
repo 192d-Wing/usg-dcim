@@ -126,106 +126,11 @@ async def rack_detail(
 # services/capacity.find_free_space is still imported by the racks/
 # {id} and sites/{id} endpoints below and stays here until Phase 2b.
 
-@router.get("/assets/{asset_id}")
-async def asset_detail(
-    asset_id: UUID,
-    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Asset health: identity, telemetry sources, bound IPs, recent alerts."""
-    from ..models.inventory import Asset
-    from ..models.ipam import IPAddress
-
-    asset = await db.get(Asset, asset_id)
-    if asset is None:
-        return {"error": "not_found"}
-
-    sources = (
-        await db.execute(
-            select(TelemetrySource)
-            .where(TelemetrySource.asset_id == asset_id)
-            .order_by(TelemetrySource.metric.asc())
-        )
-    ).scalars().all()
-
-    ip_rows = (
-        await db.execute(
-            select(IPAddress)
-            .where(IPAddress.asset_id == asset_id)
-            .order_by(IPAddress.role.asc(), IPAddress.address.asc())
-        )
-    ).scalars().all()
-
-    recent_alerts = (
-        await db.execute(
-            select(Alert)
-            .where(Alert.asset_id == asset_id)
-            .order_by(Alert.last_seen_at.desc())
-            .limit(10)
-        )
-    ).scalars().all()
-
-    return {
-        "asset": {
-            "id": str(asset.id),
-            "site_id": str(asset.site_id),
-            "rack_id": str(asset.rack_id) if asset.rack_id else None,
-            "name": asset.name,
-            "hostname": asset.hostname,
-            "kind": asset.kind.value if hasattr(asset.kind, "value") else asset.kind,
-            "manufacturer": asset.manufacturer,
-            "model": asset.model,
-            "serial": asset.serial,
-            "firmware": asset.firmware,
-            "mgmt_ip": asset.mgmt_ip,
-            "mgmt_protocol": asset.mgmt_protocol,
-            "mgmt_port": asset.mgmt_port,
-            "rack_position_u": asset.rack_position_u,
-            "rack_units": asset.rack_units,
-            "port_count": asset.port_count,
-            "lifecycle_state": _enum_val(asset.lifecycle_state),
-        },
-        "telemetry_sources": [
-            {
-                "metric": s.metric,
-                "unit": s.unit,
-                "source_system": s.source_system,
-                "freshness": s.freshness.value if hasattr(s.freshness, "value") else s.freshness,
-                "last_value": float(s.last_value) if s.last_value is not None else None,
-                "last_reading_at": s.last_reading_at.isoformat() if s.last_reading_at else None,
-                "last_success_at": s.last_success_at.isoformat() if s.last_success_at else None,
-                "poll_interval_seconds": s.poll_interval_seconds,
-            }
-            for s in sources
-        ],
-        "ip_addresses": [
-            {
-                "id": str(ip.id),
-                "subnet_id": str(ip.subnet_id),
-                "address": str(ip.address).split("/", 1)[0],
-                "role": _enum_val(ip.role),
-                "status": _enum_val(ip.status),
-                "source": _enum_val(ip.source),
-                "dns_name": ip.dns_name,
-                "description": ip.description,
-                "dhcp_lease_expires_at": (
-                    ip.dhcp_lease_expires_at.isoformat() if ip.dhcp_lease_expires_at else None
-                ),
-            }
-            for ip in ip_rows
-        ],
-        "recent_alerts": [
-            {
-                "id": str(a.id),
-                "severity": a.severity.value if hasattr(a.severity, "value") else a.severity,
-                "state": a.state.value if hasattr(a.state, "value") else a.state,
-                "summary": a.summary,
-                "first_seen_at": a.first_seen_at.isoformat(),
-                "last_seen_at": a.last_seen_at.isoformat(),
-            }
-            for a in recent_alerts
-        ],
-    }
+# /api/v1/dashboards/assets/{asset_id} moved to otter-go (Phase 2c).
+# Identity + telemetry sources + bound IPs + 10 most-recent alerts
+# joined via four sequential reads. The remaining /dashboards/*
+# routes still here are racks/{id}, sites/{id}, and the 3 forecast
+# endpoints (need services/power_chain + services/forecast ports).
 
 @router.get("/forecast/racks")
 async def racks_forecast_batch(
