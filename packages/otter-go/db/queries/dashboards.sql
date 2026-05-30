@@ -36,3 +36,47 @@ WHERE enabled = TRUE
 -- column is a Postgres ENUM; an explicit text comparison works without
 -- the ::text cast because we're comparing to a literal, not scanning.
 SELECT COUNT(id) FROM telemetry_sources WHERE freshness = 'stale';
+
+-- ---- /dashboards/free-space (Phase 2) — rack capacity rollup ----
+-- /free-space ranks racks by their biggest contiguous free U run,
+-- optionally narrowing by site or region and rejecting racks that
+-- have less kW headroom than the caller asked for. The implementation
+-- is rack-level so the handler fans out one bulk asset lookup +
+-- one bulk PDU-telemetry lookup, then computes the U/kW rollup in Go.
+
+-- name: ListRacksForFreeSpace :many
+-- Filter parameters can be NULL (don't filter). When both are set
+-- Python ANDs them — match that.
+SELECT id, site_id, row_id, name, code, u_height, max_kw, max_weight_lbs, serial, created_at, updated_at
+FROM racks
+WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
+  AND ($2::uuid IS NULL OR site_id IN (SELECT id FROM sites WHERE region_id = $2::uuid));
+
+-- name: ListAssetsByRackIDs :many
+-- Bulk asset fetch for many racks — Python iterates rack-by-rack and
+-- runs one SELECT each; one round-trip is cheaper.
+SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
+       kind::text AS kind, manufacturer, model, serial, firmware,
+       rack_position_u, rack_units,
+       face::text AS face, mount::text AS mount,
+       pdu_side, psu_count, port_count,
+       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+       lifecycle_state::text AS lifecycle_state,
+       install_date, warranty_expires, metadata_json,
+       created_at, updated_at
+FROM assets
+WHERE rack_id = ANY($1::uuid[]);
+
+-- name: ListPduKwTelemetry :many
+-- Per-PDU current-freshness telemetry rows whose metric is one of the
+-- kW or W power metrics. The handler picks metric + last_value off
+-- each row and rolls up by asset_id (rack).
+SELECT asset_id, metric, last_value
+FROM telemetry_sources
+WHERE asset_id = ANY($1::uuid[])
+  AND last_value IS NOT NULL
+  AND freshness = 'current'
+  AND metric IN (
+    'pdu.input.kw', 'power.consumed.kW', 'rack.input.kw',
+    'power.consumed.W', 'pdu.input.w'
+  );
