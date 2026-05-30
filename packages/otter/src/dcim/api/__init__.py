@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter
 
-from .admin import router as admin_router
 from .alerts import router as alerts_router
 from .bgp import router as bgp_router
 from .collectors import router as collectors_router
@@ -45,12 +44,10 @@ router.include_router(power_router)
 # double-serving. The audit_log table + the security.audit.record()
 # helper still live in Python (mutation handlers write to it).
 #
-# /api/v1/admin/* mostly moved to otter-go (PR-admin). The two
-# unported routes (capabilities/catalog + system/dns-settings) stay
-# on Python; ingress longest-prefix-match keeps them reachable via
-# /api/v1/admin/capabilities + /api/v1/admin/system paths. The
-# admin_router below now only registers those two surfaces.
-router.include_router(admin_router)
+# /api/v1/admin/* fully moved to otter-go — including the
+# capabilities/catalog + system/dns-settings routes that briefly
+# lingered behind the ingress split in PR #182. The longer-prefix
+# ingress paths that kept those on Python are gone.
 router.include_router(notifications_router)
 router.include_router(organization_router)
 router.include_router(ipam_router)

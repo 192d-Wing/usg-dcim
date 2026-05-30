@@ -80,7 +80,21 @@ func main() {
 	oh := &organization.Handler{Q: q, Audit: q}
 	sth := &stencils.Handler{}
 	th := &telemetry.Handler{Q: q}
-	adh := &admin.Handler{Q: q, Audit: q}
+	// Default DNS recursive_upstreams — same shape Python's
+	// settings.dns_recursive_upstreams handles (comma-separated env
+	// override, hard-coded {1.1.1.1, 8.8.8.8} fallback). Surfaced
+	// by GET /admin/system/dns-settings as `default_recursive_upstreams`
+	// so the UI can render the reset-to-default affordance.
+	dnsDefault := []string{"1.1.1.1", "8.8.8.8"}
+	if csv := env.String("DCIM_DNS_RECURSIVE_UPSTREAMS", ""); csv != "" {
+		dnsDefault = dnsDefault[:0]
+		for _, v := range strings.Split(csv, ",") {
+			if v = strings.TrimSpace(v); v != "" {
+				dnsDefault = append(dnsDefault, v)
+			}
+		}
+	}
+	adh := &admin.Handler{Q: q, Audit: q, DefaultDnsRecursiveUpstreams: dnsDefault}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

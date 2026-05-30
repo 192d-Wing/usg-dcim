@@ -268,20 +268,9 @@ ingress:
         - path: /api/v1/telemetry
           pathType: Prefix
           backend: otter-go
-        # PR-admin cutover: /api/v1/admin/* moves to otter-go EXCEPT the
-        # two routes that haven't been ported yet — capabilities catalog
-        # (static enum the role-create UI fetches) and system DNS
-        # settings (read + put for the recursive_upstreams override).
-        # Both stay on Python via the longer-prefix Python paths below,
-        # which win under nginx-ingress longest-prefix-match. When the
-        # Go port lands, delete the two Python paths and let
-        # /api/v1/admin alone serve the prefix.
-        - path: /api/v1/admin/capabilities
-          pathType: Prefix
-          backend: otter
-        - path: /api/v1/admin/system
-          pathType: Prefix
-          backend: otter
+        # /api/v1/admin/* fully on otter-go since the capabilities +
+        # system-dns port. The longer-prefix Python paths PR #182
+        # introduced are gone — a single Prefix rule now suffices.
         - path: /api/v1/admin
           pathType: Prefix
           backend: otter-go

@@ -69,6 +69,18 @@ func (q *Queries) UpsertSystemSetting(ctx context.Context, arg UpsertSystemSetti
 	return err
 }
 
+const deleteSystemSetting = `-- name: DeleteSystemSetting :exec
+DELETE FROM system_settings WHERE key = $1
+`
+
+// DeleteSystemSetting removes the row for `key`. Idempotent — if no
+// row exists the operation is a no-op (Python idempotency parity).
+// Used by the system-DNS reset path to fall back to the env default.
+func (q *Queries) DeleteSystemSetting(ctx context.Context, key string) error {
+	_, err := q.db.Exec(ctx, deleteSystemSetting, key)
+	return err
+}
+
 // ---- ARIN job claim ----
 
 const claimNextArinSubmitJob = `-- name: ClaimNextArinSubmitJob :one

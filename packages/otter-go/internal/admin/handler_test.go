@@ -45,6 +45,14 @@ type fakeQ struct {
 	gotRoleCreate     dbq.CreateAdminRoleParams
 	gotRoleUpdate     dbq.UpdateAdminRoleParams
 
+	// system_settings — used by capabilities + system_dns handlers.
+	sysGet           func(key string) (dbq.SystemSetting, error)
+	sysUpsertedKey   string
+	sysUpsertedValue []byte
+	sysUpsertErr     error
+	sysDeletedKey    string
+	sysDeleteErr     error
+
 	// Assignments
 	assignments         []dbq.UserRoleRow
 	assignmentByID      map[uuid.UUID]dbq.UserRoleRow
@@ -238,6 +246,27 @@ func (f *fakeQ) UpdateOidcRoleMapping(_ context.Context, a dbq.UpdateOidcRoleMap
 }
 func (f *fakeQ) DeleteOidcRoleMapping(_ context.Context, _ uuid.UUID) (int64, error) {
 	return f.oidcDeleteRows, nil
+}
+
+// ---- system_settings — wired by capabilities + system_dns tests. ----
+//
+// Tests assign sysGet directly to override per-case. sysUpsert /
+// sysDelete capture the args so a test can assert "the right key was
+// written" without having to set up a sentinel error path.
+func (f *fakeQ) GetSystemSetting(_ context.Context, key string) (dbq.SystemSetting, error) {
+	if f.sysGet != nil {
+		return f.sysGet(key)
+	}
+	return dbq.SystemSetting{}, pgx.ErrNoRows
+}
+func (f *fakeQ) UpsertSystemSetting(_ context.Context, a dbq.UpsertSystemSettingParams) error {
+	f.sysUpsertedKey = a.Key
+	f.sysUpsertedValue = a.Value
+	return f.sysUpsertErr
+}
+func (f *fakeQ) DeleteSystemSetting(_ context.Context, key string) error {
+	f.sysDeletedKey = key
+	return f.sysDeleteErr
 }
 
 func defaultString(p *string, d string) string {
