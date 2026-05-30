@@ -6,6 +6,8 @@ package dbq
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ---- Enterprise dashboard rollup queries ----
@@ -58,4 +60,120 @@ func (q *Queries) CountStaleTelemetrySources(ctx context.Context) (int64, error)
 	var n int64
 	err := q.db.QueryRow(ctx, countStaleTelemetrySources).Scan(&n)
 	return n, err
+}
+
+// ---- /dashboards/free-space (Phase 2) — rack capacity rollup ----
+
+const listRacksForFreeSpace = `-- name: ListRacksForFreeSpace :many
+SELECT id, site_id, row_id, name, code, u_height, max_kw, max_weight_lbs, serial, created_at, updated_at
+FROM racks
+WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
+  AND ($2::uuid IS NULL OR site_id IN (SELECT id FROM sites WHERE region_id = $2::uuid))
+`
+
+// ListRacksForFreeSpaceParams: both filters are optional; nil → don't
+// filter on that dimension. When both are set the query ANDs them
+// (matches Python's where-clause composition).
+type ListRacksForFreeSpaceParams struct {
+	SiteID   *uuid.UUID `json:"site_id"`
+	RegionID *uuid.UUID `json:"region_id"`
+}
+
+func (q *Queries) ListRacksForFreeSpace(ctx context.Context, arg ListRacksForFreeSpaceParams) ([]Rack, error) {
+	rows, err := q.db.Query(ctx, listRacksForFreeSpace, arg.SiteID, arg.RegionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Rack
+	for rows.Next() {
+		var r Rack
+		if err := rows.Scan(
+			&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listAssetsByRackIDs = `-- name: ListAssetsByRackIDs :many
+SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
+       kind::text AS kind, manufacturer, model, serial, firmware,
+       rack_position_u, rack_units,
+       face::text AS face, mount::text AS mount,
+       pdu_side, psu_count, port_count,
+       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+       lifecycle_state::text AS lifecycle_state,
+       install_date, warranty_expires, metadata_json,
+       created_at, updated_at
+FROM assets
+WHERE rack_id = ANY($1::uuid[])
+`
+
+func (q *Queries) ListAssetsByRackIDs(ctx context.Context, rackIDs []uuid.UUID) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, listAssetsByRackIDs, rackIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var a Asset
+		if err := rows.Scan(
+			&a.ID, &a.SiteID, &a.RackID, &a.ParentAssetID, &a.Name, &a.Hostname,
+			&a.Kind, &a.Manufacturer, &a.Model, &a.Serial, &a.Firmware,
+			&a.RackPositionU, &a.RackUnits,
+			&a.Face, &a.Mount,
+			&a.PduSide, &a.PsuCount, &a.PortCount,
+			&a.MgmtIP, &a.MgmtProtocol, &a.MgmtPort, &a.MgmtCredentialsRef,
+			&a.LifecycleState,
+			&a.InstallDate, &a.WarrantyExpires, &a.MetadataJson,
+			&a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	return items, rows.Err()
+}
+
+const listPduKwTelemetry = `-- name: ListPduKwTelemetry :many
+SELECT asset_id, metric, last_value
+FROM telemetry_sources
+WHERE asset_id = ANY($1::uuid[])
+  AND last_value IS NOT NULL
+  AND freshness = 'current'
+  AND metric IN (
+    'pdu.input.kw', 'power.consumed.kW', 'rack.input.kw',
+    'power.consumed.W', 'pdu.input.w'
+  )
+`
+
+// PduKwTelemetryRow — projected slice the capacity rollup needs.
+// last_value is NUMERIC in PG; Go scans it as *string and we parse
+// only when the metric belongs to one of the kW/W sets.
+type PduKwTelemetryRow struct {
+	AssetID   uuid.UUID `json:"asset_id"`
+	Metric    string    `json:"metric"`
+	LastValue *string   `json:"last_value"`
+}
+
+func (q *Queries) ListPduKwTelemetry(ctx context.Context, assetIDs []uuid.UUID) ([]PduKwTelemetryRow, error) {
+	rows, err := q.db.Query(ctx, listPduKwTelemetry, assetIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PduKwTelemetryRow
+	for rows.Next() {
+		var r PduKwTelemetryRow
+		if err := rows.Scan(&r.AssetID, &r.Metric, &r.LastValue); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
 }

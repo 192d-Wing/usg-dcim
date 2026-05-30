@@ -42,6 +42,7 @@ type Handler struct {
 
 func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability("dashboards:dashboards:read")).Get("/dashboards/enterprise", h.enterprise)
+	r.With(auth.RequireCapability("dashboards:dashboards:read")).Get("/dashboards/free-space", h.freeSpace)
 }
 
 // enterpriseOverview is the wire shape returned by GET
