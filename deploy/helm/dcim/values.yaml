@@ -280,6 +280,16 @@ ingress:
         - path: /api/v1/search
           pathType: Prefix
           backend: otter-go
+        # Dashboards Phase 1 cutover: only /enterprise (rolled-up COUNT
+        # KPIs). The rest of /dashboards/* — sites/at-risk, racks/{id},
+        # assets/{id}, free-space, forecasts, sites/{id} — depends on
+        # Python service helpers (capacity, power_chain, forecast) and
+        # stays on Python until those ports land. nginx-ingress longest-
+        # prefix-match means /enterprise wins over the broader /api
+        # rule below.
+        - path: /api/v1/dashboards/enterprise
+          pathType: Prefix
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter

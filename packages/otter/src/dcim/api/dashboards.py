@@ -18,64 +18,17 @@ from ..db import get_db
 from ..models.alerts import Alert, AlertState, Severity
 from ..models.collectors import Collector, CollectorStatus
 from ..models.inventory import Asset, Building, LifecycleState, Rack, Region, Room, Row, Site
-from ..models.telemetry_meta import FreshnessState, TelemetrySource
+from ..models.telemetry_meta import TelemetrySource
 from ..security.deps import Principal, require_capability
 from ..settings import get_settings
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
-@router.get("/enterprise")
-async def enterprise_overview(
-    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Top-level KPIs: site count, alerting sites, stale collectors, capacity at risk."""
-
-    site_count = (await db.execute(select(func.count(Site.id)))).scalar_one()
-    rack_count = (await db.execute(select(func.count(Rack.id)))).scalar_one()
-    sites_active = (
-        await db.execute(select(func.count(Site.id)).where(Site.lifecycle_state == LifecycleState.active))
-    ).scalar_one()
-
-    sites_with_critical = (
-        await db.execute(
-            select(func.count(func.distinct(Alert.site_id))).where(
-                Alert.state == AlertState.firing, Alert.severity == Severity.critical
-            )
-        )
-    ).scalar_one()
-
-    s = get_settings()
-    stale_threshold = datetime.now(UTC) - timedelta(seconds=s.collector_stale_seconds)
-    stale_collectors = (
-        await db.execute(
-            select(func.count(Collector.id)).where(
-                Collector.enabled.is_(True),
-                (Collector.last_seen_at.is_(None)) | (Collector.last_seen_at < stale_threshold),
-            )
-        )
-    ).scalar_one()
-
-    healthy_collectors = (
-        await db.execute(
-            select(func.count(Collector.id)).where(Collector.status == CollectorStatus.healthy)
-        )
-    ).scalar_one()
-
-    stale_sources = (
-        await db.execute(
-            select(func.count(TelemetrySource.id)).where(TelemetrySource.freshness == FreshnessState.stale)
-        )
-    ).scalar_one()
-
-    return {
-        "sites": {"total": site_count, "active": sites_active},
-        "racks": {"total": rack_count},
-        "alerts": {"sites_with_critical": sites_with_critical},
-        "collectors": {"healthy": healthy_collectors, "stale": stale_collectors},
-        "telemetry": {"stale_sources": stale_sources},
-        "generated_at": datetime.now(UTC).isoformat(),
-    }
+# /api/v1/dashboards/enterprise moved to otter-go (Phase 1 of the
+# dashboards port). The umbrella chart routes that specific path to
+# otter-go via a longer-prefix ingress rule; the rest of /dashboards/*
+# (sites/at-risk, racks/{id}, assets/{id}, free-space, forecasts,
+# sites/{id}) stays here until the service-helper ports land.
 
 @router.get("/sites/at-risk")
 async def sites_at_risk(
