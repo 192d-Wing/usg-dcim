@@ -37,6 +37,55 @@ WHERE enabled = TRUE
 -- the ::text cast because we're comparing to a literal, not scanning.
 SELECT COUNT(id) FROM telemetry_sources WHERE freshness = 'stale';
 
+-- ---- /dashboards/racks/{rack_id} (Phase 2e) — rack detail view ----
+-- Rack entity + ordered placed assets + per-asset open-alerts count +
+-- per-asset telemetry freshness + power_chain rollup. compute_rack_
+-- capacity reuses internal/capacity.
+
+-- name: ListAssetsByRackOrdered :many
+-- Order by rack_position_u asc nulls last (Python parity for the rack
+-- visualization). ENUMs cast to ::text per convention.
+SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
+       kind::text AS kind, manufacturer, model, serial, firmware,
+       rack_position_u, rack_units,
+       face::text AS face, mount::text AS mount,
+       pdu_side, psu_count, port_count,
+       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+       lifecycle_state::text AS lifecycle_state,
+       install_date, warranty_expires, metadata_json,
+       created_at, updated_at
+FROM assets
+WHERE rack_id = $1
+ORDER BY rack_position_u ASC NULLS LAST;
+
+-- name: ListOpenAlertsByAssetIDs :many
+-- Aggregation for the rack detail's per-asset open_alerts column.
+-- Group by asset_id; only firing alerts count.
+SELECT asset_id, COUNT(id)::bigint AS n
+FROM alerts
+WHERE asset_id = ANY($1::uuid[]) AND state = 'firing'
+GROUP BY asset_id;
+
+-- name: ListAssetFreshnessByIDs :many
+-- Per-asset telemetry freshness counts. Caller pivots into the
+-- {asset_id: {freshness: count}} nested map the response shape uses.
+SELECT asset_id, freshness::text AS freshness, COUNT(*)::bigint AS n
+FROM telemetry_sources
+WHERE asset_id = ANY($1::uuid[])
+GROUP BY asset_id, freshness;
+
+-- name: ListOutletsByPduIDs :many
+-- Outlets for the rack's PDUs — feeds compute_power_chain. The Python
+-- side projected the full Outlet row; the Go port only needs id +
+-- pdu_asset_id + position + label.
+SELECT id, pdu_asset_id, position, label
+FROM outlets
+WHERE pdu_asset_id = ANY($1::uuid[]);
+
+-- ListPowerConnectionsByOutletIDs is already declared in power.sql
+-- (returns []PowerConnection); the rack-detail handler reuses that
+-- query directly.
+
 -- ---- /dashboards/sites/{site_id} (Phase 2d) — site topology + KPIs ----
 -- Fans out a half-dozen queries: site topology (buildings → rooms →
 -- rows → racks + all assets), the alerts/collectors KPI counters, and

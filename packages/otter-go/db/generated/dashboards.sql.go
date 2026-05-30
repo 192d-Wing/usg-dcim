@@ -62,6 +62,150 @@ func (q *Queries) CountStaleTelemetrySources(ctx context.Context) (int64, error)
 	return n, err
 }
 
+// ---- /dashboards/racks/{rack_id} — rack detail view ----
+
+const listAssetsByRackOrdered = `-- name: ListAssetsByRackOrdered :many
+SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
+       kind::text AS kind, manufacturer, model, serial, firmware,
+       rack_position_u, rack_units,
+       face::text AS face, mount::text AS mount,
+       pdu_side, psu_count, port_count,
+       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+       lifecycle_state::text AS lifecycle_state,
+       install_date, warranty_expires, metadata_json,
+       created_at, updated_at
+FROM assets
+WHERE rack_id = $1
+ORDER BY rack_position_u ASC NULLS LAST
+`
+
+func (q *Queries) ListAssetsByRackOrdered(ctx context.Context, rackID uuid.UUID) ([]Asset, error) {
+	rows, err := q.db.Query(ctx, listAssetsByRackOrdered, rackID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Asset
+	for rows.Next() {
+		var a Asset
+		if err := rows.Scan(
+			&a.ID, &a.SiteID, &a.RackID, &a.ParentAssetID, &a.Name, &a.Hostname,
+			&a.Kind, &a.Manufacturer, &a.Model, &a.Serial, &a.Firmware,
+			&a.RackPositionU, &a.RackUnits,
+			&a.Face, &a.Mount,
+			&a.PduSide, &a.PsuCount, &a.PortCount,
+			&a.MgmtIP, &a.MgmtProtocol, &a.MgmtPort, &a.MgmtCredentialsRef,
+			&a.LifecycleState,
+			&a.InstallDate, &a.WarrantyExpires, &a.MetadataJson,
+			&a.CreatedAt, &a.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, a)
+	}
+	return items, rows.Err()
+}
+
+const listOpenAlertsByAssetIDs = `-- name: ListOpenAlertsByAssetIDs :many
+SELECT asset_id, COUNT(id)::bigint AS n
+FROM alerts
+WHERE asset_id = ANY($1::uuid[]) AND state = 'firing'
+GROUP BY asset_id
+`
+
+// AssetOpenAlertsRow is the {asset_id, count} aggregation used by
+// the rack detail's per-asset open_alerts column.
+type AssetOpenAlertsRow struct {
+	AssetID uuid.UUID `json:"asset_id"`
+	N       int64     `json:"n"`
+}
+
+func (q *Queries) ListOpenAlertsByAssetIDs(ctx context.Context, assetIDs []uuid.UUID) ([]AssetOpenAlertsRow, error) {
+	rows, err := q.db.Query(ctx, listOpenAlertsByAssetIDs, assetIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AssetOpenAlertsRow
+	for rows.Next() {
+		var r AssetOpenAlertsRow
+		if err := rows.Scan(&r.AssetID, &r.N); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listAssetFreshnessByIDs = `-- name: ListAssetFreshnessByIDs :many
+SELECT asset_id, freshness::text AS freshness, COUNT(*)::bigint AS n
+FROM telemetry_sources
+WHERE asset_id = ANY($1::uuid[])
+GROUP BY asset_id, freshness
+`
+
+// AssetFreshnessRow projects (asset_id, freshness, count). The
+// rack-detail handler pivots into {asset_id: {freshness: count}}.
+type AssetFreshnessRow struct {
+	AssetID   uuid.UUID `json:"asset_id"`
+	Freshness string    `json:"freshness"`
+	N         int64     `json:"n"`
+}
+
+func (q *Queries) ListAssetFreshnessByIDs(ctx context.Context, assetIDs []uuid.UUID) ([]AssetFreshnessRow, error) {
+	rows, err := q.db.Query(ctx, listAssetFreshnessByIDs, assetIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AssetFreshnessRow
+	for rows.Next() {
+		var r AssetFreshnessRow
+		if err := rows.Scan(&r.AssetID, &r.Freshness, &r.N); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listOutletsByPduIDs = `-- name: ListOutletsByPduIDs :many
+SELECT id, pdu_asset_id, position, label
+FROM outlets
+WHERE pdu_asset_id = ANY($1::uuid[])
+`
+
+// OutletForPowerChainRow projects only the columns
+// internal/powerchain needs from the Outlet row.
+type OutletForPowerChainRow struct {
+	ID         uuid.UUID `json:"id"`
+	PduAssetID uuid.UUID `json:"pdu_asset_id"`
+	Position   int32     `json:"position"`
+	Label      *string   `json:"label"`
+}
+
+func (q *Queries) ListOutletsByPduIDs(ctx context.Context, pduIDs []uuid.UUID) ([]OutletForPowerChainRow, error) {
+	rows, err := q.db.Query(ctx, listOutletsByPduIDs, pduIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OutletForPowerChainRow
+	for rows.Next() {
+		var r OutletForPowerChainRow
+		if err := rows.Scan(&r.ID, &r.PduAssetID, &r.Position, &r.Label); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+// ListPowerConnectionsByOutletIDs already exists in power.sql.go and
+// returns []PowerConnection; the rack-detail handler reuses it
+// directly. Removing the SQL declaration from dashboards.sql for the
+// same reason.
+
 // ---- /dashboards/sites/{site_id} — topology + KPIs ----
 
 const listBuildingsBySite = `-- name: ListBuildingsBySite :many

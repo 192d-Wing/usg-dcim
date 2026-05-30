@@ -30,11 +30,11 @@ def test_openapi_published() -> None:
         "/api/v1/collectors",
         "/api/v1/ingest/telemetry",
         "/api/v1/alerts",
-        # /dashboards/racks/{rack_id} still on Python (needs the
-        # services/power_chain port). Used as the smoke needle now
-        # that /enterprise + /free-space + /sites/at-risk +
-        # /assets/{id} + /sites/{id} moved to otter-go.
-        "/api/v1/dashboards/racks/",
+        # /dashboards/forecast/* still on Python (needs the
+        # services/forecast port). Used as the smoke needle now that
+        # /enterprise + /free-space + /sites/at-risk + /assets/{id} +
+        # /sites/{id} + /racks/{id} all moved to otter-go.
+        "/api/v1/dashboards/forecast/",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
     # /api/v1/auth/* (PR 179), /api/v1/telemetry/series (PR 178),
@@ -54,6 +54,7 @@ def test_openapi_published() -> None:
         "/api/v1/dashboards/free-space",
         "/api/v1/dashboards/sites/",
         "/api/v1/dashboards/assets/",
+        "/api/v1/dashboards/racks/",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
