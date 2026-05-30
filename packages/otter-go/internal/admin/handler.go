@@ -62,11 +62,22 @@ type Querier interface {
 	CreateOidcRoleMapping(ctx context.Context, arg dbq.CreateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error)
 	UpdateOidcRoleMapping(ctx context.Context, arg dbq.UpdateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error)
 	DeleteOidcRoleMapping(ctx context.Context, id uuid.UUID) (int64, error)
+
+	// system_settings access for /admin/system/dns-settings.
+	GetSystemSetting(ctx context.Context, key string) (dbq.SystemSetting, error)
+	UpsertSystemSetting(ctx context.Context, arg dbq.UpsertSystemSettingParams) error
+	DeleteSystemSetting(ctx context.Context, key string) error
 }
 
 type Handler struct {
 	Q     Querier
 	Audit audit.Recorder
+	// DefaultDnsRecursiveUpstreams is the env-backed fallback used by
+	// GET /admin/system/dns-settings when the system_settings row is
+	// absent (or empty). Wired from main.go from
+	// DCIM_DNS_RECURSIVE_UPSTREAMS (comma-separated); default is
+	// {"1.1.1.1", "8.8.8.8"} to match Python's settings.py.
+	DefaultDnsRecursiveUpstreams []string
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -88,6 +99,18 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("admin:oidc-mappings:create")).Post("/oidc-role-mappings", h.createOidcMapping)
 		r.With(auth.RequireCapability("admin:oidc-mappings:update")).Patch("/oidc-role-mappings/{id}", h.updateOidcMapping)
 		r.With(auth.RequireCapability("admin:oidc-mappings:delete")).Delete("/oidc-role-mappings/{id}", h.deleteOidcMapping)
+
+		// Static capability catalog for the role-create picker UI; gated
+		// on admin:roles:read because the picker is reachable only when
+		// editing a role. Static for the lifetime of the process.
+		r.With(auth.RequireCapability("admin:roles:read")).Get("/capabilities/catalog", h.getCapabilitiesCatalog)
+
+		// System-wide DNS recursive_upstreams override — runtime-editable
+		// alternative to the env-backed default. system-settings:read
+		// gates the GET (and feeds the "current vs default" UI affordance);
+		// system-settings:update gates the PUT (which audits + upserts).
+		r.With(auth.RequireCapability("admin:system-settings:read")).Get("/system/dns-settings", h.getSystemDnsSettings)
+		r.With(auth.RequireCapability("admin:system-settings:update")).Put("/system/dns-settings", h.putSystemDnsSettings)
 	})
 }
 

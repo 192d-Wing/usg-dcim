@@ -5,9 +5,12 @@ hits when resolving the catch-all forwarder list. Confirms the
 fallback chain (DB override → env-backed default) and that the
 DB row's value is normalized on the way out.
 
-`_normalize_upstreams` is the pure helper feeding PUT
-/admin/system/dns-settings; it pins the strip/dedupe/empty-collapse
-contract that the route relies on.
+The `_normalize_upstreams` helper that used to live in
+`dcim.api.admin` was deleted alongside the rest of the Python admin
+module when those routes were ported to otter-go; equivalent unit
+tests now live in
+`packages/otter-go/internal/admin/system_dns_test.go`
+(`TestNormalizeUpstreams_*`).
 """
 
 from __future__ import annotations
@@ -17,46 +20,10 @@ from typing import Any
 
 import pytest
 
-from dcim.api.admin import _normalize_upstreams
 from dcim.services.dns import (
     _SYSTEM_KEY_DNS_RECURSIVE_UPSTREAMS,
     get_system_dns_upstreams,
 )
-
-# ---------- _normalize_upstreams ----------
-
-def test_normalize_returns_none_on_none():
-    assert _normalize_upstreams(None) is None
-
-
-def test_normalize_returns_none_on_empty_list():
-    """Empty after strip is equivalent to no override; the route
-    treats this as 'reset to default' rather than 'lock out'."""
-    assert _normalize_upstreams([]) is None
-
-
-def test_normalize_collapses_whitespace_only_to_none():
-    assert _normalize_upstreams(["", "  ", "\t"]) is None
-
-
-def test_normalize_strips_each_entry():
-    assert _normalize_upstreams(["  1.1.1.1  ", "\t8.8.8.8\t"]) == [
-        "1.1.1.1", "8.8.8.8",
-    ]
-
-
-def test_normalize_dedupes_preserving_first_occurrence():
-    """Operators reorder upstreams to express preference; first-seen
-    wins so the saved list still reflects the order they typed."""
-    assert _normalize_upstreams(
-        ["1.1.1.1", "8.8.8.8", "1.1.1.1", "9.9.9.9"],
-    ) == ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
-
-
-def test_normalize_keeps_port_form():
-    """`ip:port` is a valid Corefile forward target — pass it through."""
-    out = _normalize_upstreams(["10.0.0.53:5353", "10.0.0.54"])
-    assert out == ["10.0.0.53:5353", "10.0.0.54"]
 
 
 # ---------- get_system_dns_upstreams ----------

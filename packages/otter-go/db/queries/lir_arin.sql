@@ -44,6 +44,13 @@ ON CONFLICT (key) DO UPDATE SET
     value = EXCLUDED.value,
     updated_at = NOW();
 
+-- name: DeleteSystemSetting :exec
+-- Reset path for the system-DNS admin endpoint: clearing the override
+-- removes the row so get_system_dns_upstreams falls back to the
+-- env-backed default. Idempotent — no-op when the row is absent
+-- (Python parity).
+DELETE FROM system_settings WHERE key = $1;
+
 -- name: ClaimNextArinSubmitJob :one
 -- Returns one eligible allocation joined with the data the worker
 -- needs to build the ARIN payload: the tenant Organization's POC +
