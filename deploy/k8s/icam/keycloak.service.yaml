@@ -1,0 +1,23 @@
+# LoadBalancer fronting Keycloak. loadBalancerIP is environment-specific (the
+# k8-01 MetalLB/Cilium pool address that icam.xtic.dev.mil resolves to); adjust
+# or drop for other clusters. Exposes :80 -> container http (8080).
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak
+  namespace: icam
+  labels:
+    # Applied live by the site-deploy convention (kfk-001 = site code); preserved
+    # here so re-applying these manifests doesn't strip it. No repo file or helm
+    # release currently defines this Service — these manifests are now its source.
+    sbc.usg/site: kfk-001
+spec:
+  type: LoadBalancer
+  loadBalancerIP: 10.50.1.7
+  selector:
+    app: keycloak
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
