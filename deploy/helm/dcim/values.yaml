@@ -293,6 +293,41 @@ ingress:
         - path: /api/v1/dashboards
           pathType: Prefix
           backend: otter-go
+        # Region-deploy read-side split. Detail GET + paginated event
+        # history move to otter-go now; LIST + CREATE + the lifecycle
+        # endpoints (preflight/start/abort/SSE/kubeconfig callback)
+        # stay on Python until the Go scheduler + arq client are in
+        # place (followups). nginx-ingress sorts by longest prefix so
+        # the Python sub-path rules below win for the named lifecycle
+        # subpaths even though both ends share the bare prefix.
+        #
+        # UUID character class is [0-9A-Fa-f-] so both upper- and
+        # lower-case ids match the otter-go rules consistently
+        # (Python's uuid.UUID accepts both). The catch-all detail
+        # rule below is anchored with (/|$) so any future sub-path
+        # we haven't carved out falls through to /api → otter
+        # instead of silently 404'ing on otter-go.
+        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/events/stream
+          pathType: ImplementationSpecific
+          backend: otter
+        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/preflight
+          pathType: ImplementationSpecific
+          backend: otter
+        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/start
+          pathType: ImplementationSpecific
+          backend: otter
+        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/abort
+          pathType: ImplementationSpecific
+          backend: otter
+        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/kubeconfig/callback
+          pathType: ImplementationSpecific
+          backend: otter
+        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/events$
+          pathType: ImplementationSpecific
+          backend: otter-go
+        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+$
+          pathType: ImplementationSpecific
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter

@@ -19,8 +19,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
-	"github.com/usg-dcim/packages/otter-go/internal/alerts"
 	"github.com/usg-dcim/packages/otter-go/internal/admin"
+	"github.com/usg-dcim/packages/otter-go/internal/alerts"
 	"github.com/usg-dcim/packages/otter-go/internal/assets"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
@@ -37,6 +37,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/organization"
 	"github.com/usg-dcim/packages/otter-go/internal/power"
 	"github.com/usg-dcim/packages/otter-go/internal/racks"
+	"github.com/usg-dcim/packages/otter-go/internal/regiondeploy"
 	"github.com/usg-dcim/packages/otter-go/internal/regions"
 	"github.com/usg-dcim/packages/otter-go/internal/search"
 	"github.com/usg-dcim/packages/otter-go/internal/sites"
@@ -104,6 +105,7 @@ func main() {
 		// (600). Operators override via DCIM_COLLECTOR_STALE_SECONDS.
 		CollectorStaleSeconds: env.Int("DCIM_COLLECTOR_STALE_SECONDS", 600),
 	}
+	rdh := &regiondeploy.Handler{Q: q, Audit: q}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -233,6 +235,7 @@ func main() {
 			adh.Mount(r)
 			srh.Mount(r)
 			dah.Mount(r)
+			rdh.Mount(r)
 		})
 	})
 
