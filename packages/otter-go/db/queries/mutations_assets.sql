@@ -111,6 +111,28 @@ RETURNING id, site_id, a_asset_id, a_port, b_asset_id, b_port,
 -- name: DeleteCable :exec
 DELETE FROM cables WHERE id = $1;
 
+-- name: UpdateCable :one
+-- site_id and the two asset_id columns are NOT NULL — handlers pass
+-- nil to keep current. The nullable a_port/b_port/medium/color/
+-- length_m/label/face columns use the (set, value) flag pattern so
+-- a body of {"medium": null} clears the row, matching Pydantic's
+-- model_dump(exclude_unset=True) semantics on the Python side.
+UPDATE cables
+SET site_id    = COALESCE(sqlc.narg(site_id)::uuid,    site_id),
+    a_asset_id = COALESCE(sqlc.narg(a_asset_id)::uuid, a_asset_id),
+    b_asset_id = COALESCE(sqlc.narg(b_asset_id)::uuid, b_asset_id),
+    a_port     = CASE WHEN sqlc.arg(a_port_set)::bool   THEN sqlc.narg(a_port)::text    ELSE a_port   END,
+    b_port     = CASE WHEN sqlc.arg(b_port_set)::bool   THEN sqlc.narg(b_port)::text    ELSE b_port   END,
+    medium     = CASE WHEN sqlc.arg(medium_set)::bool   THEN sqlc.narg(medium)::text    ELSE medium   END,
+    color      = CASE WHEN sqlc.arg(color_set)::bool    THEN sqlc.narg(color)::text     ELSE color    END,
+    length_m   = CASE WHEN sqlc.arg(length_m_set)::bool THEN sqlc.narg(length_m)::numeric ELSE length_m END,
+    label      = CASE WHEN sqlc.arg(label_set)::bool    THEN sqlc.narg(label)::text     ELSE label    END,
+    face       = CASE WHEN sqlc.arg(face_set)::bool     THEN sqlc.narg(face)::text      ELSE face     END,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING id, site_id, a_asset_id, a_port, b_asset_id, b_port,
+          medium, color, length_m, label, face, created_at, updated_at;
+
 -- name: GetAssetSiteID :one
 -- Lookup helper used by the cables handler to set site_id from the
 -- a-end asset, matching Python's behavior.

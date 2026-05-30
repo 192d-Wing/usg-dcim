@@ -21,13 +21,10 @@ def test_openapi_published() -> None:
     r = client.get("/openapi.json")
     assert r.status_code == 200
     paths = r.json()["paths"]
-    # spot-check the key surfaces are mounted. Cables is the only
-    # /inventory route still on Python (PATCH not yet ported to Go);
-    # the umbrella chart uses a longer-prefix ingress rule to keep
-    # /api/v1/inventory/cables on otter while /api/v1/inventory
-    # serves from otter-go.
+    # spot-check the key surfaces are mounted. /api/v1/inventory/*
+    # (including cables) is fully on otter-go now; the umbrella chart
+    # routes the whole prefix via a single rule.
     for needle in [
-        "/api/v1/inventory/cables",
         "/api/v1/collectors",
         "/api/v1/ingest/telemetry",
         "/api/v1/alerts",
@@ -35,28 +32,19 @@ def test_openapi_published() -> None:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
     # /api/v1/auth/* (PR 179), /api/v1/telemetry/series (PR 178),
     # /api/v1/audit/* (PR 180), /api/v1/admin/* (PR #182 + capabilities/
-    # dns follow-up), /api/v1/search (PR #187), /api/v1/dashboards/
-    # enterprise (Phase 1) + /api/v1/dashboards/free-space (Phase 2
-    # capacity port), /api/v1/inventory/{sites,regions,buildings,rooms,
-    # rows,racks,assets} (inventory cutover) all on otter-go. Negative-
-    # assert each is gone from Python's OpenAPI so a regression that
-    # re-includes any of those routers fails CI.
+    # dns follow-up), /api/v1/search (PR #187), /api/v1/dashboards/*
+    # (PRs #188-#194), /api/v1/inventory/* (PR #195 + cables PATCH
+    # follow-up) all on otter-go. Negative-assert each is gone from
+    # Python's OpenAPI so a regression that re-includes any of those
+    # routers fails CI.
     for gone in (
         "/api/v1/auth",
         "/api/v1/audit",
         "/api/v1/telemetry/",
         "/api/v1/admin",
         "/api/v1/search",
-        "/api/v1/dashboards/enterprise",
-        "/api/v1/dashboards/free-space",
         "/api/v1/dashboards",
-        "/api/v1/inventory/sites",
-        "/api/v1/inventory/regions",
-        "/api/v1/inventory/buildings",
-        "/api/v1/inventory/rooms",
-        "/api/v1/inventory/rows",
-        "/api/v1/inventory/racks",
-        "/api/v1/inventory/assets",
+        "/api/v1/inventory",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

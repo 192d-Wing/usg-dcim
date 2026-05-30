@@ -12,9 +12,11 @@ import (
 const findCableForPort = `-- name: FindCableForPort :one
 SELECT id, label
 FROM cables
-WHERE (a_asset_id = $1 AND a_port = $2)
-   OR (b_asset_id = $1 AND b_port = $2)
-  AND id != $3
+WHERE id != $3
+  AND (
+        (a_asset_id = $1 AND a_port = $2)
+     OR (b_asset_id = $1 AND b_port = $2)
+      )
 LIMIT 1
 `
 

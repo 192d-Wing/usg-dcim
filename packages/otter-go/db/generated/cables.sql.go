@@ -19,20 +19,22 @@ WHERE ($3::uuid IS NULL OR site_id     = $3)
         a_asset_id IN (SELECT id FROM assets WHERE rack_id = $5)
      OR b_asset_id IN (SELECT id FROM assets WHERE rack_id = $5)
   ))
+  AND ($6::uuid[] IS NULL OR site_id = ANY($6::uuid[]))
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListCablesParams struct {
-	Limit   int32      `json:"limit"`
-	Offset  int32      `json:"offset"`
-	SiteID  *uuid.UUID `json:"site_id"`
-	AssetID *uuid.UUID `json:"asset_id"`
-	RackID  *uuid.UUID `json:"rack_id"`
+	Limit        int32       `json:"limit"`
+	Offset       int32       `json:"offset"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	AssetID      *uuid.UUID  `json:"asset_id"`
+	RackID       *uuid.UUID  `json:"rack_id"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) ListCables(ctx context.Context, arg ListCablesParams) ([]Cable, error) {
-	rows, err := q.db.Query(ctx, listCables, arg.Limit, arg.Offset, arg.SiteID, arg.AssetID, arg.RackID)
+	rows, err := q.db.Query(ctx, listCables, arg.Limit, arg.Offset, arg.SiteID, arg.AssetID, arg.RackID, arg.ScopeSiteIds)
 	if err != nil {
 		return nil, err
 	}
@@ -58,16 +60,18 @@ WHERE ($1::uuid IS NULL OR site_id     = $1)
         a_asset_id IN (SELECT id FROM assets WHERE rack_id = $3)
      OR b_asset_id IN (SELECT id FROM assets WHERE rack_id = $3)
   ))
+  AND ($4::uuid[] IS NULL OR site_id = ANY($4::uuid[]))
 `
 
 type CountCablesParams struct {
-	SiteID  *uuid.UUID `json:"site_id"`
-	AssetID *uuid.UUID `json:"asset_id"`
-	RackID  *uuid.UUID `json:"rack_id"`
+	SiteID       *uuid.UUID  `json:"site_id"`
+	AssetID      *uuid.UUID  `json:"asset_id"`
+	RackID       *uuid.UUID  `json:"rack_id"`
+	ScopeSiteIds []uuid.UUID `json:"scope_site_ids"`
 }
 
 func (q *Queries) CountCables(ctx context.Context, arg CountCablesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countCables, arg.SiteID, arg.AssetID, arg.RackID)
+	row := q.db.QueryRow(ctx, countCables, arg.SiteID, arg.AssetID, arg.RackID, arg.ScopeSiteIds)
 	var n int64
 	err := row.Scan(&n)
 	return n, err

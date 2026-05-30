@@ -275,6 +275,61 @@ func (q *Queries) DeleteCable(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const updateCable = `-- name: UpdateCable :one
+UPDATE cables
+SET site_id    = COALESCE($2::uuid,    site_id),
+    a_asset_id = COALESCE($3::uuid,    a_asset_id),
+    b_asset_id = COALESCE($4::uuid,    b_asset_id),
+    a_port     = CASE WHEN $5::bool  THEN $6::text    ELSE a_port   END,
+    b_port     = CASE WHEN $7::bool  THEN $8::text    ELSE b_port   END,
+    medium     = CASE WHEN $9::bool  THEN $10::text   ELSE medium   END,
+    color      = CASE WHEN $11::bool THEN $12::text   ELSE color    END,
+    length_m   = CASE WHEN $13::bool THEN $14::numeric ELSE length_m END,
+    label      = CASE WHEN $15::bool THEN $16::text   ELSE label    END,
+    face       = CASE WHEN $17::bool THEN $18::text   ELSE face     END,
+    updated_at = NOW()
+WHERE id = $1
+RETURNING ` + cableRetCols
+
+// UpdateCableParams uses the (Set, Value) flag pattern for nullable
+// columns so callers can distinguish "field omitted from PATCH body"
+// (Set=false → keep current) from "field set to null" (Set=true,
+// Value=nil → clear). Mirrors Pydantic's model_dump(exclude_unset=True)
+// on the Python side.
+type UpdateCableParams struct {
+	ID          uuid.UUID  `json:"id"`
+	SiteID      *uuid.UUID `json:"site_id"`
+	AAssetID    *uuid.UUID `json:"a_asset_id"`
+	BAssetID    *uuid.UUID `json:"b_asset_id"`
+	APortSet    bool       `json:"a_port_set"`
+	APort       *string    `json:"a_port"`
+	BPortSet    bool       `json:"b_port_set"`
+	BPort       *string    `json:"b_port"`
+	MediumSet   bool       `json:"medium_set"`
+	Medium      *string    `json:"medium"`
+	ColorSet    bool       `json:"color_set"`
+	Color       *string    `json:"color"`
+	LengthMSet  bool       `json:"length_m_set"`
+	LengthM     *string    `json:"length_m"`
+	LabelSet    bool       `json:"label_set"`
+	Label       *string    `json:"label"`
+	FaceSet     bool       `json:"face_set"`
+	Face        *string    `json:"face"`
+}
+
+func (q *Queries) UpdateCable(ctx context.Context, arg UpdateCableParams) (Cable, error) {
+	row := q.db.QueryRow(ctx, updateCable,
+		arg.ID, arg.SiteID, arg.AAssetID, arg.BAssetID,
+		arg.APortSet, arg.APort, arg.BPortSet, arg.BPort,
+		arg.MediumSet, arg.Medium, arg.ColorSet, arg.Color,
+		arg.LengthMSet, arg.LengthM, arg.LabelSet, arg.Label,
+		arg.FaceSet, arg.Face,
+	)
+	var c Cable
+	err := scanCable(row, &c)
+	return c, err
+}
+
 const getAssetSiteID = `SELECT site_id FROM assets WHERE id = $1`
 
 func (q *Queries) GetAssetSiteID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {

@@ -25,6 +25,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
+	"github.com/usg-dcim/packages/otter-go/internal/cables"
 	"github.com/usg-dcim/packages/otter-go/internal/collectors"
 	"github.com/usg-dcim/packages/otter-go/internal/dashboards"
 	"github.com/usg-dcim/packages/otter-go/internal/dns"
@@ -68,10 +69,7 @@ func main() {
 	lh := &locations.Handler{Q: q, Audit: q}
 	rkh := &racks.Handler{Q: q, Audit: q}
 	ah := &assets.Handler{Q: q, Audit: q}
-	// cables.Handler intentionally not constructed here — cables stays
-	// on Python until PATCH ports. Re-add `ch := &cables.Handler{...}`
-	// + `ch.Mount(r)` inside the r.Route("/inventory") block below, and
-	// drop the longer-prefix ingress rule, when the port lands.
+	ch := &cables.Handler{Q: q, Audit: q}
 	ih := &ipam.Handler{Q: q, Audit: q}
 	lih := &lir.Handler{Q: q, Audit: q}
 	ph := &power.Handler{Q: q, Audit: q}
@@ -208,17 +206,17 @@ func main() {
 			// etc. via the Refine data-provider. Each handler still
 			// declares its routes at /sites, /racks, etc. so the
 			// chi.Route below adds the /inventory prefix that finch
-			// expects.
-			//
-			// cables stays at /api/v1/inventory/cables on Python
-			// because PATCH isn't ported yet (followup); the ingress
-			// uses a longer-prefix split to keep that path on otter.
+			// expects. Cables PATCH ports brings ch into this group;
+			// the longer-prefix /api/v1/inventory/cables ingress rule
+			// is now gone — one `/api/v1/inventory → otter-go` covers
+			// the whole module.
 			r.Route("/inventory", func(r chi.Router) {
 				sh.Mount(r)
 				rh.Mount(r)
 				lh.Mount(r)
 				rkh.Mount(r)
 				ah.Mount(r)
+				ch.Mount(r)
 			})
 			ih.Mount(r)
 			lih.Mount(r)
