@@ -67,6 +67,21 @@ SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
 FROM assets
 WHERE rack_id = ANY($1::uuid[]);
 
+-- ---- /dashboards/sites/at-risk (Phase 2b) — site alert counts ----
+-- Ranks the 50 sites with the most firing alerts at or above the
+-- caller-supplied severity. The alert_severity ENUM has intrinsic
+-- ordering (info, warning, minor, major, critical) so the >= compare
+-- works in PG once the parameter is cast.
+
+-- name: ListSitesAtRisk :many
+SELECT site_id, COUNT(id)::bigint AS alert_count
+FROM alerts
+WHERE state = 'firing'
+  AND severity >= $1::alert_severity
+GROUP BY site_id
+ORDER BY COUNT(id) DESC
+LIMIT 50;
+
 -- name: ListPduKwTelemetry :many
 -- Per-PDU current-freshness telemetry rows whose metric is one of the
 -- kW or W power metrics. The handler picks metric + last_value off

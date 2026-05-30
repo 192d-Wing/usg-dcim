@@ -30,11 +30,11 @@ def test_openapi_published() -> None:
         "/api/v1/collectors",
         "/api/v1/ingest/telemetry",
         "/api/v1/alerts",
-        # /dashboards/sites/at-risk still on Python — Phase 2b which
-        # depends on the Alert.severity ENUM-compare port. Used as the
-        # smoke needle now that /enterprise (Phase 1) + /free-space
-        # (Phase 2 capacity) moved to otter-go.
-        "/api/v1/dashboards/sites/at-risk",
+        # /dashboards/racks/{rack_id} still on Python (needs the
+        # services/power_chain port). Used as the smoke needle now
+        # that /enterprise (Phase 1) + /free-space (Phase 2 capacity)
+        # + /sites/at-risk (Phase 2b ENUM-compare) moved to otter-go.
+        "/api/v1/dashboards/racks/",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
     # /api/v1/auth/* (PR 179), /api/v1/telemetry/series (PR 178),
@@ -52,6 +52,7 @@ def test_openapi_published() -> None:
         "/api/v1/search",
         "/api/v1/dashboards/enterprise",
         "/api/v1/dashboards/free-space",
+        "/api/v1/dashboards/sites/at-risk",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

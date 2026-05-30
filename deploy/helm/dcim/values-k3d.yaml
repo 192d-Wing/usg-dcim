@@ -80,6 +80,7 @@ ingress:
         # longest-prefix.
         - { path: /api/v1/dashboards/enterprise, pathType: Prefix, backend: otter-go }
         - { path: /api/v1/dashboards/free-space, pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/dashboards/sites/at-risk, pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []
