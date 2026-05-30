@@ -1,0 +1,12 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# icam — dev SSO (Keycloak) serving the DCIM 'dcim' realm.
+# The keycloak-admin Secret is intentionally NOT listed here (see
+# keycloak-admin.secret.example.yaml) so `apply -k` cannot overwrite an
+# existing cluster's admin password. Create that Secret out-of-band first.
+resources:
+  - namespace.yaml
+  - keycloak-realm.configmap.yaml
+  - keycloak.deployment.yaml
+  - keycloak.service.yaml
