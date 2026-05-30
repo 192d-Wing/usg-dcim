@@ -8,18 +8,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 )
 
 type fakeQ struct {
-	lastAsn    dbq.ListAsnsParams
-	lastPL     dbq.ListPrefixListsParams
-	lastEntry  dbq.ListPrefixListEntriesParams
-	lastCL     dbq.ListCommunityListsParams
-	lastCLE    dbq.ListCommunityListEntriesParams
-	lastRM     dbq.ListRouteMapsParams
-	lastRME    dbq.ListRouteMapEntriesParams
+	lastAsn   dbq.ListAsnsParams
+	lastPL    dbq.ListPrefixListsParams
+	lastEntry dbq.ListPrefixListEntriesParams
+	lastCL    dbq.ListCommunityListsParams
+	lastCLE   dbq.ListCommunityListEntriesParams
+	lastRM    dbq.ListRouteMapsParams
+	lastRME   dbq.ListRouteMapEntriesParams
 }
 
 func (f *fakeQ) ListAsns(_ context.Context, a dbq.ListAsnsParams) ([]dbq.Asn, error) {
@@ -120,6 +121,29 @@ func (f *fakeQ) UpdateRouteMapEntry(_ context.Context, a dbq.UpdateRouteMapEntry
 	return dbq.RouteMapEntry{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteRouteMapEntry(_ context.Context, _ uuid.UUID) error { return nil }
+
+// ---- TCP AO key-chains fakes ----
+//
+// These are overridden case-by-case in tcp_ao_test.go via the closures
+// on `tcpAoFake` (test-local). The package-shared fakeQ just satisfies
+// the interface with sane defaults.
+func (f *fakeQ) ListTcpAoKeyChains(_ context.Context, _ dbq.ListTcpAoKeyChainsParams) ([]dbq.TcpAoKeyChain, error) {
+	return nil, nil
+}
+func (f *fakeQ) CountTcpAoKeyChains(_ context.Context) (int64, error) { return 0, nil }
+func (f *fakeQ) GetTcpAoKeyChain(_ context.Context, _ uuid.UUID) (dbq.TcpAoKeyChain, error) {
+	return dbq.TcpAoKeyChain{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateTcpAoKeyChain(_ context.Context, a dbq.CreateTcpAoKeyChainParams) (dbq.TcpAoKeyChain, error) {
+	return dbq.TcpAoKeyChain{ID: uuid.New(), Name: a.Name, Description: a.Description}, nil
+}
+func (f *fakeQ) UpdateTcpAoKeyChain(_ context.Context, a dbq.UpdateTcpAoKeyChainParams) (dbq.TcpAoKeyChain, error) {
+	return dbq.TcpAoKeyChain{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteTcpAoKeyChain(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) CountKeysInTcpAoKeyChain(_ context.Context, _ uuid.UUID) (int64, error) {
+	return 0, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
