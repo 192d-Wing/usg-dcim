@@ -1,6 +1,5 @@
 // Package regions holds the HTTP handlers for /api/v1/regions.
-// Read-only for the Phase-1 vertical slice: list + get. Create/Patch
-// still served by the Python otter until Phase 2.
+// Full CRUD on otter-go since PR #195; Python's regions module is gone.
 package regions
 
 import (
@@ -29,6 +28,11 @@ type Querier interface {
 	GetRegion(ctx context.Context, id uuid.UUID) (dbq.Region, error)
 	CreateRegion(ctx context.Context, arg dbq.CreateRegionParams) (dbq.Region, error)
 	UpdateRegion(ctx context.Context, arg dbq.UpdateRegionParams) (dbq.Region, error)
+	// Region-scope expansion: ScopedSiteFilter (sites reachable by the
+	// caller) → ListRegionIDsForSiteIDs (regions containing those sites)
+	// → union with the caller's direct RegionIDs scope dim.
+	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
+	ListRegionIDsForSiteIDs(ctx context.Context, siteIDs []uuid.UUID) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -144,13 +148,24 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 
-	// NOTE: ABAC region-id filtering is NOT applied here yet — the
-	// Python list_regions runs scope_filtered_site_ids() and folds the
-	// site set into regions via a subquery. Doing that requires the
-	// real auth middleware (Phase 3); the stub middleware in
-	// internal/auth grants `*` so for now every authenticated request
-	// sees every region. That matches the stub's documented behavior.
-	params := dbq.ListRegionsParams{Limit: limit, Offset: offset}
+	// ABAC: scoped principals see only regions they were directly
+	// granted plus regions whose sites they can reach. Mirrors Python's
+	// list_regions filter. Global principals get nil, which the SQL
+	// treats as "no filter."
+	p, _ := auth.From(r.Context())
+	regionIDs, scoped, err := auth.ScopedRegionFilter(r.Context(), h.Q, p, capRegionsRead)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if scoped && len(regionIDs) == 0 {
+		httpx.JSON(w, http.StatusOK, listResponse{
+			Items: []dbq.Region{}, Total: 0, Limit: limit, Offset: offset,
+		})
+		return
+	}
+	params := dbq.ListRegionsParams{Limit: limit, Offset: offset, RegionIds: regionIDs}
 
 	items, err := h.Q.ListRegions(r.Context(), params)
 	if err != nil {
@@ -158,7 +173,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountRegions(r.Context(), dbq.CountRegionsParams{})
+	total, err := h.Q.CountRegions(r.Context(), dbq.CountRegionsParams{RegionIds: regionIDs})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -182,6 +197,14 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// Per-row ABAC: a scoped principal can't get-by-id outside their
+	// reachable region set.
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceRegionScope(r.Context(), h.Q, p, region.ID, capRegionsRead); serr != nil {
+		status, msg := httpx.Mapped(serr)
 		httpx.Error(w, status, msg)
 		return
 	}

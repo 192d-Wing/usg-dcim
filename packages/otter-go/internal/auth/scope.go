@@ -161,6 +161,15 @@ type siteExpansionQ interface {
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
+// regionExpansionQ widens siteExpansionQ with the region-rollup query.
+// ScopedRegionFilter expands the caller's site-reachable scope to a
+// region set (union of directly-granted RegionIDs + regions whose sites
+// the caller can see).
+type regionExpansionQ interface {
+	siteExpansionQ
+	ListRegionIDsForSiteIDs(ctx context.Context, siteIDs []uuid.UUID) ([]uuid.UUID, error)
+}
+
 // scopeFilterCacheKey is the context key under which a request can
 // memoize ScopedSiteFilter results. Set by the verify middleware
 // (lazy: only allocated when the first ScopedSiteFilter call fires
@@ -280,6 +289,94 @@ func uuidKeys(m map[uuid.UUID]struct{}) []uuid.UUID {
 		out = append(out, id)
 	}
 	return out
+}
+
+// ScopedRegionFilter resolves the caller's scope for capCode and turns
+// it into the (regionIDs, scoped) pair that the regions LIST/COUNT
+// handlers pass as their region_ids SQL parameter. Mirrors Python's
+// list_regions filter: "show regions directly granted plus regions
+// containing at least one in-scope site."
+//
+// Returns:
+//   - (nil, false, nil)            — principal is global; pass nil to
+//     skip the filter.
+//   - ([]uuid.UUID{...}, true, nil) — scoped; pass the slice. Empty
+//     slice means the principal can reach zero regions — caller
+//     short-circuits to an empty page.
+//   - (nil, true, err)             — DB error during expansion.
+//
+// Direct RegionIDs grant region visibility on their own. Site-rooted
+// dimensions (SiteIDs, SiteGroupIDs, OrganizationIDs) expand to sites
+// via ListSiteIDsForExpansion, then to regions via
+// ListRegionIDsForSiteIDs. The union is deduplicated.
+func ScopedRegionFilter(ctx context.Context, q regionExpansionQ, p Principal, capCode string) ([]uuid.UUID, bool, error) {
+	s := FindScope(p, capCode)
+	if s == nil || s.IsGlobal {
+		return nil, false, nil
+	}
+	out := map[uuid.UUID]struct{}{}
+	for id := range s.RegionIDs {
+		out[id] = struct{}{}
+	}
+	// Skip the site-rooted expansion when the principal has no site-
+	// reachable dims — otherwise we'd pay ListSiteIDsForExpansion +
+	// ListRegionIDsForSiteIDs just to re-derive RegionIDs we already
+	// have. Non-site-reachable dims (Enclaves, Classifications,
+	// FabricIDs) can't expand into a region set; for those a principal
+	// with only RegionIDs gets exactly RegionIDs.
+	if len(s.SiteIDs) > 0 || len(s.SiteGroupIDs) > 0 || len(s.OrganizationIDs) > 0 {
+		siteIDs, scoped, err := ScopedSiteFilter(ctx, q, p, capCode)
+		if err != nil {
+			return nil, true, err
+		}
+		if scoped && len(siteIDs) > 0 {
+			regionIDs, err := q.ListRegionIDsForSiteIDs(ctx, siteIDs)
+			if err != nil {
+				return nil, true, err
+			}
+			for _, id := range regionIDs {
+				out[id] = struct{}{}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return []uuid.UUID{}, true, nil
+	}
+	ids := make([]uuid.UUID, 0, len(out))
+	for id := range out {
+		ids = append(ids, id)
+	}
+	return ids, true, nil
+}
+
+// EnforceRegionScope refuses with ErrOutsideScope if the principal has
+// capCode but regionID isn't reachable. Mirrors EnforceSiteScope for
+// region-rooted reads.
+func EnforceRegionScope(ctx context.Context, q regionExpansionQ, p Principal, regionID uuid.UUID, capCode string) error {
+	s := FindScope(p, capCode)
+	if s == nil || s.IsGlobal {
+		return nil
+	}
+	// Fast path: directly-granted region needs no DB lookup. Avoids
+	// paying ScopedSiteFilter + ListRegionIDsForSiteIDs (and the
+	// resulting 500-on-DB-error) for the most common scoped-access
+	// shape.
+	if _, ok := s.RegionIDs[regionID]; ok {
+		return nil
+	}
+	ids, scoped, err := ScopedRegionFilter(ctx, q, p, capCode)
+	if err != nil {
+		return err
+	}
+	if !scoped {
+		return nil
+	}
+	for _, id := range ids {
+		if id == regionID {
+			return nil
+		}
+	}
+	return ErrOutsideScope
 }
 
 // ScopedFabricFilter resolves the caller's scope for capCode and turns
