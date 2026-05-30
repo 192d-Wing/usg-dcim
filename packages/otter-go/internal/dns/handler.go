@@ -307,12 +307,10 @@ func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, blocklistsPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type blocklistEntriesPage struct {
-	Items  []dbq.DnsBlocklistEntry `json:"items"`
-	Total  int64                   `json:"total"`
-	Limit  int32                   `json:"limit"`
-	Offset int32                   `json:"offset"`
-}
+// blocklistEntriesPage is the wire shape for /api/v1/dns/blocklists/{id}/entries.
+// Alias of httpx.Page[T] so empty-page short-circuits can use EmptyPage[T]
+// (returns Items: [] not null, which finch's data.items.map() needs).
+type blocklistEntriesPage = httpx.Page[dbq.DnsBlocklistEntry]
 
 func (h *Handler) listBlocklistEntries(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -341,9 +339,7 @@ func (h *Handler) listBlocklistEntries(w http.ResponseWriter, r *http.Request) {
 	if _, scoped := auth.ScopedFabricFilter(p, "dns:blocklists:read"); scoped {
 		if err := auth.EnforceFabricScope(p, bl.FabricID, "dns:blocklists:read"); err != nil {
 			limit, offset := httpx.PageBounds(r.URL.Query())
-			httpx.JSON(w, http.StatusOK, blocklistEntriesPage{Items: nil, Total: 0,
-				Limit: limit, Offset: offset,
-			})
+			httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsBlocklistEntry](limit, offset))
 			return
 		}
 	}

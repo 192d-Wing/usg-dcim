@@ -319,15 +319,12 @@ func splitCSV(s string) (ids []string, explicitlyEmpty bool) {
 	return out, false
 }
 
-func first(q map[string][]string, key string) string {
+// qGet is the map-keyed sibling of url.Values.Get — buildListParams
+// works against the raw map so the helper can be unit-tested without
+// constructing a *http.Request.
+func qGet(q map[string][]string, key string) string {
 	if vs := q[key]; len(vs) > 0 {
 		return vs[0]
 	}
 	return ""
 }
-
-// qGet is the map-keyed sibling of url.Values.Get — buildListParams
-// works against the raw map so the helper can be unit-tested without
-// constructing a *http.Request. Identical to `first`; kept named at
-// the call sites for readability.
-var qGet = first
