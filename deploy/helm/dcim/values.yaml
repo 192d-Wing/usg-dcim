@@ -280,14 +280,9 @@ ingress:
         - path: /api/v1/search
           pathType: Prefix
           backend: otter-go
-        # Inventory cutover: regions/sites/buildings/rooms/rows/racks/
-        # assets all on otter-go. /api/v1/inventory/cables stays on
-        # Python until cables PATCH ports (Go has only GET/POST/DELETE
-        # for cables today). The longer-prefix cables rule below wins
-        # under nginx-ingress longest-prefix-match.
-        - path: /api/v1/inventory/cables
-          pathType: Prefix
-          backend: otter
+        # Inventory module fully on otter-go after cables PATCH port.
+        # Single Prefix rule supersedes the longer-prefix /cables split
+        # that lived here while cables stayed on Python.
         - path: /api/v1/inventory
           pathType: Prefix
           backend: otter-go

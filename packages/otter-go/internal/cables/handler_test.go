@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 type fakeQ struct{ last dbq.ListCablesParams }
@@ -38,6 +39,21 @@ func (f *fakeQ) GetAsset(_ context.Context, id uuid.UUID) (dbq.Asset, error) {
 func (f *fakeQ) FindCableForPort(_ context.Context, _ dbq.FindCableForPortParams) (dbq.FindCableForPortRow, error) {
 	return dbq.FindCableForPortRow{}, pgx.ErrNoRows
 }
+func (f *fakeQ) UpdateCable(_ context.Context, a dbq.UpdateCableParams) (dbq.Cable, error) {
+	return dbq.Cable{ID: a.ID}, nil
+}
+func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, pgx.ErrNoRows
+}
+func (f *fakeQ) GetSiteOrganizationID(_ context.Context, _ uuid.UUID) (*uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (f *fakeQ) ListSiteIDsForExpansion(_ context.Context, _ dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
+	return nil, nil
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
@@ -46,8 +62,11 @@ func mount(f *fakeQ) http.Handler {
 }
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Wildcard principal — inventory:cables:read gate added when cables
+	// moved fully onto otter-go blocks otherwise-anonymous test traffic.
+	req := authtest.Request("GET", p, authtest.PrincipalWithCaps("*"), nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+	h.ServeHTTP(rec, req)
 	return rec
 }
 

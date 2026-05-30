@@ -7,7 +7,6 @@ from .bgp import router as bgp_router
 from .collectors import router as collectors_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
-from .inventory import router as inventory_router
 from .ipam import router as ipam_router
 from .notifications import router as notifications_router
 from .organization import router as organization_router
@@ -22,7 +21,10 @@ router = APIRouter()
 # double-serving login/me/tokens. The schemas + models for User /
 # ApiToken / Role still live under packages/otter/src/dcim/{schemas,
 # models}/auth.py — they back DB rows other Python paths still read.
-router.include_router(inventory_router)
+#
+# /api/v1/inventory/* fully moved to otter-go (this PR). Cables PATCH
+# was the last gap; with it ported, the longer-prefix
+# /api/v1/inventory/cables → otter ingress rule was collapsed.
 router.include_router(collectors_router)
 # /api/v1/ingest/telemetry remains on Python until the high-throughput
 # fallback gets a Go port; heron already owns the mTLS path.
