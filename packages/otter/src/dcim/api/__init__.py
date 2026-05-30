@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from .alerts import router as alerts_router
 from .bgp import router as bgp_router
 from .collectors import router as collectors_router
-from .dashboards import router as dashboards_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
 from .inventory import router as inventory_router
@@ -33,7 +32,10 @@ router.include_router(ingest_router)
 # the router so a misrouted internal call fails loud instead of
 # silently double-serving.
 router.include_router(alerts_router)
-router.include_router(dashboards_router)
+# /api/v1/dashboards/* fully moved to otter-go across phases 1-3.
+# enterprise + free-space + sites/at-risk + assets/{id} + sites/{id}
+# + racks/{id} + 3 forecast endpoints all on otter-go now;
+# services/{capacity,power_chain,forecast}.py retired alongside.
 # /api/v1/search moved to otter-go (PR-search). The umbrella chart
 # routes /api/v1/search → otter-go; Python no longer registers the
 # router so a misrouted internal call fails loud instead of silently

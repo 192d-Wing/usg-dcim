@@ -37,6 +37,37 @@ WHERE enabled = TRUE
 -- the ::text cast because we're comparing to a literal, not scanning.
 SELECT COUNT(id) FROM telemetry_sources WHERE freshness = 'stale';
 
+-- ---- /dashboards/forecast/* (Phase 3) — capacity forecasting ----
+-- Forecasts U-fill at growth rate (linear regression on cumulative U
+-- over time) + kW trend (OLS on daily-averaged PDU telemetry from the
+-- TimescaleDB hypertable).
+
+-- name: ListRacksForForecast :many
+-- Optional site_id filter; limit caps result count. Caller iterates
+-- the batch with compute_rack_forecast (no DB calls beyond this).
+SELECT id, site_id, row_id, name, code, u_height, max_kw,
+       max_weight_lbs, serial, created_at, updated_at
+FROM racks
+WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
+LIMIT $2;
+
+-- name: ListKwHistorySamples :many
+-- TimescaleDB time_bucket — daily AVG(value) per (day, metric) for the
+-- PDU assets in the rack. metrics filter restricts to the kW/W power
+-- metric set. Window bounded by (start, end) so the caller controls
+-- the regression's days_back parameter.
+SELECT
+    time_bucket('1 day', ts)::timestamptz AS day,
+    metric,
+    AVG(value)::double precision AS avg_v
+FROM telemetry_samples
+WHERE asset_id = ANY($1::uuid[])
+  AND metric = ANY($2::text[])
+  AND ts >= $3
+  AND ts <= $4
+GROUP BY day, metric
+ORDER BY day;
+
 -- ---- /dashboards/racks/{rack_id} (Phase 2e) — rack detail view ----
 -- Rack entity + ordered placed assets + per-asset open-alerts count +
 -- per-asset telemetry freshness + power_chain rollup. compute_rack_

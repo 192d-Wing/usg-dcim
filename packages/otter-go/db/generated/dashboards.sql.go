@@ -62,6 +62,91 @@ func (q *Queries) CountStaleTelemetrySources(ctx context.Context) (int64, error)
 	return n, err
 }
 
+// ---- /dashboards/forecast/* — capacity forecasting ----
+
+const listRacksForForecast = `-- name: ListRacksForForecast :many
+SELECT id, site_id, row_id, name, code, u_height, max_kw,
+       max_weight_lbs, serial, created_at, updated_at
+FROM racks
+WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
+LIMIT $2
+`
+
+// ListRacksForForecastParams — site_id is optional (nil → no filter).
+type ListRacksForForecastParams struct {
+	SiteID *uuid.UUID `json:"site_id"`
+	Limit  int32      `json:"limit"`
+}
+
+func (q *Queries) ListRacksForForecast(ctx context.Context, arg ListRacksForForecastParams) ([]Rack, error) {
+	rows, err := q.db.Query(ctx, listRacksForForecast, arg.SiteID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Rack
+	for rows.Next() {
+		var r Rack
+		if err := rows.Scan(
+			&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
+const listKwHistorySamples = `-- name: ListKwHistorySamples :many
+SELECT
+    time_bucket('1 day', ts)::timestamptz AS day,
+    metric,
+    AVG(value)::double precision AS avg_v
+FROM telemetry_samples
+WHERE asset_id = ANY($1::uuid[])
+  AND metric = ANY($2::text[])
+  AND ts >= $3
+  AND ts <= $4
+GROUP BY day, metric
+ORDER BY day
+`
+
+// ListKwHistorySamplesParams — asset_ids is the PDU set, metrics is
+// the power-metric allowlist, the window is (start, end) inclusive.
+type ListKwHistorySamplesParams struct {
+	AssetIDs []uuid.UUID `json:"asset_ids"`
+	Metrics  []string    `json:"metrics"`
+	Start    time.Time   `json:"start"`
+	End      time.Time   `json:"end"`
+}
+
+// KwHistoryRow is one (day, metric, avg) row from the TimescaleDB
+// time_bucket aggregation. avg_v scans as *float64 because the
+// PG AVG(double precision) can be NULL for empty buckets.
+type KwHistoryRow struct {
+	Day    time.Time `json:"day"`
+	Metric string    `json:"metric"`
+	AvgV   *float64  `json:"avg_v"`
+}
+
+func (q *Queries) ListKwHistorySamples(ctx context.Context, arg ListKwHistorySamplesParams) ([]KwHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listKwHistorySamples, arg.AssetIDs, arg.Metrics, arg.Start, arg.End)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KwHistoryRow
+	for rows.Next() {
+		var r KwHistoryRow
+		if err := rows.Scan(&r.Day, &r.Metric, &r.AvgV); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
 // ---- /dashboards/racks/{rack_id} — rack detail view ----
 
 const listAssetsByRackOrdered = `-- name: ListAssetsByRackOrdered :many
