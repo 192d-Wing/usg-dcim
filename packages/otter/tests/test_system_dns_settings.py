@@ -25,7 +25,6 @@ from dcim.services.dns import (
     get_system_dns_upstreams,
 )
 
-
 # ---------- get_system_dns_upstreams ----------
 
 class _FakeSession:
