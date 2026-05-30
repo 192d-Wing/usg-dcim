@@ -10,13 +10,11 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..models.alerts import Alert, AlertState
 from ..models.inventory import Asset, Rack, Site
-from ..models.telemetry_meta import TelemetrySource
 from ..security.deps import Principal, require_capability
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
@@ -26,96 +24,6 @@ router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 # remaining /dashboards/* routes (racks/{id}, assets/{id}, forecasts,
 # sites/{id}) stay here until the service-helper ports land.
 
-@router.get("/racks/{rack_id}")
-async def rack_detail(
-    rack_id: UUID,
-    _: Principal = Depends(require_capability("dashboards:dashboards:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Rack + ordered assets + per-asset freshness summary, used by the rack visualization."""
-    from ..models.inventory import Asset
-    from ..models.inventory import Rack as RackModel
-
-    rack = await db.get(RackModel, rack_id)
-    if rack is None:
-        return {"error": "not_found"}
-    assets = (
-        await db.execute(
-            select(Asset).where(Asset.rack_id == rack_id).order_by(Asset.rack_position_u.asc().nullslast())
-        )
-    ).scalars().all()
-
-    # Open alerts grouped by asset
-    asset_ids = [a.id for a in assets]
-    open_alert_count: dict[str, int] = {}
-    if asset_ids:
-        rows = (
-            await db.execute(
-                select(Alert.asset_id, func.count(Alert.id))
-                .where(Alert.asset_id.in_(asset_ids), Alert.state == AlertState.firing)
-                .group_by(Alert.asset_id)
-            )
-        ).all()
-        open_alert_count = {str(r[0]): int(r[1]) for r in rows}
-
-    # Telemetry source freshness per asset
-    fresh_rows = (
-        await db.execute(
-            select(TelemetrySource.asset_id, TelemetrySource.freshness, func.count())
-            .where(TelemetrySource.asset_id.in_(asset_ids) if asset_ids else False)
-            .group_by(TelemetrySource.asset_id, TelemetrySource.freshness)
-        )
-    ).all() if asset_ids else []
-    by_asset_freshness: dict[str, dict[str, int]] = {}
-    for aid, fresh, n in fresh_rows:
-        key = fresh.value if hasattr(fresh, "value") else fresh
-        by_asset_freshness.setdefault(str(aid), {})[key] = int(n)
-
-    from ..services.capacity import compute_rack_capacity
-    from ..services.power_chain import compute_power_chain
-    capacity = await compute_rack_capacity(db, rack, list(assets))
-    power_chain = await compute_power_chain(db, list(assets))
-
-    def enum_val(v):
-        return v.value if v is not None and hasattr(v, "value") else v
-
-    return {
-        "rack": {
-            "id": str(rack.id),
-            "site_id": str(rack.site_id),
-            "row_id": str(rack.row_id),
-            "name": rack.name,
-            "code": rack.code,
-            "u_height": rack.u_height,
-            "max_kw": float(rack.max_kw) if rack.max_kw is not None else None,
-            "serial": rack.serial,
-        },
-        "capacity": capacity,
-        "power_chain": power_chain,
-        "assets": [
-            {
-                "id": str(a.id),
-                "name": a.name,
-                "hostname": a.hostname,
-                "kind": enum_val(a.kind),
-                "manufacturer": a.manufacturer,
-                "model": a.model,
-                "serial": a.serial,
-                "rack_position_u": a.rack_position_u,
-                "rack_units": a.rack_units or 1,
-                "face": enum_val(a.face),
-                "mount": enum_val(a.mount),
-                "pdu_side": enum_val(a.pdu_side),
-                "psu_count": a.psu_count,
-                "port_count": a.port_count,
-                "lifecycle_state": enum_val(a.lifecycle_state),
-                "open_alerts": open_alert_count.get(str(a.id), 0),
-                "freshness": by_asset_freshness.get(str(a.id), {}),
-                "redundancy": power_chain["per_asset"].get(str(a.id), {}).get("redundancy"),
-            }
-            for a in assets
-        ],
-    }
 
 # /api/v1/dashboards/free-space moved to otter-go (Phase 2 of the
 # dashboards port). The capacity rollup primitives live in

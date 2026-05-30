@@ -304,6 +304,9 @@ ingress:
         - path: /api/v1/dashboards/sites
           pathType: Prefix
           backend: otter-go
+        - path: /api/v1/dashboards/racks
+          pathType: Prefix
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter
