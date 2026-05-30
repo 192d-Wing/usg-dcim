@@ -18,6 +18,8 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+const capSitesRead = "inventory:sites:read"
+
 // Querier is the slice of sqlc-generated *Queries this package uses,
 // exposed as an interface so handlers can be tested against an in-memory
 // fake without spinning up Postgres. *dbq.Queries satisfies this.
@@ -46,8 +48,13 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/sites", h.list)
-	r.Get("/sites/{id}", h.get)
+	// Read paths gated by inventory:sites:read in addition to the
+	// per-row ABAC inside list/get. Without RequireCapability,
+	// auth.FindScope returns nil for cap-less principals and
+	// ScopedSiteFilter then signals "global view" — would let any
+	// verified user enumerate every site.
+	r.With(auth.RequireCapability(capSitesRead)).Get("/sites", h.list)
+	r.With(auth.RequireCapability(capSitesRead)).Get("/sites/{id}", h.get)
 	r.With(auth.RequireCapability("inventory:sites:create")).Post("/sites", h.create)
 	r.With(auth.RequireCapability("inventory:sites:update")).Patch("/sites/{id}", h.update)
 }
@@ -65,7 +72,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	// site dimensions. A scoped principal with no site-reachable
 	// dimensions (enclave-only, fabric-only, etc.) gets an empty page.
 	p, _ := auth.From(r.Context())
-	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:sites:read")
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capSitesRead)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -138,6 +145,14 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// Per-row ABAC: a scoped principal cannot get-by-id outside their
+	// scope. Mirrors Python's _enforce_site_scope in api/inventory.py.
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, site.ID, capSitesRead); serr != nil {
+		status, msg := httpx.Mapped(serr)
 		httpx.Error(w, status, msg)
 		return
 	}

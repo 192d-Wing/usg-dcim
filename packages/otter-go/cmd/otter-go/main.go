@@ -25,7 +25,6 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
-	"github.com/usg-dcim/packages/otter-go/internal/cables"
 	"github.com/usg-dcim/packages/otter-go/internal/collectors"
 	"github.com/usg-dcim/packages/otter-go/internal/dashboards"
 	"github.com/usg-dcim/packages/otter-go/internal/dns"
@@ -69,7 +68,10 @@ func main() {
 	lh := &locations.Handler{Q: q, Audit: q}
 	rkh := &racks.Handler{Q: q, Audit: q}
 	ah := &assets.Handler{Q: q, Audit: q}
-	ch := &cables.Handler{Q: q, Audit: q}
+	// cables.Handler intentionally not constructed here — cables stays
+	// on Python until PATCH ports. Re-add `ch := &cables.Handler{...}`
+	// + `ch.Mount(r)` inside the r.Route("/inventory") block below, and
+	// drop the longer-prefix ingress rule, when the port lands.
 	ih := &ipam.Handler{Q: q, Audit: q}
 	lih := &lir.Handler{Q: q, Audit: q}
 	ph := &power.Handler{Q: q, Audit: q}
@@ -202,12 +204,22 @@ func main() {
 		// Everything else under /api/v1 requires a verified session.
 		r.Group(func(r chi.Router) {
 			r.Use(authMW)
-			sh.Mount(r)
-			rh.Mount(r)
-			lh.Mount(r)
-			rkh.Mount(r)
-			ah.Mount(r)
-			ch.Mount(r)
+			// Inventory cutover — finch hits /api/v1/inventory/sites
+			// etc. via the Refine data-provider. Each handler still
+			// declares its routes at /sites, /racks, etc. so the
+			// chi.Route below adds the /inventory prefix that finch
+			// expects.
+			//
+			// cables stays at /api/v1/inventory/cables on Python
+			// because PATCH isn't ported yet (followup); the ingress
+			// uses a longer-prefix split to keep that path on otter.
+			r.Route("/inventory", func(r chi.Router) {
+				sh.Mount(r)
+				rh.Mount(r)
+				lh.Mount(r)
+				rkh.Mount(r)
+				ah.Mount(r)
+			})
 			ih.Mount(r)
 			lih.Mount(r)
 			ph.Mount(r)

@@ -18,6 +18,8 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+const capAssetsRead = "inventory:assets:read"
+
 type Querier interface {
 	ListAssets(ctx context.Context, arg dbq.ListAssetsParams) ([]dbq.Asset, error)
 	CountAssets(ctx context.Context, arg dbq.CountAssetsParams) (int64, error)
@@ -51,9 +53,11 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/assets", h.list)
-	r.Get("/assets/{id}", h.get)
-	r.With(auth.RequireCapability("inventory:assets:read")).Get("/assets/{id}/decommission/preview", h.decommissionPreview)
+	// Read paths gated by inventory:assets:read — see sites/Mount for
+	// why ScopedSiteFilter alone doesn't keep cap-less principals out.
+	r.With(auth.RequireCapability(capAssetsRead)).Get("/assets", h.list)
+	r.With(auth.RequireCapability(capAssetsRead)).Get("/assets/{id}", h.get)
+	r.With(auth.RequireCapability(capAssetsRead)).Get("/assets/{id}/decommission/preview", h.decommissionPreview)
 	r.With(auth.RequireCapability("inventory:assets:create")).Post("/assets", h.create)
 	r.With(auth.RequireCapability("inventory:assets:update")).Patch("/assets/{id}", h.update)
 	r.With(auth.RequireCapability("inventory:assets:update")).Post("/assets/{id}/decommission", h.decommission)
@@ -66,7 +70,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	p, _ := auth.From(r.Context())
-	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "inventory:assets:read")
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capAssetsRead)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -133,6 +137,13 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// Per-row ABAC: scoped principals can't read assets outside scope.
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, asset.SiteID, capAssetsRead); serr != nil {
+		status, msg := httpx.Mapped(serr)
 		httpx.Error(w, status, msg)
 		return
 	}

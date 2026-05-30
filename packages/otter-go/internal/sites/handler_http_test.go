@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 // fakeQuerier is an in-memory implementation of the Querier interface so
@@ -90,7 +91,10 @@ func mount(f *fakeQuerier) http.Handler {
 
 func do(t *testing.T, h http.Handler, method, path string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, nil)
+	// Inject a wildcard principal so the inventory:sites:read gate
+	// added by the PR-inventory-cutover read-cap retrofit lets these
+	// tests through. Per-scope tests inject their own principal.
+	req := authtest.Request(method, path, authtest.PrincipalWithCaps("*"), nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
