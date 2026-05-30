@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -103,8 +102,7 @@ type listResponse struct {
 
 func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseInt32(q.Get("limit"), 50, 1, 500)
-	offset := parseInt32(q.Get("offset"), 0, 0, 1_000_000)
+	limit, offset := httpx.PageBounds(q)
 	items, err := h.Q.ListAdminUsers(r.Context(), dbq.ListAdminUsersParams{
 		Limit: limit, Offset: offset,
 	})
@@ -221,22 +219,4 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 		Action: "user.update", TargetType: "user", TargetID: id.String(),
 	})
 	httpx.JSON(w, http.StatusOK, out)
-}
-
-func parseInt32(s string, def, lo, hi int32) int32 {
-	if s == "" {
-		return def
-	}
-	n, err := strconv.ParseInt(s, 10, 32)
-	if err != nil {
-		return def
-	}
-	v := int32(n)
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
 }

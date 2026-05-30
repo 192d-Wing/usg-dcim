@@ -164,16 +164,3 @@ func TestGetRegion_BadID(t *testing.T) {
 	}
 }
 
-func TestParseInt32(t *testing.T) {
-	for _, c := range []struct {
-		s         string
-		def, want int32
-	}{
-		{"", 50, 50}, {"100", 50, 100}, {"-5", 50, 1},
-		{"99999", 50, 500}, {"x", 50, 50},
-	} {
-		if got := parseInt32(c.s, c.def, 1, 500); got != c.want {
-			t.Errorf("parseInt32(%q,%d): got %d want %d", c.s, c.def, got, c.want)
-		}
-	}
-}
