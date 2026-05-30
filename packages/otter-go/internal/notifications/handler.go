@@ -34,13 +34,29 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
+	// Cap codes match Python's notifications.py + the canonical catalog
+	// in internal/admin/capabilities.go. Earlier values lived under
+	// `alerts:notifications:*` which doesn't exist in either catalog —
+	// role assignments using the correct `notifications:channels:*`
+	// codes silently failed to grant access, so the routes were
+	// reachable only by global (`*`) principals. LIST also gains a
+	// read gate so a cap-less authenticated user can't enumerate
+	// every channel in the fleet (same shape sites/racks/assets fixed
+	// in PR #195).
 	r.Route("/notifications", func(r chi.Router) {
-		r.Get("/channels", h.listChannels)
-		r.With(auth.RequireCapability("alerts:notifications:create")).Post("/channels", h.createChannel)
-		r.With(auth.RequireCapability("alerts:notifications:update")).Patch("/channels/{id}", h.updateChannel)
-		r.With(auth.RequireCapability("alerts:notifications:delete")).Delete("/channels/{id}", h.deleteChannel)
+		r.With(auth.RequireCapability(capChannelsRead)).Get("/channels", h.listChannels)
+		r.With(auth.RequireCapability(capChannelsCreate)).Post("/channels", h.createChannel)
+		r.With(auth.RequireCapability(capChannelsUpdate)).Patch("/channels/{id}", h.updateChannel)
+		r.With(auth.RequireCapability(capChannelsDelete)).Delete("/channels/{id}", h.deleteChannel)
 	})
 }
+
+const (
+	capChannelsRead   = "notifications:channels:read"
+	capChannelsCreate = "notifications:channels:create"
+	capChannelsUpdate = "notifications:channels:update"
+	capChannelsDelete = "notifications:channels:delete"
+)
 
 type channelsPage struct {
 	Items  []dbq.NotificationChannel `json:"items"`

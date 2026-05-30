@@ -1,6 +1,7 @@
 package notifications
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 type fakeQ struct {
@@ -42,8 +44,12 @@ func mount(f *fakeQ) http.Handler {
 }
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Wildcard principal — the LIST gate gained
+	// notifications:channels:read in this PR; mutation tests inject
+	// their own principal.
+	req := authtest.Request(http.MethodGet, p, authtest.PrincipalWithCaps("*"), nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+	h.ServeHTTP(rec, req)
 	return rec
 }
 
@@ -87,5 +93,77 @@ func TestListChannels_DBError(t *testing.T) {
 	rec := do(t, mount(f), "/notifications/channels")
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("got %d", rec.Code)
+	}
+}
+
+// Cap-gate negative tests pin the RBAC fix: pre-fix, LIST had no
+// gate (any verified principal could enumerate channels) and the
+// mutations used `alerts:notifications:*` cap codes that didn't
+// exist in either catalog. Both now require notifications:channels:*.
+
+func TestListChannels_NoCap_403(t *testing.T) {
+	// Empty-cap principal must not see the channel list.
+	p := authtest.PrincipalWithCaps()
+	req := authtest.Request(http.MethodGet, "/notifications/channels", p, nil)
+	rec := httptest.NewRecorder()
+	mount(&fakeQ{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListChannels_OldBogusCap_StillDenied(t *testing.T) {
+	// The pre-fix code accepted alerts:notifications:* — verify that
+	// a principal holding only the old bogus code is now denied.
+	p := authtest.PrincipalWithCaps("alerts:notifications:read")
+	req := authtest.Request(http.MethodGet, "/notifications/channels", p, nil)
+	rec := httptest.NewRecorder()
+	mount(&fakeQ{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 (old cap should not match), got %d", rec.Code)
+	}
+}
+
+func TestListChannels_CanonicalCap_200(t *testing.T) {
+	p := authtest.PrincipalWithCaps("notifications:channels:read")
+	req := authtest.Request(http.MethodGet, "/notifications/channels", p, nil)
+	rec := httptest.NewRecorder()
+	mount(&fakeQ{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateChannel_CanonicalCap_201(t *testing.T) {
+	p := authtest.PrincipalWithCaps("notifications:channels:create")
+	body := []byte(`{"name":"ops","kind":"slack","webhook_url":"https://hooks.slack.com/x"}`)
+	req := authtest.Request(http.MethodPost, "/notifications/channels", p, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mount(&fakeQ{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreateChannel_OldBogusCap_403(t *testing.T) {
+	p := authtest.PrincipalWithCaps("alerts:notifications:create")
+	body := []byte(`{"name":"ops","kind":"slack","webhook_url":"https://hooks.slack.com/x"}`)
+	req := authtest.Request(http.MethodPost, "/notifications/channels", p, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mount(&fakeQ{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeleteChannel_CanonicalCap_204(t *testing.T) {
+	p := authtest.PrincipalWithCaps("notifications:channels:delete")
+	req := authtest.Request(http.MethodDelete, "/notifications/channels/"+uuid.New().String(), p, nil)
+	rec := httptest.NewRecorder()
+	mount(&fakeQ{}).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
