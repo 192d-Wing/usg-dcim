@@ -82,6 +82,43 @@ GROUP BY site_id
 ORDER BY COUNT(id) DESC
 LIMIT 50;
 
+-- ---- /dashboards/assets/{asset_id} (Phase 2c) — asset health view ----
+-- The endpoint loads the asset entity + telemetry-source freshness +
+-- bound IPs + 10 most-recent alerts. One round-trip per joined surface
+-- so each query stays small enough to scan into its own projected row.
+
+-- name: ListAssetTelemetrySources :many
+-- ORDER BY metric asc matches Python's `order_by(metric.asc())`.
+-- freshness ENUM cast to ::text for clean pgx scan; last_value is
+-- FLOAT (not NUMERIC) so it scans straight into *float64.
+SELECT metric, unit, source_system,
+       freshness::text AS freshness,
+       last_value, last_reading_at, last_success_at, poll_interval_seconds
+FROM telemetry_sources
+WHERE asset_id = $1
+ORDER BY metric;
+
+-- name: ListAssetIPAddresses :many
+-- ORDER BY role asc, address asc matches Python. host(address)
+-- strips the prefix length so finch gets the bare host string
+-- (same trick the search handler uses).
+SELECT id, subnet_id,
+       host(address) AS address,
+       role::text AS role, status::text AS status, source::text AS source,
+       dns_name, description, dhcp_lease_expires_at
+FROM ip_addresses
+WHERE asset_id = $1
+ORDER BY role, address;
+
+-- name: ListRecentAssetAlerts :many
+-- 10 most-recent alerts on the asset, ordered by last_seen_at desc.
+SELECT id, severity::text AS severity, state::text AS state,
+       summary, first_seen_at, last_seen_at
+FROM alerts
+WHERE asset_id = $1
+ORDER BY last_seen_at DESC
+LIMIT 10;
+
 -- name: ListPduKwTelemetry :many
 -- Per-PDU current-freshness telemetry rows whose metric is one of the
 -- kW or W power metrics. The handler picks metric + last_value off
