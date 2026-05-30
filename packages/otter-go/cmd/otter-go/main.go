@@ -27,6 +27,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
 	"github.com/usg-dcim/packages/otter-go/internal/cables"
 	"github.com/usg-dcim/packages/otter-go/internal/collectors"
+	"github.com/usg-dcim/packages/otter-go/internal/dashboards"
 	"github.com/usg-dcim/packages/otter-go/internal/dns"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/ipam"
@@ -97,6 +98,12 @@ func main() {
 	}
 	adh := &admin.Handler{Q: q, Audit: q, DefaultDnsRecursiveUpstreams: dnsDefault}
 	srh := &search.Handler{Q: q}
+	dah := &dashboards.Handler{
+		Q: q,
+		// Same default Python's settings.collector_stale_seconds carries
+		// (600). Operators override via DCIM_COLLECTOR_STALE_SECONDS.
+		CollectorStaleSeconds: env.Int("DCIM_COLLECTOR_STALE_SECONDS", 600),
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -215,6 +222,7 @@ func main() {
 			th.Mount(r)
 			adh.Mount(r)
 			srh.Mount(r)
+			dah.Mount(r)
 		})
 	})
 

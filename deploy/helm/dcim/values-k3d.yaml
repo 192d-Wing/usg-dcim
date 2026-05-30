@@ -75,6 +75,9 @@ ingress:
         - { path: /api/v1/telemetry, pathType: Prefix, backend: otter-go }
         - { path: /api/v1/admin,     pathType: Prefix, backend: otter-go }
         - { path: /api/v1/search,    pathType: Prefix, backend: otter-go }
+        # Dashboards Phase 1: /enterprise only — listed BEFORE the /api
+        # catch-all so Traefik honors longest-prefix.
+        - { path: /api/v1/dashboards/enterprise, pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []
