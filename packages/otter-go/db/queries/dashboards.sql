@@ -37,6 +37,69 @@ WHERE enabled = TRUE
 -- the ::text cast because we're comparing to a literal, not scanning.
 SELECT COUNT(id) FROM telemetry_sources WHERE freshness = 'stale';
 
+-- ---- /dashboards/sites/{site_id} (Phase 2d) — site topology + KPIs ----
+-- Fans out a half-dozen queries: site topology (buildings → rooms →
+-- rows → racks + all assets), the alerts/collectors KPI counters, and
+-- the per-rack capacity rollup via internal/capacity.
+
+-- name: ListBuildingsBySite :many
+SELECT id, name, code FROM buildings
+WHERE site_id = $1
+ORDER BY code;
+
+-- name: ListRoomsByBuildingIDs :many
+-- design_kw projects as text so pgx scans cleanly into *string;
+-- caller parses to float at the response boundary (matches the
+-- max_kw NUMERIC pattern in racks).
+SELECT id, building_id, name, code, design_kw::text AS design_kw
+FROM rooms
+WHERE building_id = ANY($1::uuid[])
+ORDER BY code;
+
+-- name: ListRowsByRoomIDs :many
+SELECT id, room_id, name, code FROM rows
+WHERE room_id = ANY($1::uuid[])
+ORDER BY code;
+
+-- name: ListRacksBySite :many
+SELECT id, site_id, row_id, name, code, u_height, max_kw,
+       max_weight_lbs, serial, created_at, updated_at
+FROM racks
+WHERE site_id = $1
+ORDER BY code;
+
+-- name: ListAssetsBySite :many
+-- Same projection as ListAssetsByRackIDs but anchored to a single
+-- site. ENUMs cast to ::text matching the codebase convention.
+SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
+       kind::text AS kind, manufacturer, model, serial, firmware,
+       rack_position_u, rack_units,
+       face::text AS face, mount::text AS mount,
+       pdu_side, psu_count, port_count,
+       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
+       lifecycle_state::text AS lifecycle_state,
+       install_date, warranty_expires, metadata_json,
+       created_at, updated_at
+FROM assets
+WHERE site_id = $1;
+
+-- name: ListSiteAlertsBySeverity :many
+-- Aggregation for the site KPI block — firing alert counts grouped
+-- by severity. Caller fans out into the `{severity: count}` dict +
+-- the rollup `total` field.
+SELECT severity::text AS severity, COUNT(id)::bigint AS n
+FROM alerts
+WHERE site_id = $1 AND state = 'firing'
+GROUP BY severity;
+
+-- name: ListSiteCollectors :many
+-- Per-site collector list. Caller computes the by-status breakdown +
+-- the stale count using its own stale_threshold (same env var the
+-- enterprise overview reads).
+SELECT id, status::text AS status, enabled, last_seen_at
+FROM collectors
+WHERE site_id = $1;
+
 -- ---- /dashboards/free-space (Phase 2) — rack capacity rollup ----
 -- /free-space ranks racks by their biggest contiguous free U run,
 -- optionally narrowing by site or region and rejecting racks that

@@ -299,6 +299,11 @@ ingress:
         - path: /api/v1/dashboards/assets
           pathType: Prefix
           backend: otter-go
+        # /sites/at-risk above is the longer-prefix sibling — both win
+        # over /sites/{site_id} for their specific paths.
+        - path: /api/v1/dashboards/sites
+          pathType: Prefix
+          backend: otter-go
         - path: /api
           pathType: Prefix
           backend: otter

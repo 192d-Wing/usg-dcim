@@ -32,8 +32,8 @@ def test_openapi_published() -> None:
         "/api/v1/alerts",
         # /dashboards/racks/{rack_id} still on Python (needs the
         # services/power_chain port). Used as the smoke needle now
-        # that /enterprise (Phase 1) + /free-space (Phase 2 capacity)
-        # + /sites/at-risk (Phase 2b ENUM-compare) moved to otter-go.
+        # that /enterprise + /free-space + /sites/at-risk +
+        # /assets/{id} + /sites/{id} moved to otter-go.
         "/api/v1/dashboards/racks/",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
@@ -52,7 +52,7 @@ def test_openapi_published() -> None:
         "/api/v1/search",
         "/api/v1/dashboards/enterprise",
         "/api/v1/dashboards/free-space",
-        "/api/v1/dashboards/sites/at-risk",
+        "/api/v1/dashboards/sites/",
         "/api/v1/dashboards/assets/",
     ):
         assert not any(p.startswith(gone) for p in paths), (
