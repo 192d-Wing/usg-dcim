@@ -1,7 +1,8 @@
-// Package bgp holds GET handlers for the BGP policy resources:
-// asns, prefix-lists, prefix-list-entries. Deferred to follow-up:
-// tcp-ao-key-chains, tcp-ao-keys, community-lists, community-list-entries,
-// route-maps, route-map-entries.
+// Package bgp holds CRUD handlers for the BGP policy resources:
+// asns, prefix-lists + entries, community-lists + entries, route-
+// maps + entries, and tcp-ao-key-chains + keys (with /rotate-batch).
+// Python's api/bgp.py is gone since the BGP cutover (PR #205); these
+// handlers are the canonical surface served behind /api/v1/bgp/*.
 package bgp
 
 import (
@@ -83,13 +84,19 @@ type Handler struct {
 
 func (h *Handler) Mount(r chi.Router) {
 	r.Route("/bgp", func(r chi.Router) {
-		r.Get("/asns", h.listAsns)
-		r.Get("/prefix-lists", h.listPrefixLists)
-		r.Get("/prefix-list-entries", h.listPrefixListEntries)
-		r.Get("/community-lists", h.listCommunityLists)
-		r.Get("/community-list-entries", h.listCommunityListEntries)
-		r.Get("/route-maps", h.listRouteMaps)
-		r.Get("/route-map-entries", h.listRouteMapEntries)
+		// Read paths are gated by routing:X:read so cap-less principals
+		// can't enumerate BGP topology. BGP isn't site-rooted, so
+		// there's no implicit ABAC fallback — leaving GETs ungated
+		// would leak ASN/prefix/community/route-map metadata to anyone
+		// holding a valid JWT. Mirrors the inventory cutover fix from
+		// PR #195.
+		r.With(auth.RequireCapability("routing:asns:read")).Get("/asns", h.listAsns)
+		r.With(auth.RequireCapability("routing:prefix-lists:read")).Get("/prefix-lists", h.listPrefixLists)
+		r.With(auth.RequireCapability("routing:prefix-list-entries:read")).Get("/prefix-list-entries", h.listPrefixListEntries)
+		r.With(auth.RequireCapability("routing:community-lists:read")).Get("/community-lists", h.listCommunityLists)
+		r.With(auth.RequireCapability("routing:community-list-entries:read")).Get("/community-list-entries", h.listCommunityListEntries)
+		r.With(auth.RequireCapability("routing:route-maps:read")).Get("/route-maps", h.listRouteMaps)
+		r.With(auth.RequireCapability("routing:route-map-entries:read")).Get("/route-map-entries", h.listRouteMapEntries)
 
 		// ---- Mutations (PR 44) ----
 		r.With(auth.RequireCapability("routing:asns:create")).Post("/asns", h.createAsn)

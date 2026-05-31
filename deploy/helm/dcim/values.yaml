@@ -293,15 +293,12 @@ ingress:
         - path: /api/v1/dashboards
           pathType: Prefix
           backend: otter-go
-        # TCP-AO key-chains + keys + rotate-batch fully ported (PRs #203
-        # + this one). The URL prefix is /bgp (Python's APIRouter +
-        # otter-go's chi r.Route both serve there). The capability
-        # namespace is `routing:*` — a separate concept. Listed BEFORE
-        # any future broader /api/v1/bgp rule so longest-prefix wins.
-        - path: /api/v1/bgp/tcp-ao-key-chains
-          pathType: Prefix
-          backend: otter-go
-        - path: /api/v1/bgp/tcp-ao-keys
+        # BGP module fully on otter-go (TCP-AO via PRs #203/#204; the
+        # rest — asns/prefix-lists/community-lists/route-maps + their
+        # entries — were already implemented on Go in PR 44 but stayed
+        # dark until this PR cut the ingress over. Single Prefix rule
+        # supersedes the per-resource TCP-AO splits that lived here.
+        - path: /api/v1/bgp
           pathType: Prefix
           backend: otter-go
         # Region-deploy read-side split. Detail GET + paginated event

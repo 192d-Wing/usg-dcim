@@ -3,7 +3,6 @@
 from fastapi import APIRouter
 
 from .alerts import router as alerts_router
-from .bgp import router as bgp_router
 from .collectors import router as collectors_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
@@ -58,5 +57,8 @@ router.include_router(notifications_router)
 router.include_router(organization_router)
 router.include_router(ipam_router)
 router.include_router(dns_router)
-router.include_router(bgp_router)
+# /api/v1/bgp/* fully moved to otter-go (PRs #203 + #204 for TCP-AO;
+# this PR for the rest — asns/prefix-lists/community-lists/route-maps
+# + their entries; the Go handlers were already implemented in PR 44
+# but stayed dark until the ingress cutover landed here).
 router.include_router(regiondeploy_router)
