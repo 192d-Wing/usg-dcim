@@ -1,0 +1,25 @@
+apiVersion: v2
+name: otter-go-scheduler
+description: |
+  USG DCIM Go cron-driven scheduler. Companion to the otter-go API
+  subchart; runs the periodic jobs Python's arq worker (packages/
+  otter/src/dcim/worker.py) historically owned. PR #208 landed the
+  harness + the first ported job (dns_purge_metrics); subsequent
+  PRs port the rest of the arq cron entries one at a time.
+
+  Disabled by default in the umbrella because the Python arq worker
+  is still firing the same crons. Once a job is verified working
+  here, the matching arq cron is disabled in worker.py to retire
+  the duplicate. Flip `otter-go-scheduler.enabled=true` on dev
+  clusters now to validate the harness end-to-end.
+
+  Same image as otter-go (multi-binary build via
+  packages/otter-go/Containerfile). This subchart sets command to
+  /otter-go-scheduler so the same release tag pins both the API
+  and the worker.
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+maintainers:
+  - name: USG DCIM Team
