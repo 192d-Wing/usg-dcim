@@ -319,6 +319,23 @@ ingress:
         - path: /api/v1/alerts
           pathType: Prefix
           backend: otter-go
+        # /api/v1/dns/bgp-peers/* moves to otter-go (this PR). The
+        # rest of /api/v1/dns/* stays on Python until the DNS module
+        # is fully cut over (zones/records/keys/health-checks/anycast-
+        # bindings are still Python-canonical). nginx-ingress
+        # longest-prefix routing peels off bgp-peers before the bare
+        # /api → otter catch-all wins for the rest of /dns. The four
+        # Go routes (list/create/patch/delete) already exist on
+        # otter-go and have full parity with Python — same ABAC
+        # (dns:bgp-peers:<verb>), same Asn/TcpAoKeyChain FK
+        # validation (Asn checks run inside CreateBgpPeer's SQL
+        # and surface as 4xx via httpx.Mapped), same anycast-binding
+        # in-use → 409 conflict on delete (FK violation maps to 409
+        # post-PR-#198). Python's /bgp-peers handlers in api/dns.py
+        # are removed in this PR so the route owner is unambiguous.
+        - path: /api/v1/dns/bgp-peers
+          pathType: Prefix
+          backend: otter-go
         # Region-deploy read-side split. Detail GET + paginated event
         # history move to otter-go now; LIST + CREATE + the lifecycle
         # endpoints (preflight/start/abort/SSE/kubeconfig callback)

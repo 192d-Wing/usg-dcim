@@ -33,7 +33,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
 from ..errors import ConflictError, NotFoundError, ValidationError
-from ..models.bgp import Asn, TcpAoKeyChain
 from ..models.dns import (
     AnycastBgpBinding,
     AnycastGroup,
@@ -64,9 +63,6 @@ from ..schemas.dns import (
     AnycastGroupCreate,
     AnycastGroupOut,
     AnycastGroupUpdate,
-    BgpPeerCreate,
-    BgpPeerOut,
-    BgpPeerUpdate,
     DnsBlocklistCreate,
     DnsBlocklistEntryBulk,
     DnsBlocklistEntryCreate,
@@ -131,7 +127,6 @@ _ZONE_NOT_FOUND = "dns zone not found"
 _RECORD_NOT_FOUND = "dns record not found"
 _SERVER_NOT_FOUND = "dns server not found"
 _ANYCAST_NOT_FOUND = "anycast group not found"
-_BGP_NOT_FOUND = "bgp peer not found"
 _BIND_NOT_FOUND = "anycast/bgp binding not found"
 _FORWARDER_NOT_FOUND = "dns forwarder not found"
 _CATALOG_NOT_FOUND = "dns catalog zone not found"
@@ -2584,135 +2579,14 @@ async def post_health_check_result(
 
 
 # ----------------------- BGP peers -----------------------
-@router.get("/bgp-peers", response_model=Page[BgpPeerOut])
-async def list_bgp_peers(
-    params: PageParams = Depends(PageParams.from_query),
-    site_id: UUID | None = Query(None),
-    principal: Principal = Depends(require_capability("dns:bgp-peers:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    stmt = select(BgpPeer)
-    if site_id is not None:
-        stmt = stmt.where(BgpPeer.site_id == site_id)
-    in_scope = await scope_filtered_site_ids(
-        db, principal.capabilities, "dns:bgp-peers:read",
-    )
-    if in_scope is not None:
-        if not in_scope:
-            return Page[BgpPeerOut](
-                items=[], total=0, page=params.page,
-                page_size=params.page_size, has_more=False,
-            )
-        stmt = stmt.where(BgpPeer.site_id.in_(in_scope))
-    return await paginate(db, stmt, model=BgpPeer, params=params, out_model=BgpPeerOut)
-
-
-@router.post("/bgp-peers", response_model=BgpPeerOut, status_code=201)
-async def create_bgp_peer(
-    payload: BgpPeerCreate,
-    principal: Principal = Depends(require_capability("dns:bgp-peers:create")),
-    db: AsyncSession = Depends(get_db),
-):
-    site = await db.get(Site, payload.site_id)
-    if site is None:
-        raise ValidationError(f"site {payload.site_id} not found")
-    await enforce_site_scope(
-        db, principal.capabilities, payload.site_id, "dns:bgp-peers:create",
-    )
-    # Cross-check ASN catalog FKs at the call site so 404s land here
-    # instead of as an opaque IntegrityError at commit.
-    if await db.get(Asn, payload.local_asn_id) is None:
-        raise NotFoundError(f"local ASN {payload.local_asn_id} not found")
-    if await db.get(Asn, payload.peer_asn_id) is None:
-        raise NotFoundError(f"peer ASN {payload.peer_asn_id} not found")
-    if (
-        payload.tcp_ao_key_chain_id is not None
-        and await db.get(TcpAoKeyChain, payload.tcp_ao_key_chain_id) is None
-    ):
-        raise NotFoundError(f"tcp ao key chain {payload.tcp_ao_key_chain_id} not found")
-    obj = BgpPeer(**payload.model_dump())
-    db.add(obj)
-    await db.flush()
-    metadata = {"name": payload.name, "peer_ip": payload.peer_ip}
-    await audit.record(
-        db, principal, action="bgp_peer.create",
-        target_type="bgp_peer", target_id=str(obj.id),
-        site_id=obj.site_id, metadata=metadata,
-    )
-    await db.commit()
-    await db.refresh(obj)
-    return obj
-
-
-@router.patch("/bgp-peers/{peer_id}", response_model=BgpPeerOut)
-async def update_bgp_peer(
-    peer_id: UUID,
-    payload: BgpPeerUpdate,
-    principal: Principal = Depends(require_capability("dns:bgp-peers:update")),
-    db: AsyncSession = Depends(get_db),
-):
-    obj = await db.get(BgpPeer, peer_id)
-    if obj is None:
-        raise NotFoundError(_BGP_NOT_FOUND)
-    await enforce_site_scope(
-        db, principal.capabilities, obj.site_id, "dns:bgp-peers:update",
-    )
-    diff = payload.model_dump(exclude_unset=True)
-    if (
-        "local_asn_id" in diff
-        and diff["local_asn_id"] is not None
-        and await db.get(Asn, diff["local_asn_id"]) is None
-    ):
-        raise NotFoundError(f"local ASN {diff['local_asn_id']} not found")
-    if (
-        "peer_asn_id" in diff
-        and diff["peer_asn_id"] is not None
-        and await db.get(Asn, diff["peer_asn_id"]) is None
-    ):
-        raise NotFoundError(f"peer ASN {diff['peer_asn_id']} not found")
-    if (
-        "tcp_ao_key_chain_id" in diff
-        and diff["tcp_ao_key_chain_id"] is not None
-        and await db.get(TcpAoKeyChain, diff["tcp_ao_key_chain_id"]) is None
-    ):
-        raise NotFoundError(f"tcp ao key chain {diff['tcp_ao_key_chain_id']} not found")
-    for k, v in diff.items():
-        setattr(obj, k, v)
-    await audit.record(
-        db, principal, action="bgp_peer.update",
-        target_type="bgp_peer", target_id=str(peer_id),
-        site_id=obj.site_id, diff=diff,
-    )
-    await db.commit()
-    await db.refresh(obj)
-    return obj
-
-
-@router.delete("/bgp-peers/{peer_id}", status_code=204)
-async def delete_bgp_peer(
-    peer_id: UUID,
-    principal: Principal = Depends(require_capability("dns:bgp-peers:delete")),
-    db: AsyncSession = Depends(get_db),
-):
-    obj = await db.get(BgpPeer, peer_id)
-    if obj is None:
-        raise NotFoundError(_BGP_NOT_FOUND)
-    await enforce_site_scope(
-        db, principal.capabilities, obj.site_id, "dns:bgp-peers:delete",
-    )
-    in_use = (
-        await db.execute(
-            select(AnycastBgpBinding.id).where(AnycastBgpBinding.bgp_peer_id == peer_id).limit(1)
-        )
-    ).scalar_one_or_none()
-    if in_use is not None:
-        raise ConflictError("bgp peer still bound to one or more DNS servers; unbind first")
-    await db.execute(delete(BgpPeer).where(BgpPeer.id == peer_id))
-    await audit.record(
-        db, principal, action="bgp_peer.delete",
-        target_type="bgp_peer", target_id=str(peer_id),
-    )
-    await db.commit()
+# /api/v1/dns/bgp-peers/* moved to otter-go. The Go handlers
+# (internal/dns/{handler.go,mutations.go}) have full parity:
+# ABAC via dns:bgp-peers:<verb>, Asn/TcpAoKeyChain FK validation
+# inside the SQL (surfaces as 4xx via httpx.Mapped), and anycast-
+# binding in-use → 409 conflict on delete (FK violation maps via
+# post-PR-#198 ErrFKViolation handling). Ingress carved off the
+# /api/v1/dns/bgp-peers prefix in this PR; the rest of /dns/* stays
+# Python-canonical until the full DNS module is cut over.
 
 
 # ----------------------- Anycast/BGP binding -----------------------

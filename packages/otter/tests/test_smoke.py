@@ -52,6 +52,11 @@ def test_openapi_published() -> None:
         # maintenance-windows CRUD). The arq eval loop lives in
         # services/alerts.py which is untouched.
         "/api/v1/alerts",
+        # /api/v1/dns/bgp-peers/* moved to otter-go. The rest of
+        # /api/v1/dns/* stays Python-canonical until the full DNS
+        # module is cut over, so the negative-assert targets the
+        # specific subprefix that left.
+        "/api/v1/dns/bgp-peers",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
