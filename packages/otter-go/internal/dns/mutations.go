@@ -1338,6 +1338,8 @@ type bgpPeerCreateReq struct {
 	Enabled         *bool      `json:"enabled"`
 }
 
+const errBgpPeerNotFound = "bgp peer not found"
+
 func (h *Handler) createBgpPeer(w http.ResponseWriter, r *http.Request) {
 	var req bgpPeerCreateReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
@@ -1360,7 +1362,7 @@ func (h *Handler) createBgpPeer(w http.ResponseWriter, r *http.Request) {
 		TcpAoKeyChainID: req.TcpAoKeyChainID, Enabled: enabled,
 	})
 	if err != nil {
-		mapErr(w, err, "bgp peer not found")
+		mapErr(w, err, errBgpPeerNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "bgp_peer.create", TargetType: "bgp_peer", TargetID: out.ID.String()})
@@ -1410,7 +1412,7 @@ func (h *Handler) updateBgpPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	sid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
 		return h.Q.GetBgpPeerSiteID(ctx, id)
-	}, "bgp peer not found")
+	}, errBgpPeerNotFound)
 	if !ok {
 		return
 	}
@@ -1430,7 +1432,7 @@ func (h *Handler) updateBgpPeer(w http.ResponseWriter, r *http.Request) {
 		Enabled: req.Enabled,
 	})
 	if err != nil {
-		mapErr(w, err, "bgp peer not found")
+		mapErr(w, err, errBgpPeerNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "bgp_peer.update", TargetType: "bgp_peer", TargetID: id.String()})
@@ -1444,15 +1446,31 @@ func (h *Handler) deleteBgpPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	sid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
 		return h.Q.GetBgpPeerSiteID(ctx, id)
-	}, "bgp peer not found")
+	}, errBgpPeerNotFound)
 	if !ok {
 		return
 	}
 	if !h.enforceSite(w, r, sid, "dns:bgp-peers:delete") {
 		return
 	}
+	// In-use check matches Python's pre-FK conflict guard at
+	// api/dns.py (pre-#PR cutover): if the peer is still wired to a
+	// DNS server via anycast_bgp_bindings, return 409 with an
+	// actionable message instead of letting the FK violation bubble
+	// up as a raw pgx error string. Mirrors the TCP-AO keychain
+	// delete pattern in internal/bgp/tcp_ao.go:170-180.
+	bound, err := h.Q.CountAnycastBindings(r.Context(), dbq.CountAnycastBindingsParams{BgpPeerID: &id})
+	if err != nil {
+		mapErr(w, err, errBgpPeerNotFound)
+		return
+	}
+	if bound > 0 {
+		httpx.Error(w, http.StatusConflict,
+			"bgp peer still bound to one or more DNS servers; unbind first")
+		return
+	}
 	if err := h.Q.DeleteBgpPeer(r.Context(), id); err != nil {
-		mapErr(w, err, "bgp peer not found")
+		mapErr(w, err, errBgpPeerNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "bgp_peer.delete", TargetType: "bgp_peer", TargetID: id.String()})
