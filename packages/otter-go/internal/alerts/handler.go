@@ -1,6 +1,8 @@
-// Package alerts holds GET handlers for the Python alerts router.
-// Currently: alerts list, alert rules list. Deferred: rule get-by-id,
-// maintenance-window list/get, ack/resolve actions (writes — Phase 2).
+// Package alerts holds the CRUD handlers for the alerts module:
+// alerts list + ack, alert_rules CRUD, maintenance_windows CRUD. The
+// arq-driven evaluation loop in packages/otter/.../services/alerts.py
+// is still Python until the Go scheduler lands; only the HTTP routes
+// live here. Python's api/alerts.py is gone since the alerts cutover.
 package alerts
 
 import (
@@ -65,22 +67,41 @@ type Handler struct {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Get("/alerts", h.listAlerts)
-	r.Get("/alerts/", h.listAlerts)
-	r.Get("/alerts/rules", h.listRules)
-	r.Get("/alerts/rules/{id}", h.getRule)
-	r.Get("/alerts/maintenance-windows", h.listMaintenanceWindows)
-	r.Get("/alerts/maintenance-windows/{id}", h.getMaintenanceWindow)
+	// Cap codes match the canonical catalog
+	// (packages/otter-go/internal/admin/capabilities.go):
+	//   alerts:alerts:{read,ack}   ← previously used :update for ack
+	//   alerts:rules:{read,create,update,delete}
+	//   maintenance:windows:{read,create,update,delete}  ← previously
+	//     used `alerts:maintenance-windows:*`, which is not in the
+	//     catalog and silently broke role-picker assignments.
+	// Same class of RBAC bug as PR #202 (notifications). Read paths
+	// are gated explicitly — alerts aren't site-rooted so an
+	// ungated GET would leak rule/window/firing-alert metadata to
+	// any logged-in user. Mirrors PR #195/#205's fix.
+	r.With(auth.RequireCapability(capAlertsRead)).Get("/alerts", h.listAlerts)
+	r.With(auth.RequireCapability(capAlertsRead)).Get("/alerts/", h.listAlerts)
+	r.With(auth.RequireCapability(capRulesRead)).Get("/alerts/rules", h.listRules)
+	r.With(auth.RequireCapability(capRulesRead)).Get(pathRuleByID, h.getRule)
+	r.With(auth.RequireCapability(capMWRead)).Get("/alerts/maintenance-windows", h.listMaintenanceWindows)
+	r.With(auth.RequireCapability(capMWRead)).Get(pathMWByID, h.getMaintenanceWindow)
 
-	// Mutations (PR 45)
-	r.With(auth.RequireCapability("alerts:alerts:update")).Post("/alerts/{id}/ack", h.ack)
+	r.With(auth.RequireCapability("alerts:alerts:ack")).Post("/alerts/{id}/ack", h.ack)
 	r.With(auth.RequireCapability("alerts:rules:create")).Post("/alerts/rules", h.createRule)
-	r.With(auth.RequireCapability("alerts:rules:update")).Patch("/alerts/rules/{id}", h.updateRule)
-	r.With(auth.RequireCapability("alerts:rules:delete")).Delete("/alerts/rules/{id}", h.deleteRule)
-	r.With(auth.RequireCapability("alerts:maintenance-windows:create")).Post("/alerts/maintenance-windows", h.createMW)
-	r.With(auth.RequireCapability("alerts:maintenance-windows:update")).Patch("/alerts/maintenance-windows/{id}", h.updateMW)
-	r.With(auth.RequireCapability("alerts:maintenance-windows:delete")).Delete("/alerts/maintenance-windows/{id}", h.deleteMW)
+	r.With(auth.RequireCapability("alerts:rules:update")).Patch(pathRuleByID, h.updateRule)
+	r.With(auth.RequireCapability("alerts:rules:delete")).Delete(pathRuleByID, h.deleteRule)
+	r.With(auth.RequireCapability("maintenance:windows:create")).Post("/alerts/maintenance-windows", h.createMW)
+	r.With(auth.RequireCapability("maintenance:windows:update")).Patch(pathMWByID, h.updateMW)
+	r.With(auth.RequireCapability("maintenance:windows:delete")).Delete(pathMWByID, h.deleteMW)
 }
+
+const (
+	capAlertsRead = "alerts:alerts:read"
+	capRulesRead  = "alerts:rules:read"
+	capMWRead     = "maintenance:windows:read"
+
+	pathRuleByID = "/alerts/rules/{id}"
+	pathMWByID   = "/alerts/maintenance-windows/{id}"
+)
 
 // alertsPage is the wire shape for /alerts. Alias of httpx.Page[T] so
 // the {Items, Total, Limit, Offset} layout stays in lockstep with
@@ -93,7 +114,7 @@ func (h *Handler) listAlerts(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	p, _ := auth.From(r.Context())
-	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "alerts:alerts:read")
+	scopeSiteIds, scoped, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capAlertsRead)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -153,7 +174,7 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	// set still surfaces enterprise defaults via the SQL's NULL clause.
 	// No short-circuit here.
 	p, _ := auth.From(r.Context())
-	scopeSiteIds, _, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "alerts:rules:read")
+	scopeSiteIds, _, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capRulesRead)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -227,7 +248,7 @@ func (h *Handler) listMaintenanceWindows(w http.ResponseWriter, r *http.Request)
 	// default semantic as alert_rules above). Don't short-circuit on
 	// empty scope set.
 	p, _ := auth.From(r.Context())
-	scopeSiteIds, _, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, "alerts:maintenance-windows:read")
+	scopeSiteIds, _, err := auth.ScopedSiteFilter(r.Context(), h.Q, p, capMWRead)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

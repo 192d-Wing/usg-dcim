@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter
 
-from .alerts import router as alerts_router
 from .collectors import router as collectors_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
@@ -32,7 +31,10 @@ router.include_router(ingest_router)
 # chart routes /api/v1/telemetry → otter-go; Python no longer registers
 # the router so a misrouted internal call fails loud instead of
 # silently double-serving.
-router.include_router(alerts_router)
+# /api/v1/alerts/* fully moved to otter-go (this PR). The arq-driven
+# evaluation loop in services/alerts.py is untouched — only the HTTP
+# routes move. The 12 Go handlers were implemented in PR 45 but
+# stayed dark until the ingress cutover landed here.
 # /api/v1/dashboards/* fully moved to otter-go across phases 1-3.
 # enterprise + free-space + sites/at-risk + assets/{id} + sites/{id}
 # + racks/{id} + 3 forecast endpoints all on otter-go now;

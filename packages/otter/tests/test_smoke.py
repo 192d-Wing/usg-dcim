@@ -27,7 +27,6 @@ def test_openapi_published() -> None:
     for needle in [
         "/api/v1/collectors",
         "/api/v1/ingest/telemetry",
-        "/api/v1/alerts",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
     # /api/v1/auth/* (PR 179), /api/v1/telemetry/series (PR 178),
@@ -49,6 +48,10 @@ def test_openapi_published() -> None:
         # rest cut over here). URL prefix is /bgp (capability
         # namespace `routing:*` is a separate concept).
         "/api/v1/bgp",
+        # /api/v1/alerts/* (this PR — list/ack, rules CRUD,
+        # maintenance-windows CRUD). The arq eval loop lives in
+        # services/alerts.py which is untouched.
+        "/api/v1/alerts",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

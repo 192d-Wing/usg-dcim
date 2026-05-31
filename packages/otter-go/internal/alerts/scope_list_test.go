@@ -116,9 +116,9 @@ func TestMaintenanceWindowsList_ScopedEmpty_StillCallsDB(t *testing.T) {
 	// Same nullable semantic as alert_rules.
 	q := &expansionFakeQ{expandResult: []uuid.UUID{}}
 	p := auth.Principal{
-		Capabilities: []string{"alerts:maintenance-windows:read"},
+		Capabilities: []string{"maintenance:windows:read"},
 		Scopes: map[string]auth.Scope{
-			"alerts:maintenance-windows:read": {FabricIDs: map[uuid.UUID]struct{}{uuid.New(): {}}},
+			"maintenance:windows:read": {FabricIDs: map[uuid.UUID]struct{}{uuid.New(): {}}},
 		},
 	}
 	req := httptest.NewRequest("GET", "/alerts/maintenance-windows", nil)

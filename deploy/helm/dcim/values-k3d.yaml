@@ -88,6 +88,9 @@ ingress:
         # BGP module fully on otter-go (TCP-AO via PRs #203/#204; rest
         # was implemented on Go in PR 44 but dark until this cutover).
         - { path: /api/v1/bgp, pathType: Prefix, backend: otter-go }
+        # Alerts module fully on otter-go (this PR). Python's eval
+        # loop in services/alerts.py stays — only the HTTP routes move.
+        - { path: /api/v1/alerts, pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []
