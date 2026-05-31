@@ -145,6 +145,28 @@ func (f *fakeQ) CountKeysInTcpAoKeyChain(_ context.Context, _ uuid.UUID) (int64,
 	return 0, nil
 }
 
+// ---- TCP AO keys + rotate-batch fakes ----
+func (f *fakeQ) ListTcpAoKeys(_ context.Context, _ dbq.ListTcpAoKeysParams) ([]dbq.TcpAoKey, error) {
+	return nil, nil
+}
+func (f *fakeQ) CountTcpAoKeys(_ context.Context, _ dbq.CountTcpAoKeysParams) (int64, error) {
+	return 0, nil
+}
+func (f *fakeQ) GetTcpAoKey(_ context.Context, _ uuid.UUID) (dbq.TcpAoKey, error) {
+	return dbq.TcpAoKey{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CreateTcpAoKey(_ context.Context, a dbq.CreateTcpAoKeyParams) (dbq.TcpAoKey, error) {
+	return dbq.TcpAoKey{ID: uuid.New(), KeyChainID: a.KeyChainID, KeyID: a.KeyID,
+		Algorithm: a.Algorithm, Secret: a.Secret}, nil
+}
+func (f *fakeQ) UpdateTcpAoKey(_ context.Context, a dbq.UpdateTcpAoKeyParams) (dbq.TcpAoKey, error) {
+	return dbq.TcpAoKey{ID: a.ID}, nil
+}
+func (f *fakeQ) DeleteTcpAoKey(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) MaxKeyIDInTcpAoKeyChain(_ context.Context, _ uuid.UUID) (int32, error) {
+	return 0, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)

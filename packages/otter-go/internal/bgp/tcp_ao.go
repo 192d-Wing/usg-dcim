@@ -1,11 +1,7 @@
-// TCP AO key-chains CRUD handlers (PR 1 of 2). The keys CRUD +
-// /rotate-batch crypto generator land in the follow-up. The Mount
-// wires these routes inside r.Route("/bgp", ...) but the umbrella
-// chart's ingress still routes /api/v1/routing/* to Python — these
-// handlers are exercised by Go tests only until PR 2 lands the
-// ingress split. Do NOT add /api/v1/routing/tcp-ao-key-chains →
-// otter-go until the rotate-batch endpoint exists in Go, or POSTs
-// to /tcp-ao-key-chains/{id}/rotate-batch will 404.
+// TCP AO key-chains CRUD handlers. Live in production since the
+// ingress cutover landed alongside keys + rotate-batch (PR 2);
+// before that, these routes were dark code only exercised by Go
+// tests.
 package bgp
 
 import (

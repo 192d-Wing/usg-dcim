@@ -27,17 +27,14 @@ the parent delete returns 409 so the operator clears entries first.
 
 from __future__ import annotations
 
-import secrets
-from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db import get_db
-from ..errors import ConflictError, NotFoundError, ValidationError
+from ..errors import ConflictError, NotFoundError
 from ..models.bgp import (
     AddressFamilyV4V6,
     Asn,
@@ -49,9 +46,6 @@ from ..models.bgp import (
     PrefixListEntry,
     RouteMap,
     RouteMapEntry,
-    TcpAoAlgorithm,
-    TcpAoKey,
-    TcpAoKeyChain,
 )
 from ..models.organization import Organization
 from ..schemas.bgp import (
@@ -76,12 +70,6 @@ from ..schemas.bgp import (
     RouteMapEntryUpdate,
     RouteMapOut,
     RouteMapUpdate,
-    TcpAoKeyChainCreate,
-    TcpAoKeyChainOut,
-    TcpAoKeyChainUpdate,
-    TcpAoKeyCreate,
-    TcpAoKeyOut,
-    TcpAoKeyUpdate,
 )
 from ..schemas.common import Page, PageParams
 from ..security import audit
@@ -169,230 +157,6 @@ async def delete_asn(
     )
     await db.commit()
 
-# ----------------------- TCP AO key chains -----------------------
-
-_TCP_AO_CHAIN_NOT_FOUND = "tcp ao key chain not found"
-_TCP_AO_KEY_NOT_FOUND = "tcp ao key not found"
-
-@router.get("/tcp-ao-key-chains", response_model=Page[TcpAoKeyChainOut])
-async def list_tcp_ao_chains(
-    params: PageParams = Depends(PageParams.from_query),
-    _: Principal = Depends(require_capability("routing:tcp-ao-key-chains:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    return await paginate(
-        db, select(TcpAoKeyChain), model=TcpAoKeyChain, params=params, out_model=TcpAoKeyChainOut,
-    )
-
-@router.post("/tcp-ao-key-chains", response_model=TcpAoKeyChainOut, status_code=201)
-async def create_tcp_ao_chain(
-    payload: TcpAoKeyChainCreate,
-    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:create")),
-    db: AsyncSession = Depends(get_db),
-):
-    obj = TcpAoKeyChain(**payload.model_dump())
-    db.add(obj)
-    await db.flush()
-    await audit.record(
-        db, principal, action="tcp_ao_key_chain.create",
-        target_type="tcp_ao_key_chain", target_id=str(obj.id),
-    )
-    await db.commit()
-    await db.refresh(obj)
-    return obj
-
-@router.patch("/tcp-ao-key-chains/{chain_id}", response_model=TcpAoKeyChainOut)
-async def update_tcp_ao_chain(
-    chain_id: UUID,
-    payload: TcpAoKeyChainUpdate,
-    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:update")),
-    db: AsyncSession = Depends(get_db),
-):
-    obj = await db.get(TcpAoKeyChain, chain_id)
-    if obj is None:
-        raise NotFoundError(_TCP_AO_CHAIN_NOT_FOUND)
-    diff = payload.model_dump(exclude_unset=True)
-    for k, v in diff.items():
-        setattr(obj, k, v)
-    await audit.record(
-        db, principal, action="tcp_ao_key_chain.update",
-        target_type="tcp_ao_key_chain", target_id=str(chain_id), diff=diff,
-    )
-    await db.commit()
-    await db.refresh(obj)
-    return obj
-
-@router.delete("/tcp-ao-key-chains/{chain_id}", status_code=204)
-async def delete_tcp_ao_chain(
-    chain_id: UUID,
-    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:delete")),
-    db: AsyncSession = Depends(get_db),
-):
-    obj = await db.get(TcpAoKeyChain, chain_id)
-    if obj is None:
-        raise NotFoundError(_TCP_AO_CHAIN_NOT_FOUND)
-    # Guard: refuse to drop a chain that still has keys; operator clears
-    # entries first so secret rotation history is intentional.
-    in_use = (
-        await db.execute(
-            select(TcpAoKey.id).where(TcpAoKey.key_chain_id == chain_id).limit(1),
-        )
-    ).scalar_one_or_none()
-    if in_use is not None:
-        raise ConflictError("key chain still has keys; remove them first")
-    await db.execute(delete(TcpAoKeyChain).where(TcpAoKeyChain.id == chain_id))
-    await audit.record(
-        db, principal, action="tcp_ao_key_chain.delete",
-        target_type="tcp_ao_key_chain", target_id=str(chain_id),
-    )
-    await db.commit()
-
-@router.get("/tcp-ao-keys", response_model=Page[TcpAoKeyOut])
-async def list_tcp_ao_keys(
-    params: PageParams = Depends(PageParams.from_query),
-    key_chain_id: UUID | None = Query(None),
-    _: Principal = Depends(require_capability("routing:tcp-ao-keys:read")),
-    db: AsyncSession = Depends(get_db),
-):
-    stmt = select(TcpAoKey)
-    if key_chain_id is not None:
-        stmt = stmt.where(TcpAoKey.key_chain_id == key_chain_id)
-    return await paginate(db, stmt, model=TcpAoKey, params=params, out_model=TcpAoKeyOut)
-
-@router.post("/tcp-ao-keys", response_model=TcpAoKeyOut, status_code=201)
-async def create_tcp_ao_key(
-    payload: TcpAoKeyCreate,
-    principal: Principal = Depends(require_capability("routing:tcp-ao-keys:create")),
-    db: AsyncSession = Depends(get_db),
-):
-    chain = await db.get(TcpAoKeyChain, payload.key_chain_id)
-    if chain is None:
-        raise NotFoundError(_TCP_AO_CHAIN_NOT_FOUND)
-    obj = TcpAoKey(**payload.model_dump())
-    db.add(obj)
-    await db.flush()
-    await audit.record(
-        db, principal, action="tcp_ao_key.create",
-        target_type="tcp_ao_key", target_id=str(obj.id),
-    )
-    await db.commit()
-    await db.refresh(obj)
-    return obj
-
-@router.patch("/tcp-ao-keys/{key_id_pk}", response_model=TcpAoKeyOut)
-async def update_tcp_ao_key(
-    key_id_pk: UUID,
-    payload: TcpAoKeyUpdate,
-    principal: Principal = Depends(require_capability("routing:tcp-ao-keys:update")),
-    db: AsyncSession = Depends(get_db),
-):
-    obj = await db.get(TcpAoKey, key_id_pk)
-    if obj is None:
-        raise NotFoundError(_TCP_AO_KEY_NOT_FOUND)
-    diff = payload.model_dump(exclude_unset=True)
-    for k, v in diff.items():
-        setattr(obj, k, v)
-    await audit.record(
-        db, principal, action="tcp_ao_key.update",
-        target_type="tcp_ao_key", target_id=str(key_id_pk), diff=diff,
-    )
-    await db.commit()
-    await db.refresh(obj)
-    return obj
-
-@router.delete("/tcp-ao-keys/{key_id_pk}", status_code=204)
-async def delete_tcp_ao_key(
-    key_id_pk: UUID,
-    principal: Principal = Depends(require_capability("routing:tcp-ao-keys:delete")),
-    db: AsyncSession = Depends(get_db),
-):
-    obj = await db.get(TcpAoKey, key_id_pk)
-    if obj is None:
-        raise NotFoundError(_TCP_AO_KEY_NOT_FOUND)
-    await db.execute(delete(TcpAoKey).where(TcpAoKey.id == key_id_pk))
-    await audit.record(
-        db, principal, action="tcp_ao_key.delete",
-        target_type="tcp_ao_key", target_id=str(key_id_pk),
-    )
-    await db.commit()
-
-# ---- TCP AO key chain rotation: generate a year's worth at once ----
-
-class TcpAoRotationRequest(BaseModel):
-    """Generate `count` keys with consecutive `days_per_key`-day windows
-    starting at `start`. Each key gets a server-side 256-bit random
-    secret (32 bytes / 64 hex chars). Defaults match the operator's
-    usual ask: 12 keys x 30 days = ~1 year."""
-
-    start: datetime | None = None
-    count: int = 12
-    days_per_key: int = 30
-    algorithm: TcpAoAlgorithm = TcpAoAlgorithm.hmac_sha1_96
-
-@router.post(
-    "/tcp-ao-key-chains/{chain_id}/rotate-batch",
-    response_model=list[TcpAoKeyOut],
-    status_code=201,
-)
-async def rotate_tcp_ao_chain(
-    chain_id: UUID,
-    payload: TcpAoRotationRequest,
-    principal: Principal = Depends(require_capability("routing:tcp-ao-key-chains:rotate")),
-    db: AsyncSession = Depends(get_db),
-):
-    chain = await db.get(TcpAoKeyChain, chain_id)
-    if chain is None:
-        raise NotFoundError(_TCP_AO_CHAIN_NOT_FOUND)
-    if payload.count < 1 or payload.count > 365:
-        raise ValidationError("count must be 1..365")
-    if payload.days_per_key < 1 or payload.days_per_key > 366:
-        raise ValidationError("days_per_key must be 1..366")
-
-    # Resume from max(key_id) so a follow-up rotation extends the chain
-    # rather than colliding with existing keys.
-    next_id = (
-        await db.execute(
-            select(func.max(TcpAoKey.key_id)).where(TcpAoKey.key_chain_id == chain_id),
-        )
-    ).scalar_one_or_none()
-    next_key_id = (next_id or 0) + 1
-
-    start = payload.start or datetime.now(tz=UTC)
-    window = timedelta(days=payload.days_per_key)
-
-    created: list[TcpAoKey] = []
-    for i in range(payload.count):
-        valid_from = start + window * i
-        valid_to = valid_from + window
-        key_id = next_key_id + i
-        # 32 bytes = 256 bits of entropy. secrets.token_hex generates a
-        # cryptographically-secure hex string (64 chars).
-        secret_hex = secrets.token_hex(32)
-        obj = TcpAoKey(
-            key_chain_id=chain_id,
-            key_id=key_id,
-            send_id=key_id,
-            recv_id=key_id,
-            algorithm=payload.algorithm,
-            secret=secret_hex,
-            valid_from=valid_from,
-            valid_to=valid_to,
-            description=f"Auto-generated rotation #{i + 1}/{payload.count}",
-        )
-        db.add(obj)
-        created.append(obj)
-
-    await db.flush()
-    await audit.record(
-        db, principal, action="tcp_ao_key.rotate_batch",
-        target_type="tcp_ao_key_chain", target_id=str(chain_id),
-        diff={"count": payload.count, "days_per_key": payload.days_per_key,
-              "start": start.isoformat(), "first_key_id": next_key_id},
-    )
-    await db.commit()
-    for obj in created:
-        await db.refresh(obj)
-    return created
 
 # ----------------------- Prefix lists -----------------------
 
