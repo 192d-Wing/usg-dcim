@@ -15,6 +15,9 @@
 //	                                (default "23 * * * *" — hourly at :23)
 //	DCIM_FRESHNESS_SWEEP_CRON      cron spec for freshness_sweep
 //	                                (default "*/5 * * * *" — every 5 min)
+//	DCIM_DNS_SYNC_FROM_IPAM_CRON   cron spec for dns_sync_from_ipam
+//	                                (default "4-59/5 * * * *" — every 5 min
+//	                                offset 4 to spread vs freshness_sweep)
 //	SCHEDULER_HEALTH_ADDR          /healthz bind (default :8080)
 //
 // Cron defaults mirror Python's arq schedules in worker.py. Override
@@ -42,6 +45,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnspurge"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssync"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/freshness"
 	"github.com/usg-dcim/packages/shared-go/env"
 )
@@ -62,6 +66,12 @@ func main() {
 	// minutes. Flips current→stale for telemetry sources whose last
 	// successful poll is older than max(60s, 3× poll interval).
 	freshnessCron := env.String("DCIM_FRESHNESS_SWEEP_CRON", "*/5 * * * *")
+	// Default spec "4-59/5 * * * *" mirrors Python's
+	// cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))) — every 5
+	// minutes at :04, :09, :14, … The :04 offset is intentional: it
+	// staggers vs freshness_sweep (:00, :05, …) so two heavy passes
+	// don't collide on a single tick.
+	dnsSyncCron := env.String("DCIM_DNS_SYNC_FROM_IPAM_CRON", "4-59/5 * * * *")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -92,6 +102,10 @@ func main() {
 	}
 	if _, err := sch.Register(freshnessCron, &freshness.Job{Q: q}); err != nil {
 		log.Error("scheduler_register_failed", "job", freshness.Name, "err", err)
+		os.Exit(1)
+	}
+	if _, err := sch.Register(dnsSyncCron, &dnssync.Job{Q: q}); err != nil {
+		log.Error("scheduler_register_failed", "job", dnssync.Name, "err", err)
 		os.Exit(1)
 	}
 

@@ -3,15 +3,21 @@
 // Rebuilds source=ipam (and source=ddns) records for a site zone +
 // every derived reverse zone. Operator runs this when IPAM rows
 // change in ways the live triggers don't catch (bulk import, hand
-// edit). The arq cron worker (`dns_sync_from_ipam`) calls the same
-// service helper to keep the projection fresh.
+// edit). The Go scheduler job at internal/scheduler/jobs/dnssync
+// (Python's `dns_sync_from_ipam` arq cron) calls the same service
+// helper every 5 min to keep the projection fresh — drift bound is
+// therefore ~5 min, not 60s as the original arq cadence was.
 //
 // Partial-failure note: the existing Go codebase doesn't expose
 // pgx transactions on the Querier interface. The drop + bulk
 // insert here runs as sequential statements — a connection drop
 // mid-write leaves the zone half-rebuilt. Recovery is idempotent:
-// re-running drops the partial state and rebuilds. The arq cron
-// (every 60s) keeps drift bounded.
+// re-running drops the partial state and rebuilds. Cross-zone
+// behavior diverges from Python here: Python wraps the whole
+// `for z in zones: …` loop in one `db.commit()`, so a mid-loop
+// failure rolls everything back. Go's autocommit-per-statement
+// leaves zones 1..N-1 committed and zone N half-committed. The
+// next cron tick re-DELETEs and rebuilds, healing the divergence.
 package dns
 
 import (
@@ -136,15 +142,32 @@ type syncResponse struct {
 	Removed int    `json:"removed"`
 }
 
-// syncIPAMRecordsForZone is the service layer — handler-agnostic
-// so the cron worker (when ported) can call it the same way.
-func (h *Handler) syncIPAMRecordsForZone(ctx context.Context, zone dbq.DnsZone) (added, removed int, err error) {
-	// site zones only — apex zones don't project IPAM (they're
-	// operator-curated).
+// SyncQuerier is the minimal Querier surface SyncIPAMRecordsForZone
+// needs. Exported so packages outside `dns` (the scheduler job in
+// internal/scheduler/jobs/dnssync, specifically) can satisfy it
+// without depending on the larger handler.Querier interface.
+type SyncQuerier interface {
+	ListReverseZonesForSite(ctx context.Context, fabricID, siteID uuid.UUID) ([]dbq.DnsZone, error)
+	GetReverseZoneByName(ctx context.Context, fabricID, siteID uuid.UUID, name string) (dbq.DnsZone, error)
+	CreateReverseZone(ctx context.Context, name string, fabricID, siteID uuid.UUID) (dbq.DnsZone, error)
+	ListIPAddressesForSiteWithDnsName(ctx context.Context, siteID uuid.UUID) ([]dbq.IPAddressForSyncRow, error)
+	DeleteIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) error
+	CountIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) (int64, error)
+	CreateProjectedDnsRecord(ctx context.Context, arg dbq.CreateProjectedDnsRecordParams) (uuid.UUID, error)
+	TouchDnsZone(ctx context.Context, id uuid.UUID) (int64, error)
+}
+
+// SyncIPAMRecordsForZone rebuilds source=ipam/ddns DNS records for a
+// site zone + every derived reverse zone. Returns (added, removed)
+// row counts. Apex zones short-circuit to (0, 0) — they're
+// operator-curated and the cron skips them anyway. Handler-agnostic
+// so both the POST /dns/zones/{id}/sync-from-ipam endpoint and the
+// dns_sync_from_ipam scheduler job invoke the same code path.
+func SyncIPAMRecordsForZone(ctx context.Context, q SyncQuerier, zone dbq.DnsZone) (added, removed int, err error) {
 	if zone.Kind != "site" || zone.SiteID == nil {
 		return 0, 0, nil
 	}
-	revZones, err := h.Q.ListReverseZonesForSite(ctx, zone.FabricID, *zone.SiteID)
+	revZones, err := q.ListReverseZonesForSite(ctx, zone.FabricID, *zone.SiteID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -158,18 +181,25 @@ func (h *Handler) syncIPAMRecordsForZone(ctx context.Context, zone dbq.DnsZone) 
 	for _, z := range revZones {
 		zoneIDs = append(zoneIDs, z.ID)
 	}
-	dropCount, err := h.Q.CountIPAMRecordsInZones(ctx, zoneIDs)
+	dropCount, err := q.CountIPAMRecordsInZones(ctx, zoneIDs)
 	if err != nil {
 		return 0, 0, err
 	}
-	if err := h.Q.DeleteIPAMRecordsInZones(ctx, zoneIDs); err != nil {
+	if err := q.DeleteIPAMRecordsInZones(ctx, zoneIDs); err != nil {
 		return 0, 0, err
 	}
 	// Load every IP that should project.
-	rows, err := h.Q.ListIPAddressesForSiteWithDnsName(ctx, *zone.SiteID)
+	rows, err := q.ListIPAddressesForSiteWithDnsName(ctx, *zone.SiteID)
 	if err != nil {
 		return 0, 0, err
 	}
+	// Track which reverse zones we actually emitted PTRs into so we
+	// only touch (bump SOA / etag) the zones that genuinely changed
+	// — matches Python's `touched_zone_ids` set at
+	// services/dns.py:2682. Without this, a 5-min cron over quiet
+	// zones bumps every reverse zone's serial every tick, causing
+	// needless downstream resolver churn.
+	touchedRev := make(map[uuid.UUID]struct{})
 	for _, ip := range rows {
 		// Skip rows with NULL dns_name (defensive — the query
 		// already filters but a future schema change could lift
@@ -177,18 +207,25 @@ func (h *Handler) syncIPAMRecordsForZone(ctx context.Context, zone dbq.DnsZone) 
 		if ip.DnsName == nil || *ip.DnsName == "" {
 			continue
 		}
-		added2, err := h.emitForwardAndReverse(ctx, zone, ip, revByName)
+		added2, revZoneID, err := emitForwardAndReverse(ctx, q, zone, ip, revByName)
 		if err != nil {
 			return added, int(dropCount), err
 		}
 		added += added2
+		if revZoneID != uuid.Nil {
+			touchedRev[revZoneID] = struct{}{}
+		}
 	}
-	// Bump updated_at on every touched zone so its bundle etag flips.
-	if _, err := h.Q.TouchDnsZone(ctx, zone.ID); err != nil {
-		return added, int(dropCount), err
+	// Forward zone's serial only moves if we actually changed it
+	// (added rows, OR removed rows in the drop step). Matches
+	// Python's `if added > 0 or removed > 0: touched_zone_ids.add(zone.id)`.
+	if added > 0 || dropCount > 0 {
+		if _, err := q.TouchDnsZone(ctx, zone.ID); err != nil {
+			return added, int(dropCount), err
+		}
 	}
-	for _, z := range revByName {
-		if _, err := h.Q.TouchDnsZone(ctx, z.ID); err != nil {
+	for revID := range touchedRev {
+		if _, err := q.TouchDnsZone(ctx, revID); err != nil {
 			return added, int(dropCount), err
 		}
 	}
@@ -196,15 +233,21 @@ func (h *Handler) syncIPAMRecordsForZone(ctx context.Context, zone dbq.DnsZone) 
 }
 
 // emitForwardAndReverse emits one A/AAAA + matching PTR for an
-// IP. Returns the count added (0 or 2). revByName is mutated to
-// cache auto-created reverse zones across iterations.
-func (h *Handler) emitForwardAndReverse(
-	ctx context.Context, forward dbq.DnsZone, ip dbq.IPAddressForSyncRow,
+// IP. Returns (added, revZoneID, err) where added is 0/1/2 and
+// revZoneID is the reverse zone that received the PTR (or uuid.Nil
+// if no PTR was emitted — unparseable address, malformed reverse
+// origin, or PTR-side errors that didn't reach the INSERT).
+// revByName is mutated to cache auto-created reverse zones across
+// iterations. The returned revZoneID feeds the caller's
+// touchedRev set so we don't bump SOA on reverse zones we didn't
+// actually write to.
+func emitForwardAndReverse(
+	ctx context.Context, q SyncQuerier, forward dbq.DnsZone, ip dbq.IPAddressForSyncRow,
 	revByName map[string]dbq.DnsZone,
-) (int, error) {
+) (int, uuid.UUID, error) {
 	rtype, err := recordTypeForAddr(ip.Address)
 	if err != nil {
-		return 0, nil // skip unparseable address
+		return 0, uuid.Nil, nil // skip unparseable address
 	}
 	source := "ipam"
 	if ip.Source == "dhcp" {
@@ -214,31 +257,31 @@ func (h *Handler) emitForwardAndReverse(
 	forwardName := forwardLabelFor(*ip.DnsName, forward.Name)
 	fwdData, _ := json.Marshal(map[string]string{"target": ip.Address})
 	ipamID := ip.ID
-	if _, err := h.Q.CreateProjectedDnsRecord(ctx, dbq.CreateProjectedDnsRecordParams{
+	if _, err := q.CreateProjectedDnsRecord(ctx, dbq.CreateProjectedDnsRecordParams{
 		ZoneID: forward.ID, Name: forwardName, Type: rtype,
 		Data: fwdData, Source: source, IpamAddressID: &ipamID,
 	}); err != nil {
-		return 0, err
+		return 0, uuid.Nil, err
 	}
 	// Reverse PTR. Auto-create the reverse zone if it doesn't exist.
 	revOrigin, err := reverseZoneName(ip.Address)
 	if err != nil {
-		return 1, nil // forward succeeded; skip PTR
+		return 1, uuid.Nil, nil // forward succeeded; skip PTR
 	}
 	rev, ok := revByName[revOrigin]
 	if !ok {
 		// Try to fetch first in case a concurrent sync created it.
-		existing, gerr := h.Q.GetReverseZoneByName(ctx, forward.FabricID, *forward.SiteID, revOrigin)
+		existing, gerr := q.GetReverseZoneByName(ctx, forward.FabricID, *forward.SiteID, revOrigin)
 		if gerr == nil {
 			rev = existing
 		} else if errors.Is(gerr, pgx.ErrNoRows) {
-			created, cerr := h.Q.CreateReverseZone(ctx, revOrigin, forward.FabricID, *forward.SiteID)
+			created, cerr := q.CreateReverseZone(ctx, revOrigin, forward.FabricID, *forward.SiteID)
 			if cerr != nil {
-				return 1, cerr
+				return 1, uuid.Nil, cerr
 			}
 			rev = created
 		} else {
-			return 1, gerr
+			return 1, uuid.Nil, gerr
 		}
 		revByName[revOrigin] = rev
 	}
@@ -247,13 +290,13 @@ func (h *Handler) emitForwardAndReverse(
 	ptrData, _ := json.Marshal(map[string]string{
 		"target": ptrTargetFor(*ip.DnsName, forward.Name),
 	})
-	if _, err := h.Q.CreateProjectedDnsRecord(ctx, dbq.CreateProjectedDnsRecordParams{
+	if _, err := q.CreateProjectedDnsRecord(ctx, dbq.CreateProjectedDnsRecordParams{
 		ZoneID: rev.ID, Name: ptrLabel, Type: "PTR",
 		Data: ptrData, Source: source, IpamAddressID: &ipamID,
 	}); err != nil {
-		return 1, err
+		return 1, uuid.Nil, err
 	}
-	return 2, nil
+	return 2, rev.ID, nil
 }
 
 // ---- handler ----
@@ -281,7 +324,7 @@ func (h *Handler) syncFromIPAM(w http.ResponseWriter, r *http.Request) {
 			"zone is frozen — unfreeze before syncing")
 		return
 	}
-	added, removed, err := h.syncIPAMRecordsForZone(r.Context(), zone)
+	added, removed, err := SyncIPAMRecordsForZone(r.Context(), h.Q, zone)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

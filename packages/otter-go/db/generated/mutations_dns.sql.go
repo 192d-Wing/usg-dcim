@@ -925,6 +925,30 @@ func (q *Queries) ListReverseZonesForSite(ctx context.Context, fabricID, siteID 
 	return out, rows.Err()
 }
 
+const listAllSiteDnsZones = `SELECT ` + reverseZoneCols + `
+FROM dns_zones WHERE kind = 'site'::dns_zone_kind ORDER BY id`
+
+// ListAllSiteDnsZones returns every kind=site zone unpaginated for
+// the dns_sync_from_ipam scheduler job. Apex zones (operator-curated)
+// are filtered out at the SQL level so the cron loop doesn't iterate
+// rows the per-zone helper would no-op on anyway.
+func (q *Queries) ListAllSiteDnsZones(ctx context.Context) ([]DnsZone, error) {
+	rows, err := q.db.Query(ctx, listAllSiteDnsZones)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsZone{}
+	for rows.Next() {
+		var z DnsZone
+		if err := scanReverseZone(rows, &z); err != nil {
+			return nil, err
+		}
+		out = append(out, z)
+	}
+	return out, rows.Err()
+}
+
 const getReverseZoneByName = `SELECT ` + reverseZoneCols + `
 FROM dns_zones WHERE kind = 'reverse'::dns_zone_kind AND fabric_id = $1 AND site_id = $2 AND name = $3`
 
