@@ -959,3 +959,77 @@ type DhcpServer struct {
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
+
+// DhcpServerBundleRow is the projection of dhcp_servers the bundle
+// endpoint needs: the operator-authored base_config + the bundle
+// cache columns. The bundle endpoint reads the cache when present
+// (etag still valid) and falls back to a live render otherwise; the
+// rerender_dhcp_bundle scheduler job (followup PR) writes the cache.
+// Distinct from DhcpServer because the list/CRUD handlers don't need
+// the JSON base_config or the cache blob and shouldn't pay to
+// deserialize them. Mirrors the column shape of dhcp_servers's
+// PR 76 (base_config) + PR 83 (bundle_cache_*) additions.
+type DhcpServerBundleRow struct {
+	ID              uuid.UUID       `json:"id"`
+	Name            string          `json:"name"`
+	FabricID        uuid.UUID       `json:"fabric_id"`
+	BaseConfig      json.RawMessage `json:"base_config"`
+	BundleCacheAt   *time.Time      `json:"bundle_cache_at"`
+	BundleCacheEtag *string         `json:"bundle_cache_etag"`
+	BundleCacheJSON json.RawMessage `json:"bundle_cache_json"`
+}
+
+// DhcpScope is the dhcp_scopes table projection — full column shape.
+// JSON columns are json.RawMessage so the bundle renderer can decode
+// them on its own (no double-decode in the SQL layer). Nullable
+// columns are pointers per the codebase's convention; defaults match
+// migration 0028 + the PR 78 (template_id), PR 80 (last_diff_*),
+// PR 95 (auto_push_override, deleted_at) extensions.
+type DhcpScope struct {
+	ID                       uuid.UUID       `json:"id"`
+	DhcpServerID             uuid.UUID       `json:"dhcp_server_id"`
+	SubnetID                 *uuid.UUID      `json:"subnet_id"`
+	Name                     string          `json:"name"`
+	IPFamily                 int32           `json:"ip_family"`
+	Prefix                   string          `json:"prefix"`
+	PoolsJSON                json.RawMessage `json:"pools_json"`
+	PdPoolsJSON              json.RawMessage `json:"pd_pools_json"`
+	OptionsJSON              json.RawMessage `json:"options_json"`
+	ReservationsJSON         json.RawMessage `json:"reservations_json"`
+	ValidLifetimeSeconds     *int32          `json:"valid_lifetime_seconds"`
+	RenewTimerSeconds        *int32          `json:"renew_timer_seconds"`
+	RebindTimerSeconds       *int32          `json:"rebind_timer_seconds"`
+	PreferredLifetimeSeconds *int32          `json:"preferred_lifetime_seconds"`
+	Enabled                  bool            `json:"enabled"`
+	Description              *string         `json:"description"`
+	KeaSubnetID              *int32          `json:"kea_subnet_id"`
+	TemplateID               *uuid.UUID      `json:"template_id"`
+	LastDiffAt               *time.Time      `json:"last_diff_at"`
+	LastDiffStatus           *string         `json:"last_diff_status"`
+	LastDiffDeltaJSON        json.RawMessage `json:"last_diff_delta_json"`
+	AutoPushOverride         *bool           `json:"auto_push_override"`
+	DeletedAt                *time.Time      `json:"deleted_at"`
+	CreatedAt                time.Time       `json:"created_at"`
+	UpdatedAt                time.Time       `json:"updated_at"`
+}
+
+// DhcpScopeTemplate is the dhcp_scope_templates table projection —
+// reusable option-bundle + timer defaults that DhcpScope rows inherit
+// from when their TemplateID is set. The bundle renderer reads
+// OptionsJSON + the timer pointers via MergeTemplateIntoScope; the
+// fabric_id + ip_family columns are surfaced for the eventual HTTP
+// CRUD on /dhcp/scope-templates (out of scope for this PR).
+type DhcpScopeTemplate struct {
+	ID                       uuid.UUID       `json:"id"`
+	FabricID                 uuid.UUID       `json:"fabric_id"`
+	Name                     string          `json:"name"`
+	IPFamily                 int32           `json:"ip_family"`
+	OptionsJSON              json.RawMessage `json:"options_json"`
+	ValidLifetimeSeconds     *int32          `json:"valid_lifetime_seconds"`
+	RenewTimerSeconds        *int32          `json:"renew_timer_seconds"`
+	RebindTimerSeconds       *int32          `json:"rebind_timer_seconds"`
+	PreferredLifetimeSeconds *int32          `json:"preferred_lifetime_seconds"`
+	Description              *string         `json:"description"`
+	CreatedAt                time.Time       `json:"created_at"`
+	UpdatedAt                time.Time       `json:"updated_at"`
+}
