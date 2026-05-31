@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
@@ -77,9 +78,24 @@ type Querier interface {
 	MaxKeyIDInTcpAoKeyChain(ctx context.Context, keyChainID uuid.UUID) (int32, error)
 }
 
+// TxBeginner is the slim subset of *pgxpool.Pool the rotate-batch
+// handler uses to wrap its insert loop in a single transaction.
+// Production wires *pgxpool.Pool; tests pass nil to short-circuit to
+// the pre-existing autocommit-per-insert path (existing tests work
+// unchanged) or a stub Pool to verify the rollback path.
+type TxBeginner interface {
+	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
+}
+
 type Handler struct {
 	Q     Querier
 	Audit audit.Recorder
+	// Pool is optional. When nil, rotateTcpAoKeyChain falls back to
+	// autocommit-per-insert via h.Q (the original behavior). When set,
+	// the rotate-batch loop runs inside a single tx so partial failure
+	// rolls back atomically — closes the autocommit-partial-failure
+	// gap noted in PR #204's code-review followup.
+	Pool TxBeginner
 }
 
 func (h *Handler) Mount(r chi.Router) {
