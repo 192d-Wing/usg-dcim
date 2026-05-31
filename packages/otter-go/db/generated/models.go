@@ -153,6 +153,26 @@ type TcpAoKeyChain struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// TcpAoKey mirrors the SQLAlchemy TcpAoKey. One key in a chain;
+// Algorithm is the pg `tcp_ao_algorithm` enum surfaced as a string
+// (`::text` cast in the queries) — values: "hmac-sha1-96" |
+// "aes-128-cmac". ValidFrom / ValidTo are nullable: null/null means
+// always-valid.
+type TcpAoKey struct {
+	ID          uuid.UUID  `json:"id"`
+	KeyChainID  uuid.UUID  `json:"key_chain_id"`
+	KeyID       int32      `json:"key_id"`
+	SendID      int32      `json:"send_id"`
+	RecvID      int32      `json:"recv_id"`
+	Algorithm   string     `json:"algorithm"`
+	Secret      string     `json:"secret"`
+	ValidFrom   *time.Time `json:"valid_from"`
+	ValidTo     *time.Time `json:"valid_to"`
+	Description *string    `json:"description"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
 type PrefixList struct {
 	ID          uuid.UUID `json:"id"`
 	Name        string    `json:"name"`

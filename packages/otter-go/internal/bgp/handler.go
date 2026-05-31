@@ -57,7 +57,7 @@ type Querier interface {
 	UpdateRouteMapEntry(ctx context.Context, arg dbq.UpdateRouteMapEntryParams) (dbq.RouteMapEntry, error)
 	DeleteRouteMapEntry(ctx context.Context, id uuid.UUID) error
 
-	// TCP AO key-chains (PR — this PR). Keys + rotate-batch deferred.
+	// TCP AO key-chains (PR #203).
 	ListTcpAoKeyChains(ctx context.Context, arg dbq.ListTcpAoKeyChainsParams) ([]dbq.TcpAoKeyChain, error)
 	CountTcpAoKeyChains(ctx context.Context) (int64, error)
 	GetTcpAoKeyChain(ctx context.Context, id uuid.UUID) (dbq.TcpAoKeyChain, error)
@@ -65,6 +65,15 @@ type Querier interface {
 	UpdateTcpAoKeyChain(ctx context.Context, arg dbq.UpdateTcpAoKeyChainParams) (dbq.TcpAoKeyChain, error)
 	DeleteTcpAoKeyChain(ctx context.Context, id uuid.UUID) error
 	CountKeysInTcpAoKeyChain(ctx context.Context, keyChainID uuid.UUID) (int64, error)
+
+	// TCP AO keys + rotate-batch (this PR).
+	ListTcpAoKeys(ctx context.Context, arg dbq.ListTcpAoKeysParams) ([]dbq.TcpAoKey, error)
+	CountTcpAoKeys(ctx context.Context, arg dbq.CountTcpAoKeysParams) (int64, error)
+	GetTcpAoKey(ctx context.Context, id uuid.UUID) (dbq.TcpAoKey, error)
+	CreateTcpAoKey(ctx context.Context, arg dbq.CreateTcpAoKeyParams) (dbq.TcpAoKey, error)
+	UpdateTcpAoKey(ctx context.Context, arg dbq.UpdateTcpAoKeyParams) (dbq.TcpAoKey, error)
+	DeleteTcpAoKey(ctx context.Context, id uuid.UUID) error
+	MaxKeyIDInTcpAoKeyChain(ctx context.Context, keyChainID uuid.UUID) (int32, error)
 }
 
 type Handler struct {
@@ -114,12 +123,22 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("routing:tcp-ao-key-chains:create")).Post("/tcp-ao-key-chains", h.createTcpAoKeyChain)
 		r.With(auth.RequireCapability("routing:tcp-ao-key-chains:update")).Patch(tcpAoChainByID, h.updateTcpAoKeyChain)
 		r.With(auth.RequireCapability("routing:tcp-ao-key-chains:delete")).Delete(tcpAoChainByID, h.deleteTcpAoKeyChain)
+		r.With(auth.RequireCapability("routing:tcp-ao-key-chains:rotate")).Post(tcpAoChainByID+"/rotate-batch", h.rotateTcpAoKeyChain)
+
+		// ---- TCP AO keys ----
+		r.With(auth.RequireCapability(capTcpAoKeysRead)).Get("/tcp-ao-keys", h.listTcpAoKeys)
+		r.With(auth.RequireCapability(capTcpAoKeysRead)).Get(tcpAoKeyByID, h.getTcpAoKey)
+		r.With(auth.RequireCapability("routing:tcp-ao-keys:create")).Post("/tcp-ao-keys", h.createTcpAoKey)
+		r.With(auth.RequireCapability("routing:tcp-ao-keys:update")).Patch(tcpAoKeyByID, h.updateTcpAoKey)
+		r.With(auth.RequireCapability("routing:tcp-ao-keys:delete")).Delete(tcpAoKeyByID, h.deleteTcpAoKey)
 	})
 }
 
 const (
 	capTcpAoChainsRead = "routing:tcp-ao-key-chains:read"
+	capTcpAoKeysRead   = "routing:tcp-ao-keys:read"
 	tcpAoChainByID     = "/tcp-ao-key-chains/{id}"
+	tcpAoKeyByID       = "/tcp-ao-keys/{id}"
 )
 
 type asnsPage struct {

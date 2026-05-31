@@ -45,6 +45,13 @@ def test_openapi_published() -> None:
         "/api/v1/search",
         "/api/v1/dashboards",
         "/api/v1/inventory",
+        # TCP-AO key-chains + keys + rotate-batch fully on otter-go
+        # (PRs #203 + this); BGP module's other routes (asns, prefix
+        # lists, community lists, route maps) stay on Python until
+        # follow-up PRs port them. URL prefix is /bgp (capability
+        # namespace `routing:*` is a separate concept).
+        "/api/v1/bgp/tcp-ao-key-chains",
+        "/api/v1/bgp/tcp-ao-keys",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
