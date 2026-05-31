@@ -37,6 +37,15 @@ dnsPurgeMetrics:
 freshnessSweep:
   cron: "*/5 * * * *"
 
+# DCIM_DNS_SYNC_FROM_IPAM_CRON — schedule for dns_sync_from_ipam.
+# Default "4-59/5 * * * *" mirrors Python's
+# cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))) — every 5 min
+# starting at :04. The :04 offset staggers vs freshness_sweep (:00, :05)
+# so heavy passes don't collide. Per-zone DELETE+rebuild is idempotent,
+# so a missed tick self-heals on the next one.
+dnsSyncFromIpam:
+  cron: "4-59/5 * * * *"
+
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
   limits:   { cpu: 500m, memory: 256Mi }

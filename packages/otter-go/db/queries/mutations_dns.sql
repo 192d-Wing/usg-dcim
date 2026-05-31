@@ -326,6 +326,20 @@ WHERE kind = 'reverse'::dns_zone_kind
   AND fabric_id = $1
   AND site_id = $2;
 
+-- name: ListAllSiteDnsZones :many
+-- Used by the dns_sync_from_ipam scheduler job to enumerate every
+-- kind=site zone whose IPAM projection should be rebuilt. Unpaginated
+-- because the cron processes every site zone in one pass — apex zones
+-- are skipped (operator-curated; the per-zone helper returns (0, 0) on
+-- non-site kinds too, but filtering here keeps the loop tighter).
+SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
+       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+FROM dns_zones
+WHERE kind = 'site'::dns_zone_kind
+ORDER BY id;
+
 -- name: GetReverseZoneByName :one
 SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
        soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
