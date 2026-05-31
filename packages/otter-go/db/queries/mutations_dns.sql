@@ -340,6 +340,23 @@ FROM dns_zones
 WHERE kind = 'site'::dns_zone_kind
 ORDER BY id;
 
+-- name: ListSignedZonesWithZskRotation :many
+-- Used by the dns_rotate_zsks scheduler job. Only signed zones with a
+-- positive rotation policy are candidates; the cron then checks each
+-- zone's active ZSK age in code before issuing a rotation. Frozen
+-- zones are returned and skipped at the job level so the count
+-- ("checked" in the result map) matches Python's notion of "rows we
+-- looked at" — Python's select(...).where(...) has no frozen filter
+-- either; rotate_zone_key would raise on a frozen zone there too.
+SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
+       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+FROM dns_zones
+WHERE signed = true
+  AND zsk_rotation_days > 0
+ORDER BY id;
+
 -- name: GetReverseZoneByName :one
 SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
        soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,

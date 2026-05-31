@@ -24,6 +24,8 @@
 //	                                dhcp_scope_tombstone_purge job
 //	                                (default 30, matching Python's
 //	                                settings.dhcp_tombstone_retention_days)
+//	DCIM_DNS_ROTATE_ZSKS_CRON      cron spec for dns_rotate_zsks
+//	                                (default "17 3 * * *" — daily at 03:17)
 //	SCHEDULER_HEALTH_ADDR          /healthz bind (default :8080)
 //
 // Cron defaults mirror Python's arq schedules in worker.py. Override
@@ -52,6 +54,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcptombstone"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnspurge"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssecrotate"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssync"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/freshness"
 	"github.com/usg-dcim/packages/shared-go/env"
@@ -86,6 +89,14 @@ func main() {
 	// Python's settings.dhcp_tombstone_retention_days.
 	dhcpTombstoneCron := env.String("DCIM_DHCP_TOMBSTONE_PURGE_CRON", "30 3 * * *")
 	dhcpTombstoneRetention := env.Int("DCIM_DHCP_TOMBSTONE_RETENTION_DAYS", 30)
+	// Default spec "17 3 * * *" mirrors Python's
+	// cron(dns_rotate_zsks, hour={3}, minute={17}). Off-hours,
+	// off-round minute so it doesn't collide with dhcp_tombstone_purge
+	// (:30) or any future top-of-hour ticks. Daily cadence is fine —
+	// the per-zone rotation threshold is multi-day (zsk_rotation_days
+	// typically 30+), so checking every 24h has 24× headroom over the
+	// finest-grained rotation policy.
+	zskRotateCron := env.String("DCIM_DNS_ROTATE_ZSKS_CRON", "17 3 * * *")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -126,6 +137,10 @@ func main() {
 		Q: q, RetentionDays: dhcpTombstoneRetention,
 	}); err != nil {
 		log.Error("scheduler_register_failed", "job", dhcptombstone.Name, "err", err)
+		os.Exit(1)
+	}
+	if _, err := sch.Register(zskRotateCron, &dnssecrotate.Job{Q: q, Log: log}); err != nil {
+		log.Error("scheduler_register_failed", "job", dnssecrotate.Name, "err", err)
 		os.Exit(1)
 	}
 

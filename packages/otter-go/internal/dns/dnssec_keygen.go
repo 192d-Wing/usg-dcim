@@ -190,7 +190,7 @@ func (h *Handler) enableDnssec(w http.ResponseWriter, r *http.Request) {
 	}
 	// Generate KSK + ZSK. Default algorithm is ECDSAP256 — short
 	// keys, ubiquitous resolver support. Matches Python's default.
-	defaultAlg := h.defaultDnssecAlgorithm()
+	defaultAlg := defaultDnssecAlgorithm()
 	out := make([]dbq.DnsKeyRow, 0, 2)
 	for _, role := range []string{"ksk", "zsk"} {
 		material, err := generateDnssecKeypair(role, defaultAlg)
@@ -223,10 +223,3 @@ func (h *Handler) enableDnssec(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, out)
 }
 
-// defaultDnssecAlgorithm — the Python reads this from settings
-// (dns_dnssec_default_algorithm). For the Go port we hardcode
-// ECDSAP256 (the Python default); operators wanting other algs
-// will get a settings knob in a follow-up.
-func (h *Handler) defaultDnssecAlgorithm() string {
-	return "ecdsap256sha256"
-}

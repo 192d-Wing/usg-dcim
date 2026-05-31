@@ -949,6 +949,31 @@ func (q *Queries) ListAllSiteDnsZones(ctx context.Context) ([]DnsZone, error) {
 	return out, rows.Err()
 }
 
+const listSignedZonesWithZskRotation = `SELECT ` + reverseZoneCols + `
+FROM dns_zones WHERE signed = true AND zsk_rotation_days > 0 ORDER BY id`
+
+// ListSignedZonesWithZskRotation returns every signed zone whose
+// rotation policy says "rotate after N days." The scheduler job
+// then checks each zone's most-recent active ZSK age before issuing
+// the rotation — that age check stays in Go code, not SQL, to keep
+// the policy comparison readable and unit-testable.
+func (q *Queries) ListSignedZonesWithZskRotation(ctx context.Context) ([]DnsZone, error) {
+	rows, err := q.db.Query(ctx, listSignedZonesWithZskRotation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DnsZone{}
+	for rows.Next() {
+		var z DnsZone
+		if err := scanReverseZone(rows, &z); err != nil {
+			return nil, err
+		}
+		out = append(out, z)
+	}
+	return out, rows.Err()
+}
+
 const getReverseZoneByName = `SELECT ` + reverseZoneCols + `
 FROM dns_zones WHERE kind = 'reverse'::dns_zone_kind AND fabric_id = $1 AND site_id = $2 AND name = $3`
 
