@@ -1392,6 +1392,21 @@ func (q *Queries) SetDnsServerRenderStatus(ctx context.Context, arg SetDnsServer
 	return tag.RowsAffected(), nil
 }
 
+const deleteDnsServerMetricsSamplesOlderThan = `-- name: DeleteDnsServerMetricsSamplesOlderThan :exec
+DELETE FROM dns_server_metrics_samples WHERE observed_at < $1
+`
+
+// DeleteDnsServerMetricsSamplesOlderThan drops every metrics row with
+// observed_at strictly older than `cutoff`. Returns the number of
+// rows deleted so the scheduler job can structure-log it.
+func (q *Queries) DeleteDnsServerMetricsSamplesOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := q.db.Exec(ctx, deleteDnsServerMetricsSamplesOlderThan, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 const setDnsHealthCheckResult = `-- name: SetDnsHealthCheckResult :exec
 UPDATE dns_health_checks
 SET status = $2::dns_health_check_status,
