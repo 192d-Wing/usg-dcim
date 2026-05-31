@@ -37,6 +37,8 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+const headerContentType = "Content-Type"
+
 // severity ordering mirrors Python's _SEV_ORDER in
 // services/notifications.py:34. Tied to the catalog convention
 // info < warning < minor < major < critical.
@@ -229,7 +231,7 @@ func sendWebhook(ctx context.Context, client httpPoster, cfg map[string]any, pay
 			}
 		}
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
@@ -255,7 +257,7 @@ func sendSlack(ctx context.Context, client httpPoster, cfg map[string]any, paylo
 	if err != nil {
 		return false, err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(headerContentType, "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
@@ -308,7 +310,7 @@ func sendEmail(send smtpSender, cfg map[string]any, alert syntheticAlert, event 
 	hdr.Set("To", strings.Join(recipients, ", "))
 	hdr.Set("Subject", subject)
 	hdr.Set("MIME-Version", "1.0")
-	hdr.Set("Content-Type", "text/plain; charset=utf-8")
+	hdr.Set(headerContentType, "text/plain; charset=utf-8")
 	for k, vs := range hdr {
 		for _, v := range vs {
 			msg.WriteString(k)
