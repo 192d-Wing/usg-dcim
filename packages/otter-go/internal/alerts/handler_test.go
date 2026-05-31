@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 type fakeQ struct {
@@ -102,8 +103,13 @@ func mount(f *fakeQ) http.Handler {
 }
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Wildcard principal — alerts GETs require the matching
+	// alerts:X:read / maintenance:windows:read cap (PR cap-gate
+	// hardening). Per-cap denial paths are exercised separately
+	// in caps_test.go.
+	req := authtest.Request("GET", p, authtest.PrincipalWithCaps("*"), nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+	h.ServeHTTP(rec, req)
 	return rec
 }
 

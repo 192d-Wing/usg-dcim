@@ -301,6 +301,16 @@ ingress:
         - path: /api/v1/bgp
           pathType: Prefix
           backend: otter-go
+        # Alerts module fully on otter-go (this PR). All 12 routes
+        # (alerts list/ack, rules CRUD, maintenance-windows CRUD)
+        # were implemented on Go in PR 45 but stayed dark code until
+        # this PR cut the ingress over. Python's arq-driven
+        # evaluation loop in services/alerts.py is unchanged — the
+        # HTTP routes move; the eval loop stays Python until the Go
+        # scheduler is in place (followup).
+        - path: /api/v1/alerts
+          pathType: Prefix
+          backend: otter-go
         # Region-deploy read-side split. Detail GET + paginated event
         # history move to otter-go now; LIST + CREATE + the lifecycle
         # endpoints (preflight/start/abort/SSE/kubeconfig callback)

@@ -180,11 +180,11 @@ func TestEnforceSite_MaintenanceWindowDeletes(t *testing.T) {
 		wantCode int
 	}{
 		{"different-site forbidden", &other,
-			scopedPrincipal("alerts:maintenance-windows:delete", owned), http.StatusForbidden},
+			scopedPrincipal("maintenance:windows:delete", owned), http.StatusForbidden},
 		{"same-site ok", &owned,
-			scopedPrincipal("alerts:maintenance-windows:delete", owned), http.StatusNoContent},
+			scopedPrincipal("maintenance:windows:delete", owned), http.StatusNoContent},
 		{"enterprise-default scoped forbidden", nil,
-			scopedPrincipal("alerts:maintenance-windows:delete", owned), http.StatusForbidden},
+			scopedPrincipal("maintenance:windows:delete", owned), http.StatusForbidden},
 		{"enterprise-default global ok", nil,
 			auth.Principal{Capabilities: []string{"*"}}, http.StatusNoContent},
 	}

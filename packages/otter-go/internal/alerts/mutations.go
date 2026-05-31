@@ -297,7 +297,14 @@ func (h *Handler) createMW(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "name, starts_at, ends_at required")
 		return
 	}
-	if !h.enforceSiteOrGlobal(w, r, req.SiteID, "alerts:maintenance-windows:create") {
+	// Mirrors Python's _validate_window. Inverted bounds would persist
+	// silently and never match the suppression query in
+	// services/alerts.py (starts_at <= now AND ends_at >= now).
+	if !req.EndsAt.After(req.StartsAt) {
+		httpx.Error(w, http.StatusBadRequest, "ends_at must be after starts_at")
+		return
+	}
+	if !h.enforceSiteOrGlobal(w, r, req.SiteID, "maintenance:windows:create") {
 		return
 	}
 	p, _ := auth.From(r.Context())
@@ -369,7 +376,7 @@ func (h *Handler) updateMW(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.enforceSiteOrGlobal(w, r, currentSite, "alerts:maintenance-windows:update") {
+	if !h.enforceSiteOrGlobal(w, r, currentSite, "maintenance:windows:update") {
 		return
 	}
 	var req mwUpdateReq
@@ -377,8 +384,30 @@ func (h *Handler) updateMW(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "bad request body")
 		return
 	}
-	if req.siteSet && !h.enforceSiteOrGlobal(w, r, req.SiteID, "alerts:maintenance-windows:update") {
+	if req.siteSet && !h.enforceSiteOrGlobal(w, r, req.SiteID, "maintenance:windows:update") {
 		return
+	}
+	// Merge the patched start/end against the current row so we can
+	// validate the post-PATCH window — mirrors Python's
+	// _validate_window(new_start, new_end) at the same call site.
+	if req.StartsAt != nil || req.EndsAt != nil {
+		current, err := h.Q.GetMaintenanceWindow(r.Context(), id)
+		if err != nil {
+			mapErr(w, err, "maintenance window not found")
+			return
+		}
+		newStart := current.StartsAt
+		newEnd := current.EndsAt
+		if req.StartsAt != nil {
+			newStart = *req.StartsAt
+		}
+		if req.EndsAt != nil {
+			newEnd = *req.EndsAt
+		}
+		if !newEnd.After(newStart) {
+			httpx.Error(w, http.StatusBadRequest, "ends_at must be after starts_at")
+			return
+		}
 	}
 	out, err := h.Q.UpdateMaintenanceWindow(r.Context(), dbq.UpdateMaintenanceWindowParams{
 		ID: id, Name: req.Name,
@@ -406,7 +435,7 @@ func (h *Handler) deleteMW(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.enforceSiteOrGlobal(w, r, currentSite, "alerts:maintenance-windows:delete") {
+	if !h.enforceSiteOrGlobal(w, r, currentSite, "maintenance:windows:delete") {
 		return
 	}
 	if err := h.Q.DeleteMaintenanceWindow(r.Context(), id); err != nil {
