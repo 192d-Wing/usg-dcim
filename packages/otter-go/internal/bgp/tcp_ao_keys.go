@@ -437,39 +437,109 @@ func (h *Handler) rotateTcpAoKeyChain(w http.ResponseWriter, r *http.Request) {
 	if req.Start != nil {
 		start = req.Start.UTC()
 	}
-	window := time.Duration(req.DaysPerKey) * 24 * time.Hour
-	created := make([]dbq.TcpAoKey, 0, req.Count)
-	for i := 0; i < req.Count; i++ {
-		validFrom := start.Add(window * time.Duration(i))
-		validTo := validFrom.Add(window)
-		keyID := nextKeyID + int32(i)
-		secret, err := randomSecretHex()
-		if err != nil {
-			writeMapped(w, err)
-			return
-		}
-		desc := fmt.Sprintf("Auto-generated rotation #%d/%d", i+1, req.Count)
-		out, createErr := h.Q.CreateTcpAoKey(r.Context(), dbq.CreateTcpAoKeyParams{
-			KeyChainID: chainID, KeyID: keyID,
-			SendID: keyID, RecvID: keyID,
-			Algorithm: req.Algorithm, Secret: secret,
-			ValidFrom: &validFrom, ValidTo: &validTo,
-			Description: &desc,
-		})
-		if createErr != nil {
-			// Bail on first failure. pgxpool isn't tx-wrapped here, so
-			// already-inserted rows stay in the DB — operator reruns
-			// rotate-batch from the new max-key-id baseline. Record
-			// the audit row BEFORE returning so the partial-failure
-			// case is observable (#code-review on PR 204).
-			recordRotateBatchAudit(r.Context(), h.Audit, chainID, req, start, nextKeyID, len(created), false)
-			writeMapped(w, createErr)
-			return
-		}
-		created = append(created, out)
+	created, attempted, err := h.rotateInsert(r.Context(), chainID, req, start, nextKeyID)
+	if err != nil {
+		// `attempted` reports rows committed (DB invariant):
+		//   - tx path: 0 (rollback wiped every insert)
+		//   - autocommit fallback: len(created) at the moment of failure
+		// Audit row mirrors so forensics can join target_id to the
+		// keys table and verify the count.
+		recordRotateBatchAudit(r.Context(), h.Audit, chainID, req, start, nextKeyID, attempted, false)
+		writeMapped(w, err)
+		return
 	}
 	recordRotateBatchAudit(r.Context(), h.Audit, chainID, req, start, nextKeyID, len(created), true)
 	httpx.JSON(w, http.StatusCreated, created)
+}
+
+// rotateInsert runs the insert loop. When h.Pool is set the loop runs
+// inside a single pgx.Tx — partial failure rolls back atomically. When
+// nil (tests pre-PR #206), inserts autocommit one-by-one and partial
+// failure leaves prior rows in the DB (the previous behavior). The
+// returned `attempted` counter reflects loop iterations that called
+// CreateTcpAoKey before any failure — handy in the autocommit fallback
+// for the audit row's `actual` field.
+func (h *Handler) rotateInsert(ctx context.Context, chainID uuid.UUID, req tcpAoRotateReq, start time.Time, nextKeyID int32) ([]dbq.TcpAoKey, int, error) {
+	window := time.Duration(req.DaysPerKey) * 24 * time.Hour
+	run := func(q rotateInsertQ) ([]dbq.TcpAoKey, int, error) {
+		created := make([]dbq.TcpAoKey, 0, req.Count)
+		for i := 0; i < req.Count; i++ {
+			validFrom := start.Add(window * time.Duration(i))
+			validTo := validFrom.Add(window)
+			keyID := nextKeyID + int32(i)
+			secret, err := randomSecretHex()
+			if err != nil {
+				return created, len(created), err
+			}
+			desc := fmt.Sprintf("Auto-generated rotation #%d/%d", i+1, req.Count)
+			out, err := q.CreateTcpAoKey(ctx, dbq.CreateTcpAoKeyParams{
+				KeyChainID: chainID, KeyID: keyID,
+				SendID: keyID, RecvID: keyID,
+				Algorithm: req.Algorithm, Secret: secret,
+				ValidFrom: &validFrom, ValidTo: &validTo,
+				Description: &desc,
+			})
+			if err != nil {
+				// Return len(created), NOT i+1: the failing
+				// CreateTcpAoKey did not produce a row. attempted ==
+				// rows in DB (autocommit path) or 0 (tx path after
+				// rollback) — the caller decides which to audit.
+				return created, len(created), err
+			}
+			created = append(created, out)
+		}
+		return created, len(created), nil
+	}
+	if h.Pool == nil {
+		// Test fallback: autocommit per insert via the existing fake.
+		return run(h.Q)
+	}
+	tx, err := h.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, 0, err
+	}
+	// Rollback uses a fresh background context with a short timeout so
+	// the cleanup still runs when the request context is cancelled
+	// mid-loop (client disconnect). Without this the rollback fires
+	// on a cancelled ctx and pgxpool has to discard the conn —
+	// correct end-state but noisy on a hot instance.
+	defer func() {
+		rbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rbCtx)
+	}()
+	// Re-read MaxKeyIDInTcpAoKeyChain inside the tx so two concurrent
+	// rotate-batch calls can't compute the same nextKeyID. pgx routes
+	// the inner Querier through the tx, and the row read sits behind
+	// the chain row's lock-effects so PG MVCC serializes concurrent
+	// rotations.
+	if maxID, err := dbq.New(tx).MaxKeyIDInTcpAoKeyChain(ctx, chainID); err != nil {
+		return nil, 0, err
+	} else if maxID != nextKeyID-1 {
+		// Recompute baseline: a concurrent rotation snuck in between
+		// the pre-tx MaxKeyID read and BeginTx. Rebuild nextKeyID so
+		// the inserts pick up where the OTHER batch left off.
+		nextKeyID = maxID + 1
+	}
+	q := dbq.New(tx)
+	created, _, runErr := run(q)
+	if runErr != nil {
+		// Tx rollback discards every row inserted in this iteration of
+		// the loop; surface `attempted=0` to make that explicit in the
+		// audit row.
+		return nil, 0, runErr
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, 0, err
+	}
+	return created, len(created), nil
+}
+
+// rotateInsertQ is the slim sub-interface rotateInsert calls — lets
+// the in-tx path run against a Querier built from the tx (dbq.New(tx))
+// without exposing the full handler.Querier surface.
+type rotateInsertQ interface {
+	CreateTcpAoKey(ctx context.Context, arg dbq.CreateTcpAoKeyParams) (dbq.TcpAoKey, error)
 }
 
 // recordRotateBatchAudit is split out so the success + partial-failure

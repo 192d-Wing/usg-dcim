@@ -74,7 +74,10 @@ func main() {
 	ih := &ipam.Handler{Q: q, Audit: q}
 	lih := &lir.Handler{Q: q, Audit: q}
 	ph := &power.Handler{Q: q, Audit: q}
-	bh := &bgp.Handler{Q: q, Audit: q}
+	// Pool is wired so rotateTcpAoKeyChain wraps its insert loop in a
+	// single pgx.Tx (PR #206): partial failure rolls back atomically
+	// instead of leaving 5-of-12 freshly-rotated keys stranded.
+	bh := &bgp.Handler{Q: q, Audit: q, Pool: pool}
 	dh := &dns.Handler{Q: q, Audit: q}
 	auh := &audit.Handler{Q: q}
 	alh := &alerts.Handler{Q: q, Audit: q}

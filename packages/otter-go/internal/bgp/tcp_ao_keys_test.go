@@ -319,6 +319,24 @@ func TestUpdateTcpAoKey_BadAlgorithm_400(t *testing.T) {
 
 // ----- rotate-batch -----
 
+// The rotate-batch route is gated by routing:tcp-ao-key-chains:rotate.
+// A principal holding the read cap (but not rotate) must be refused.
+func TestRotateBatch_NoCap_403(t *testing.T) {
+	chainID := uuid.New()
+	r := chi.NewRouter()
+	(&Handler{Q: &tcpAoKeysFake{}}).Mount(r)
+	body, _ := json.Marshal(map[string]any{"count": 1})
+	req := authtest.Request(http.MethodPost,
+		"/bgp/tcp-ao-key-chains/"+chainID.String()+"/rotate-batch",
+		authtest.PrincipalWithCaps("routing:tcp-ao-key-chains:read"), // read != rotate
+		bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRotateBatch_ChainNotFound_404(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{"count": 1})
 	rec := httptest.NewRecorder()
@@ -422,6 +440,72 @@ func TestRotateBatch_CustomStart_AcceptedAndOffsetCorrectly(t *testing.T) {
 	}
 	if f.createInputs[0].Algorithm != "aes-128-cmac" {
 		t.Errorf("algorithm not threaded: %s", f.createInputs[0].Algorithm)
+	}
+}
+
+// errBeginner satisfies bgp.TxBeginner with a fixed error so the test
+// can verify the BeginTx-failed audit shape without standing up a
+// real pgx.Tx. The autocommit-fallback path is already covered by
+// TestRotateBatch_CreateError_BailsAndReportsError below (Pool=nil).
+type errBeginner struct{ err error }
+
+func (e *errBeginner) BeginTx(_ context.Context, _ pgx.TxOptions) (pgx.Tx, error) {
+	return nil, e.err
+}
+
+// auditCapture implements audit.Recorder and records the params each
+// InsertAuditLog call received, so the test can decode DiffJson and
+// inspect the actual/complete fields.
+type auditCapture struct {
+	rows []dbq.InsertAuditLogParams
+}
+
+func (a *auditCapture) InsertAuditLog(_ context.Context, arg dbq.InsertAuditLogParams) error {
+	a.rows = append(a.rows, arg)
+	return nil
+}
+
+// When Pool is set and BeginTx returns an error, the audit row must
+// record actual=0 + complete=false and the response must be 5xx —
+// no rows were inserted (the tx never opened).
+func TestRotateBatch_TxBeginFails_AuditActualZeroAndCompleteFalse(t *testing.T) {
+	chainID := uuid.New()
+	auditCap := &auditCapture{}
+	h := &Handler{
+		Q: &tcpAoKeysFake{
+			getChain: func(_ context.Context, _ uuid.UUID) (dbq.TcpAoKeyChain, error) {
+				return dbq.TcpAoKeyChain{ID: chainID}, nil
+			},
+		},
+		Audit: auditCap,
+		Pool:  &errBeginner{err: errors.New("pool exhausted")},
+	}
+	r := chi.NewRouter()
+	h.Mount(r)
+	body, _ := json.Marshal(map[string]any{"count": 5})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, authedReq(http.MethodPost,
+		"/bgp/tcp-ao-key-chains/"+chainID.String()+"/rotate-batch", body))
+	if rec.Code == http.StatusCreated {
+		t.Fatalf("expected non-2xx (BeginTx failed), got %d", rec.Code)
+	}
+	if len(auditCap.rows) != 1 {
+		t.Fatalf("expected exactly one audit row, got %d", len(auditCap.rows))
+	}
+	row := auditCap.rows[0]
+	if row.Action != "tcp_ao_key.rotate_batch" {
+		t.Errorf("audit Action wrong: %s", row.Action)
+	}
+	var diff map[string]any
+	if err := json.Unmarshal(row.DiffJson, &diff); err != nil {
+		t.Fatalf("audit DiffJson not decodable: %v", err)
+	}
+	// JSON numbers decode as float64.
+	if v, ok := diff["actual"].(float64); !ok || v != 0 {
+		t.Errorf("audit Diff[actual] should be 0 on rollback; got %v", diff["actual"])
+	}
+	if v, ok := diff["complete"].(bool); !ok || v {
+		t.Errorf("audit Diff[complete] should be false on rollback; got %v", diff["complete"])
 	}
 }
 
