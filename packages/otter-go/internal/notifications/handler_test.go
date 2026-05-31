@@ -5,12 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/smtp"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
@@ -36,6 +40,14 @@ func (f *fakeQ) UpdateNotificationChannel(_ context.Context, a dbq.UpdateNotific
 	return dbq.NotificationChannel{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteNotificationChannel(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeQ) GetNotificationChannel(_ context.Context, id uuid.UUID) (dbq.NotificationChannel, error) {
+	for _, c := range f.channels {
+		if c.ID == id {
+			return c, nil
+		}
+	}
+	return dbq.NotificationChannel{}, pgx.ErrNoRows
+}
 
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
@@ -167,3 +179,254 @@ func TestDeleteChannel_CanonicalCap_204(t *testing.T) {
 		t.Fatalf("expected 204, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
+
+// ---- POST /channels/{id}/test ----
+
+// fakePoster captures requests and replays a programmed response.
+type fakePoster struct {
+	gotReq    *http.Request
+	gotBody   []byte
+	respCode  int
+	respBody  string
+	returnErr error
+}
+
+func (p *fakePoster) Do(req *http.Request) (*http.Response, error) {
+	p.gotReq = req
+	if req.Body != nil {
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(req.Body)
+		p.gotBody = buf.Bytes()
+	}
+	if p.returnErr != nil {
+		return nil, p.returnErr
+	}
+	code := p.respCode
+	if code == 0 {
+		code = http.StatusOK
+	}
+	body := p.respBody
+	return &http.Response{
+		StatusCode: code,
+		Body:       io.NopCloser(bytes.NewReader([]byte(body))),
+		Header:     http.Header{},
+	}, nil
+}
+
+
+// swapHTTPClient swaps the package-level default for the duration of
+// the test. Tests in this package don't run in parallel.
+func swapHTTPClient(t *testing.T, p httpPoster) {
+	t.Helper()
+	prev := defaultHTTPClient
+	defaultHTTPClient = p
+	t.Cleanup(func() { defaultHTTPClient = prev })
+}
+
+func swapSMTP(t *testing.T, s smtpSender) {
+	t.Helper()
+	prev := defaultSMTP
+	defaultSMTP = s
+	t.Cleanup(func() { defaultSMTP = prev })
+}
+
+func testChannel_POST(t *testing.T, h http.Handler, id uuid.UUID) *httptest.ResponseRecorder {
+	t.Helper()
+	p := authtest.PrincipalWithCaps("notifications:channels:update")
+	req := authtest.Request(http.MethodPost, "/notifications/channels/"+id.String()+"/test", p, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestTestChannel_NotFound_404(t *testing.T) {
+	rec := testChannel_POST(t, mount(&fakeQ{}), uuid.New())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTestChannel_DisabledChannel_ReportsReason(t *testing.T) {
+	id := uuid.New()
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "ops", Kind: "webhook", Enabled: false,
+			MinSeverity: "warning", NotifyOnFire: true},
+	}}
+	rec := testChannel_POST(t, mount(f), id)
+	if rec.Code != 200 {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body testChannelResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Delivered || body.Error != "channel is disabled" {
+		t.Errorf("body wrong: %+v", body)
+	}
+}
+
+func TestTestChannel_FilterSkipsWarning(t *testing.T) {
+	// channel only fires on critical+ — the synthetic alert is
+	// warning, so the filter rejects it. Matches Python's branch at
+	// api/notifications.py:133.
+	id := uuid.New()
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "ops", Kind: "webhook", Enabled: true,
+			MinSeverity: "critical", NotifyOnFire: true},
+	}}
+	rec := testChannel_POST(t, mount(f), id)
+	var body testChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Delivered || body.Error == "" {
+		t.Errorf("expected delivered=false with error, got %+v", body)
+	}
+}
+
+func TestTestChannel_FilterSkipsFireDisabled(t *testing.T) {
+	id := uuid.New()
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "ops", Kind: "webhook", Enabled: true,
+			MinSeverity: "warning", NotifyOnFire: false},
+	}}
+	rec := testChannel_POST(t, mount(f), id)
+	var body testChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Delivered {
+		t.Errorf("notify_on_fire=false should skip; got delivered=true: %+v", body)
+	}
+}
+
+func TestTestChannel_WebhookSuccess(t *testing.T) {
+	id := uuid.New()
+	cfg, _ := json.Marshal(map[string]any{"url": "https://hooks.example/foo"})
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "ops", Kind: "webhook", Enabled: true,
+			MinSeverity: "warning", NotifyOnFire: true, ConfigJson: cfg},
+	}}
+	poster := &fakePoster{respCode: 200}
+	swapHTTPClient(t, poster)
+	rec := testChannel_POST(t, mount(f), id)
+	var body testChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if !body.Delivered || body.Error != "" {
+		t.Errorf("expected delivered=true, no error; got %+v", body)
+	}
+	if poster.gotReq == nil || poster.gotReq.URL.String() != "https://hooks.example/foo" {
+		t.Errorf("webhook URL not forwarded; got %v", poster.gotReq)
+	}
+	// Spot-check the payload shape — at minimum the event key
+	// should be "alert.fire".
+	var posted map[string]any
+	if err := json.Unmarshal(poster.gotBody, &posted); err != nil {
+		t.Fatalf("payload not valid JSON: %v", err)
+	}
+	if posted["event"] != "alert.fire" {
+		t.Errorf("event key wrong: %v", posted["event"])
+	}
+}
+
+func TestTestChannel_WebhookErrorReportsStatus(t *testing.T) {
+	id := uuid.New()
+	cfg, _ := json.Marshal(map[string]any{"url": "https://hooks.example/foo"})
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "ops", Kind: "webhook", Enabled: true,
+			MinSeverity: "warning", NotifyOnFire: true, ConfigJson: cfg},
+	}}
+	swapHTTPClient(t, &fakePoster{respCode: 503})
+	rec := testChannel_POST(t, mount(f), id)
+	var body testChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Delivered || body.Error == "" {
+		t.Errorf("expected delivered=false with error, got %+v", body)
+	}
+	if !strings.Contains(body.Error, "503") {
+		t.Errorf("error should mention status; got %q", body.Error)
+	}
+}
+
+func TestTestChannel_UnknownKind_ReportsError(t *testing.T) {
+	id := uuid.New()
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "x", Kind: "carrier-pigeon", Enabled: true,
+			MinSeverity: "warning", NotifyOnFire: true},
+	}}
+	rec := testChannel_POST(t, mount(f), id)
+	var body testChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Delivered || body.Error == "" {
+		t.Errorf("expected delivered=false with error, got %+v", body)
+	}
+}
+
+func TestTestChannel_WebhookMissingURL(t *testing.T) {
+	id := uuid.New()
+	cfg, _ := json.Marshal(map[string]any{}) // empty config
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "ops", Kind: "webhook", Enabled: true,
+			MinSeverity: "warning", NotifyOnFire: true, ConfigJson: cfg},
+	}}
+	rec := testChannel_POST(t, mount(f), id)
+	var body testChannelResponse
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Delivered || !strings.Contains(body.Error, "url") {
+		t.Errorf("expected error mentioning url, got %+v", body)
+	}
+}
+
+func TestTestChannel_RequiresUpdateCap(t *testing.T) {
+	// cap-less principal must be denied. The route uses
+	// notifications:channels:update.
+	id := uuid.New()
+	f := &fakeQ{channels: []dbq.NotificationChannel{
+		{ID: id, Name: "ops", Kind: "webhook", Enabled: true,
+			MinSeverity: "warning", NotifyOnFire: true},
+	}}
+	req := authtest.Request(http.MethodPost,
+		"/notifications/channels/"+id.String()+"/test",
+		authtest.PrincipalWithCaps("notifications:channels:read"), nil)
+	rec := httptest.NewRecorder()
+	mount(f).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rec.Code)
+	}
+}
+
+// Pure-helper coverage so the (severity, event) filter logic is
+// pinned even outside the HTTP path.
+func TestChannelMatches_RespectsSeverityFloor(t *testing.T) {
+	c := dbq.NotificationChannel{Enabled: true, NotifyOnFire: true, MinSeverity: "major"}
+	if channelMatches(c, "warning", "fire") {
+		t.Error("warning < major should not match")
+	}
+	if !channelMatches(c, "critical", "fire") {
+		t.Error("critical >= major should match")
+	}
+}
+
+func TestChannelMatches_RespectsEventGate(t *testing.T) {
+	c := dbq.NotificationChannel{Enabled: true, NotifyOnFire: true, NotifyOnResolve: false, MinSeverity: "info"}
+	if channelMatches(c, "info", "resolve") {
+		t.Error("notify_on_resolve=false should reject resolve events")
+	}
+}
+
+func TestSMTPSender_NoHostNoOp(t *testing.T) {
+	// Mirrors Python's "soft no-op so dev/CI doesn't error on missing
+	// SMTP" branch — when DCIM_SMTP_HOST is unset, sendEmail returns
+	// (false, nil) without invoking the sender.
+	t.Setenv("DCIM_SMTP_HOST", "")
+	calls := 0
+	swapSMTP(t, func(_ string, _ smtp.Auth, _ string, _ []string, _ []byte) error {
+		calls++
+		return nil
+	})
+	cfg := map[string]any{"recipients": []any{"a@example.com"}}
+	delivered, err := sendEmail(defaultSMTP, cfg, syntheticAlert{Severity: "warning", State: "firing", Summary: "x"}, "fire")
+	if err != nil || delivered {
+		t.Errorf("expected (false, nil) for missing host, got (%v, %v)", delivered, err)
+	}
+	if calls != 0 {
+		t.Errorf("smtp sender should not be invoked when host unset; calls=%d", calls)
+	}
+}
+

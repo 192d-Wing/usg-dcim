@@ -45,6 +45,15 @@ var ErrOutsideScope = errors.New("resource is outside your scope")
 // because it's referenced" from generic 5xx.
 var ErrFKViolation = errors.New("resource has dependent rows")
 
+// ErrUniqueViolation is the unique-constraint sentinel for INSERT
+// handlers rejecting duplicates (e.g. a second notification channel
+// with the same name). Python's mutation handlers pre-fetched by
+// name and returned 409 with a hand-rolled message; Go relies on
+// the DB unique constraint and surfaces this sentinel via
+// httpx.Mapped's SQLSTATE 23505 path so the response is 409 instead
+// of the default 500.
+var ErrUniqueViolation = errors.New("resource already exists")
+
 func Mapped(err error) (int, string) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
@@ -52,6 +61,8 @@ func Mapped(err error) (int, string) {
 	case errors.Is(err, ErrOutsideScope):
 		return http.StatusForbidden, err.Error()
 	case errors.Is(err, ErrFKViolation) || isPgFKViolation(err):
+		return http.StatusConflict, err.Error()
+	case errors.Is(err, ErrUniqueViolation) || isPgUniqueViolation(err):
 		return http.StatusConflict, err.Error()
 	default:
 		return http.StatusInternalServerError, "internal error"
@@ -63,4 +74,11 @@ func Mapped(err error) (int, string) {
 func isPgFKViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+}
+
+// isPgUniqueViolation matches Postgres SQLSTATE 23505 (unique_violation)
+// so INSERT handlers don't need to wrap pgx errors by hand.
+func isPgUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

@@ -57,6 +57,11 @@ def test_openapi_published() -> None:
         # module is cut over, so the negative-assert targets the
         # specific subprefix that left.
         "/api/v1/dns/bgp-peers",
+        # /api/v1/notifications/* fully moved to otter-go (channels
+        # list/create/patch/delete were already there; this PR added
+        # the test endpoint). services/notifications.py stays in
+        # Python because the alert eval loop still uses it.
+        "/api/v1/notifications",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

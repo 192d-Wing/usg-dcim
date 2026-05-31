@@ -336,6 +336,19 @@ ingress:
         - path: /api/v1/dns/bgp-peers
           pathType: Prefix
           backend: otter-go
+        # Notifications module fully on otter-go after the test
+        # endpoint port. The existing channels CRUD was already
+        # implemented on Go (PR 45 + the RBAC fix in PR #207); the
+        # new POST /channels/{id}/test endpoint mirrors Python's
+        # services.notifications dispatch (webhook + slack + email
+        # senders) so operators can verify wiring before relying on
+        # it for real incidents. Same ABAC (notifications:channels:*),
+        # 23505 → 409 mapping added to httpx.Mapped so duplicate
+        # channel-name conflicts surface as 409 (Python's pre-check
+        # returned the same status).
+        - path: /api/v1/notifications
+          pathType: Prefix
+          backend: otter-go
         # Region-deploy read-side split. Detail GET + paginated event
         # history move to otter-go now; LIST + CREATE + the lifecycle
         # endpoints (preflight/start/abort/SSE/kubeconfig callback)

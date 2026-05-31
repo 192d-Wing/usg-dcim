@@ -21,6 +21,7 @@ import (
 type Querier interface {
 	ListNotificationChannels(ctx context.Context, arg dbq.ListNotificationChannelsParams) ([]dbq.NotificationChannel, error)
 	CountNotificationChannels(ctx context.Context) (int64, error)
+	GetNotificationChannel(ctx context.Context, id uuid.UUID) (dbq.NotificationChannel, error)
 
 	// Mutations (PR 45)
 	CreateNotificationChannel(ctx context.Context, arg dbq.CreateNotificationChannelParams) (dbq.NotificationChannel, error)
@@ -48,6 +49,11 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability(capChannelsCreate)).Post("/channels", h.createChannel)
 		r.With(auth.RequireCapability(capChannelsUpdate)).Patch("/channels/{id}", h.updateChannel)
 		r.With(auth.RequireCapability(capChannelsDelete)).Delete("/channels/{id}", h.deleteChannel)
+		// Test endpoint reuses the channels:update capability — Python's
+		// (api/notifications.py:106) anchors here too. Cap-wise it's
+		// "did this principal configure the channel?" not a separate
+		// test-only privilege.
+		r.With(auth.RequireCapability(capChannelsUpdate)).Post("/channels/{id}/test", h.testChannel)
 	})
 }
 
