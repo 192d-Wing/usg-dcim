@@ -85,11 +85,9 @@ ingress:
         # /api/v1/dashboards/* fully on otter-go after Phase 3. Single
         # Prefix rule supersedes the per-phase rules that lived here.
         - { path: /api/v1/dashboards, pathType: Prefix, backend: otter-go }
-        # TCP-AO key-chains + keys + rotate-batch (PRs #203 + this).
-        # URL prefix is /bgp; capability namespace `routing:*` is
-        # separate.
-        - { path: /api/v1/bgp/tcp-ao-key-chains, pathType: Prefix, backend: otter-go }
-        - { path: /api/v1/bgp/tcp-ao-keys,       pathType: Prefix, backend: otter-go }
+        # BGP module fully on otter-go (TCP-AO via PRs #203/#204; rest
+        # was implemented on Go in PR 44 but dark until this cutover).
+        - { path: /api/v1/bgp, pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []

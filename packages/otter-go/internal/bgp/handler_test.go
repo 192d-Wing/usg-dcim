@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
 type fakeQ struct {
@@ -174,8 +175,13 @@ func mount(f *fakeQ) http.Handler {
 }
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
 	t.Helper()
+	// Wildcard principal — the BGP GET routes now require the matching
+	// routing:X:read cap (see Mount), so anonymous test requests would
+	// 403 / 500. The cap-deny path is exercised in tcp_ao_test.go and
+	// the new bgp_caps_test.go.
+	req := authtest.Request("GET", p, authtest.PrincipalWithCaps("*"), nil)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", p, nil))
+	h.ServeHTTP(rec, req)
 	return rec
 }
 
