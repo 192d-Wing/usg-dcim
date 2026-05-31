@@ -128,10 +128,17 @@ authoritative record.
 
 ### Cutover queue — infrastructure-scale (multi-PR)
 
-- [ ] **Go scheduler**. Pick `gocron` or `robfig/cron`. Port the
-      simplest cron first (`dns_purge_metrics`) to validate the
-      ergonomics, then escalate. Blocks the DHCP cron paths and the
-      alerts evaluation loop. ~10–15 PRs.
+- [x] **Go scheduler — proof of concept (PR #208)**. `robfig/cron/v3`
+      picked. `packages/otter-go/internal/scheduler` is the harness
+      (Job interface, register/run loop, structured slog wrapper,
+      cron.Recover panic guard). First job:
+      `internal/scheduler/jobs/dnspurge` (port of Python's
+      `dns_purge_metrics`). New binary `otter-go-scheduler` with
+      /healthz + /readyz; same shape as otter-go-worker. Helm sub-
+      chart deferred to a follow-up. Remaining arq cron entries port
+      one at a time: alerts evaluation, collectors sweep, freshness
+      sweep, DHCP sync/age-out/drift/tombstone, IPAM utilization,
+      DNS sync-from-ipam/rotate-zsks/health-checks, notify-bridge.
 - [ ] **DHCP stack**. ~5000 lines across `services/dhcp_*.py` plus the
       `api/ipam.py` `/dhcp/*` endpoints. Push/drift/reconcile/
       bundle-cache/push-history; Kea Control Agent integration via

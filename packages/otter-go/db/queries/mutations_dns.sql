@@ -534,6 +534,13 @@ WHERE server_id = $1
   AND observed_at >= $2
 ORDER BY observed_at ASC;
 
+-- name: DeleteDnsServerMetricsSamplesOlderThan :exec
+-- Cron-driven retention: the dns_server_metrics_samples table grows
+-- unbounded otherwise (every scrape inserts a fresh row). The Go
+-- scheduler's dns_purge_metrics job picks the cutoff in code so the
+-- retention policy stays a single deployment-config knob.
+DELETE FROM dns_server_metrics_samples WHERE observed_at < $1;
+
 -- name: SetDnsHealthCheckResult :exec
 -- PR 72 — collector callback after running one probe. Status,
 -- last_checked_at, last_error are the only mutable fields. Audit
