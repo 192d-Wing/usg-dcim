@@ -6,7 +6,6 @@ from .collectors import router as collectors_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
 from .ipam import router as ipam_router
-from .notifications import router as notifications_router
 from .organization import router as organization_router
 from .power import router as power_router
 from .regiondeploy import router as regiondeploy_router
@@ -55,7 +54,16 @@ router.include_router(power_router)
 # capabilities/catalog + system/dns-settings routes that briefly
 # lingered behind the ingress split in PR #182. The longer-prefix
 # ingress paths that kept those on Python are gone.
-router.include_router(notifications_router)
+# /api/v1/notifications/* fully moved to otter-go (this PR). The
+# existing channels CRUD was on Go (PR 45 + RBAC fix in PR #207); the
+# new POST /channels/{id}/test endpoint mirrors Python's
+# services.notifications dispatch (webhook + slack + email) so
+# operators can verify wiring. Python no longer registers the router
+# so a misrouted internal call fails loud instead of silently
+# double-serving. services/notifications.py + models/notifications.py
+# still exist — the alert evaluation loop in Python (untouched) calls
+# notif_svc.dispatch() directly during fire/resolve events. Channel
+# rows in Postgres remain the canonical config source for both.
 router.include_router(organization_router)
 router.include_router(ipam_router)
 router.include_router(dns_router)

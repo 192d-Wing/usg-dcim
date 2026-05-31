@@ -3,7 +3,11 @@
 
 package dbq
 
-import "context"
+import (
+	"context"
+
+	"github.com/google/uuid"
+)
 
 const listNotificationChannels = `-- name: ListNotificationChannels :many
 SELECT id, name, kind::text AS kind, config_json,
@@ -48,4 +52,22 @@ func (q *Queries) CountNotificationChannels(ctx context.Context) (int64, error) 
 	var n int64
 	err := row.Scan(&n)
 	return n, err
+}
+
+const getNotificationChannel = `-- name: GetNotificationChannel :one
+SELECT id, name, kind::text AS kind, config_json,
+       min_severity::text AS min_severity,
+       notify_on_fire, notify_on_resolve, enabled,
+       created_at, updated_at
+FROM notification_channels
+WHERE id = $1
+`
+
+func (q *Queries) GetNotificationChannel(ctx context.Context, id uuid.UUID) (NotificationChannel, error) {
+	row := q.db.QueryRow(ctx, getNotificationChannel, id)
+	var c NotificationChannel
+	err := row.Scan(&c.ID, &c.Name, &c.Kind, &c.ConfigJson,
+		&c.MinSeverity, &c.NotifyOnFire, &c.NotifyOnResolve, &c.Enabled,
+		&c.CreatedAt, &c.UpdatedAt)
+	return c, err
 }
