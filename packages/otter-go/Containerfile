@@ -1,15 +1,29 @@
 # Build context: REPO ROOT — otter-go depends on packages/shared-go via
 # an in-tree replace directive.
+#
+# Multi-binary image: cmd/otter-go is the HTTP server, cmd/otter-go-
+# scheduler is the cron-driven worker introduced in PR #208 (Helm
+# sub-chart in PR #209 selects the entrypoint). Both binaries live in
+# the same image so a Helm release pins a single image tag for all
+# deployments. cmd/otter-go-worker (the ARIN drain) is built too; it
+# stays dark from k8s until its own sub-chart lands.
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY packages/shared-go ./packages/shared-go
 COPY packages/otter-go  ./packages/otter-go
 WORKDIR /src/packages/otter-go
 RUN go mod download
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go ./cmd/otter-go
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go           ./cmd/otter-go
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-scheduler ./cmd/otter-go-scheduler
+RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-worker    ./cmd/otter-go-worker
 
 FROM gcr.io/distroless/static-debian12
-COPY --from=build /out/otter-go /otter-go
+COPY --from=build /out/otter-go           /otter-go
+COPY --from=build /out/otter-go-scheduler /otter-go-scheduler
+COPY --from=build /out/otter-go-worker    /otter-go-worker
 EXPOSE 8000
 USER nonroot:nonroot
+# Default entrypoint stays /otter-go so existing deployments don't
+# need any changes. Sub-charts that run the scheduler/worker
+# override `command:` to point at the matching binary.
 ENTRYPOINT ["/otter-go"]

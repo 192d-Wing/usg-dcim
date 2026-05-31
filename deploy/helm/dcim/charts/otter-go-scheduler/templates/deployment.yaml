@@ -1,0 +1,59 @@
+{{- if .Values.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "otter-go-scheduler.fullname" . }}
+  labels: {{- include "otter-go-scheduler.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # strategy.type is hard-coded to Recreate — robfig/cron fires on
+  # every replica's clock, so a RollingUpdate's transient two-replica
+  # overlap would double-fire any cron tick caught in the maxSurge
+  # window. Operators can still tune sub-fields via .Values.strategy
+  # but type cannot be overridden from values.
+  strategy:
+    type: Recreate
+    {{- with .Values.strategy }}
+    {{- if .rollingUpdate }}
+    rollingUpdate: {{- toYaml .rollingUpdate | nindent 6 }}
+    {{- end }}
+    {{- end }}
+  selector:
+    matchLabels: {{- include "otter-go-scheduler.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "otter-go-scheduler.labels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      # Same merge pattern as otter-go: subchart-local podSecurity
+      # wins (distroless nonroot UID 65532), other umbrella keys
+      # propagate.
+      securityContext: {{- toYaml (mergeOverwrite (deepCopy .Values.global.podSecurityContext) .Values.podSecurityContext) | nindent 8 }}
+      containers:
+        - name: otter-go-scheduler
+          image: {{ include "otter-go-scheduler.image" . }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          # The multi-binary image's default entrypoint is /otter-go
+          # (the API). Override to run the scheduler binary instead.
+          command: ["/otter-go-scheduler"]
+          ports:
+            # 8000 (not the binary's 8080 default) so this pod rides
+            # the umbrella's existing default-deny NetworkPolicy
+            # ingress allowlist (templates/networkpolicy.yaml:16-18:
+            # 8000/8443/80). Without this any cluster whose CNI
+            # enforces probe-traffic against NetworkPolicy would
+            # leave the pod NotReady forever.
+            - { name: http, containerPort: 8000 }
+          env:
+            - { name: SCHEDULER_HEALTH_ADDR,           value: ":8000" }
+            - { name: DCIM_POSTGRES_DSN_RAW,           value: {{ include "dcim.goDsn" . | quote }} }
+            - { name: DCIM_DNS_PURGE_CRON,             value: {{ .Values.dnsPurgeMetrics.cron | quote }} }
+            - { name: DCIM_DNS_METRICS_RETENTION_DAYS, value: {{ .Values.dnsPurgeMetrics.retentionDays | quote }} }
+          readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
+          livenessProbe:  {{- toYaml .Values.livenessProbe  | nindent 12 }}
+          resources:      {{- toYaml .Values.resources      | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+{{- end }}

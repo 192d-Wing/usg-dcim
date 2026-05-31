@@ -1,0 +1,61 @@
+# otter-go-scheduler subchart values. Disabled by default — see
+# Chart.yaml. Operators flip this to true once they're ready to run
+# the Go scheduler alongside the Python arq worker (jobs are
+# idempotent so a brief overlap is safe).
+enabled: false
+
+# Single replica: robfig/cron fires on every replica's own wall
+# clock, so two replicas would double-fire every job. The jobs that
+# have landed so far (dns_purge_metrics) are idempotent so double-
+# firing is safe-but-wasteful. When a job that ISN'T idempotent
+# lands (e.g. notify-bridge, DHCP push), we'll either add leader
+# election or stay at replicaCount: 1 forever; this default is the
+# conservative starting point.
+replicaCount: 1
+
+# Strategy type is HARD-CODED to Recreate in the deployment template
+# — values here are merged in but type:Recreate always wins. The
+# reason is robfig/cron firing on every replica's clock: a
+# RollingUpdate's transient two-replica overlap would double-fire any
+# cron tick caught in the maxSurge window. The Recreate posture means
+# the scheduler is briefly unavailable during a rollout — acceptable
+# for cron-driven jobs that fire on the minute boundary.
+strategy: {}
+
+# DCIM_DNS_PURGE_CRON / DCIM_DNS_METRICS_RETENTION_DAYS — see PR #208.
+# Defaults here match the binary defaults (hourly at :23, 14d).
+dnsPurgeMetrics:
+  cron: "23 * * * *"
+  retentionDays: 14
+
+resources:
+  requests: { cpu: 50m,  memory: 64Mi }
+  limits:   { cpu: 500m, memory: 256Mi }
+
+# Distroless image runs as nonroot UID 65532, GID 65532. The umbrella
+# merges this map onto global.podSecurityContext via mergeOverwrite
+# (subchart wins) — same pattern otter-go uses.
+podSecurityContext:
+  runAsUser: 65532
+  runAsGroup: 65532
+  runAsNonRoot: true
+  fsGroup: 65532
+
+readinessProbe:
+  httpGet: { path: /readyz, port: http }
+  # pgxpool.New uses a 30s connect timeout (cmd/otter-go-scheduler/
+  # main.go:61). initialDelaySeconds=5 matches otter-go and avoids
+  # the noisy ~3-failure probe churn that initialDelaySeconds=2
+  # produces on a cold cluster while the pool is still connecting.
+  initialDelaySeconds: 5
+  periodSeconds: 10
+livenessProbe:
+  httpGet: { path: /healthz, port: http }
+  initialDelaySeconds: 5
+  periodSeconds: 30
+
+# Allow longer than the k8s default 30s so the next cron jobs to
+# port (notify_bridge, dhcp_sync — flagged as the next non-idempotent
+# entries) can drain past SIGTERM. dns_purge_metrics is one DELETE
+# that completes in ms; this is forward-defense for the bigger jobs.
+terminationGracePeriodSeconds: 60

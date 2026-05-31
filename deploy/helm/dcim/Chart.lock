@@ -1,0 +1,30 @@
+dependencies:
+- name: otter
+  repository: ""
+  version: 0.1.0
+- name: otter-go
+  repository: ""
+  version: 0.1.0
+- name: otter-go-scheduler
+  repository: ""
+  version: 0.1.0
+- name: otter-worker
+  repository: ""
+  version: 0.1.0
+- name: finch
+  repository: ""
+  version: 0.1.0
+- name: heron
+  repository: ""
+  version: 0.1.0
+- name: magpie
+  repository: ""
+  version: 0.1.0
+- name: beagle
+  repository: ""
+  version: 0.1.0
+- name: badger
+  repository: ""
+  version: 0.1.0
+digest: sha256:b359431810a3a4cdaf935ab3a984affd586643a577643a928d263aa11e3358c9
+generated: "2026-05-31T03:06:43.09157-05:00"

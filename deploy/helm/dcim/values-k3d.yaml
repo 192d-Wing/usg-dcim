@@ -53,6 +53,13 @@ otter-go:
   podDisruptionBudget:
     enabled: false
 
+# Opt the lab cluster into the new Go scheduler so the harness gets
+# real validation alongside Python's arq. Both fire dns_purge_metrics
+# (Python at minute=23, Go default same) — DELETE is idempotent so
+# the overlap is wasted-work, not corruption.
+otter-go-scheduler:
+  enabled: true
+
 magpie:
   enabled: false
 
