@@ -28,6 +28,15 @@ dnsPurgeMetrics:
   cron: "23 * * * *"
   retentionDays: 14
 
+# DCIM_FRESHNESS_SWEEP_CRON — schedule for freshness_sweep.
+# Default "*/5 * * * *" mirrors Python's arq schedule (every 5 min).
+# Only the SCHEDULE is tunable from Helm; the staleness threshold
+# (max(60s, 3× poll_interval_seconds)) is hard-coded in the SQL
+# (FlipStaleTelemetrySources in db/queries/telemetry.sql) — changing
+# it requires a migration + binary rebuild, not a values override.
+freshnessSweep:
+  cron: "*/5 * * * *"
+
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
   limits:   { cpu: 500m, memory: 256Mi }

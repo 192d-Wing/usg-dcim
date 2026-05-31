@@ -10,6 +10,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const flipStaleTelemetrySources = `-- name: FlipStaleTelemetrySources :exec
+UPDATE telemetry_sources
+SET freshness  = 'stale'::freshness_state,
+    updated_at = NOW()
+WHERE freshness        = 'current'::freshness_state
+  AND last_success_at IS NOT NULL
+  AND last_success_at < NOW() - (GREATEST(60, poll_interval_seconds * 3) || ' seconds')::interval
+`
+
+// FlipStaleTelemetrySources returns the number of rows flipped from
+// current→stale so the scheduler job can structure-log it.
+func (q *Queries) FlipStaleTelemetrySources(ctx context.Context) (int64, error) {
+	tag, err := q.db.Exec(ctx, flipStaleTelemetrySources)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 const getTelemetrySeries = `-- name: GetTelemetrySeries :many
 SELECT ts, value
 FROM telemetry_samples
