@@ -46,6 +46,18 @@ freshnessSweep:
 dnsSyncFromIpam:
   cron: "4-59/5 * * * *"
 
+# DCIM_DHCP_TOMBSTONE_PURGE_CRON + retention for the once-daily
+# dhcp_scope_tombstone_purge job. Default "30 3 * * *" mirrors Python's
+# cron(dhcp_scope_tombstone_purge, hour={3}, minute={30}) — daily at
+# 03:30 UTC, off-hours so the DELETE doesn't compete with operator
+# traffic. Retention defaults to 30 days (Python's
+# settings.dhcp_tombstone_retention_days). The Kea-side DELETE already
+# ran when the scope was soft-deleted (PR 74); this only drops the
+# orphaned tombstone rows from Postgres.
+dhcpTombstonePurge:
+  cron: "30 3 * * *"
+  retentionDays: 30
+
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
   limits:   { cpu: 500m, memory: 256Mi }

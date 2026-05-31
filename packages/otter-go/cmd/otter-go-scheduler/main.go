@@ -18,6 +18,12 @@
 //	DCIM_DNS_SYNC_FROM_IPAM_CRON   cron spec for dns_sync_from_ipam
 //	                                (default "4-59/5 * * * *" — every 5 min
 //	                                offset 4 to spread vs freshness_sweep)
+//	DCIM_DHCP_TOMBSTONE_PURGE_CRON cron spec for dhcp_scope_tombstone_purge
+//	                                (default "30 3 * * *" — daily at 03:30)
+//	DCIM_DHCP_TOMBSTONE_RETENTION_DAYS retention window for the
+//	                                dhcp_scope_tombstone_purge job
+//	                                (default 30, matching Python's
+//	                                settings.dhcp_tombstone_retention_days)
 //	SCHEDULER_HEALTH_ADDR          /healthz bind (default :8080)
 //
 // Cron defaults mirror Python's arq schedules in worker.py. Override
@@ -44,6 +50,7 @@ import (
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcptombstone"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnspurge"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssync"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/freshness"
@@ -72,6 +79,13 @@ func main() {
 	// staggers vs freshness_sweep (:00, :05, …) so two heavy passes
 	// don't collide on a single tick.
 	dnsSyncCron := env.String("DCIM_DNS_SYNC_FROM_IPAM_CRON", "4-59/5 * * * *")
+	// Default spec "30 3 * * *" mirrors Python's
+	// cron(dhcp_scope_tombstone_purge, hour={3}, minute={30}) — daily
+	// at 03:30 UTC. Off-hours so the DELETE doesn't compete with
+	// operator-initiated traffic. Default 30-day retention mirrors
+	// Python's settings.dhcp_tombstone_retention_days.
+	dhcpTombstoneCron := env.String("DCIM_DHCP_TOMBSTONE_PURGE_CRON", "30 3 * * *")
+	dhcpTombstoneRetention := env.Int("DCIM_DHCP_TOMBSTONE_RETENTION_DAYS", 30)
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -106,6 +120,12 @@ func main() {
 	}
 	if _, err := sch.Register(dnsSyncCron, &dnssync.Job{Q: q}); err != nil {
 		log.Error("scheduler_register_failed", "job", dnssync.Name, "err", err)
+		os.Exit(1)
+	}
+	if _, err := sch.Register(dhcpTombstoneCron, &dhcptombstone.Job{
+		Q: q, RetentionDays: dhcpTombstoneRetention,
+	}); err != nil {
+		log.Error("scheduler_register_failed", "job", dhcptombstone.Name, "err", err)
 		os.Exit(1)
 	}
 
@@ -144,7 +164,9 @@ func main() {
 	// if the harness's ctx doesn't reach them.
 	sch.Start(ctx)
 	log.Info("otter_go_scheduler_started",
-		"retention_days", retentionDays, "addr", healthAddr)
+		"dns_metrics_retention_days", retentionDays,
+		"dhcp_tombstone_retention_days", dhcpTombstoneRetention,
+		"addr", healthAddr)
 
 	<-ctx.Done()
 	log.Info("otter_go_scheduler_shutdown")

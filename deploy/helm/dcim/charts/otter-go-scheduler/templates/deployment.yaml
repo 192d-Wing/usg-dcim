@@ -51,6 +51,8 @@ spec:
             - { name: DCIM_DNS_METRICS_RETENTION_DAYS, value: {{ .Values.dnsPurgeMetrics.retentionDays | quote }} }
             - { name: DCIM_FRESHNESS_SWEEP_CRON,       value: {{ .Values.freshnessSweep.cron | quote }} }
             - { name: DCIM_DNS_SYNC_FROM_IPAM_CRON,    value: {{ .Values.dnsSyncFromIpam.cron | quote }} }
+            - { name: DCIM_DHCP_TOMBSTONE_PURGE_CRON,  value: {{ .Values.dhcpTombstonePurge.cron | quote }} }
+            - { name: DCIM_DHCP_TOMBSTONE_RETENTION_DAYS, value: {{ .Values.dhcpTombstonePurge.retentionDays | quote }} }
           readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
           livenessProbe:  {{- toYaml .Values.livenessProbe  | nindent 12 }}
           resources:      {{- toYaml .Values.resources      | nindent 12 }}
