@@ -8,15 +8,18 @@
 //
 //	DCIM_POSTGRES_DSN_RAW          same DSN otter-go uses
 //	DCIM_DNS_METRICS_RETENTION_DAYS retention window for the
-//	                                dns_purge_metrics job (default 30,
+//	                                dns_purge_metrics job (default 14,
 //	                                matching Python's
 //	                                settings.dns_metrics_retention_days)
+//	DCIM_DNS_PURGE_CRON            cron spec for dns_purge_metrics
+//	                                (default "23 * * * *" — hourly at :23)
+//	DCIM_FRESHNESS_SWEEP_CRON      cron spec for freshness_sweep
+//	                                (default "*/5 * * * *" — every 5 min)
 //	SCHEDULER_HEALTH_ADDR          /healthz bind (default :8080)
 //
-// Cron spec for dns_purge_metrics defaults to "23 * * * *" — hourly
-// at :23, matching Python's cron(dns_purge_metrics, minute={23}) in
-// worker.py:557. Override via DCIM_DNS_PURGE_CRON for ops throttling
-// (e.g. during a backfill).
+// Cron defaults mirror Python's arq schedules in worker.py. Override
+// via the env vars for ops throttling (e.g. during a backfill) instead
+// of rebuilding the binary.
 //
 // Concurrency: jobs autocommit per scheduler.Job.Run; if a future
 // job needs tx semantics it pulls the pool from this main via the
@@ -39,6 +42,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnspurge"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/freshness"
 	"github.com/usg-dcim/packages/shared-go/env"
 )
 
@@ -53,6 +57,11 @@ func main() {
 	// can override (e.g. to throttle to daily during a backfill) via
 	// the env var instead of rebuilding the binary.
 	purgeCron := env.String("DCIM_DNS_PURGE_CRON", "23 * * * *")
+	// Default spec "*/5 * * * *" mirrors Python's
+	// cron(freshness_sweep, minute=set(range(0, 60, 5))) — every 5
+	// minutes. Flips current→stale for telemetry sources whose last
+	// successful poll is older than max(60s, 3× poll interval).
+	freshnessCron := env.String("DCIM_FRESHNESS_SWEEP_CRON", "*/5 * * * *")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -78,7 +87,11 @@ func main() {
 		Q:             q,
 		RetentionDays: retentionDays,
 	}); err != nil {
-		log.Error("scheduler_register_failed", "err", err)
+		log.Error("scheduler_register_failed", "job", dnspurge.Name, "err", err)
+		os.Exit(1)
+	}
+	if _, err := sch.Register(freshnessCron, &freshness.Job{Q: q}); err != nil {
+		log.Error("scheduler_register_failed", "job", freshness.Name, "err", err)
 		os.Exit(1)
 	}
 
