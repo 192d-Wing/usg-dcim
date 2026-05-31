@@ -58,6 +58,14 @@ dhcpTombstonePurge:
   cron: "30 3 * * *"
   retentionDays: 30
 
+# DCIM_DNS_ROTATE_ZSKS_CRON — schedule for dns_rotate_zsks. Default
+# "17 3 * * *" mirrors Python's cron(dns_rotate_zsks, hour={3}, minute={17}).
+# Daily 03:17 UTC, off-round vs other 03:* jobs. The per-zone rotation
+# threshold (zsk_rotation_days on dns_zones) is the policy knob; this
+# cron just checks ages once daily and rotates anything that's due.
+dnsRotateZsks:
+  cron: "17 3 * * *"
+
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
   limits:   { cpu: 500m, memory: 256Mi }
