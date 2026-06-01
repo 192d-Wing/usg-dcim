@@ -95,3 +95,30 @@ func uuidPtrToStringPtr(v *uuid.UUID) *string {
 	s := v.String()
 	return &s
 }
+
+// FromDbqScopeForPush is a shortcut that maps the narrow
+// DhcpScopeForPushRow projection (PR 2 of DHCP push) directly to the
+// renderer's Scope input. push.PushScope and diff.DiffScope both
+// load this row shape; sharing the conversion here keeps each
+// orchestrator from carrying its own DhcpScopeForPushRow → dbq.DhcpScope
+// shim. The full dbq.DhcpScope path is still used by the bundle
+// endpoint, which reads more columns than push needs.
+func FromDbqScopeForPush(s dbq.DhcpScopeForPushRow) Scope {
+	return FromDbqScope(dbq.DhcpScope{
+		ID:                       s.ID,
+		DhcpServerID:             s.DhcpServerID,
+		IPFamily:                 s.IPFamily,
+		Prefix:                   s.Prefix,
+		PoolsJSON:                s.PoolsJSON,
+		PdPoolsJSON:              s.PdPoolsJSON,
+		OptionsJSON:              s.OptionsJSON,
+		ReservationsJSON:         s.ReservationsJSON,
+		ValidLifetimeSeconds:     s.ValidLifetimeSeconds,
+		RenewTimerSeconds:        s.RenewTimerSeconds,
+		RebindTimerSeconds:       s.RebindTimerSeconds,
+		PreferredLifetimeSeconds: s.PreferredLifetimeSeconds,
+		KeaSubnetID:              s.KeaSubnetID,
+		TemplateID:               s.TemplateID,
+		Enabled:                  s.Enabled,
+	})
+}

@@ -111,3 +111,19 @@ WHERE id = $1;
 INSERT INTO dhcp_scope_push_history
        (id, scope_id, server_id, operation, kea_subnet_id, status, error, duration_ms, attempted_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW());
+
+-- name: WriteDhcpScopeDiffState :exec
+-- Mirrors persist_diff_state at services/dhcp_push.py:934. Updates
+-- the three last_diff_* columns: timestamp moves with NOW();
+-- status carries one of in_sync / drifted / missing_from_kea /
+-- never_pushed / error; delta_json carries the per-key delta map
+-- when status='drifted' and NULL on every other terminal state
+-- (a stale delta would mislead operators reading the LIST
+-- endpoint). Used by the per-scope diff endpoint, diff-all
+-- preflight, and push-drifted preflight.
+UPDATE dhcp_scopes
+SET last_diff_at         = NOW(),
+    last_diff_status     = $2,
+    last_diff_delta_json = $3,
+    updated_at           = NOW()
+WHERE id = $1;

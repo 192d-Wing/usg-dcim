@@ -293,7 +293,7 @@ func callKea(
 	ctx context.Context, client KeaClient,
 	scope dbq.DhcpScopeForPushRow, tpl *dbq.DhcpScopeTemplate, isUpdate bool,
 ) ([]byte, kea.Status, string) {
-	bundleScope := bundle.FromDbqScope(asDbqScope(scope))
+	bundleScope := bundle.FromDbqScopeForPush(scope)
 	var bundleTpl *bundle.Template
 	if tpl != nil {
 		t := bundle.FromDbqTemplate(*tpl)
@@ -342,30 +342,6 @@ func dispatchKeaCall(
 		return client.Subnet6Update(ctx, subnet)
 	default:
 		return client.Subnet6Add(ctx, subnet)
-	}
-}
-
-// asDbqScope re-projects a DhcpScopeForPushRow back to a dbq.DhcpScope
-// so bundle.FromDbqScope (which takes the full row) accepts it. The
-// fields the renderer actually reads are present; the rest get
-// zero-values which the renderer doesn't touch.
-func asDbqScope(s dbq.DhcpScopeForPushRow) dbq.DhcpScope {
-	return dbq.DhcpScope{
-		ID:                       s.ID,
-		DhcpServerID:             s.DhcpServerID,
-		IPFamily:                 s.IPFamily,
-		Prefix:                   s.Prefix,
-		PoolsJSON:                s.PoolsJSON,
-		PdPoolsJSON:              s.PdPoolsJSON,
-		OptionsJSON:              s.OptionsJSON,
-		ReservationsJSON:         s.ReservationsJSON,
-		ValidLifetimeSeconds:     s.ValidLifetimeSeconds,
-		RenewTimerSeconds:        s.RenewTimerSeconds,
-		RebindTimerSeconds:       s.RebindTimerSeconds,
-		PreferredLifetimeSeconds: s.PreferredLifetimeSeconds,
-		KeaSubnetID:              s.KeaSubnetID,
-		TemplateID:               s.TemplateID,
-		Enabled:                  s.Enabled,
 	}
 }
 
