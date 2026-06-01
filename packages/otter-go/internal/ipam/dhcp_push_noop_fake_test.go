@@ -103,3 +103,18 @@ func (dhcpPushNoop) UpdateDhcpScopeTemplate(_ context.Context, _ dbq.UpdateDhcpS
 func (dhcpPushNoop) DeleteDhcpScopeTemplate(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
+
+// DHCP drift-summary read paths (PR 9). All three return empty
+// slices so unrelated tests don't accidentally fall into a half-
+// defined fleet state.
+func (dhcpPushNoop) ListDhcpServersForDriftSummary(_ context.Context, _ []uuid.UUID) ([]dbq.DhcpServerDriftSummaryRow, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) ListDhcpScopeDriftStatusByServers(_ context.Context, _ []uuid.UUID) ([]dbq.DhcpScopeDriftStatusRow, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) ListFiringDhcpDriftAlertKeys(_ context.Context) ([]string, error) {
+	return nil, nil
+}
