@@ -119,6 +119,23 @@ func (q *Queries) GetDhcpServerFabricID(ctx context.Context, id uuid.UUID) (uuid
 	return fid, err
 }
 
+const getDhcpScopeFabricID = `-- name: GetDhcpScopeFabricID :one
+SELECT s.fabric_id
+FROM dhcp_scopes c
+JOIN dhcp_servers s ON s.id = c.dhcp_server_id
+WHERE c.id = $1`
+
+// GetDhcpScopeFabricID is the 2-hop ABAC lookup used by the per-scope
+// push / diff / push-history endpoints — scope → server → fabric.
+// Returns pgx.ErrNoRows when the scope id doesn't exist OR points at a
+// deleted server (the JOIN inner-projects).
+func (q *Queries) GetDhcpScopeFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getDhcpScopeFabricID, id)
+	var fid uuid.UUID
+	err := row.Scan(&fid)
+	return fid, err
+}
+
 const getSubnetFabricID = `-- name: GetSubnetFabricID :one
 SELECT fabric_id FROM subnets WHERE id = $1`
 

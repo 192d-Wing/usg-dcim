@@ -47,6 +47,17 @@ SELECT fabric_id FROM overlays WHERE id = $1;
 -- name: GetDhcpServerFabricID :one
 SELECT fabric_id FROM dhcp_servers WHERE id = $1;
 
+-- name: GetDhcpScopeFabricID :one
+-- 2-hop scope → server → fabric. Used by the per-scope push / diff /
+-- push-history endpoints to enforce EnforceFabricScope before the
+-- scope id has been resolved to a row. INNER JOIN returns 0 rows
+-- (pgx.ErrNoRows) when the scope id is missing or its server has
+-- been deleted — both treated as 404 by the caller.
+SELECT s.fabric_id
+FROM dhcp_scopes c
+JOIN dhcp_servers s ON s.id = c.dhcp_server_id
+WHERE c.id = $1;
+
 -- name: GetSubnetFabricID :one
 -- Subnets denormalize fabric_id alongside the supernet FK (see
 -- CreateSubnet, which copies fabric/vrf from the parent supernet),

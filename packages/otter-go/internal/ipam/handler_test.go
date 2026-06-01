@@ -14,6 +14,7 @@ import (
 )
 
 type fakeQ struct {
+	dhcpPushNoop
 	lastVrf        dbq.ListVrfsParams
 	lastSubnet     dbq.ListSubnetsParams
 	lastAddr       dbq.ListIPAddressesParams

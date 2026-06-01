@@ -18,6 +18,8 @@ import (
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
+	"github.com/usg-dcim/packages/otter-go/internal/dhcp/diff"
+	"github.com/usg-dcim/packages/otter-go/internal/dhcp/push"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -129,16 +131,36 @@ type Querier interface {
 	GetVrfFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetOverlayFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetDhcpServerFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetDhcpScopeFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetSubnetFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetIPAddressFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetVniFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetVtepFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetVtepMembershipFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+
+	// DHCP push / diff orchestrator queries. The push and diff packages
+	// each declare their own narrow Querier interface; embedding them
+	// here means *dbq.Queries satisfies ipam.Querier in production and
+	// a single test fake covers all DHCP endpoints. Embedding (rather
+	// than re-listing each method) keeps the surface in sync as the
+	// orchestrators grow.
+	push.Querier
+	diff.Querier
+	ListDhcpScopePushHistoryByScope(ctx context.Context, arg dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistoryRow, error)
 }
 
 type Handler struct {
 	Q     Querier
 	Audit audit.Recorder
+	// PushKea and DiffKea inject the Kea client builder for the
+	// per-scope push and diff endpoints. Production wires
+	// push.DefaultKeaClientBuilder / diff.DefaultKeaClientBuilder
+	// here; tests substitute fakes so the suite never reaches a
+	// live HTTP server. Both are optional — nil falls back to the
+	// production default via pushKeaBuilder / diffKeaBuilder in
+	// dhcp_push.go.
+	PushKea push.KeaClientBuilder
+	DiffKea diff.KeaClientBuilder
 }
 
 // scopedListFilter resolves the caller's fabric scope for capCode and
@@ -246,6 +268,16 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("ipam:dhcp-servers:create")).Post("/dhcp/servers", h.createDhcpServer)
 		r.With(auth.RequireCapability("ipam:dhcp-servers:update")).Patch("/dhcp/servers/{id}", h.updateDhcpServer)
 		r.With(auth.RequireCapability("ipam:dhcp-servers:delete")).Delete("/dhcp/servers/{id}", h.deleteDhcpServer)
+
+		// DHCP per-scope push surface (PR 5 of the DHCP push port).
+		// Three thin wrappers around the orchestrators in
+		// internal/dhcp/push and internal/dhcp/diff. ABAC resolves
+		// the scope's transitive fabric_id via the 2-hop
+		// GetDhcpScopeFabricID lookup before each call. See
+		// dhcp_push.go for the handler bodies.
+		r.With(auth.RequireCapability("ipam:dhcp-scopes:push")).Post("/dhcp/scopes/{id}/push", h.pushDhcpScope)
+		r.With(auth.RequireCapability("ipam:dhcp-scopes:read")).Get("/dhcp/scopes/{id}/diff", h.diffDhcpScope)
+		r.With(auth.RequireCapability("ipam:dhcp-scopes:read")).Get("/dhcp/scopes/{id}/push-history", h.listDhcpScopePushHistory)
 	})
 }
 

@@ -6,6 +6,7 @@ package dbq
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -212,6 +213,57 @@ func (q *Queries) InsertDhcpScopePushHistory(ctx context.Context, arg InsertDhcp
 		arg.ScopeID, arg.ServerID, arg.Operation, arg.KeaSubnetID,
 		arg.Status, arg.Error, arg.DurationMS)
 	return err
+}
+
+// DhcpScopePushHistoryRow is the wire shape the push-history endpoint
+// serializes. operation/status are short strings (16 chars), error is
+// the 2048-char column, attempted_at carries the server-side NOW().
+type DhcpScopePushHistoryRow struct {
+	ID           uuid.UUID  `json:"id"`
+	ScopeID      uuid.UUID  `json:"scope_id"`
+	ServerID     uuid.UUID  `json:"server_id"`
+	Operation    string     `json:"operation"`
+	KeaSubnetID  *int32     `json:"kea_subnet_id"`
+	Status       string     `json:"status"`
+	Error        *string    `json:"error"`
+	DurationMS   *int32     `json:"duration_ms"`
+	AttemptedAt  time.Time  `json:"attempted_at"`
+}
+
+const listDhcpScopePushHistoryByScope = `-- name: ListDhcpScopePushHistoryByScope :many
+SELECT id, scope_id, server_id, operation, kea_subnet_id, status,
+       error, duration_ms, attempted_at
+FROM dhcp_scope_push_history
+WHERE scope_id = $1
+ORDER BY attempted_at DESC
+LIMIT $2`
+
+// ListDhcpScopePushHistoryByScopeParams takes the scope id + the
+// caller-validated limit (1..500). Caller is responsible for clamping
+// before invocation; sqlc doesn't validate Postgres-side.
+type ListDhcpScopePushHistoryByScopeParams struct {
+	ScopeID uuid.UUID
+	Limit   int32
+}
+
+func (q *Queries) ListDhcpScopePushHistoryByScope(
+	ctx context.Context, arg ListDhcpScopePushHistoryByScopeParams,
+) ([]DhcpScopePushHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listDhcpScopePushHistoryByScope, arg.ScopeID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DhcpScopePushHistoryRow{}
+	for rows.Next() {
+		var r DhcpScopePushHistoryRow
+		if err := rows.Scan(&r.ID, &r.ScopeID, &r.ServerID, &r.Operation,
+			&r.KeaSubnetID, &r.Status, &r.Error, &r.DurationMS, &r.AttemptedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 const writeDhcpScopeDiffState = `-- name: WriteDhcpScopeDiffState :exec
