@@ -66,3 +66,12 @@ def test_openapi_published() -> None:
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
         )
+    # /api/v1/ipam/dhcp/servers/{id}/bundle moved to otter-go (PRs
+    # #216-#219 ported the renderer + queries + HTTP endpoint +
+    # rerender cron). The rest of /api/v1/ipam/dhcp/servers/* (CRUD,
+    # /sync, /diff) stays Python-canonical, so we can't use the
+    # startswith form above — we'd accidentally flag every other
+    # endpoint on the same prefix. Negative-assert the exact path.
+    assert not any(p.endswith("/bundle") and "/dhcp/servers/" in p for p in paths), (
+        "Python should not advertise /ipam/dhcp/servers/{id}/bundle — otter-go is canonical"
+    )
