@@ -16,12 +16,10 @@ package push
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/dhcp/kea"
@@ -41,12 +39,12 @@ import (
 // Symmetric to PushScope: takes scopeID and loads the scope+server
 // itself so HTTP handlers don't have to do the work twice.
 func DeleteScopeFromKea(ctx context.Context, q Querier, build KeaClientBuilder, scopeID uuid.UUID) (Result, error) {
-	scope, err := q.GetDhcpScopeForPush(ctx, scopeID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Result{ScopeID: scopeID, Status: kea.StatusError, Error: "scope not found"}, nil
-		}
-		return Result{}, fmt.Errorf("load scope: %w", err)
+	scope, ok, errRes, fatalErr := loadScopeForPush(ctx, q, scopeID)
+	if fatalErr != nil {
+		return Result{}, fatalErr
+	}
+	if !ok {
+		return errRes, nil
 	}
 	// No-push, no-clean-up. Mirrors the Python early return at
 	// services/dhcp_push.py:517-521; an unsuspecting caller that
@@ -56,23 +54,15 @@ func DeleteScopeFromKea(ctx context.Context, q Querier, build KeaClientBuilder, 
 	if scope.KeaSubnetID == nil {
 		return Result{ScopeID: scope.ID, Status: kea.StatusOK}, nil
 	}
-	server, err := q.GetDhcpServerForPush(ctx, scope.DhcpServerID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Result{ScopeID: scopeID, Status: kea.StatusError, Error: "parent dhcp server not found"}, nil
-		}
-		return Result{}, fmt.Errorf("load server: %w", err)
+	// Disabled-server short-circuit: refuses fast (Python implicitly
+	// fails via the RPC, but the explicit gate saves a confusing
+	// transport-error log line).
+	server, ok, errRes, fatalErr := loadEnabledServerForPush(ctx, q, scopeID, scope.DhcpServerID, scope.KeaSubnetID)
+	if fatalErr != nil {
+		return Result{}, fatalErr
 	}
-	// Disabled-server short-circuit: a disabled server can't accept
-	// any RPC, so refuse with an explicit error. Python doesn't
-	// gate this explicitly because the RPC would fail anyway, but
-	// failing fast saves the operator a confusing transport-error
-	// log line and matches PushScope's posture.
-	if !server.Enabled {
-		return Result{
-			ScopeID: scopeID, KeaSubnetID: scope.KeaSubnetID,
-			Status: kea.StatusError, Error: ErrServerDisabled.Error(),
-		}, nil
+	if !ok {
+		return errRes, nil
 	}
 
 	deleteStart := time.Now()
