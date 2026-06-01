@@ -113,6 +113,12 @@ type Querier interface {
 	CreateDhcpServer(ctx context.Context, arg dbq.CreateDhcpServerParams) (dbq.DhcpServer, error)
 	UpdateDhcpServer(ctx context.Context, arg dbq.UpdateDhcpServerParams) (dbq.DhcpServer, error)
 	DeleteDhcpServer(ctx context.Context, id uuid.UUID) error
+	// DHCP bundle endpoint (PR 3 in the bundle work) — projection of
+	// dhcp_servers with base_config + bundle_cache_*; scope + template
+	// reads used to live-render when the cache is empty.
+	GetDhcpServerBundleRow(ctx context.Context, id uuid.UUID) (dbq.DhcpServerBundleRow, error)
+	ListDhcpScopesForBundle(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.DhcpScope, error)
+	ListDhcpScopeTemplatesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.DhcpScopeTemplate, error)
 
 	// ABAC parent-fabric lookups. Used by mutation handlers to resolve
 	// {id} → fabric_id before EnforceFabricScope. 1-hop lookups shipped
@@ -172,6 +178,13 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/vteps", h.listVteps)
 		r.Get("/vtep-memberships", h.listVtepMemberships)
 		r.Get("/dhcp/servers", h.listDhcpServers)
+		// Bundle endpoint mirrors Python's get_dhcp_server_bundle at
+		// api/ipam.py:1833 — short-circuits on the rerender_dhcp_bundle
+		// cache when present, falls back to live render otherwise.
+		// Capability is dhcp-servers:bundle, separate from :read so
+		// operators can grant the heavy collector-facing endpoint
+		// without exposing the rest of the dhcp surface.
+		r.With(auth.RequireCapability("ipam:dhcp-servers:bundle")).Get("/dhcp/servers/{id}/bundle", h.getDhcpServerBundle)
 		r.Get("/vrf-bgp-peers", h.listVrfBgpPeers)
 
 		// ---- Mutations ----

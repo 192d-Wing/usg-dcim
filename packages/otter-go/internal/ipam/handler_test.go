@@ -25,6 +25,21 @@ type fakeQ struct {
 	lastMembership dbq.ListVtepMembershipsParams
 	lastDhcp       dbq.ListDhcpServersParams
 	lastVrfPeer    dbq.ListVrfBgpPeersParams
+
+	// PR 3 of DHCP bundle work — fakes for the bundle endpoint.
+	// Tests seed the row + scope/template slices; the fake's
+	// last* captures verify the handler actually called through.
+	bundleServer            dbq.DhcpServerBundleRow
+	bundleServerErr         error
+	bundleScopes            []dbq.DhcpScope
+	bundleTemplates         []dbq.DhcpScopeTemplate
+	// bundleScopesCalled is a bool flag so cache-hit tests can
+	// assert the scope query was NOT called even when the handler
+	// passes uuid.Nil through (which the lastBundleScopesServerID
+	// !=  uuid.Nil check would silently miss).
+	bundleScopesCalled       bool
+	lastBundleScopesServerID uuid.UUID
+	lastBundleTemplateIDs    []uuid.UUID
 }
 
 func (f *fakeQ) ListVrfs(_ context.Context, a dbq.ListVrfsParams) ([]dbq.Vrf, error) {
@@ -464,6 +479,39 @@ func (f *fakeQ) ListVrfBgpPeers(_ context.Context, a dbq.ListVrfBgpPeersParams) 
 }
 func (f *fakeQ) CountVrfBgpPeers(_ context.Context, _ dbq.CountVrfBgpPeersParams) (int64, error) {
 	return 0, nil
+}
+
+// DHCP bundle endpoint (PR 3 in DHCP bundle work). The Get returns
+// pre-seeded fields when set; nil-id / explicit ErrNoRows simulate
+// 404. List returns the seeded slices. List-templates filters
+// against the seeded map keys.
+func (f *fakeQ) GetDhcpServerBundleRow(_ context.Context, id uuid.UUID) (dbq.DhcpServerBundleRow, error) {
+	if f.bundleServerErr != nil {
+		return dbq.DhcpServerBundleRow{}, f.bundleServerErr
+	}
+	if f.bundleServer.ID != id {
+		return dbq.DhcpServerBundleRow{}, pgx.ErrNoRows
+	}
+	return f.bundleServer, nil
+}
+func (f *fakeQ) ListDhcpScopesForBundle(_ context.Context, serverID uuid.UUID) ([]dbq.DhcpScope, error) {
+	f.bundleScopesCalled = true
+	f.lastBundleScopesServerID = serverID
+	return f.bundleScopes, nil
+}
+func (f *fakeQ) ListDhcpScopeTemplatesByIDs(_ context.Context, ids []uuid.UUID) ([]dbq.DhcpScopeTemplate, error) {
+	f.lastBundleTemplateIDs = append([]uuid.UUID(nil), ids...)
+	out := []dbq.DhcpScopeTemplate{}
+	want := map[uuid.UUID]struct{}{}
+	for _, id := range ids {
+		want[id] = struct{}{}
+	}
+	for _, t := range f.bundleTemplates {
+		if _, ok := want[t.ID]; ok {
+			out = append(out, t)
+		}
+	}
+	return out, nil
 }
 
 func TestListOverlays_FabricFilter(t *testing.T) {
