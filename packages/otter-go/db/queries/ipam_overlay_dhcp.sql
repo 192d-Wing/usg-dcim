@@ -112,3 +112,37 @@ SELECT count(*)::bigint
 FROM dhcp_servers
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
+
+-- ===== DHCP scope templates =====
+-- Reusable option-bundle + timer defaults that DhcpScope rows inherit
+-- from when their template_id is set. The bundle renderer reads
+-- options_json + the four timer pointers via MergeTemplateIntoScope;
+-- the API surface is straight CRUD with ABAC on fabric_id.
+-- Unique constraint (fabric_id, name) — collisions surface as 23505
+-- from CreateDhcpScopeTemplate's RETURNING, mapped to 409 via the
+-- standard ErrUniqueViolation path.
+
+-- name: ListDhcpScopeTemplates :many
+SELECT id, fabric_id, name, ip_family, options_json,
+       valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+       preferred_lifetime_seconds, description, created_at, updated_at
+FROM dhcp_scope_templates
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(ip_family)::int  IS NULL OR ip_family = sqlc.narg(ip_family))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
+ORDER BY name
+LIMIT $1 OFFSET $2;
+
+-- name: CountDhcpScopeTemplates :one
+SELECT count(*)::bigint
+FROM dhcp_scope_templates
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
+  AND (sqlc.narg(ip_family)::int  IS NULL OR ip_family = sqlc.narg(ip_family))
+  AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
+
+-- name: GetDhcpScopeTemplate :one
+SELECT id, fabric_id, name, ip_family, options_json,
+       valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+       preferred_lifetime_seconds, description, created_at, updated_at
+FROM dhcp_scope_templates
+WHERE id = $1;

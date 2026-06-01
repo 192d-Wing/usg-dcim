@@ -74,3 +74,32 @@ func (dhcpPushNoop) ListDriftedScopeIDsForServer(_ context.Context, _ uuid.UUID)
 func (dhcpPushNoop) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.DhcpScopeIDAndPriorDriftRow, error) {
 	return nil, nil
 }
+
+// DHCP scope-template CRUD stubs (PR 8). LIST returns an empty page,
+// GET returns ErrNoRows so unrelated tests don't accidentally fall
+// into a half-defined row; create/update return zero values, delete
+// is a no-op. Tests that actually exercise the CRUD endpoints
+// override these on their own fake.
+func (dhcpPushNoop) ListDhcpScopeTemplates(_ context.Context, _ dbq.ListDhcpScopeTemplatesParams) ([]dbq.DhcpScopeTemplate, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) CountDhcpScopeTemplates(_ context.Context, _ dbq.CountDhcpScopeTemplatesParams) (int64, error) {
+	return 0, nil
+}
+
+func (dhcpPushNoop) GetDhcpScopeTemplate(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeTemplate, error) {
+	return dbq.DhcpScopeTemplate{}, pgx.ErrNoRows
+}
+
+func (dhcpPushNoop) CreateDhcpScopeTemplate(_ context.Context, _ dbq.CreateDhcpScopeTemplateParams) (dbq.DhcpScopeTemplate, error) {
+	return dbq.DhcpScopeTemplate{}, nil
+}
+
+func (dhcpPushNoop) UpdateDhcpScopeTemplate(_ context.Context, _ dbq.UpdateDhcpScopeTemplateParams) (dbq.DhcpScopeTemplate, error) {
+	return dbq.DhcpScopeTemplate{}, nil
+}
+
+func (dhcpPushNoop) DeleteDhcpScopeTemplate(_ context.Context, _ uuid.UUID) error {
+	return nil
+}

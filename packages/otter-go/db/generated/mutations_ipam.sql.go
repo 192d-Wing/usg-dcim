@@ -5,6 +5,7 @@ package dbq
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -846,5 +847,110 @@ const deleteDhcpServer = `DELETE FROM dhcp_servers WHERE id = $1`
 
 func (q *Queries) DeleteDhcpServer(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteDhcpServer, id)
+	return err
+}
+
+// ===== DHCP scope templates =====
+
+const dhcpScopeTemplateRetCols = `id, fabric_id, name, ip_family, options_json,
+          valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+          preferred_lifetime_seconds, description, created_at, updated_at`
+
+func scanDhcpScopeTemplate(row interface{ Scan(...any) error }, t *DhcpScopeTemplate) error {
+	return row.Scan(
+		&t.ID, &t.FabricID, &t.Name, &t.IPFamily, &t.OptionsJSON,
+		&t.ValidLifetimeSeconds, &t.RenewTimerSeconds, &t.RebindTimerSeconds,
+		&t.PreferredLifetimeSeconds, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+	)
+}
+
+const createDhcpScopeTemplate = `INSERT INTO dhcp_scope_templates (
+    id, fabric_id, name, ip_family, options_json,
+    valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+    preferred_lifetime_seconds, description, created_at, updated_at
+)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+RETURNING ` + dhcpScopeTemplateRetCols
+
+// CreateDhcpScopeTemplateParams. OptionsJSON is the renderer-canonical
+// shape (list of {code, data} dicts the bundle merge reads). Pointer
+// fields stay nil when the caller omits them — Python's create has
+// no defaults beyond NULL.
+type CreateDhcpScopeTemplateParams struct {
+	FabricID                 uuid.UUID       `json:"fabric_id"`
+	Name                     string          `json:"name"`
+	IPFamily                 int32           `json:"ip_family"`
+	OptionsJSON              json.RawMessage `json:"options_json"`
+	ValidLifetimeSeconds     *int32          `json:"valid_lifetime_seconds"`
+	RenewTimerSeconds        *int32          `json:"renew_timer_seconds"`
+	RebindTimerSeconds       *int32          `json:"rebind_timer_seconds"`
+	PreferredLifetimeSeconds *int32          `json:"preferred_lifetime_seconds"`
+	Description              *string         `json:"description"`
+}
+
+func (q *Queries) CreateDhcpScopeTemplate(ctx context.Context, arg CreateDhcpScopeTemplateParams) (DhcpScopeTemplate, error) {
+	row := q.db.QueryRow(ctx, createDhcpScopeTemplate,
+		arg.FabricID, arg.Name, arg.IPFamily, arg.OptionsJSON,
+		arg.ValidLifetimeSeconds, arg.RenewTimerSeconds, arg.RebindTimerSeconds,
+		arg.PreferredLifetimeSeconds, arg.Description)
+	var t DhcpScopeTemplate
+	err := scanDhcpScopeTemplate(row, &t)
+	return t, err
+}
+
+const updateDhcpScopeTemplate = `UPDATE dhcp_scope_templates
+SET name                       = COALESCE($2::text, name),
+    options_json               = CASE WHEN $3::bool  THEN $4::jsonb  ELSE options_json END,
+    valid_lifetime_seconds     = CASE WHEN $5::bool  THEN $6::int    ELSE valid_lifetime_seconds END,
+    renew_timer_seconds        = CASE WHEN $7::bool  THEN $8::int    ELSE renew_timer_seconds END,
+    rebind_timer_seconds       = CASE WHEN $9::bool  THEN $10::int   ELSE rebind_timer_seconds END,
+    preferred_lifetime_seconds = CASE WHEN $11::bool THEN $12::int   ELSE preferred_lifetime_seconds END,
+    description                = CASE WHEN $13::bool THEN $14::text  ELSE description END,
+    updated_at                 = NOW()
+WHERE id = $1
+RETURNING ` + dhcpScopeTemplateRetCols
+
+// UpdateDhcpScopeTemplateParams. Each nullable field carries a
+// matching `*Set bool` so the handler can distinguish "patch omits
+// key" (keep current) from "patch sets to null" (clear). Same
+// pattern as UpdateDhcpServer's auth_username/auth_password.
+// FabricID + IPFamily are immutable (Python's PATCH model omits
+// them) so they're not in the param list.
+type UpdateDhcpScopeTemplateParams struct {
+	ID                          uuid.UUID       `json:"id"`
+	Name                        *string         `json:"name"`
+	OptionsSet                  bool            `json:"options_set"`
+	OptionsJSON                 json.RawMessage `json:"options_json"`
+	ValidLifetimeSet            bool            `json:"valid_lifetime_set"`
+	ValidLifetimeSeconds        *int32          `json:"valid_lifetime_seconds"`
+	RenewTimerSet               bool            `json:"renew_timer_set"`
+	RenewTimerSeconds           *int32          `json:"renew_timer_seconds"`
+	RebindTimerSet              bool            `json:"rebind_timer_set"`
+	RebindTimerSeconds          *int32          `json:"rebind_timer_seconds"`
+	PreferredLifetimeSet        bool            `json:"preferred_lifetime_set"`
+	PreferredLifetimeSeconds    *int32          `json:"preferred_lifetime_seconds"`
+	DescriptionSet              bool            `json:"description_set"`
+	Description                 *string         `json:"description"`
+}
+
+func (q *Queries) UpdateDhcpScopeTemplate(ctx context.Context, arg UpdateDhcpScopeTemplateParams) (DhcpScopeTemplate, error) {
+	row := q.db.QueryRow(ctx, updateDhcpScopeTemplate,
+		arg.ID, arg.Name,
+		arg.OptionsSet, arg.OptionsJSON,
+		arg.ValidLifetimeSet, arg.ValidLifetimeSeconds,
+		arg.RenewTimerSet, arg.RenewTimerSeconds,
+		arg.RebindTimerSet, arg.RebindTimerSeconds,
+		arg.PreferredLifetimeSet, arg.PreferredLifetimeSeconds,
+		arg.DescriptionSet, arg.Description,
+	)
+	var t DhcpScopeTemplate
+	err := scanDhcpScopeTemplate(row, &t)
+	return t, err
+}
+
+const deleteDhcpScopeTemplate = `DELETE FROM dhcp_scope_templates WHERE id = $1`
+
+func (q *Queries) DeleteDhcpScopeTemplate(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDhcpScopeTemplate, id)
 	return err
 }

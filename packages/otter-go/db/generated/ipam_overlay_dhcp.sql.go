@@ -306,3 +306,88 @@ func (q *Queries) CountDhcpServers(ctx context.Context, arg CountDhcpServersPara
 	err := row.Scan(&n)
 	return n, err
 }
+
+const listDhcpScopeTemplates = `-- name: ListDhcpScopeTemplates :many
+SELECT id, fabric_id, name, ip_family, options_json,
+       valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+       preferred_lifetime_seconds, description, created_at, updated_at
+FROM dhcp_scope_templates
+WHERE ($3::uuid IS NULL OR fabric_id = $3)
+  AND ($4::int  IS NULL OR ip_family = $4)
+  AND ($5::uuid[] IS NULL OR fabric_id = ANY($5::uuid[]))
+ORDER BY name
+LIMIT $1 OFFSET $2`
+
+// ListDhcpScopeTemplatesParams: ip_family is the v4/v6 filter; the
+// nullable *int32 lets a caller-side "no filter" pass NULL through
+// without resorting to a sentinel value.
+type ListDhcpScopeTemplatesParams struct {
+	Limit          int32       `json:"limit"`
+	Offset         int32       `json:"offset"`
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	IPFamily       *int32      `json:"ip_family"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
+}
+
+func (q *Queries) ListDhcpScopeTemplates(ctx context.Context, arg ListDhcpScopeTemplatesParams) ([]DhcpScopeTemplate, error) {
+	rows, err := q.db.Query(ctx, listDhcpScopeTemplates,
+		arg.Limit, arg.Offset, arg.FabricID, arg.IPFamily, arg.ScopeFabricIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DhcpScopeTemplate
+	for rows.Next() {
+		var t DhcpScopeTemplate
+		if err := rows.Scan(
+			&t.ID, &t.FabricID, &t.Name, &t.IPFamily, &t.OptionsJSON,
+			&t.ValidLifetimeSeconds, &t.RenewTimerSeconds, &t.RebindTimerSeconds,
+			&t.PreferredLifetimeSeconds, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, t)
+	}
+	return items, rows.Err()
+}
+
+const countDhcpScopeTemplates = `-- name: CountDhcpScopeTemplates :one
+SELECT count(*)::bigint FROM dhcp_scope_templates
+WHERE ($1::uuid IS NULL OR fabric_id = $1)
+  AND ($2::int  IS NULL OR ip_family = $2)
+  AND ($3::uuid[] IS NULL OR fabric_id = ANY($3::uuid[]))`
+
+type CountDhcpScopeTemplatesParams struct {
+	FabricID       *uuid.UUID  `json:"fabric_id"`
+	IPFamily       *int32      `json:"ip_family"`
+	ScopeFabricIds []uuid.UUID `json:"scope_fabric_ids"`
+}
+
+func (q *Queries) CountDhcpScopeTemplates(ctx context.Context, arg CountDhcpScopeTemplatesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDhcpScopeTemplates, arg.FabricID, arg.IPFamily, arg.ScopeFabricIds)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
+const getDhcpScopeTemplate = `-- name: GetDhcpScopeTemplate :one
+SELECT id, fabric_id, name, ip_family, options_json,
+       valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+       preferred_lifetime_seconds, description, created_at, updated_at
+FROM dhcp_scope_templates
+WHERE id = $1`
+
+// GetDhcpScopeTemplate is the read-by-id variant for the CRUD handler.
+// Distinct from GetDhcpScopeTemplateForPush even though the SELECT
+// shape is identical, so a future shape change for the push path
+// doesn't unintentionally break the CRUD response.
+func (q *Queries) GetDhcpScopeTemplate(ctx context.Context, id uuid.UUID) (DhcpScopeTemplate, error) {
+	row := q.db.QueryRow(ctx, getDhcpScopeTemplate, id)
+	var t DhcpScopeTemplate
+	err := row.Scan(
+		&t.ID, &t.FabricID, &t.Name, &t.IPFamily, &t.OptionsJSON,
+		&t.ValidLifetimeSeconds, &t.RenewTimerSeconds, &t.RebindTimerSeconds,
+		&t.PreferredLifetimeSeconds, &t.Description, &t.CreatedAt, &t.UpdatedAt,
+	)
+	return t, err
+}
