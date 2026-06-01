@@ -53,3 +53,35 @@ SELECT id, fabric_id, name, ip_family, options_json,
        preferred_lifetime_seconds, description, created_at, updated_at
 FROM dhcp_scope_templates
 WHERE id = ANY($1::uuid[]);
+
+-- name: ListEnabledDhcpServerIDs :many
+-- Used by the dhcp_bundle_rerender scheduler job to walk every
+-- enabled DhcpServer once per tick. Disabled servers are excluded —
+-- the bundle would still render correctly but operators have
+-- explicitly opted them out, and re-rendering would only burn DB
+-- cycles + log noise. ORDER BY id is stable so the cron log
+-- correlates predictably across ticks.
+SELECT id
+FROM dhcp_servers
+WHERE enabled = true
+ORDER BY id;
+
+-- name: WriteDhcpBundleCache :exec
+-- Writes the pre-rendered bundle bytes + etag into the cache columns
+-- the HTTP bundle endpoint (PR #218) short-circuits on. The cron
+-- (PR 4) calls this for every server whose freshly-rendered etag
+-- differs from the cached one — no-change ticks skip the write
+-- entirely to avoid DB churn on a fleet with hundreds of stable
+-- servers.
+--
+-- bundle_cache_at = NOW() (server clock) so the puller can
+-- distinguish "cache is stale because the writer is wedged" from
+-- "cache hasn't been updated because nothing changed" — when the
+-- etag matches the cron's no-write path leaves the timestamp
+-- alone, so a puller monitoring bundle_cache_at can alert on
+-- writer wedge cases without false positives on stable fleets.
+UPDATE dhcp_servers
+SET bundle_cache_at   = NOW(),
+    bundle_cache_etag = $2,
+    bundle_cache_json = $3
+WHERE id = $1;

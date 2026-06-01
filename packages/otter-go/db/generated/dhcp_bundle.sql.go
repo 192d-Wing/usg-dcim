@@ -101,3 +101,56 @@ func (q *Queries) ListDhcpScopeTemplatesByIDs(ctx context.Context, ids []uuid.UU
 	}
 	return out, rows.Err()
 }
+
+const listEnabledDhcpServerIDs = `-- name: ListEnabledDhcpServerIDs :many
+SELECT id
+FROM dhcp_servers
+WHERE enabled = true
+ORDER BY id`
+
+// ListEnabledDhcpServerIDs returns the IDs of every enabled
+// DhcpServer in stable id order. Used by the dhcp_bundle_rerender
+// scheduler job (PR 4 in DHCP bundle work) to drive the per-server
+// re-render loop.
+func (q *Queries) ListEnabledDhcpServerIDs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listEnabledDhcpServerIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+const writeDhcpBundleCache = `-- name: WriteDhcpBundleCache :exec
+UPDATE dhcp_servers
+SET bundle_cache_at   = NOW(),
+    bundle_cache_etag = $2,
+    bundle_cache_json = $3
+WHERE id = $1`
+
+// WriteDhcpBundleCacheParams is the typed parameter struct for the
+// rerender cron's per-server cache write.
+type WriteDhcpBundleCacheParams struct {
+	ID              uuid.UUID
+	BundleCacheEtag string
+	BundleCacheJSON []byte
+}
+
+// WriteDhcpBundleCache writes the pre-rendered etag + JSON bytes
+// into the bundle_cache_* columns the HTTP bundle endpoint short-
+// circuits on. bundle_cache_at is set to NOW() server-side so a
+// puller monitoring the column can detect a wedged writer
+// independent of the cache contents.
+func (q *Queries) WriteDhcpBundleCache(ctx context.Context, arg WriteDhcpBundleCacheParams) error {
+	_, err := q.db.Exec(ctx, writeDhcpBundleCache,
+		arg.ID, arg.BundleCacheEtag, arg.BundleCacheJSON)
+	return err
+}
