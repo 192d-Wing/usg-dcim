@@ -159,10 +159,13 @@ func TestGetDhcpServerBundle_EmptyCacheEtag_FallsThroughToLiveRender(t *testing.
 	}
 }
 
-func TestGetDhcpServerBundle_304ResponsesIncludeETagHeader(t *testing.T) {
-	// RFC 9110 §15.4.5 — 304 SHOULD include the ETag header so an
-	// intermediary can refresh its validator. Python's
-	// `Response(status_code=304)` omits it; the Go port adds it.
+func TestGetDhcpServerBundle_CacheHit_IfNoneMatch_304(t *testing.T) {
+	// 304 cache-hit short-circuit covers two invariants in one
+	// place: empty body (so the puller doesn't waste bytes on a
+	// no-change tick) AND the ETag header echo per RFC 9110
+	// §15.4.5 (Python's `Response(status_code=304)` omitted it;
+	// the Go port adds it so intermediaries can refresh their
+	// validator).
 	serverID := uuid.New()
 	fabricID := uuid.New()
 	etag := "stable-etag"
@@ -176,27 +179,11 @@ func TestGetDhcpServerBundle_304ResponsesIncludeETagHeader(t *testing.T) {
 	if rec.Code != http.StatusNotModified {
 		t.Fatalf("want 304, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get("ETag"); got != `"`+etag+`"` {
-		t.Errorf("304 should echo ETag header per RFC 9110; got %q", got)
-	}
-}
-
-func TestGetDhcpServerBundle_CacheHit_IfNoneMatch_304(t *testing.T) {
-	serverID := uuid.New()
-	fabricID := uuid.New()
-	etag := "abc123"
-	etagPtr := etag
-	f := &fakeQ{bundleServer: dbq.DhcpServerBundleRow{
-		ID: serverID, FabricID: fabricID,
-		BundleCacheEtag: &etagPtr,
-		BundleCacheJSON: json.RawMessage(`{}`),
-	}}
-	rec := authedGet(t, mount(f), bundleOperator(t), "/ipam/dhcp/servers/"+serverID.String()+"/bundle", `"`+etag+`"`)
-	if rec.Code != http.StatusNotModified {
-		t.Fatalf("want 304, got %d body=%s", rec.Code, rec.Body.String())
-	}
 	if rec.Body.Len() != 0 {
 		t.Errorf("304 response should have empty body; got %q", rec.Body.String())
+	}
+	if got := rec.Header().Get("ETag"); got != `"`+etag+`"` {
+		t.Errorf("304 should echo ETag header per RFC 9110; got %q", got)
 	}
 }
 
