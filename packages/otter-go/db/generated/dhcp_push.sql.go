@@ -213,3 +213,27 @@ func (q *Queries) InsertDhcpScopePushHistory(ctx context.Context, arg InsertDhcp
 		arg.Status, arg.Error, arg.DurationMS)
 	return err
 }
+
+const writeDhcpScopeDiffState = `-- name: WriteDhcpScopeDiffState :exec
+UPDATE dhcp_scopes
+SET last_diff_at         = NOW(),
+    last_diff_status     = $2,
+    last_diff_delta_json = $3,
+    updated_at           = NOW()
+WHERE id = $1`
+
+// WriteDhcpScopeDiffStateParams carries the three persisted columns.
+// LastDiffDeltaJSON is nullable because in_sync / never_pushed /
+// missing_from_kea / error all clear it; only status='drifted'
+// stores a delta.
+type WriteDhcpScopeDiffStateParams struct {
+	ID                uuid.UUID
+	LastDiffStatus    string
+	LastDiffDeltaJSON json.RawMessage
+}
+
+func (q *Queries) WriteDhcpScopeDiffState(ctx context.Context, arg WriteDhcpScopeDiffStateParams) error {
+	_, err := q.db.Exec(ctx, writeDhcpScopeDiffState,
+		arg.ID, arg.LastDiffStatus, arg.LastDiffDeltaJSON)
+	return err
+}
