@@ -112,6 +112,19 @@ INSERT INTO dhcp_scope_push_history
        (id, scope_id, server_id, operation, kea_subnet_id, status, error, duration_ms, attempted_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, NOW());
 
+-- name: ListDhcpScopePushHistoryByScope :many
+-- Newest-first attempt log for one scope. Uses the
+-- (scope_id, attempted_at DESC) index from migration 0064 so the
+-- read is index-only. `limit` caps the response size for the
+-- common "show recent activity" UI pattern; caller validates
+-- 1 <= limit <= 500 against the column constraint.
+SELECT id, scope_id, server_id, operation, kea_subnet_id, status,
+       error, duration_ms, attempted_at
+FROM dhcp_scope_push_history
+WHERE scope_id = $1
+ORDER BY attempted_at DESC
+LIMIT $2;
+
 -- name: WriteDhcpScopeDiffState :exec
 -- Mirrors persist_diff_state at services/dhcp_push.py:934. Updates
 -- the three last_diff_* columns: timestamp moves with NOW();
