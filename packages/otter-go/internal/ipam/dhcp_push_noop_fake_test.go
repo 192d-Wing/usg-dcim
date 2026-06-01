@@ -62,3 +62,15 @@ func (dhcpPushNoop) WriteDhcpScopeDiffState(_ context.Context, _ dbq.WriteDhcpSc
 func (dhcpPushNoop) ListDhcpScopePushHistoryByScope(_ context.Context, _ dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistoryRow, error) {
 	return nil, nil
 }
+
+func (dhcpPushNoop) ListEnabledScopeIDsForServer(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) ListDriftedScopeIDsForServer(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.DhcpScopeIDAndPriorDriftRow, error) {
+	return nil, nil
+}
