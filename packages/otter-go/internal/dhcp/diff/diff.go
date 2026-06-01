@@ -177,7 +177,7 @@ func DiffScope(ctx context.Context, q Querier, build KeaClientBuilder, scopeID u
 }
 
 func renderDCIMSubnet(scope dbq.DhcpScopeForPushRow, tpl *dbq.DhcpScopeTemplate) map[string]any {
-	bundleScope := bundle.FromDbqScope(asDbqScope(scope))
+	bundleScope := bundle.FromDbqScopeForPush(scope)
 	var bundleTpl *bundle.Template
 	if tpl != nil {
 		t := bundle.FromDbqTemplate(*tpl)
@@ -196,30 +196,6 @@ func fetchKeaSubnet(ctx context.Context, client KeaClient, ipFamily int32, subne
 		return client.Subnet4Get(ctx, subnetID)
 	}
 	return client.Subnet6Get(ctx, subnetID)
-}
-
-// asDbqScope re-projects DhcpScopeForPushRow → dbq.DhcpScope so
-// bundle.FromDbqScope accepts it. Same shim as push.asDbqScope;
-// duplicated rather than imported from push because diff doesn't
-// want a compile-time dependency on the push orchestrator.
-func asDbqScope(s dbq.DhcpScopeForPushRow) dbq.DhcpScope {
-	return dbq.DhcpScope{
-		ID:                       s.ID,
-		DhcpServerID:             s.DhcpServerID,
-		IPFamily:                 s.IPFamily,
-		Prefix:                   s.Prefix,
-		PoolsJSON:                s.PoolsJSON,
-		PdPoolsJSON:              s.PdPoolsJSON,
-		OptionsJSON:              s.OptionsJSON,
-		ReservationsJSON:         s.ReservationsJSON,
-		ValidLifetimeSeconds:     s.ValidLifetimeSeconds,
-		RenewTimerSeconds:        s.RenewTimerSeconds,
-		RebindTimerSeconds:       s.RebindTimerSeconds,
-		PreferredLifetimeSeconds: s.PreferredLifetimeSeconds,
-		KeaSubnetID:              s.KeaSubnetID,
-		TemplateID:               s.TemplateID,
-		Enabled:                  s.Enabled,
-	}
 }
 
 func loadTemplate(ctx context.Context, q Querier, templateID *uuid.UUID) (*dbq.DhcpScopeTemplate, error) {
