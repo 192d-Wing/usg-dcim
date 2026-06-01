@@ -57,6 +57,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpbundle"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpdriftcheck"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcptombstone"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnspurge"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssecrotate"
@@ -112,6 +113,13 @@ func main() {
 	// between log volume and how quickly an operator can see their
 	// scope mutation propagated to the puller's etag header.
 	dhcpBundleCron := env.String("DCIM_DHCP_BUNDLE_RERENDER_CRON", "*/2 * * * *")
+	// Default spec "9-54/15 * * * *" mirrors Python's
+	// cron(dhcp_drift_check, minute={9, 24, 39, 54}) — every 15
+	// minutes at :09. Off-rounded so the drift sweep doesn't collide
+	// with the bundle re-render (:00, :02, :04 …) or the freshness
+	// sweep (:00, :05, …). Python defends the cadence at PR 81 in
+	// worker.py:535.
+	dhcpDriftCheckCron := env.String("DCIM_DHCP_DRIFT_CHECK_CRON", "9-54/15 * * * *")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -151,6 +159,7 @@ func main() {
 	mustRegister(dhcpTombstoneCron, &dhcptombstone.Job{Q: q, RetentionDays: dhcpTombstoneRetention})
 	mustRegister(zskRotateCron, &dnssecrotate.Job{Q: q, Log: log})
 	mustRegister(dhcpBundleCron, &dhcpbundle.Job{Q: q, Log: log})
+	mustRegister(dhcpDriftCheckCron, &dhcpdriftcheck.Job{Q: q, Log: log})
 
 	// /healthz + /readyz mirror the otter-go-worker shape so k8s
 	// probes can target either binary without per-pod config
