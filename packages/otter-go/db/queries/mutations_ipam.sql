@@ -270,3 +270,59 @@ RETURNING id, name, fabric_id, kea_url, auth_username, enabled,
 
 -- name: DeleteDhcpServer :exec
 DELETE FROM dhcp_servers WHERE id = $1;
+
+-- ===== DHCP scope templates =====
+-- name: CreateDhcpScopeTemplate :one
+-- Unique (fabric_id, name) constraint surfaces as 23505 on RETURNING;
+-- handler maps via httpx.ErrUniqueViolation → 409. options_json is
+-- caller-validated JSON.
+INSERT INTO dhcp_scope_templates (
+    id, fabric_id, name, ip_family, options_json,
+    valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+    preferred_lifetime_seconds, description, created_at, updated_at
+)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+RETURNING id, fabric_id, name, ip_family, options_json,
+          valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+          preferred_lifetime_seconds, description, created_at, updated_at;
+
+-- name: UpdateDhcpScopeTemplate :one
+-- COALESCE on the non-nullable name; the four timer columns + the
+-- description column are nullable so use the (set, value) CASE
+-- pattern to distinguish "clear to NULL" from "key omitted".
+-- options_json gets the same set/value split — Python's PATCH treats
+-- {"options": null} as "clear to empty array" and missing key as
+-- "keep current"; the API handler resolves that to options_set with
+-- value [] vs options_set=false. ip_family + fabric_id are immutable
+-- (Python doesn't expose them in the PATCH model).
+UPDATE dhcp_scope_templates
+SET name                       = COALESCE(sqlc.narg(name)::text, name),
+    options_json               = CASE WHEN sqlc.arg(options_set)::bool
+                                      THEN sqlc.narg(options_json)::jsonb
+                                      ELSE options_json END,
+    valid_lifetime_seconds     = CASE WHEN sqlc.arg(valid_lifetime_set)::bool
+                                      THEN sqlc.narg(valid_lifetime_seconds)::int
+                                      ELSE valid_lifetime_seconds END,
+    renew_timer_seconds        = CASE WHEN sqlc.arg(renew_timer_set)::bool
+                                      THEN sqlc.narg(renew_timer_seconds)::int
+                                      ELSE renew_timer_seconds END,
+    rebind_timer_seconds       = CASE WHEN sqlc.arg(rebind_timer_set)::bool
+                                      THEN sqlc.narg(rebind_timer_seconds)::int
+                                      ELSE rebind_timer_seconds END,
+    preferred_lifetime_seconds = CASE WHEN sqlc.arg(preferred_lifetime_set)::bool
+                                      THEN sqlc.narg(preferred_lifetime_seconds)::int
+                                      ELSE preferred_lifetime_seconds END,
+    description                = CASE WHEN sqlc.arg(description_set)::bool
+                                      THEN sqlc.narg(description)::text
+                                      ELSE description END,
+    updated_at                 = NOW()
+WHERE id = $1
+RETURNING id, fabric_id, name, ip_family, options_json,
+          valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+          preferred_lifetime_seconds, description, created_at, updated_at;
+
+-- name: DeleteDhcpScopeTemplate :exec
+-- FK on dhcp_scopes.template_id is ON DELETE SET NULL — referencing
+-- scopes fall back to their stored values automatically. Matches
+-- Python's posture at api/ipam.py:2911.
+DELETE FROM dhcp_scope_templates WHERE id = $1;

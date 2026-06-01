@@ -150,6 +150,18 @@ type Querier interface {
 	push.BulkQuerier
 	diff.BulkQuerier
 	ListDhcpScopePushHistoryByScope(ctx context.Context, arg dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistoryRow, error)
+
+	// DHCP scope-template CRUD (PR 8). GetDhcpScopeTemplate is
+	// distinct from GetDhcpScopeTemplateForPush even though the SELECT
+	// shape is identical, so a future shape change on either side
+	// doesn't pull the other along (push reads what the renderer
+	// needs; CRUD returns the API wire shape).
+	ListDhcpScopeTemplates(ctx context.Context, arg dbq.ListDhcpScopeTemplatesParams) ([]dbq.DhcpScopeTemplate, error)
+	CountDhcpScopeTemplates(ctx context.Context, arg dbq.CountDhcpScopeTemplatesParams) (int64, error)
+	GetDhcpScopeTemplate(ctx context.Context, id uuid.UUID) (dbq.DhcpScopeTemplate, error)
+	CreateDhcpScopeTemplate(ctx context.Context, arg dbq.CreateDhcpScopeTemplateParams) (dbq.DhcpScopeTemplate, error)
+	UpdateDhcpScopeTemplate(ctx context.Context, arg dbq.UpdateDhcpScopeTemplateParams) (dbq.DhcpScopeTemplate, error)
+	DeleteDhcpScopeTemplate(ctx context.Context, id uuid.UUID) error
 }
 
 type Handler struct {
@@ -301,6 +313,25 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability(capDhcpScopesPush)).Post("/dhcp/servers/{id}/scopes/push-all", h.pushAllDhcpScopes)
 		r.With(auth.RequireCapability(capDhcpScopesPush)).Post("/dhcp/servers/{id}/scopes/push-drifted", h.pushDriftedDhcpScopes)
 		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/servers/{id}/scopes/diff-all", h.diffAllDhcpScopes)
+
+		// DHCP scope templates (PR 8). Five-route CRUD on the
+		// reusable option-bundle + timer defaults that DhcpScope
+		// rows inherit via template_id. Distinct capability family
+		// (ipam:dhcp-scope-templates:*) from the scope and server
+		// caps; operators commonly grant template-edit to one team
+		// and scope-edit to another. See dhcp_scope_templates.go.
+		const (
+			capDhcpTemplatesRead   = "ipam:dhcp-scope-templates:read"
+			capDhcpTemplatesCreate = "ipam:dhcp-scope-templates:create"
+			capDhcpTemplatesUpdate = "ipam:dhcp-scope-templates:update"
+			capDhcpTemplatesDelete = "ipam:dhcp-scope-templates:delete"
+			pathDhcpTemplateByID   = "/dhcp/scope-templates/{id}"
+		)
+		r.With(auth.RequireCapability(capDhcpTemplatesRead)).Get("/dhcp/scope-templates", h.listDhcpScopeTemplates)
+		r.With(auth.RequireCapability(capDhcpTemplatesRead)).Get(pathDhcpTemplateByID, h.getDhcpScopeTemplate)
+		r.With(auth.RequireCapability(capDhcpTemplatesCreate)).Post("/dhcp/scope-templates", h.createDhcpScopeTemplate)
+		r.With(auth.RequireCapability(capDhcpTemplatesUpdate)).Patch(pathDhcpTemplateByID, h.updateDhcpScopeTemplate)
+		r.With(auth.RequireCapability(capDhcpTemplatesDelete)).Delete(pathDhcpTemplateByID, h.deleteDhcpScopeTemplate)
 	})
 }
 
