@@ -66,6 +66,18 @@ dhcpTombstonePurge:
 dnsRotateZsks:
   cron: "17 3 * * *"
 
+# DCIM_DHCP_BUNDLE_RERENDER_CRON — schedule for dhcp_bundle_rerender.
+# Default "*/2 * * * *" polls the fleet every 2 minutes. Python's
+# rerender_dhcp_bundle was event-driven (per-server arq task enqueued
+# on every scope mutation); the Go scheduler is cron-only, so this
+# polling cadence sets the worst-case staleness window for the bundle
+# cache. The HTTP bundle endpoint's live-render fallback keeps cache-
+# miss requests correct, so the cron is purely an optimization to
+# avoid the render cost on every request — operators can tune the
+# cadence freely (faster = fresher cache, slower = less DB churn).
+dhcpBundleRerender:
+  cron: "*/2 * * * *"
+
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
   limits:   { cpu: 500m, memory: 256Mi }

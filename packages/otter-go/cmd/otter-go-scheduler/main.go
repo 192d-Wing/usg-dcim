@@ -26,6 +26,10 @@
 //	                                settings.dhcp_tombstone_retention_days)
 //	DCIM_DNS_ROTATE_ZSKS_CRON      cron spec for dns_rotate_zsks
 //	                                (default "17 3 * * *" — daily at 03:17)
+//	DCIM_DHCP_BUNDLE_RERENDER_CRON cron spec for dhcp_bundle_rerender
+//	                                (default "*/2 * * * *" — every 2 min,
+//	                                polling backstop for Python's
+//	                                event-driven rerender_dhcp_bundle)
 //	SCHEDULER_HEALTH_ADDR          /healthz bind (default :8080)
 //
 // Cron defaults mirror Python's arq schedules in worker.py. Override
@@ -52,6 +56,7 @@ import (
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpbundle"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcptombstone"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnspurge"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssecrotate"
@@ -97,6 +102,16 @@ func main() {
 	// typically 30+), so checking every 24h has 24× headroom over the
 	// finest-grained rotation policy.
 	zskRotateCron := env.String("DCIM_DNS_ROTATE_ZSKS_CRON", "17 3 * * *")
+	// Default spec "*/2 * * * *" runs the dhcp_bundle_rerender
+	// polling backstop every 2 minutes. Python's
+	// rerender_dhcp_bundle is event-driven (enqueued per-server on
+	// every scope mutation); the Go scheduler is cron-only, so the
+	// polling cadence sets the worst-case staleness window for the
+	// cache. The HTTP bundle endpoint's live-render fallback makes
+	// any cache-miss request correct, so 2 minutes is a balance
+	// between log volume and how quickly an operator can see their
+	// scope mutation propagated to the puller's etag header.
+	dhcpBundleCron := env.String("DCIM_DHCP_BUNDLE_RERENDER_CRON", "*/2 * * * *")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -141,6 +156,10 @@ func main() {
 	}
 	if _, err := sch.Register(zskRotateCron, &dnssecrotate.Job{Q: q, Log: log}); err != nil {
 		log.Error("scheduler_register_failed", "job", dnssecrotate.Name, "err", err)
+		os.Exit(1)
+	}
+	if _, err := sch.Register(dhcpBundleCron, &dhcpbundle.Job{Q: q, Log: log}); err != nil {
+		log.Error("scheduler_register_failed", "job", dhcpbundle.Name, "err", err)
 		os.Exit(1)
 	}
 
