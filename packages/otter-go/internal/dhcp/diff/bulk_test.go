@@ -22,18 +22,18 @@ import (
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 )
 
-// bulkFakeQ drives DiffAllScopes. The scope list + per-scope
-// scope/server/template maps mirror the push-side bulk fake; adding
-// a writes map captures per-scope persist_diff_state calls so the
-// test can assert on transition + persist ordering.
+// bulkFakeQ drives DiffAllScopes. Only the methods the never_pushed
+// short-circuit hits are stubbed here — DiffScope returns at diff.go's
+// "scope.KeaSubnetID == nil" branch before any server/template fetch,
+// so GetDhcpServerForPush / GetDhcpScopeTemplateForPush would be dead
+// code if defined. Tests that need the full diff path (drifted, Kea-
+// missing, parse error) belong in diff_test.go where the per-scope
+// fakeQ already covers them.
 type bulkFakeQ struct {
-	all       []dbq.DhcpScopeIDAndPriorDriftRow
-	allErr    error
-	scopes    map[uuid.UUID]dbq.DhcpScopeForPushRow
-	servers   map[uuid.UUID]dbq.DhcpServerForPushRow
-	templates map[uuid.UUID]dbq.DhcpScopeTemplate
-	writes    map[uuid.UUID]dbq.WriteDhcpScopeDiffStateParams
-
+	all      []dbq.DhcpScopeIDAndPriorDriftRow
+	allErr   error
+	scopes   map[uuid.UUID]dbq.DhcpScopeForPushRow
+	writes   map[uuid.UUID]dbq.WriteDhcpScopeDiffStateParams
 	allCalls int
 }
 
@@ -48,31 +48,28 @@ func (f *bulkFakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.Dh
 	}
 	return r, nil
 }
-func (f *bulkFakeQ) GetDhcpServerForPush(_ context.Context, id uuid.UUID) (dbq.DhcpServerForPushRow, error) {
-	r, ok := f.servers[id]
-	if !ok {
-		return dbq.DhcpServerForPushRow{}, pgx.ErrNoRows
-	}
-	return r, nil
+
+// GetDhcpServerForPush + GetDhcpScopeTemplateForPush are required by
+// the diff.Querier interface but never invoked from these tests: the
+// only DiffScope path exercised here is the never_pushed short-
+// circuit (Kea-side is unreachable before either lookup fires). They
+// return ErrNoRows so any future test reaching the full diff path
+// fails loudly rather than silently navigating into a nil row.
+func (f *bulkFakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
+	return dbq.DhcpServerForPushRow{}, pgx.ErrNoRows
 }
-func (f *bulkFakeQ) GetDhcpScopeTemplateForPush(_ context.Context, id uuid.UUID) (dbq.DhcpScopeTemplate, error) {
-	r, ok := f.templates[id]
-	if !ok {
-		return dbq.DhcpScopeTemplate{}, pgx.ErrNoRows
-	}
-	return r, nil
+func (f *bulkFakeQ) GetDhcpScopeTemplateForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeTemplate, error) {
+	return dbq.DhcpScopeTemplate{}, pgx.ErrNoRows
 }
 func (f *bulkFakeQ) WriteDhcpScopeDiffState(_ context.Context, arg dbq.WriteDhcpScopeDiffStateParams) error {
 	f.writes[arg.ID] = arg
 	return nil
 }
 
-func newBulkDiffFake(serverID uuid.UUID) *bulkFakeQ {
+func newBulkDiffFake(_ uuid.UUID) *bulkFakeQ {
 	return &bulkFakeQ{
-		scopes:    map[uuid.UUID]dbq.DhcpScopeForPushRow{},
-		servers:   map[uuid.UUID]dbq.DhcpServerForPushRow{serverID: {ID: serverID, KeaURL: "http://kea", Enabled: true}},
-		templates: map[uuid.UUID]dbq.DhcpScopeTemplate{},
-		writes:    map[uuid.UUID]dbq.WriteDhcpScopeDiffStateParams{},
+		scopes: map[uuid.UUID]dbq.DhcpScopeForPushRow{},
+		writes: map[uuid.UUID]dbq.WriteDhcpScopeDiffStateParams{},
 	}
 }
 

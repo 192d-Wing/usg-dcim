@@ -71,19 +71,30 @@ func mountDhcpBulk(f *dhcpBulkFakeQ, rec *recordingAudit) http.Handler {
 	return r
 }
 
-// ---- push-all ----
-
-func TestPushAllDhcpScopes_EmptyServer_200WithZeroCounts(t *testing.T) {
-	serverID := uuid.New()
-	f := &dhcpBulkFakeQ{serverFabricID: uuid.New()}
-	rec := &recordingAudit{}
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/push-all", nil)
+// runBulkRequest is the test boilerplate every bulk-endpoint test
+// shares: stand up the fake + recorder + router, build the request
+// with the wildcard principal, serve it, fail the test on a non-
+// 200 status. Returns the response recorder so each test asserts
+// on the body shape it cares about.
+func runBulkRequest(t *testing.T, method, path string, f *dhcpBulkFakeQ, rec *recordingAudit) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
 	req = withPrincipal(req, "*")
 	w := httptest.NewRecorder()
 	mountDhcpBulk(f, rec).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
+	return w
+}
+
+// ---- push-all ----
+
+func TestPushAllDhcpScopes_EmptyServer_200WithZeroCounts(t *testing.T) {
+	serverID := uuid.New()
+	f := &dhcpBulkFakeQ{serverFabricID: uuid.New()}
+	rec := &recordingAudit{}
+	w := runBulkRequest(t, "POST", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/push-all", f, rec)
 	var got bulkPushBody
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
@@ -141,13 +152,8 @@ func TestPushAllDhcpScopes_AuditMetadataCarriesCounts(t *testing.T) {
 	serverID := uuid.New()
 	f := &dhcpBulkFakeQ{serverFabricID: uuid.New(), enabled: []uuid.UUID{uuid.New()}}
 	rec := &recordingAudit{}
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/push-all", nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpBulk(f, rec).ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
-	}
+	w := runBulkRequest(t, "POST", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/push-all", f, rec)
+	_ = w
 	if len(rec.calls) != 1 {
 		t.Fatalf("audit calls = %d, want 1", len(rec.calls))
 	}
@@ -186,13 +192,7 @@ func TestPushDriftedDhcpScopes_AuditActionMatchesPython(t *testing.T) {
 	serverID := uuid.New()
 	f := &dhcpBulkFakeQ{serverFabricID: uuid.New()}
 	rec := &recordingAudit{}
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/push-drifted", nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpBulk(f, rec).ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d", w.Code)
-	}
+	_ = runBulkRequest(t, "POST", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/push-drifted", f, rec)
 	if len(rec.calls) != 1 || rec.calls[0].Action != "dhcp_scope.push_drifted" {
 		t.Errorf("audit action = %v", rec.calls)
 	}
@@ -209,13 +209,7 @@ func TestDiffAllDhcpScopes_NoAuditRecord(t *testing.T) {
 	serverID := uuid.New()
 	f := &dhcpBulkFakeQ{serverFabricID: uuid.New()}
 	rec := &recordingAudit{}
-	req := httptest.NewRequest("GET", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/diff-all", nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpBulk(f, rec).ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
-	}
+	_ = runBulkRequest(t, "GET", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/diff-all", f, rec)
 	if len(rec.calls) != 0 {
 		t.Errorf("diff-all must not emit audit, got %+v", rec.calls)
 	}
@@ -227,13 +221,7 @@ func TestDiffAllDhcpScopes_WireShape(t *testing.T) {
 	// though BulkDiffReport carries it.
 	serverID := uuid.New()
 	f := &dhcpBulkFakeQ{serverFabricID: uuid.New()}
-	req := httptest.NewRequest("GET", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/diff-all", nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpBulk(f, &recordingAudit{}).ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d", w.Code)
-	}
+	w := runBulkRequest(t, "GET", "/ipam/dhcp/servers/"+serverID.String()+"/scopes/diff-all", f, &recordingAudit{})
 	body := w.Body.Bytes()
 	for _, want := range [][]byte{
 		[]byte(`"server_id":"` + serverID.String() + `"`),
