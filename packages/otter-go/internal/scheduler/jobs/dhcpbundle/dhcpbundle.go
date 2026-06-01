@@ -33,6 +33,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/dhcp/bundle"
 )
 
+
 const Name = "dhcp_bundle_rerender"
 
 // Querier is the slim DB surface this job needs — `*dbq.Queries`
@@ -159,49 +160,12 @@ func (j *Job) rerenderOne(ctx context.Context, id uuid.UUID) (didRender, didWrit
 	return didRender, true, nil
 }
 
-// renderForServer loads the scope + template rows + runs the renderer.
-// Mirrors the shape PR #218's liveRenderBundle uses on the HTTP path.
+// renderForServer is a thin shim over bundle.BuildForServer so the
+// rerenderOne caller stays linear. The shared helper handles the
+// scope + template reads and the renderer invocation; this method
+// exists only to thread j.Q through with the right type.
 func (j *Job) renderForServer(ctx context.Context, srv dbq.DhcpServerBundleRow) (bundle.KeaBundle, error) {
-	scopes, err := j.Q.ListDhcpScopesForBundle(ctx, srv.ID)
-	if err != nil {
-		return bundle.KeaBundle{}, fmt.Errorf("list scopes: %w", err)
-	}
-	tmplIDs := collectTemplateIDs(scopes)
-	templatesByID := map[string]bundle.Template{}
-	if len(tmplIDs) > 0 {
-		rows, err := j.Q.ListDhcpScopeTemplatesByIDs(ctx, tmplIDs)
-		if err != nil {
-			return bundle.KeaBundle{}, fmt.Errorf("list templates: %w", err)
-		}
-		for _, t := range rows {
-			templatesByID[t.ID.String()] = bundle.FromDbqTemplate(t)
-		}
-	}
-	mapped := make([]bundle.Scope, 0, len(scopes))
-	for _, s := range scopes {
-		mapped = append(mapped, bundle.FromDbqScope(s))
-	}
-	return bundle.RenderKeaBundle(bundle.FromDbqServer(srv), mapped, templatesByID)
-}
-
-// collectTemplateIDs dedupes the template_id pointer across the scope
-// set. Same logic as ipam.collectTemplateIDs (PR #218); duplicated
-// here to keep the dhcpbundle package self-contained without taking
-// an import dependency on internal/ipam.
-func collectTemplateIDs(scopes []dbq.DhcpScope) []uuid.UUID {
-	seen := map[uuid.UUID]struct{}{}
-	out := make([]uuid.UUID, 0, len(scopes))
-	for _, s := range scopes {
-		if s.TemplateID == nil {
-			continue
-		}
-		if _, ok := seen[*s.TemplateID]; ok {
-			continue
-		}
-		seen[*s.TemplateID] = struct{}{}
-		out = append(out, *s.TemplateID)
-	}
-	return out
+	return bundle.BuildForServer(ctx, j.Q, srv)
 }
 
 // Compile-time check: *dbq.Queries satisfies our Querier interface so

@@ -28,7 +28,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
@@ -118,51 +117,12 @@ func (h *Handler) getDhcpServerBundle(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, bundleOut)
 }
 
-// liveRenderBundle pulls scopes + templates and runs the renderer.
-// Factored out of the handler so the cache short-circuit reads
-// linearly and the cognitive complexity stays under sonar's ceiling.
+// liveRenderBundle pulls scopes + templates and runs the renderer
+// via the shared bundle.BuildForServer helper — same call shape
+// the rerender cron uses, so there's exactly one place that
+// orchestrates the read-and-render dance.
 func liveRenderBundle(r *http.Request, q Querier, srv dbq.DhcpServerBundleRow) (bundle.KeaBundle, error) {
-	scopes, err := q.ListDhcpScopesForBundle(r.Context(), srv.ID)
-	if err != nil {
-		return bundle.KeaBundle{}, err
-	}
-	tmplIDs := collectTemplateIDs(scopes)
-	templatesByID := map[string]bundle.Template{}
-	if len(tmplIDs) > 0 {
-		rows, err := q.ListDhcpScopeTemplatesByIDs(r.Context(), tmplIDs)
-		if err != nil {
-			return bundle.KeaBundle{}, err
-		}
-		for _, t := range rows {
-			templatesByID[t.ID.String()] = bundle.FromDbqTemplate(t)
-		}
-	}
-	mapped := make([]bundle.Scope, 0, len(scopes))
-	for _, s := range scopes {
-		mapped = append(mapped, bundle.FromDbqScope(s))
-	}
-	return bundle.RenderKeaBundle(bundle.FromDbqServer(srv), mapped, templatesByID)
-}
-
-// collectTemplateIDs de-dupes the template_id pointer across the
-// scope set. The downstream SQL uses `ANY($1::uuid[])` so passing the
-// same UUID twice doesn't fault, but keeping the slice tight avoids
-// shipping an outsize parameter on a server with many scopes that
-// all share one template.
-func collectTemplateIDs(scopes []dbq.DhcpScope) []uuid.UUID {
-	seen := map[uuid.UUID]struct{}{}
-	out := make([]uuid.UUID, 0, len(scopes))
-	for _, s := range scopes {
-		if s.TemplateID == nil {
-			continue
-		}
-		if _, ok := seen[*s.TemplateID]; ok {
-			continue
-		}
-		seen[*s.TemplateID] = struct{}{}
-		out = append(out, *s.TemplateID)
-	}
-	return out
+	return bundle.BuildForServer(r.Context(), q, srv)
 }
 
 // stripQuotes drops the surrounding double-quotes If-None-Match

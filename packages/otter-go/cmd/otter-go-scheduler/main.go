@@ -129,39 +129,28 @@ func main() {
 	q := dbq.New(pool)
 	sch := scheduler.New(log)
 
+	// mustRegister wraps sch.Register: every job in this binary
+	// follows the same "log + exit on register failure" pattern,
+	// so collapsing it into one helper kept the per-job lines as
+	// one-liners and cut sonar's flagged duplication across the
+	// six call sites below.
+	mustRegister := func(spec string, job scheduler.Job) {
+		if _, err := sch.Register(spec, job); err != nil {
+			log.Error("scheduler_register_failed", "job", job.Name(), "err", err)
+			os.Exit(1)
+		}
+	}
+
 	// Hourly DNS-metrics retention at :23 — matches Python's
 	// cron(dns_purge_metrics, minute={23}) in worker.py:557. The :23
 	// slot is intentionally off-round so two scheduler replicas don't
 	// fire simultaneously with other top-of-hour jobs.
-	if _, err := sch.Register(purgeCron, &dnspurge.Job{
-		Q:             q,
-		RetentionDays: retentionDays,
-	}); err != nil {
-		log.Error("scheduler_register_failed", "job", dnspurge.Name, "err", err)
-		os.Exit(1)
-	}
-	if _, err := sch.Register(freshnessCron, &freshness.Job{Q: q}); err != nil {
-		log.Error("scheduler_register_failed", "job", freshness.Name, "err", err)
-		os.Exit(1)
-	}
-	if _, err := sch.Register(dnsSyncCron, &dnssync.Job{Q: q}); err != nil {
-		log.Error("scheduler_register_failed", "job", dnssync.Name, "err", err)
-		os.Exit(1)
-	}
-	if _, err := sch.Register(dhcpTombstoneCron, &dhcptombstone.Job{
-		Q: q, RetentionDays: dhcpTombstoneRetention,
-	}); err != nil {
-		log.Error("scheduler_register_failed", "job", dhcptombstone.Name, "err", err)
-		os.Exit(1)
-	}
-	if _, err := sch.Register(zskRotateCron, &dnssecrotate.Job{Q: q, Log: log}); err != nil {
-		log.Error("scheduler_register_failed", "job", dnssecrotate.Name, "err", err)
-		os.Exit(1)
-	}
-	if _, err := sch.Register(dhcpBundleCron, &dhcpbundle.Job{Q: q, Log: log}); err != nil {
-		log.Error("scheduler_register_failed", "job", dhcpbundle.Name, "err", err)
-		os.Exit(1)
-	}
+	mustRegister(purgeCron, &dnspurge.Job{Q: q, RetentionDays: retentionDays})
+	mustRegister(freshnessCron, &freshness.Job{Q: q})
+	mustRegister(dnsSyncCron, &dnssync.Job{Q: q})
+	mustRegister(dhcpTombstoneCron, &dhcptombstone.Job{Q: q, RetentionDays: dhcpTombstoneRetention})
+	mustRegister(zskRotateCron, &dnssecrotate.Job{Q: q, Log: log})
+	mustRegister(dhcpBundleCron, &dhcpbundle.Job{Q: q, Log: log})
 
 	// /healthz + /readyz mirror the otter-go-worker shape so k8s
 	// probes can target either binary without per-pod config
