@@ -162,6 +162,12 @@ type Querier interface {
 	CreateDhcpScopeTemplate(ctx context.Context, arg dbq.CreateDhcpScopeTemplateParams) (dbq.DhcpScopeTemplate, error)
 	UpdateDhcpScopeTemplate(ctx context.Context, arg dbq.UpdateDhcpScopeTemplateParams) (dbq.DhcpScopeTemplate, error)
 	DeleteDhcpScopeTemplate(ctx context.Context, id uuid.UUID) error
+
+	// DHCP drift-summary endpoint (PR 9). Three narrow projections
+	// the fleet aggregator consumes.
+	ListDhcpServersForDriftSummary(ctx context.Context, scopeFabricIds []uuid.UUID) ([]dbq.DhcpServerDriftSummaryRow, error)
+	ListDhcpScopeDriftStatusByServers(ctx context.Context, serverIDs []uuid.UUID) ([]dbq.DhcpScopeDriftStatusRow, error)
+	ListFiringDhcpDriftAlertKeys(ctx context.Context) ([]string, error)
 }
 
 type Handler struct {
@@ -332,6 +338,12 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability(capDhcpTemplatesCreate)).Post("/dhcp/scope-templates", h.createDhcpScopeTemplate)
 		r.With(auth.RequireCapability(capDhcpTemplatesUpdate)).Patch(pathDhcpTemplateByID, h.updateDhcpScopeTemplate)
 		r.With(auth.RequireCapability(capDhcpTemplatesDelete)).Delete(pathDhcpTemplateByID, h.deleteDhcpScopeTemplate)
+
+		// DHCP fleet drift-summary (PR 9). Read-only roll-up; ABAC
+		// scopes by ipam:dhcp-scopes:read (same gate list_dhcp_servers
+		// uses). Empty-scope and empty-fleet branches both short-
+		// circuit to the zero-fleet shape. See dhcp_drift_summary.go.
+		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/drift-summary", h.dhcpDriftSummary)
 	})
 }
 
