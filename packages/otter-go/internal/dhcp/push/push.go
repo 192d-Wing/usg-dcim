@@ -65,8 +65,10 @@ type Querier interface {
 type KeaClient interface {
 	Subnet4Add(ctx context.Context, subnet map[string]any) ([]byte, error)
 	Subnet4Update(ctx context.Context, subnet map[string]any) ([]byte, error)
+	Subnet4Del(ctx context.Context, subnetID int64) ([]byte, error)
 	Subnet6Add(ctx context.Context, subnet map[string]any) ([]byte, error)
 	Subnet6Update(ctx context.Context, subnet map[string]any) ([]byte, error)
+	Subnet6Del(ctx context.Context, subnetID int64) ([]byte, error)
 	ConfigWrite(ctx context.Context, services []string) ([]byte, error)
 }
 

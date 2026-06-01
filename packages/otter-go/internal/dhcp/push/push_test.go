@@ -76,12 +76,16 @@ func (f *fakeQ) InsertDhcpScopePushHistory(_ context.Context, arg dbq.InsertDhcp
 
 // fakeKea captures the inbound subnet object and replays a
 // programmed response so the orchestrator's response-handling
-// branches are pin-down-able.
+// branches are pin-down-able. Delete methods (Subnet4Del/Subnet6Del)
+// are defined in delete_test.go to keep the test-file structure
+// matching the production-file split.
 type fakeKea struct {
 	gotSubnet4Add    map[string]any
 	gotSubnet4Update map[string]any
+	gotSubnet4DelID  *int64
 	gotSubnet6Add    map[string]any
 	gotSubnet6Update map[string]any
+	gotSubnet6DelID  *int64
 	gotConfigWrite   []string
 
 	subnetResp     []byte
