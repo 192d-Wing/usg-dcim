@@ -151,13 +151,23 @@ deletion.
 
 | Priority | Surface | Why it's still on Python |
 |---|---|---|
-| **Quick wins** | `/api/v1/dns/servers/{id}/bundle` (DHCP) ingress flip | The Go handler shipped in PR #218; only the ingress rule + Python deletion remain. Small follow-up. |
-| **High** | DHCP push to Kea (`api/ipam.py /dhcp/scopes/*/push`, `/dhcp/servers/*/sync`, `/dhcp/scopes/*/diff`) | Stateful Kea Control Agent integration (~5000 lines across `services/dhcp_push.py` + `dhcp_drift_summary.py` + `dhcp_reconcile.py`). The bundle work (PRs #216–#219) ported the **read-side**; the **write-side** to Kea is the heavier port. ~20-25 PRs. |
-| **High** | Alert evaluation loop | `services/alerts.py` arq cron — threshold + duration + dedup + suppression + maintenance windows. The HTTP routes already moved (PR #207); the eval loop is the gap. ~5-8 PRs. |
+| **High** | DHCP push to Kea (`api/ipam.py /dhcp/scopes/*/push`, `/dhcp/servers/*/sync`, `/dhcp/scopes/*/diff`) | Stateful Kea Control Agent integration (~5000 lines across `services/dhcp_push.py` + `dhcp_drift_summary.py` + `dhcp_reconcile.py`). The bundle work (PRs #216–#220) ported the **read-side**; the **write-side** to Kea is the heavier port. Also pulls in five DHCP arq cron entries (`dhcp_sync`, `dhcp_age_out`, `dhcp_drift_check`, plus the existing `dhcp_scope_tombstone_purge` already on Go, plus `ipam_utilization_sweep`). ~20-25 PRs. |
 | **Medium** | Region-deploy lifecycle (6 of 9 routes) | POST create/start/abort/preflight, kubeconfig callback, SSE event stream. Now unblocked because the Go scheduler exists; the SSE endpoint needs a Go-native streaming shape. ~5-10 PRs. |
 | **Medium** | DNS module beyond `/dns/bgp-peers` | Zones, records, keys, health-checks, anycast-bindings — large surface but all CRUD. Most handlers are dark code on Go already; mostly an ingress + Python deletion exercise once parity is audited. ~3-5 PRs. |
+| **Medium** | `notify_bridge` arq cron | Drains notification events the magpie alerts service pushes onto `dcim:notify:bridge`. Runs every 5s on Python today; would slot into otter-go-scheduler alongside the existing six cron jobs. ~1 PR. |
 | **Lower** | IPAM mutation parity | Most ipam mutations are on Go; remaining gaps are FK-validation messages + the `bulk` paths. ~2-3 PRs. |
 | **Infrastructure** | Alembic → Go migration tool | 68 versions to migrate or co-own. Atlas, Goose, or hand-rolled. Decision deferred until the Python deletion endgame. |
+
+**Not in this table because they're already shipped on Go**, despite older docs
+suggesting otherwise: the alert-evaluation loop and the collector-down sweep
+both run in the standalone `packages/magpie/` binary (referenced as
+`services/go-alerts` in older READMEs); the DNS health-check probes run in
+`packages/beagle/` (`services/go-dns-probe`); telemetry ingest runs in the Go
+ingest path. The Python `worker.py` cron registrations for `evaluate_alerts`,
+`sweep_collectors`, and `dns_health_checks` are commented out as `# RETIRED`
+in lines 558-561. If you're auditing whether a Python `services/*.py` module
+is dead code, check the cron list AND the standalone Go binaries before
+assuming work is needed.
 
 **Definition of done for the migration:** `packages/otter/` is deleted from
 `main`; the umbrella chart no longer mounts the otter container; CI loses the
