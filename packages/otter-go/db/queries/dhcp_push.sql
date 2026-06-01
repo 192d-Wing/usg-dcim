@@ -125,6 +125,50 @@ WHERE scope_id = $1
 ORDER BY attempted_at DESC
 LIMIT $2;
 
+-- ===== Bulk endpoints (PR 6) =====
+--
+-- Each query returns the narrow projection the bulk orchestrator's
+-- per-scope loop needs to drive PushScope / DiffScope: just the
+-- scope id (those orchestrators reload the full row themselves).
+-- DiffAll also projects last_diff_status so the loop can compute
+-- status transitions without a per-scope re-read before persist
+-- overwrites the column.
+
+-- name: ListEnabledScopeIDsForServer :many
+-- Drives push-all. Enabled, not soft-deleted. Order by created_at
+-- so push order is deterministic across runs.
+SELECT id FROM dhcp_scopes
+WHERE dhcp_server_id = $1
+  AND enabled = TRUE
+  AND deleted_at IS NULL
+ORDER BY created_at;
+
+-- name: ListDriftedScopeIDsForServer :many
+-- Drives push-drifted. Same filters as push-all plus the persisted
+-- drift status filter. Reads the cache populated by diff_scope /
+-- diff-all / the cron — operator should run a diff pass first so
+-- the cache is fresh.
+SELECT id FROM dhcp_scopes
+WHERE dhcp_server_id = $1
+  AND enabled = TRUE
+  AND deleted_at IS NULL
+  AND last_diff_status = 'drifted'
+ORDER BY created_at;
+
+-- name: ListAllScopeIDsAndPriorDriftForServer :many
+-- Drives diff-all. Includes DISABLED scopes (drift on a disabled
+-- scope is informational — operator may have flipped enabled=False
+-- locally while Kea still serves it). Projects last_diff_status so
+-- the loop can compute transitions before persist_diff_state
+-- overwrites it; projects prefix so transitions on never_pushed
+-- scopes (where the orchestrator short-circuits without rendering
+-- a DCIM subnet, so prefix isn't available from the Result) still
+-- carry the prefix field operators key off.
+SELECT id, prefix::text AS prefix, last_diff_status FROM dhcp_scopes
+WHERE dhcp_server_id = $1
+  AND deleted_at IS NULL
+ORDER BY created_at;
+
 -- name: WriteDhcpScopeDiffState :exec
 -- Mirrors persist_diff_state at services/dhcp_push.py:934. Updates
 -- the three last_diff_* columns: timestamp moves with NOW();

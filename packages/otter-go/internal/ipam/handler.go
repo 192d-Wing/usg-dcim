@@ -143,9 +143,12 @@ type Querier interface {
 	// here means *dbq.Queries satisfies ipam.Querier in production and
 	// a single test fake covers all DHCP endpoints. Embedding (rather
 	// than re-listing each method) keeps the surface in sync as the
-	// orchestrators grow.
-	push.Querier
-	diff.Querier
+	// orchestrators grow. push.BulkQuerier / diff.BulkQuerier embed
+	// the per-scope Queriers and add the bulk list queries; embedding
+	// the bulk variants here covers both PR 5 (per-scope) and PR 6
+	// (bulk) endpoint surfaces.
+	push.BulkQuerier
+	diff.BulkQuerier
 	ListDhcpScopePushHistoryByScope(ctx context.Context, arg dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistoryRow, error)
 }
 
@@ -269,15 +272,35 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("ipam:dhcp-servers:update")).Patch("/dhcp/servers/{id}", h.updateDhcpServer)
 		r.With(auth.RequireCapability("ipam:dhcp-servers:delete")).Delete("/dhcp/servers/{id}", h.deleteDhcpServer)
 
+		// DHCP scope-management capabilities. Pulled into constants
+		// so the per-scope (PR 5) and bulk (PR 6) routes that share
+		// these literals don't trip SonarCloud's S1192 duplicate-
+		// literal threshold once the cron PR adds two more routes
+		// on the same caps.
+		const (
+			capDhcpScopesPush = "ipam:dhcp-scopes:push"
+			capDhcpScopesRead = "ipam:dhcp-scopes:read"
+		)
+
 		// DHCP per-scope push surface (PR 5 of the DHCP push port).
 		// Three thin wrappers around the orchestrators in
 		// internal/dhcp/push and internal/dhcp/diff. ABAC resolves
 		// the scope's transitive fabric_id via the 2-hop
 		// GetDhcpScopeFabricID lookup before each call. See
 		// dhcp_push.go for the handler bodies.
-		r.With(auth.RequireCapability("ipam:dhcp-scopes:push")).Post("/dhcp/scopes/{id}/push", h.pushDhcpScope)
-		r.With(auth.RequireCapability("ipam:dhcp-scopes:read")).Get("/dhcp/scopes/{id}/diff", h.diffDhcpScope)
-		r.With(auth.RequireCapability("ipam:dhcp-scopes:read")).Get("/dhcp/scopes/{id}/push-history", h.listDhcpScopePushHistory)
+		r.With(auth.RequireCapability(capDhcpScopesPush)).Post("/dhcp/scopes/{id}/push", h.pushDhcpScope)
+		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/scopes/{id}/diff", h.diffDhcpScope)
+		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/scopes/{id}/push-history", h.listDhcpScopePushHistory)
+
+		// DHCP bulk push surface (PR 6 of the DHCP push port). Three
+		// thin wrappers around the bulk orchestrators in
+		// internal/dhcp/push (push-all, push-drifted) and
+		// internal/dhcp/diff (diff-all). ABAC: server-fabric (1-hop),
+		// distinct from the per-scope endpoints' 2-hop lookup because
+		// the URL already carries server_id. See dhcp_bulk.go.
+		r.With(auth.RequireCapability(capDhcpScopesPush)).Post("/dhcp/servers/{id}/scopes/push-all", h.pushAllDhcpScopes)
+		r.With(auth.RequireCapability(capDhcpScopesPush)).Post("/dhcp/servers/{id}/scopes/push-drifted", h.pushDriftedDhcpScopes)
+		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/servers/{id}/scopes/diff-all", h.diffAllDhcpScopes)
 	})
 }
 

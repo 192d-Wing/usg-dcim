@@ -266,6 +266,98 @@ func (q *Queries) ListDhcpScopePushHistoryByScope(
 	return out, rows.Err()
 }
 
+const listEnabledScopeIDsForServer = `-- name: ListEnabledScopeIDsForServer :many
+SELECT id FROM dhcp_scopes
+WHERE dhcp_server_id = $1
+  AND enabled = TRUE
+  AND deleted_at IS NULL
+ORDER BY created_at`
+
+// ListEnabledScopeIDsForServer drives push-all. Order by created_at
+// keeps push order deterministic across runs.
+func (q *Queries) ListEnabledScopeIDsForServer(ctx context.Context, dhcpServerID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listEnabledScopeIDsForServer, dhcpServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+const listDriftedScopeIDsForServer = `-- name: ListDriftedScopeIDsForServer :many
+SELECT id FROM dhcp_scopes
+WHERE dhcp_server_id = $1
+  AND enabled = TRUE
+  AND deleted_at IS NULL
+  AND last_diff_status = 'drifted'
+ORDER BY created_at`
+
+// ListDriftedScopeIDsForServer drives push-drifted. Reads the cache
+// populated by diff_scope / diff-all / the cron; operator should run
+// a diff pass first so the cache is fresh.
+func (q *Queries) ListDriftedScopeIDsForServer(ctx context.Context, dhcpServerID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listDriftedScopeIDsForServer, dhcpServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// DhcpScopeIDAndPriorDriftRow is the narrow projection diff-all
+// reads. LastDiffStatus is the prior persisted state — captured
+// BEFORE diff_scope's persist_diff_state overwrites it so the
+// transitions list can compare old vs new. Prefix is projected so
+// transitions on never_pushed scopes (where the orchestrator
+// short-circuits without rendering a DCIM subnet, leaving Result.
+// DCIMSubnet nil) still carry the prefix field operators key off.
+type DhcpScopeIDAndPriorDriftRow struct {
+	ID             uuid.UUID `json:"id"`
+	Prefix         string    `json:"prefix"`
+	LastDiffStatus *string   `json:"last_diff_status"`
+}
+
+const listAllScopeIDsAndPriorDriftForServer = `-- name: ListAllScopeIDsAndPriorDriftForServer :many
+SELECT id, prefix::text AS prefix, last_diff_status FROM dhcp_scopes
+WHERE dhcp_server_id = $1
+  AND deleted_at IS NULL
+ORDER BY created_at`
+
+// ListAllScopeIDsAndPriorDriftForServer drives diff-all. Includes
+// DISABLED scopes (drift on a disabled scope is informational).
+func (q *Queries) ListAllScopeIDsAndPriorDriftForServer(ctx context.Context, dhcpServerID uuid.UUID) ([]DhcpScopeIDAndPriorDriftRow, error) {
+	rows, err := q.db.Query(ctx, listAllScopeIDsAndPriorDriftForServer, dhcpServerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DhcpScopeIDAndPriorDriftRow{}
+	for rows.Next() {
+		var r DhcpScopeIDAndPriorDriftRow
+		if err := rows.Scan(&r.ID, &r.Prefix, &r.LastDiffStatus); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 const writeDhcpScopeDiffState = `-- name: WriteDhcpScopeDiffState :exec
 UPDATE dhcp_scopes
 SET last_diff_at         = NOW(),
