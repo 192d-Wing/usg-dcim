@@ -35,6 +35,7 @@ What's shipped on `main`:
 - Alert engine: threshold rules with duration, dedup, suppression, maintenance windows, collector-down sweep.
 - arq Python worker with cron jobs (alert eval, collector sweep, freshness).
 - Go ports of hot loops: `go-ingest`, `go-alerts`, `go-dns-probe` — additive, traffic-shifted at cutover (see [services/README.md](../services/README.md)).
+- Full **otter-go** backend at `packages/otter-go/`: the long-running Python→Go migration of the main API has now cut over the Auth, Audit, Admin, Telemetry-read, Search, Inventory, Dashboards, BGP, Alerts, Notifications, and `/dns/bgp-peers` surfaces. A separate `otter-go-scheduler` binary runs six ported cron jobs (DNS purge metrics, freshness sweep, DNS sync from IPAM, DHCP tombstone purge, DNS ZSK rotation, DHCP bundle rerender). See "Python → Go backend migration" below for the full status.
 - Notifications: webhook, Slack, email adapters with per-channel fire/resolve filters and severity routing.
 
 ### Site collector
@@ -101,6 +102,66 @@ All three remaining items are blocked on upstream releases. They each have a doc
 | BIND interop | `primaries` catalog property support | DCIM emits RFC 9432 §4.2.3 `primaries.<member_id>.zones A/AAAA` records, but BIND 9.20.22 only honors `coo` / `ext` properties — member zones provision as stubs without primaries. Knot DNS 3.4+ and PowerDNS 4.7+ already honor the records. Wait for BIND; until then operators using BIND must declare member zones manually in named.conf. |
 | DNS QPS | Per-second rate limiting on the recursive | Hickory 0.26 has no native QPS limiter. The 0037 CIDR ACLs only gate *who* can ask, not *how fast*. Real options today are out-of-band: nftables hashlimit on the recursive host or a dnsdist sidecar. Revisit when upstream lands a token-bucket. |
 | Alerting | "Every reading violates" vs MAX(value) semantics | The threshold check uses MAX(value) per asset within `duration_seconds` — fires if *any* reading in the window violates. The file's top comment says "violated for the entire duration", which would imply MIN for `>` and MAX for `<`. Pick one interpretation, document it, and align the SQL. Pre-existing from before the OpenSearch migration; noted in #47. |
+
+---
+
+## Python → Go backend migration (in flight)
+
+Goal: retire `packages/otter/` (Python FastAPI + SQLAlchemy + arq) in favor of
+`packages/otter-go/` (Go chi + pgx + sqlc + robfig/cron). Driven by performance,
+maintainability, and a smaller deployable surface. Migration runs as
+PR-per-endpoint with unit-test parity; each cutover is an ingress flip plus a
+Python deletion (no parallel-write window).
+
+The work is **not a discrete phase** — it ran alongside Phase 1-2 from late
+2026-Q1 and is roughly 70% complete as of 2026-06. The remaining items here
+are the long tail, ordered by what unblocks the most downstream Python
+deletion.
+
+### Cut over (Python routers retired)
+
+| Surface | Notes |
+|---|---|
+| `/api/v1/auth/*` | OIDC, JWKS, refresh, /me — otter-go canonical since PR #179. |
+| `/api/v1/audit/*` | Server-paged audit log + filters (PR #180). |
+| `/api/v1/admin/*` | Users, roles, scope assignments, OIDC mappings, capabilities/catalog, system DNS settings (PRs #182 + #184). |
+| `/api/v1/telemetry/series` | Read-side moved (PR #178); ingest stays on Python via `/api/v1/ingest/telemetry`. |
+| `/api/v1/search` | Global search across four buckets + IP-parse path (PR #187). |
+| `/api/v1/dashboards/*` | Enterprise + free-space + sites/at-risk + assets/sites/racks detail + 3 forecast endpoints (PRs #188–#194). |
+| `/api/v1/inventory/*` | Sites, regions, buildings, rooms, rows, racks, assets — cables PATCH closed the last gap (PRs #195, #197, #198). |
+| `/api/v1/lir` + `/api/v1/ipam/supernets/{id}/move` | LIR catalog + tenant supernet relocation (PR 175). |
+| `/api/v1/bgp/*` | Full BGP catalog: ASNs, prefix-lists, community-lists, route-maps + entries; TCP-AO keychains + keys + rotate-batch (PRs #203 + #204 + #205 + #206). |
+| `/api/v1/alerts/*` | List/ack + rules CRUD + maintenance-windows CRUD (PR #207). Alert evaluation loop still on Python's arq. |
+| `/api/v1/notifications/*` | Channels CRUD + test endpoint (PR #215). Channel test reuses the dispatcher service; STARTTLS default fixed in port. |
+| `/api/v1/dns/bgp-peers` | Sub-prefix cutover (PR #214). The rest of `/dns/*` still routes to Python. |
+| `/api/v1/region-deployments` (read-side) | LIST + detail GET + paginated event history (PR #201). The 6 lifecycle endpoints stay on Python. |
+
+### Six cron jobs ported to `otter-go-scheduler`
+
+| Job | Cadence | Notes |
+|---|---|---|
+| `dns_purge_metrics` | hourly `:23` | Migration 0067 adds a missing index (PR #208). |
+| `freshness_sweep` | every 5 min | Constant-memory single-UPDATE instead of Python's load-loop (PR #210). |
+| `dns_sync_from_ipam` | every 5 min `:04-:59` | Re-projects IPAM allocations into source=ipam DNS records (PR #211). |
+| `dhcp_scope_tombstone_purge` | daily `03:30` | Migration 0068 adds a partial index `WHERE deleted_at IS NOT NULL` (PR #212). |
+| `dns_rotate_zsks` | daily `03:17` | Reuses the operator-driven `RotateZoneKey` helper (PR #213). |
+| `dhcp_bundle_rerender` | every 2 min | Renders + caches the Kea config bundle per server; HTTP endpoint short-circuits on the cache (PR #219). |
+
+### Remaining Python — ordered by likely cutover
+
+| Priority | Surface | Why it's still on Python |
+|---|---|---|
+| **Quick wins** | `/api/v1/dns/servers/{id}/bundle` (DHCP) ingress flip | The Go handler shipped in PR #218; only the ingress rule + Python deletion remain. Small follow-up. |
+| **High** | DHCP push to Kea (`api/ipam.py /dhcp/scopes/*/push`, `/dhcp/servers/*/sync`, `/dhcp/scopes/*/diff`) | Stateful Kea Control Agent integration (~5000 lines across `services/dhcp_push.py` + `dhcp_drift_summary.py` + `dhcp_reconcile.py`). The bundle work (PRs #216–#219) ported the **read-side**; the **write-side** to Kea is the heavier port. ~20-25 PRs. |
+| **High** | Alert evaluation loop | `services/alerts.py` arq cron — threshold + duration + dedup + suppression + maintenance windows. The HTTP routes already moved (PR #207); the eval loop is the gap. ~5-8 PRs. |
+| **Medium** | Region-deploy lifecycle (6 of 9 routes) | POST create/start/abort/preflight, kubeconfig callback, SSE event stream. Now unblocked because the Go scheduler exists; the SSE endpoint needs a Go-native streaming shape. ~5-10 PRs. |
+| **Medium** | DNS module beyond `/dns/bgp-peers` | Zones, records, keys, health-checks, anycast-bindings — large surface but all CRUD. Most handlers are dark code on Go already; mostly an ingress + Python deletion exercise once parity is audited. ~3-5 PRs. |
+| **Lower** | IPAM mutation parity | Most ipam mutations are on Go; remaining gaps are FK-validation messages + the `bulk` paths. ~2-3 PRs. |
+| **Infrastructure** | Alembic → Go migration tool | 68 versions to migrate or co-own. Atlas, Goose, or hand-rolled. Decision deferred until the Python deletion endgame. |
+
+**Definition of done for the migration:** `packages/otter/` is deleted from
+`main`; the umbrella chart no longer mounts the otter container; CI loses the
+`otter (ruff + pytest)` job.
 
 ---
 
@@ -210,4 +271,4 @@ These come up but we're not chasing them:
 
 ---
 
-*Last updated: 2026-05-15. Edit me as plans change.*
+*Last updated: 2026-06-01. Edit me as plans change.*

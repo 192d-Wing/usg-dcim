@@ -25,7 +25,7 @@ import re
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,7 +95,7 @@ from ..schemas.ipam import (
 from ..security import audit
 from ..security.deps import Principal, require_capability
 from ..security.scope import enforce_fabric_scope, scope_filtered_fabric_ids
-from ..services import dhcp_bundle, dhcp_push, dhcp_reconcile
+from ..services import dhcp_push, dhcp_reconcile
 from ..services import dhcp_drift_summary as dhcp_drift_summary_svc
 from ..services import ipam as ipam_svc
 from ..services import kea as kea_svc
@@ -1830,78 +1830,16 @@ async def delete_dhcp_server(
     await db.commit()
 
 
-@router.get("/dhcp/servers/{server_id}/bundle")
-async def get_dhcp_server_bundle(
-    server_id: UUID,
-    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
-    principal: Principal = Depends(require_capability("ipam:dhcp-servers:bundle")),
-    db: AsyncSession = Depends(get_db),
-):
-    """Return a complete Kea config bundle for the dhcp-site chart's
-    bundle-puller to install.
-
-    Shape:
-        {
-            "server_id": "<uuid>",
-            "ctrl_agent": { ... full Kea Control Agent config ... },
-            "dhcp4":      { ..., "subnet4": [...DCIM-rendered...] },
-            "dhcp6":      { ..., "subnet6": [...DCIM-rendered...] },
-            "etag":       "<sha256 hex>"
-        }
-
-    Operator owns everything in ctrl_agent/dhcp4/dhcp6 except the
-    subnet arrays (DCIM authors those from DhcpScope rows). See
-    services/dhcp_bundle.py for the merge contract.
-
-    If-None-Match short-circuit: clients pass the previous etag; if
-    it matches, the API returns 304 with no body. Used by the
-    bundle-puller sidecar to skip disk writes when nothing changed.
-    """
-    server = await db.get(DhcpServer, server_id)
-    if server is None:
-        raise NotFoundError(_DHCP_NOT_FOUND)
-    await enforce_fabric_scope(
-        db, principal.capabilities, server.fabric_id, "ipam:dhcp-servers:bundle",
-    )
-    # PR 83 — read from the pre-rendered cache when present. Worker
-    # task rerender_dhcp_bundle writes the columns on every scope
-    # mutation. A null cache means we haven't rendered yet on this
-    # row (fresh install, just-migrated DB) — fall through to live
-    # render, which also seeds the cache via the on-demand worker
-    # enqueue on the next mutation.
-    if server.bundle_cache_etag and server.bundle_cache_json:
-        if if_none_match and if_none_match.strip('"') == server.bundle_cache_etag:
-            return Response(status_code=304)
-        return server.bundle_cache_json
-    scopes = (
-        await db.execute(
-            select(DhcpScope)
-            .where(DhcpScope.dhcp_server_id == server_id)
-            .where(DhcpScope.deleted_at.is_(None))  # PR 95
-        )
-    ).scalars().all()
-    # PR 78 — preload referenced templates so the renderer can merge
-    # template defaults under per-scope values without N+1 queries.
-    template_ids = {s.template_id for s in scopes if s.template_id}
-    templates_by_id: dict = {}
-    if template_ids:
-        rows = (
-            await db.execute(
-                select(DhcpScopeTemplate)
-                .where(DhcpScopeTemplate.id.in_(template_ids))
-            )
-        ).scalars().all()
-        templates_by_id = {t.id: t for t in rows}
-    bundle = dhcp_bundle.render_kea_bundle(server, scopes, templates_by_id)
-    if if_none_match and if_none_match.strip('"') == bundle.etag:
-        return Response(status_code=304)
-    return {
-        "server_id": bundle.server_id,
-        "ctrl_agent": bundle.ctrl_agent,
-        "dhcp4": bundle.dhcp4,
-        "dhcp6": bundle.dhcp6,
-        "etag": bundle.etag,
-    }
+# /api/v1/ipam/dhcp/servers/{id}/bundle moved to otter-go (PRs
+# #216-#219). The Go handler at internal/ipam/dhcp_bundle.go has
+# full parity: same cache short-circuit on bundle_cache_etag +
+# bundle_cache_json, same If-None-Match → 304, same live-render
+# fallback via internal/dhcp/bundle's renderer. The rerender_dhcp_bundle
+# scheduler job warms the cache every 2 min. Ingress carves the
+# specific bundle subpath off the /api/v1/ipam tree (which otherwise
+# still routes to Python); the rest of /ipam/dhcp/* (servers CRUD,
+# scopes, push, sync, diff) stays Python-canonical until the full
+# DHCP module cuts over with the push port.
 
 
 @router.post("/dhcp/servers/{server_id}/sync")

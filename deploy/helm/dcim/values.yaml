@@ -236,6 +236,19 @@ ingress:
         - path: /api/v1/ipam/supernets/[^/]+/move
           pathType: ImplementationSpecific
           backend: otter-go
+        # DHCP bundle endpoint moves to otter-go — closes out the
+        # 4-PR bundle work (renderer PR #216, queries PR #217, HTTP
+        # endpoint PR #218, rerender cron PR #219). The rest of
+        # /api/v1/ipam/dhcp/* (servers/scopes CRUD, push, sync, diff)
+        # stays on Python until the DHCP push port lands. UUID class
+        # is [0-9A-Fa-f-] to match upper- + lower-case ids (Python's
+        # uuid.UUID accepts both); the literal `/bundle` suffix is
+        # anchored so a future sibling subpath (e.g. `/bundle/raw`)
+        # falls through to /api → otter instead of silently 404'ing
+        # on otter-go.
+        - path: /api/v1/ipam/dhcp/servers/[0-9A-Fa-f-]+/bundle
+          pathType: ImplementationSpecific
+          backend: otter-go
         - path: /api/v1/lir
           pathType: Prefix
           backend: otter-go
