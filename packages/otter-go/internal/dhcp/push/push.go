@@ -65,8 +65,10 @@ type Querier interface {
 type KeaClient interface {
 	Subnet4Add(ctx context.Context, subnet map[string]any) ([]byte, error)
 	Subnet4Update(ctx context.Context, subnet map[string]any) ([]byte, error)
+	Subnet4Del(ctx context.Context, subnetID int64) ([]byte, error)
 	Subnet6Add(ctx context.Context, subnet map[string]any) ([]byte, error)
 	Subnet6Update(ctx context.Context, subnet map[string]any) ([]byte, error)
+	Subnet6Del(ctx context.Context, subnetID int64) ([]byte, error)
 	ConfigWrite(ctx context.Context, services []string) ([]byte, error)
 }
 
@@ -115,6 +117,48 @@ const errMaxLen = 2048
 // without operator action.
 var ErrServerDisabled = errors.New("dhcp server disabled; refusing to push")
 
+// loadScopeForPush reads the scope row + maps ErrNoRows to a 404-
+// shaped Result. Shared with DeleteScopeFromKea. Returns (row, ok,
+// errResult, fatalErr): ok=false means a Result has been prepared
+// and the caller should return it; fatalErr is non-nil only for
+// unexpected internal failures (DB unreachable).
+func loadScopeForPush(ctx context.Context, q Querier, scopeID uuid.UUID) (dbq.DhcpScopeForPushRow, bool, Result, error) {
+	scope, err := q.GetDhcpScopeForPush(ctx, scopeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbq.DhcpScopeForPushRow{}, false,
+				Result{ScopeID: scopeID, Status: kea.StatusError, Error: "scope not found"}, nil
+		}
+		return dbq.DhcpScopeForPushRow{}, false, Result{}, fmt.Errorf("load scope: %w", err)
+	}
+	return scope, true, Result{}, nil
+}
+
+// loadEnabledServerForPush reads the server row, maps ErrNoRows to a
+// 404-shaped Result, and refuses with ErrServerDisabled when the
+// server is operator-disabled. Shared with DeleteScopeFromKea.
+// scopeID is threaded into the Result so the caller's error
+// surface stays consistent regardless of which load step failed.
+func loadEnabledServerForPush(
+	ctx context.Context, q Querier, scopeID uuid.UUID,
+	serverID uuid.UUID, scopeKeaID *int32,
+) (dbq.DhcpServerForPushRow, bool, Result, error) {
+	server, err := q.GetDhcpServerForPush(ctx, serverID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbq.DhcpServerForPushRow{}, false,
+				Result{ScopeID: scopeID, Status: kea.StatusError, Error: "parent dhcp server not found"}, nil
+		}
+		return dbq.DhcpServerForPushRow{}, false, Result{}, fmt.Errorf("load server: %w", err)
+	}
+	if !server.Enabled {
+		return server, false,
+			Result{ScopeID: scopeID, KeaSubnetID: scopeKeaID, Status: kea.StatusError, Error: ErrServerDisabled.Error()},
+			nil
+	}
+	return server, true, Result{}, nil
+}
+
 // AllocateKeaSubnetID returns the lowest unused positive int32 for
 // this server. Kea rejects id=0 (reserved as "unspecified" in some
 // commands), so we start at 1. Matches Python's
@@ -149,25 +193,19 @@ func AllocateKeaSubnetID(ctx context.Context, q Querier, serverID uuid.UUID) (in
 // Result.Status="error" with the err string in Result.Error,
 // matching Python's PushResult contract.
 func PushScope(ctx context.Context, q Querier, build KeaClientBuilder, scopeID uuid.UUID) (Result, error) {
-	scope, err := q.GetDhcpScopeForPush(ctx, scopeID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Result{ScopeID: scopeID, Status: kea.StatusError, Error: "scope not found"}, nil
-		}
-		return Result{}, fmt.Errorf("load scope: %w", err)
+	scope, ok, errRes, fatalErr := loadScopeForPush(ctx, q, scopeID)
+	if fatalErr != nil {
+		return Result{}, fatalErr
 	}
-	server, err := q.GetDhcpServerForPush(ctx, scope.DhcpServerID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Result{ScopeID: scopeID, Status: kea.StatusError, Error: "parent dhcp server not found"}, nil
-		}
-		return Result{}, fmt.Errorf("load server: %w", err)
+	if !ok {
+		return errRes, nil
 	}
-	if !server.Enabled {
-		return Result{
-			ScopeID: scopeID, KeaSubnetID: scope.KeaSubnetID,
-			Status: kea.StatusError, Error: ErrServerDisabled.Error(),
-		}, nil
+	server, ok, errRes, fatalErr := loadEnabledServerForPush(ctx, q, scopeID, scope.DhcpServerID, scope.KeaSubnetID)
+	if fatalErr != nil {
+		return Result{}, fatalErr
+	}
+	if !ok {
+		return errRes, nil
 	}
 	tpl, err := loadTemplate(ctx, q, scope.TemplateID)
 	if err != nil {
