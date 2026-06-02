@@ -954,3 +954,175 @@ func (q *Queries) DeleteDhcpScopeTemplate(ctx context.Context, id uuid.UUID) err
 	_, err := q.db.Exec(ctx, deleteDhcpScopeTemplate, id)
 	return err
 }
+
+// ===== DHCP scopes (mutations) =====
+
+const dhcpScopeRetCols = `id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix,
+       pools_json, pd_pools_json, options_json, reservations_json,
+       valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+       preferred_lifetime_seconds, enabled, description, kea_subnet_id,
+       template_id, last_diff_at, last_diff_status, last_diff_delta_json,
+       auto_push_override, deleted_at, created_at, updated_at`
+
+func scanDhcpScopeMut(row interface{ Scan(...any) error }, s *DhcpScope) error {
+	return row.Scan(
+		&s.ID, &s.DhcpServerID, &s.SubnetID, &s.Name, &s.IPFamily, &s.Prefix,
+		&s.PoolsJSON, &s.PdPoolsJSON, &s.OptionsJSON, &s.ReservationsJSON,
+		&s.ValidLifetimeSeconds, &s.RenewTimerSeconds, &s.RebindTimerSeconds,
+		&s.PreferredLifetimeSeconds, &s.Enabled, &s.Description, &s.KeaSubnetID,
+		&s.TemplateID, &s.LastDiffAt, &s.LastDiffStatus, &s.LastDiffDeltaJSON,
+		&s.AutoPushOverride, &s.DeletedAt, &s.CreatedAt, &s.UpdatedAt,
+	)
+}
+
+const createDhcpScope = `INSERT INTO dhcp_scopes (
+    id, dhcp_server_id, subnet_id, template_id, name, ip_family, prefix,
+    pools_json, pd_pools_json, options_json, reservations_json,
+    valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+    preferred_lifetime_seconds, enabled, description, auto_push_override,
+    created_at, updated_at
+)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6::cidr,
+        $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+RETURNING ` + dhcpScopeRetCols
+
+// CreateDhcpScopeParams. Pools/Options/Reservations are caller-
+// validated JSON. PdPools is json.RawMessage so nil → NULL in
+// Postgres (matches Python's `pd_pools is None → None`).
+type CreateDhcpScopeParams struct {
+	DhcpServerID             uuid.UUID       `json:"dhcp_server_id"`
+	SubnetID                 *uuid.UUID      `json:"subnet_id"`
+	TemplateID               *uuid.UUID      `json:"template_id"`
+	Name                     string          `json:"name"`
+	IPFamily                 int32           `json:"ip_family"`
+	Prefix                   string          `json:"prefix"`
+	PoolsJSON                json.RawMessage `json:"pools_json"`
+	PdPoolsJSON              json.RawMessage `json:"pd_pools_json"`
+	OptionsJSON              json.RawMessage `json:"options_json"`
+	ReservationsJSON         json.RawMessage `json:"reservations_json"`
+	ValidLifetimeSeconds     *int32          `json:"valid_lifetime_seconds"`
+	RenewTimerSeconds        *int32          `json:"renew_timer_seconds"`
+	RebindTimerSeconds       *int32          `json:"rebind_timer_seconds"`
+	PreferredLifetimeSeconds *int32          `json:"preferred_lifetime_seconds"`
+	Enabled                  bool            `json:"enabled"`
+	Description              *string         `json:"description"`
+	AutoPushOverride         *bool           `json:"auto_push_override"`
+}
+
+func (q *Queries) CreateDhcpScope(ctx context.Context, arg CreateDhcpScopeParams) (DhcpScope, error) {
+	row := q.db.QueryRow(ctx, createDhcpScope,
+		arg.DhcpServerID, arg.SubnetID, arg.TemplateID, arg.Name, arg.IPFamily, arg.Prefix,
+		arg.PoolsJSON, arg.PdPoolsJSON, arg.OptionsJSON, arg.ReservationsJSON,
+		arg.ValidLifetimeSeconds, arg.RenewTimerSeconds, arg.RebindTimerSeconds,
+		arg.PreferredLifetimeSeconds, arg.Enabled, arg.Description, arg.AutoPushOverride)
+	var s DhcpScope
+	err := scanDhcpScopeMut(row, &s)
+	return s, err
+}
+
+const updateDhcpScope = `UPDATE dhcp_scopes
+SET name                       = COALESCE($2::text, name),
+    subnet_id                  = CASE WHEN $3::bool  THEN $4::uuid  ELSE subnet_id END,
+    template_id                = CASE WHEN $5::bool  THEN $6::uuid  ELSE template_id END,
+    pools_json                 = CASE WHEN $7::bool  THEN $8::jsonb ELSE pools_json END,
+    pd_pools_json              = CASE WHEN $9::bool  THEN $10::jsonb ELSE pd_pools_json END,
+    options_json               = CASE WHEN $11::bool THEN $12::jsonb ELSE options_json END,
+    reservations_json          = CASE WHEN $13::bool THEN $14::jsonb ELSE reservations_json END,
+    valid_lifetime_seconds     = CASE WHEN $15::bool THEN $16::int  ELSE valid_lifetime_seconds END,
+    renew_timer_seconds        = CASE WHEN $17::bool THEN $18::int  ELSE renew_timer_seconds END,
+    rebind_timer_seconds       = CASE WHEN $19::bool THEN $20::int  ELSE rebind_timer_seconds END,
+    preferred_lifetime_seconds = CASE WHEN $21::bool THEN $22::int  ELSE preferred_lifetime_seconds END,
+    enabled                    = COALESCE($23::bool, enabled),
+    description                = CASE WHEN $24::bool THEN $25::text ELSE description END,
+    auto_push_override         = CASE WHEN $26::bool THEN $27::bool ELSE auto_push_override END,
+    updated_at                 = NOW()
+WHERE id = $1
+RETURNING ` + dhcpScopeRetCols
+
+// UpdateDhcpScopeParams. Every nullable column carries a paired
+// `*Set bool` so the handler can distinguish "patch omits key"
+// (keep current) from "patch sets to null" (clear). ip_family +
+// prefix + dhcp_server_id are immutable (matches Python's PATCH
+// model which omits them).
+type UpdateDhcpScopeParams struct {
+	ID                          uuid.UUID       `json:"id"`
+	Name                        *string         `json:"name"`
+	SubnetIDSet                 bool            `json:"subnet_id_set"`
+	SubnetID                    *uuid.UUID      `json:"subnet_id"`
+	TemplateIDSet               bool            `json:"template_id_set"`
+	TemplateID                  *uuid.UUID      `json:"template_id"`
+	PoolsSet                    bool            `json:"pools_set"`
+	PoolsJSON                   json.RawMessage `json:"pools_json"`
+	PdPoolsSet                  bool            `json:"pd_pools_set"`
+	PdPoolsJSON                 json.RawMessage `json:"pd_pools_json"`
+	OptionsSet                  bool            `json:"options_set"`
+	OptionsJSON                 json.RawMessage `json:"options_json"`
+	ReservationsSet             bool            `json:"reservations_set"`
+	ReservationsJSON            json.RawMessage `json:"reservations_json"`
+	ValidLifetimeSet            bool            `json:"valid_lifetime_set"`
+	ValidLifetimeSeconds        *int32          `json:"valid_lifetime_seconds"`
+	RenewTimerSet               bool            `json:"renew_timer_set"`
+	RenewTimerSeconds           *int32          `json:"renew_timer_seconds"`
+	RebindTimerSet              bool            `json:"rebind_timer_set"`
+	RebindTimerSeconds          *int32          `json:"rebind_timer_seconds"`
+	PreferredLifetimeSet        bool            `json:"preferred_lifetime_set"`
+	PreferredLifetimeSeconds    *int32          `json:"preferred_lifetime_seconds"`
+	Enabled                     *bool           `json:"enabled"`
+	DescriptionSet              bool            `json:"description_set"`
+	Description                 *string         `json:"description"`
+	AutoPushOverrideSet         bool            `json:"auto_push_override_set"`
+	AutoPushOverride            *bool           `json:"auto_push_override"`
+}
+
+func (q *Queries) UpdateDhcpScope(ctx context.Context, arg UpdateDhcpScopeParams) (DhcpScope, error) {
+	row := q.db.QueryRow(ctx, updateDhcpScope,
+		arg.ID, arg.Name,
+		arg.SubnetIDSet, arg.SubnetID,
+		arg.TemplateIDSet, arg.TemplateID,
+		arg.PoolsSet, arg.PoolsJSON,
+		arg.PdPoolsSet, arg.PdPoolsJSON,
+		arg.OptionsSet, arg.OptionsJSON,
+		arg.ReservationsSet, arg.ReservationsJSON,
+		arg.ValidLifetimeSet, arg.ValidLifetimeSeconds,
+		arg.RenewTimerSet, arg.RenewTimerSeconds,
+		arg.RebindTimerSet, arg.RebindTimerSeconds,
+		arg.PreferredLifetimeSet, arg.PreferredLifetimeSeconds,
+		arg.Enabled,
+		arg.DescriptionSet, arg.Description,
+		arg.AutoPushOverrideSet, arg.AutoPushOverride,
+	)
+	var s DhcpScope
+	err := scanDhcpScopeMut(row, &s)
+	return s, err
+}
+
+const softDeleteDhcpScope = `UPDATE dhcp_scopes
+SET deleted_at = NOW(), updated_at = NOW()
+WHERE id = $1
+  AND deleted_at IS NULL`
+
+// SoftDeleteDhcpScope is a no-op when the row is already tombstoned;
+// the handler 404s on already-deleted via a pre-fetch. The WHERE
+// clause's deleted_at IS NULL is a defensive guard against the
+// race window between the pre-fetch and this UPDATE.
+func (q *Queries) SoftDeleteDhcpScope(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, softDeleteDhcpScope, id)
+	return err
+}
+
+const restoreDhcpScope = `UPDATE dhcp_scopes
+SET deleted_at = NULL, updated_at = NOW()
+WHERE id = $1
+  AND deleted_at IS NOT NULL
+RETURNING ` + dhcpScopeRetCols
+
+// RestoreDhcpScope returns pgx.ErrNoRows when the row is missing OR
+// already live. The handler pre-fetches via GetDhcpScope and checks
+// deleted_at, so this "0 rows affected" case here is a race.
+func (q *Queries) RestoreDhcpScope(ctx context.Context, id uuid.UUID) (DhcpScope, error) {
+	row := q.db.QueryRow(ctx, restoreDhcpScope, id)
+	var s DhcpScope
+	err := scanDhcpScopeMut(row, &s)
+	return s, err
+}

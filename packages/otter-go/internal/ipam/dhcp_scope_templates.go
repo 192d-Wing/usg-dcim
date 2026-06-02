@@ -272,26 +272,13 @@ func (u *dhcpScopeTemplateUpdateReq) UnmarshalJSON(data []byte) error {
 			u.Options = v
 		}
 	}
-	if v, ok := raw["valid_lifetime_seconds"]; ok {
-		u.validLifetimeSet = true
-		_ = json.Unmarshal(v, &u.ValidLifetimeSeconds)
-	}
-	if v, ok := raw["renew_timer_seconds"]; ok {
-		u.renewTimerSet = true
-		_ = json.Unmarshal(v, &u.RenewTimerSeconds)
-	}
-	if v, ok := raw["rebind_timer_seconds"]; ok {
-		u.rebindTimerSet = true
-		_ = json.Unmarshal(v, &u.RebindTimerSeconds)
-	}
-	if v, ok := raw["preferred_lifetime_seconds"]; ok {
-		u.preferredLifetimeSet = true
-		_ = json.Unmarshal(v, &u.PreferredLifetimeSeconds)
-	}
-	if v, ok := raw["description"]; ok {
-		u.descriptionSet = true
-		_ = json.Unmarshal(v, &u.Description)
-	}
+	setIfPresent(raw, "valid_lifetime_seconds", &u.validLifetimeSet, &u.ValidLifetimeSeconds)
+	setIfPresent(raw, "renew_timer_seconds", &u.renewTimerSet, &u.RenewTimerSeconds)
+	setIfPresent(raw, "rebind_timer_seconds", &u.rebindTimerSet, &u.RebindTimerSeconds)
+	setIfPresent(raw, "preferred_lifetime_seconds", &u.preferredLifetimeSet, &u.PreferredLifetimeSeconds)
+	var descSet bool
+	setIfPresent(raw, "description", &descSet, &u.Description)
+	u.descriptionSet = descSet
 	return nil
 }
 

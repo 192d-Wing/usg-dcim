@@ -171,10 +171,19 @@ type Querier interface {
 
 	// DHCP scope read surface (PR 10). LIST per server with filters,
 	// GET by id (returns tombstones too — wire shape carries
-	// deleted_at). Mutation queries land in a follow-up PR.
+	// deleted_at).
 	ListDhcpScopesByServer(ctx context.Context, arg dbq.ListDhcpScopesByServerParams) ([]dbq.DhcpScope, error)
 	CountDhcpScopesByServer(ctx context.Context, arg dbq.CountDhcpScopesByServerParams) (int64, error)
 	GetDhcpScope(ctx context.Context, id uuid.UUID) (dbq.DhcpScope, error)
+
+	// DHCP scope mutation surface (PR 11). CREATE / partial UPDATE /
+	// SOFT_DELETE / RESTORE. DELETE also calls push.DeleteScopeFromKea
+	// (already in the push.Querier embed above) for best-effort Kea
+	// cleanup before tombstoning.
+	CreateDhcpScope(ctx context.Context, arg dbq.CreateDhcpScopeParams) (dbq.DhcpScope, error)
+	UpdateDhcpScope(ctx context.Context, arg dbq.UpdateDhcpScopeParams) (dbq.DhcpScope, error)
+	SoftDeleteDhcpScope(ctx context.Context, id uuid.UUID) error
+	RestoreDhcpScope(ctx context.Context, id uuid.UUID) (dbq.DhcpScope, error)
 }
 
 type Handler struct {
@@ -352,11 +361,25 @@ func (h *Handler) Mount(r chi.Router) {
 		// circuit to the zero-fleet shape. See dhcp_drift_summary.go.
 		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/drift-summary", h.dhcpDriftSummary)
 
-		// DHCP scope read surface (PR 10). LIST per server + GET
-		// single. Mutations (POST/PATCH/DELETE/RESTORE) land in a
-		// follow-up PR. See dhcp_scopes.go.
+		// DHCP scope read surface (PR 10). LIST per server + GET single.
 		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/servers/{id}/scopes", h.listDhcpScopes)
 		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/scopes/{id}", h.getDhcpScope)
+
+		// DHCP scope mutations (PR 11). CREATE under the server URL,
+		// PATCH/DELETE/RESTORE on the scope URL. DELETE runs
+		// push.DeleteScopeFromKea best-effort before tombstoning;
+		// RESTORE does not re-push (operator runs /push explicitly).
+		// See dhcp_scope_mutations.go.
+		const (
+			capDhcpScopesCreate = "ipam:dhcp-scopes:create"
+			capDhcpScopesUpdate = "ipam:dhcp-scopes:update"
+			capDhcpScopesDelete = "ipam:dhcp-scopes:delete"
+			pathDhcpScopeByID   = "/dhcp/scopes/{id}"
+		)
+		r.With(auth.RequireCapability(capDhcpScopesCreate)).Post("/dhcp/servers/{id}/scopes", h.createDhcpScope)
+		r.With(auth.RequireCapability(capDhcpScopesUpdate)).Patch(pathDhcpScopeByID, h.updateDhcpScope)
+		r.With(auth.RequireCapability(capDhcpScopesDelete)).Delete(pathDhcpScopeByID, h.deleteDhcpScope)
+		r.With(auth.RequireCapability(capDhcpScopesDelete)).Post("/dhcp/scopes/{id}/restore", h.restoreDhcpScope)
 	})
 }
 
