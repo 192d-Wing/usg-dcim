@@ -33,8 +33,14 @@ mtls:
 devices: []
 
 # DNS agent — polls /api/v1/dns/servers/{id}/bundle for each entry and
-# writes Corefile + zone files (+ gobgp.yaml when recursive) into the
-# matching output_dir, then signals the matching pids to reload.
+# writes Corefile + zone files into the matching output_dir, then
+# signals the matching pids to reload.
+#
+# GoBGP deprecation: the prior gobgp_pidfile + gobgp_api_host fields
+# are gone. Cilium BGP advertises the recursive DNS LoadBalancer
+# service at the cluster level (CiliumBGPPeeringPolicy +
+# CiliumLoadBalancerIPPool) — the in-pod gobgpd process no longer
+# runs, so there's nothing for the agent to PID-signal.
 dns:
   enabled: true
   poll_interval_seconds: 30
@@ -67,5 +73,4 @@ dns:
       role: recursive
       output_dir: /var/lib/dcim-dns/recursive
       coredns_pidfile: /var/lib/dcim-dns/recursive/coredns.pid
-      gobgp_pidfile: /var/lib/dcim-dns/recursive/gobgp.pid
       metrics_url: http://coredns-recursive:9153/metrics

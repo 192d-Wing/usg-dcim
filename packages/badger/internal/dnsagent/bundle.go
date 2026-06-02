@@ -1,15 +1,24 @@
 // Package dnsagent runs the on-site DNS bundle agent + Prometheus
-// scraper + dnstap top-K + GoBGP anycast reconciler. Port of
+// scraper + dnstap top-K. Port of
 // collector/src/dcim_collector/dns_agent.py.
 //
 // One goroutine family per configured DnsServer:
 //   - serverLoop:    fetch bundle, apply on etag change, signal reload
 //   - metricsLoop:   scrape Prom endpoint, delta + percentile, POST
 //   - dnstapLoop:    listen on resolver dnstap socket, fold to top-K
-//   - advertiseLoop: keep gobgpd's RIB matched to desired prefixes
 //
 // The dnstap reservoir + the metrics loop coordinate through the
 // package-level top-K state in topk.go.
+//
+// GoBGP deprecation: in-pod gobgpd is no longer used. Cilium BGP
+// advertises the recursive DNS LoadBalancer service IP at the
+// cluster level via CiliumBGPPeeringPolicy + CiliumLoadBalancerIP
+// Pool. The agent's prior advertise-loop + RIB reconciliation +
+// gobgp.yaml materialization are gone — Cilium owns the BGP
+// session and routes are derived from the service definition, not
+// from the bundle. AnycastPrefixes stays on the wire shape today
+// for etag stability + future operator-side reporting; it's no
+// longer acted on locally.
 package dnsagent
 
 import (
@@ -21,8 +30,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/usg-dcim/packages/badger/internal/config"
 )
 
@@ -30,13 +37,12 @@ import (
 // pull out the fields the agent acts on; unknown keys (versioning,
 // future schema) are ignored.
 type Bundle struct {
-	Etag             string            `json:"etag"`
-	Engine           string            `json:"engine"`
-	Corefile         string            `json:"corefile"`
-	Zones            map[string]string `json:"zones"`
-	KeyFiles         map[string]string `json:"key_files"`
-	GoBGP            any               `json:"gobgp"`
-	AnycastPrefixes  []string          `json:"anycast_prefixes"`
+	Etag            string            `json:"etag"`
+	Engine          string            `json:"engine"`
+	Corefile        string            `json:"corefile"`
+	Zones           map[string]string `json:"zones"`
+	KeyFiles        map[string]string `json:"key_files"`
+	AnycastPrefixes []string          `json:"anycast_prefixes"`
 }
 
 const (
@@ -122,7 +128,6 @@ func postStatus(ctx context.Context, c *http.Client, apiBase, serverID, token st
 //   <output_dir>/Corefile     (CoreDNS) or config.toml (Hickory)
 //   <output_dir>/zones/*.zone (one per zone, atomic)
 //   <output_dir>/keys/*       (DNSSEC keys, 0600 on .private)
-//   <output_dir>/gobgp.yaml   (recursive only)
 //
 // Stale engine config (a leftover Corefile when the fabric just moved
 // to Hickory) is removed so the resolver doesn't read it on next start.
@@ -153,15 +158,6 @@ func applyBundle(server *config.DNSServerConfig, b *Bundle) error {
 	for name := range b.KeyFiles {
 		if filepath.Ext(name) == ".private" {
 			_ = os.Chmod(filepath.Join(out, "keys", name), 0o600)
-		}
-	}
-	if server.Role == "recursive" && b.GoBGP != nil {
-		raw, err := yaml.Marshal(b.GoBGP)
-		if err != nil {
-			return fmt.Errorf("marshal gobgp.yaml: %w", err)
-		}
-		if err := atomicWrite(filepath.Join(out, "gobgp.yaml"), raw); err != nil {
-			return fmt.Errorf("write gobgp.yaml: %w", err)
 		}
 	}
 	return nil

@@ -9,6 +9,6 @@ package dnsagent
 
 import "github.com/usg-dcim/packages/badger/internal/config"
 
-func signalReloads(_ *config.DNSServerConfig, _ string) (bool, bool) {
-	return false, false
+func signalReloads(_ *config.DNSServerConfig, _ string) bool {
+	return false
 }

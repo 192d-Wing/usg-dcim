@@ -3,16 +3,21 @@
 Brings up the on-site CoreDNS deployment driven by central DCIM:
 
 - **collector** — polls `/api/v1/dns/servers/{id}/bundle` for each
-  configured `DnsServer`, writes Corefile + zone files (+ `gobgp.yaml`
-  when recursive) into the shared `dns-state` volume, and signals
-  reloads.
+  configured `DnsServer`, writes Corefile + zone files into the
+  shared `dns-state` volume, and signals reloads.
 - **coredns-auth** — authoritative for the per-site zone (and loads
   the fabric-wide bundle for resilience). Listens on the management IP.
 - **coredns-recursive** — forwards `*.<fabric_apex>` to the local
   authoritative pod and everything else to operator upstreams. Listens
   on the per-fabric anycast IP via host networking.
-- **gobgp** — advertises the anycast `/32` and `/128` (when set) to
-  the BGP peers DCIM has configured for this site.
+
+> **GoBGP deprecation**: production deployments now use Cilium BGP to
+> advertise the recursive DNS LoadBalancer service IP at the cluster
+> level (`CiliumBGPPeeringPolicy` + `CiliumLoadBalancerIPPool`). The
+> prior in-pod `gobgp` sidecar + RIB reconciler are gone. The
+> docker-compose files below still wire a gobgp container for legacy
+> bare-metal deployments — those will be removed once the last
+> non-Cilium site retires.
 
 ## Running it locally next to central
 
