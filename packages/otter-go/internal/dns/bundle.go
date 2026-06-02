@@ -56,7 +56,15 @@ type AuthBundleInput struct {
 	// disabled" branch).
 	CatalogName        string
 	CatalogMembers     []dbq.DnsZone
+	CatalogPrimaries   []string
 	CatalogTransferACL []string
+	// Split-horizon views: per-zone-NAME list of view configs in
+	// priority order (narrowest CIDRs first). When non-empty for a
+	// zone, the default render path is bypassed for that zone and
+	// SplitHorizonZoneFiles supplies both the per-view files and a
+	// default fallthrough file.
+	ViewsByZone           map[string][]ViewConfig
+	SplitHorizonZoneFiles map[string]string
 	// DnstapSocket may be nil; CorefileAuth omits the directive
 	// when nil.
 	DnstapSocket *string
@@ -73,6 +81,16 @@ func AssembleAuthBundle(in AuthBundleInput) (BundleResult, error) {
 
 	zoneFiles := make(map[string]string, len(in.Zones))
 	for _, z := range in.Zones {
+		// Split-horizon zones are pre-rendered into
+		// SplitHorizonZoneFiles by the loader (one default + one per
+		// view), so skip the default render path here. Combining
+		// split-horizon + delegation extras would require landing the
+		// DS lines in every view's file; punt on that combo until an
+		// operator asks for it (mirrors Python's `continue` at
+		// services/dns.py L2391).
+		if _, hasViews := in.ViewsByZone[z.Name]; hasViews {
+			continue
+		}
 		filtered := filterRecordsForBundle(in.RecordsByZone[z.ID], in.UnhealthyCheckIDs)
 		text, err := renderZoneFileWithExtras(z, filtered, in.ExtraLinesByZone[z.ID])
 		if err != nil {
@@ -80,12 +98,19 @@ func AssembleAuthBundle(in AuthBundleInput) (BundleResult, error) {
 		}
 		zoneFiles[filenameForZone(z.Name)] = text
 	}
+	// Fold in the split-horizon files (default + per-view) the loader
+	// pre-rendered. Wire-shape match with Python's split_files.update().
+	for k, v := range in.SplitHorizonZoneFiles {
+		zoneFiles[k] = v
+	}
 
 	if in.CatalogName != "" {
 		// Catalog zone — one per fabric, served alongside the member
 		// zones. defaultTTL=0 falls through to the renderer's 3600
 		// default; serial=0 → auto from max(member.updated_at).
-		catalogFile := RenderCatalogZone(in.CatalogName, in.CatalogMembers, 0, 0, nil)
+		// Primaries supplied per RFC 9432 §4.2.3 so BIND 9.20+
+		// consumers can AXFR member zones.
+		catalogFile := RenderCatalogZone(in.CatalogName, in.CatalogMembers, 0, 0, in.CatalogPrimaries)
 		zoneFiles[filenameForZone(in.CatalogName)] = catalogFile
 	}
 
@@ -104,6 +129,7 @@ func AssembleAuthBundle(in AuthBundleInput) (BundleResult, error) {
 		KeysDir:           keysDirPtr,
 		DnssecKeysByZone:  in.DnssecKeysByZone,
 		Nsec3ParamsByZone: in.Nsec3ParamsByZone,
+		ViewsByZone:       in.ViewsByZone,
 		DnstapSocket:      in.DnstapSocket,
 		TransferAclByZone: transferACL,
 	})

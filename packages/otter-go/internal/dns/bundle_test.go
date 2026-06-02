@@ -52,6 +52,9 @@ func (f *fakeBundleQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uui
 func (f *fakeBundleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
 	return nil, nil
 }
+func (f *fakeBundleQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
 
 func mkBundleZoneRow(id uuid.UUID, name string, ts time.Time) dbq.DnsZone {
 	return dbq.DnsZone{

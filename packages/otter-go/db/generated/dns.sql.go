@@ -172,6 +172,29 @@ func (q *Queries) ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, 
 	return out, rows.Err()
 }
 
+const listDnsViewsByFabric = `SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at
+FROM dns_views
+WHERE fabric_id = $1
+ORDER BY priority ASC, name ASC`
+
+func (q *Queries) ListDnsViewsByFabric(ctx context.Context, fabricID uuid.UUID) ([]DnsView, error) {
+	rows, err := q.db.Query(ctx, listDnsViewsByFabric, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DnsView
+	for rows.Next() {
+		var v DnsView
+		if err := rows.Scan(&v.ID, &v.Name, &v.FabricID, &v.MatchCidrs,
+			&v.Priority, &v.Description, &v.CreatedAt, &v.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
 const getEnabledDnsCatalogZoneByFabric = `SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
 FROM dns_catalog_zones
 WHERE fabric_id = $1 AND enabled = true`

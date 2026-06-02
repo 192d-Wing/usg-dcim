@@ -175,3 +175,29 @@ func (s *scopedFakeQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uui
 func (s *scopedFakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
 	return nil, nil
 }
+
+// --- PR 32 stubs (ListDnsViewsByFabric) ---
+func (f *fakeQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
+func (f *fakeImportQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
+func (f *fakeDashboardQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
+func (f *fakeEnableDnssecQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
+func (f *fakeLifecycleQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
+func (f *fakeDnssecQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
+func (f *fakeHCResultQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
+func (s *scopedFakeQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
+	return nil, nil
+}
