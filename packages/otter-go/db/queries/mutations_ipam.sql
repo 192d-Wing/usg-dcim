@@ -326,3 +326,85 @@ RETURNING id, fabric_id, name, ip_family, options_json,
 -- scopes fall back to their stored values automatically. Matches
 -- Python's posture at api/ipam.py:2911.
 DELETE FROM dhcp_scope_templates WHERE id = $1;
+
+-- ===== DHCP scopes (mutations) =====
+-- CRUD reads ship in PR 10; this block adds CREATE/PATCH/SOFT_DELETE/
+-- RESTORE. ip_family + prefix + dhcp_server_id are immutable post-
+-- create (Python's PATCH model omits them; the PATCH SQL doesn't
+-- expose them either).
+
+-- name: CreateDhcpScope :one
+INSERT INTO dhcp_scopes (
+    id, dhcp_server_id, subnet_id, template_id, name, ip_family, prefix,
+    pools_json, pd_pools_json, options_json, reservations_json,
+    valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+    preferred_lifetime_seconds, enabled, description, auto_push_override,
+    created_at, updated_at
+)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6::cidr,
+        $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+RETURNING id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix,
+          pools_json, pd_pools_json, options_json, reservations_json,
+          valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+          preferred_lifetime_seconds, enabled, description, kea_subnet_id,
+          template_id, last_diff_at, last_diff_status, last_diff_delta_json,
+          auto_push_override, deleted_at, created_at, updated_at;
+
+-- name: UpdateDhcpScope :one
+-- Partial update — every nullable column uses the (set, value) CASE
+-- pattern; only `name`/`enabled` use COALESCE because they're NOT
+-- NULL. JSONB columns get the CASE split because Python's PATCH
+-- treats {"pools": null} as "clear" (writes [] for not-null-with-
+-- default columns; writes NULL for pd_pools). The Go handler
+-- resolves the null-vs-omitted distinction before this query runs.
+UPDATE dhcp_scopes
+SET name                       = COALESCE($2::text, name),
+    subnet_id                  = CASE WHEN $3::bool  THEN $4::uuid  ELSE subnet_id END,
+    template_id                = CASE WHEN $5::bool  THEN $6::uuid  ELSE template_id END,
+    pools_json                 = CASE WHEN $7::bool  THEN $8::jsonb ELSE pools_json END,
+    pd_pools_json              = CASE WHEN $9::bool  THEN $10::jsonb ELSE pd_pools_json END,
+    options_json               = CASE WHEN $11::bool THEN $12::jsonb ELSE options_json END,
+    reservations_json          = CASE WHEN $13::bool THEN $14::jsonb ELSE reservations_json END,
+    valid_lifetime_seconds     = CASE WHEN $15::bool THEN $16::int  ELSE valid_lifetime_seconds END,
+    renew_timer_seconds        = CASE WHEN $17::bool THEN $18::int  ELSE renew_timer_seconds END,
+    rebind_timer_seconds       = CASE WHEN $19::bool THEN $20::int  ELSE rebind_timer_seconds END,
+    preferred_lifetime_seconds = CASE WHEN $21::bool THEN $22::int  ELSE preferred_lifetime_seconds END,
+    enabled                    = COALESCE($23::bool, enabled),
+    description                = CASE WHEN $24::bool THEN $25::text ELSE description END,
+    auto_push_override         = CASE WHEN $26::bool THEN $27::bool ELSE auto_push_override END,
+    updated_at                 = NOW()
+WHERE id = $1
+RETURNING id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix,
+          pools_json, pd_pools_json, options_json, reservations_json,
+          valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+          preferred_lifetime_seconds, enabled, description, kea_subnet_id,
+          template_id, last_diff_at, last_diff_status, last_diff_delta_json,
+          auto_push_override, deleted_at, created_at, updated_at;
+
+-- name: SoftDeleteDhcpScope :exec
+-- Sets deleted_at = NOW(). Python's delete path at api/ipam.py:2193
+-- assigns datetime.now(UTC); pgx's NOW() is equivalent for a UTC
+-- column (the schema uses timestamptz). FK cascade is unaffected:
+-- soft-deleted rows still satisfy any inbound FK that referenced
+-- them.
+UPDATE dhcp_scopes
+SET deleted_at = NOW(), updated_at = NOW()
+WHERE id = $1
+  AND deleted_at IS NULL;
+
+-- name: RestoreDhcpScope :one
+-- Inverse of SoftDeleteDhcpScope. Returns the row (or pgx.ErrNoRows
+-- if the scope is missing OR already restored — the handler reads
+-- the row first to disambiguate "missing" vs "already-live", so the
+-- "0 rows affected" case here is a race).
+UPDATE dhcp_scopes
+SET deleted_at = NULL, updated_at = NOW()
+WHERE id = $1
+  AND deleted_at IS NOT NULL
+RETURNING id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix,
+          pools_json, pd_pools_json, options_json, reservations_json,
+          valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+          preferred_lifetime_seconds, enabled, description, kea_subnet_id,
+          template_id, last_diff_at, last_diff_status, last_diff_delta_json,
+          auto_push_override, deleted_at, created_at, updated_at;

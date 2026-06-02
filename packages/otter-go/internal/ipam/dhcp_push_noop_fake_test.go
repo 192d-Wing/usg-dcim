@@ -133,3 +133,22 @@ func (dhcpPushNoop) CountDhcpScopesByServer(_ context.Context, _ dbq.CountDhcpSc
 func (dhcpPushNoop) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
 	return dbq.DhcpScope{}, pgx.ErrNoRows
 }
+
+// DHCP scope mutation stubs (PR 11). CREATE/UPDATE/RESTORE return
+// zero values; SoftDelete is a no-op. Tests that exercise the
+// mutation paths override these on their own fake.
+func (dhcpPushNoop) CreateDhcpScope(_ context.Context, _ dbq.CreateDhcpScopeParams) (dbq.DhcpScope, error) {
+	return dbq.DhcpScope{}, nil
+}
+
+func (dhcpPushNoop) UpdateDhcpScope(_ context.Context, _ dbq.UpdateDhcpScopeParams) (dbq.DhcpScope, error) {
+	return dbq.DhcpScope{}, nil
+}
+
+func (dhcpPushNoop) SoftDeleteDhcpScope(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (dhcpPushNoop) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
+	return dbq.DhcpScope{}, nil
+}
