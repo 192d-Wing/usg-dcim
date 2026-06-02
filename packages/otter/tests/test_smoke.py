@@ -27,10 +27,9 @@ def test_openapi_published() -> None:
     # Keep a positive-assert on a route that's still Python-canonical
     # so a future regression that empties the FastAPI route table
     # entirely fails this test (rather than silently passing the
-    # negative-assert loop on an empty paths dict). DNS + region-
-    # deploy are the last big modules still on Python.
+    # negative-assert loop on an empty paths dict). region-deploy
+    # /start is the only lifecycle endpoint still Python-canonical.
     for needle in [
-        "/api/v1/dns",
         "/api/v1/region-deployments",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
@@ -57,11 +56,13 @@ def test_openapi_published() -> None:
         # maintenance-windows CRUD). The arq eval loop lives in
         # services/alerts.py which is untouched.
         "/api/v1/alerts",
-        # /api/v1/dns/bgp-peers/* moved to otter-go. The rest of
-        # /api/v1/dns/* stays Python-canonical until the full DNS
-        # module is cut over, so the negative-assert targets the
-        # specific subprefix that left.
-        "/api/v1/dns/bgp-peers",
+        # /api/v1/dns/* fully moved to otter-go (PR 33 cutover).
+        # The bundle endpoint ported over PRs #247-#255; the rest
+        # of the surface was already on Go but dark until ingress
+        # flipped here. Recursive servers' bundle endpoint still
+        # returns 501 until GoBGP + RPZ + recursive engine port
+        # in a follow-up.
+        "/api/v1/dns",
         # /api/v1/notifications/* fully moved to otter-go (channels
         # list/create/patch/delete were already there; this PR added
         # the test endpoint). services/notifications.py stays in

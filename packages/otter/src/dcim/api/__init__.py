@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter
 
-from .dns import router as dns_router
 from .regiondeploy import router as regiondeploy_router
 
 router = APIRouter()
@@ -83,7 +82,14 @@ router = APIRouter()
 # double-serving. The schemas + ORM models still live under
 # packages/otter/src/dcim/{schemas,models}/ipam.py — they back DB
 # rows the surviving non-IPAM Python paths still read.
-router.include_router(dns_router)
+# /api/v1/dns/* fully moved to otter-go (PR 33). The bundle endpoint
+# the collector pulls from (GET /servers/{id}/bundle) ported over PRs
+# #247-#255; before that the zones/records/keys/health-checks/anycast-
+# bindings/blocklists/views/forwarders/catalog-zones surface was
+# already on Go. Python no longer registers the router so a misrouted
+# internal call fails loud. Recursive servers return 501 from the
+# bundle endpoint until the GoBGP + RPZ + recursive engine helpers
+# port in a follow-up; auth servers are feature-complete.
 # /api/v1/bgp/* fully moved to otter-go (PRs #203 + #204 for TCP-AO;
 # this PR for the rest — asns/prefix-lists/community-lists/route-maps
 # + their entries; the Go handlers were already implemented in PR 44
