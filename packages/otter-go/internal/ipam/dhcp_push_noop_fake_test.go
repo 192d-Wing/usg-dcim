@@ -152,3 +152,10 @@ func (dhcpPushNoop) SoftDeleteDhcpScope(_ context.Context, _ uuid.UUID) error {
 func (dhcpPushNoop) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
 	return dbq.DhcpScope{}, nil
 }
+
+// DHCP reconcile narrow-projection read (PR 12). Returns an empty
+// slice so unrelated tests don't accidentally exercise the matcher
+// against partial state.
+func (dhcpPushNoop) ListIPAddressesInSubnetForReconcile(_ context.Context, _ uuid.UUID) ([]dbq.DhcpReconcileIPRow, error) {
+	return nil, nil
+}

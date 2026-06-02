@@ -184,6 +184,13 @@ type Querier interface {
 	UpdateDhcpScope(ctx context.Context, arg dbq.UpdateDhcpScopeParams) (dbq.DhcpScope, error)
 	SoftDeleteDhcpScope(ctx context.Context, id uuid.UUID) error
 	RestoreDhcpScope(ctx context.Context, id uuid.UUID) (dbq.DhcpScope, error)
+
+	// DHCP reservation ↔ IPAM reconciliation (PR 12). Narrow
+	// projection that includes dhcp_duid (PR 94 in Python; not in
+	// the standard IPAddress projection). The aggregator in
+	// internal/dhcp/reconcile classifies each reservation against
+	// these rows.
+	ListIPAddressesInSubnetForReconcile(ctx context.Context, subnetID uuid.UUID) ([]dbq.DhcpReconcileIPRow, error)
 }
 
 type Handler struct {
@@ -380,6 +387,12 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability(capDhcpScopesUpdate)).Patch(pathDhcpScopeByID, h.updateDhcpScope)
 		r.With(auth.RequireCapability(capDhcpScopesDelete)).Delete(pathDhcpScopeByID, h.deleteDhcpScope)
 		r.With(auth.RequireCapability(capDhcpScopesDelete)).Post("/dhcp/scopes/{id}/restore", h.restoreDhcpScope)
+
+		// DHCP reservation ↔ IPAM reconciliation (PR 12). Read-only
+		// classification report. Distinct capability so operators
+		// can grant the cross-check view without granting the
+		// mutating sync (PR 13). See dhcp_reconcile.go.
+		r.With(auth.RequireCapability("ipam:dhcp-scopes:reconcile")).Get("/dhcp/scopes/{id}/reconcile", h.reconcileDhcpScope)
 	})
 }
 
