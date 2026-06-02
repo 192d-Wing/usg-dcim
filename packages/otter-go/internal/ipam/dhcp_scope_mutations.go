@@ -190,33 +190,19 @@ func (u *dhcpScopeUpdateReq) UnmarshalJSON(data []byte) error {
 	u.pdPoolsSet = unmarshalRawJSON(raw, "pd_pools", &u.PdPools)
 	u.optionsSet = unmarshalRawJSON(raw, "options", &u.Options)
 	u.reservationsSet = unmarshalRawJSON(raw, "reservations", &u.Reservations)
-	if v, ok := raw["valid_lifetime_seconds"]; ok {
-		u.validLifetimeSet = true
-		_ = json.Unmarshal(v, &u.ValidLifetimeSeconds)
-	}
-	if v, ok := raw["renew_timer_seconds"]; ok {
-		u.renewTimerSet = true
-		_ = json.Unmarshal(v, &u.RenewTimerSeconds)
-	}
-	if v, ok := raw["rebind_timer_seconds"]; ok {
-		u.rebindTimerSet = true
-		_ = json.Unmarshal(v, &u.RebindTimerSeconds)
-	}
-	if v, ok := raw["preferred_lifetime_seconds"]; ok {
-		u.preferredLifetimeSet = true
-		_ = json.Unmarshal(v, &u.PreferredLifetimeSeconds)
-	}
+	setIfPresent(raw, "valid_lifetime_seconds", &u.validLifetimeSet, &u.ValidLifetimeSeconds)
+	setIfPresent(raw, "renew_timer_seconds", &u.renewTimerSet, &u.RenewTimerSeconds)
+	setIfPresent(raw, "rebind_timer_seconds", &u.rebindTimerSet, &u.RebindTimerSeconds)
+	setIfPresent(raw, "preferred_lifetime_seconds", &u.preferredLifetimeSet, &u.PreferredLifetimeSeconds)
 	if v, ok := raw["enabled"]; ok {
 		_ = json.Unmarshal(v, &u.Enabled)
 	}
-	if v, ok := raw["description"]; ok {
-		u.descriptionSet = true
-		_ = json.Unmarshal(v, &u.Description)
-	}
-	if v, ok := raw["auto_push_override"]; ok {
-		u.autoPushOverrideSet = true
-		_ = json.Unmarshal(v, &u.AutoPushOverride)
-	}
+	var descSet bool
+	setIfPresent(raw, "description", &descSet, &u.Description)
+	u.descriptionSet = descSet
+	var autoPushSet bool
+	setIfPresent(raw, "auto_push_override", &autoPushSet, &u.AutoPushOverride)
+	u.autoPushOverrideSet = autoPushSet
 	return nil
 }
 
@@ -234,6 +220,22 @@ func unmarshalRawJSON(raw map[string]json.RawMessage, key string, dst *json.RawM
 		*dst = v
 	}
 	return true
+}
+
+// setIfPresent is the shared shape both dhcpScopeUpdateReq.UnmarshalJSON
+// and dhcpScopeTemplateUpdateReq.UnmarshalJSON use for the four timer
+// fields + description. Keeping the helper here (vs duplicating the
+// 4-key block in both UnmarshalJSON impls) drops the inter-file
+// duplication SonarCloud flagged on PR 11. Generic over the target
+// pointer type so the same call site handles *int32 + *string +
+// *bool without per-type variants.
+func setIfPresent[T any](raw map[string]json.RawMessage, key string, setFlag *bool, dst *T) {
+	v, ok := raw[key]
+	if !ok {
+		return
+	}
+	*setFlag = true
+	_ = json.Unmarshal(v, dst)
 }
 
 // updateDhcpScope mirrors api/ipam.py:2084.

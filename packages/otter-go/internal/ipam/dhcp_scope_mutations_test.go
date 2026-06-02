@@ -128,6 +128,30 @@ func mountDhcpMut(f *dhcpMutFakeQ, rec *recordingAudit) http.Handler {
 	return r
 }
 
+// runMutationRequest is the shared test setup boilerplate: build the
+// request, set Content-Type, attach the wildcard principal, run the
+// router, return the recorder. Pulled out of every assertion so the
+// per-test bodies are 3-4 lines instead of 8-13, and the duplicate
+// blocks SonarCloud flagged on PR 11 stay below threshold.
+func runMutationRequest(t *testing.T, method, path string, body []byte, f *dhcpMutFakeQ, rec *recordingAudit) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	var req *http.Request
+	if reader != nil {
+		req = httptest.NewRequest(method, path, reader)
+		req.Header.Set("Content-Type", "application/json")
+	} else {
+		req = httptest.NewRequest(method, path, nil)
+	}
+	req = withPrincipal(req, "*")
+	w := httptest.NewRecorder()
+	mountDhcpMut(f, rec).ServeHTTP(w, req)
+	return w
+}
+
 // ---- CREATE ----
 
 func TestCreateDhcpScope_HappyPathV4(t *testing.T) {
@@ -138,11 +162,7 @@ func TestCreateDhcpScope_HappyPathV4(t *testing.T) {
 		"pools": []map[string]any{{"first": "10.0.0.10", "last": "10.0.0.250"}},
 	})
 	rec := &recordingAudit{}
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, rec).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", body, f, rec)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
@@ -171,11 +191,7 @@ func TestCreateDhcpScope_PayloadServerMismatch_400(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"dhcp_server_id": payloadSrv, "name": "x", "ip_family": 4, "prefix": "10.0.0.0/24",
 	})
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+urlSrv.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+urlSrv.String()+"/scopes", body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -191,11 +207,7 @@ func TestCreateDhcpScope_V4RejectsPdPools(t *testing.T) {
 		"dhcp_server_id": srvID, "name": "x", "ip_family": 4, "prefix": "10.0.0.0/24",
 		"pd_pools": []map[string]any{{"prefix": "fd00::/64"}},
 	})
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -216,11 +228,7 @@ func TestCreateDhcpScope_TemplateFamilyMismatch_400(t *testing.T) {
 		"dhcp_server_id": srvID, "name": "x", "ip_family": 4, "prefix": "10.0.0.0/24",
 		"template_id": tplID,
 	})
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -237,11 +245,7 @@ func TestCreateDhcpScope_SubnetNotFound_400(t *testing.T) {
 		"dhcp_server_id": srvID, "name": "x", "ip_family": 4, "prefix": "10.0.0.0/24",
 		"subnet_id": subID,
 	})
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -254,11 +258,7 @@ func TestCreateDhcpScope_V4ReservationWithDuid_400(t *testing.T) {
 		"dhcp_server_id": srvID, "name": "x", "ip_family": 4, "prefix": "10.0.0.0/24",
 		"reservations": []map[string]any{{"duid": "00:01:00:01:abcd", "ip": "10.0.0.5"}},
 	})
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -274,11 +274,7 @@ func TestCreateDhcpScope_V6ReservationMissingDuid_400(t *testing.T) {
 		"dhcp_server_id": srvID, "name": "x", "ip_family": 6, "prefix": "2001:db8::/64",
 		"reservations": []map[string]any{{"ip": "2001:db8::5"}},
 	})
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -293,11 +289,7 @@ func TestCreateDhcpScope_PoolsExplicitNull_DefaultsToEmptyArray(t *testing.T) {
 	srvID := uuid.New()
 	f := &dhcpMutFakeQ{serverFabricID: uuid.New()}
 	body := []byte(`{"dhcp_server_id":"` + srvID.String() + `","name":"x","ip_family":4,"prefix":"10.0.0.0/24","pools":null,"options":null,"reservations":null}`)
-	req := httptest.NewRequest("POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/servers/"+srvID.String()+"/scopes", body, f, &recordingAudit{})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
@@ -321,11 +313,7 @@ func TestUpdateDhcpScope_NullName_400(t *testing.T) {
 		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), IPFamily: 4},
 	}
 	body := []byte(`{"name": null}`)
-	req := httptest.NewRequest("PATCH", "/ipam/dhcp/scopes/"+id.String(), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -338,11 +326,7 @@ func TestUpdateDhcpScope_V4RejectsPdPoolsOnExisting(t *testing.T) {
 		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), IPFamily: 4},
 	}
 	body := []byte(`{"pd_pools": [{"prefix": "fd00::/64"}]}`)
-	req := httptest.NewRequest("PATCH", "/ipam/dhcp/scopes/"+id.String(), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -357,11 +341,7 @@ func TestUpdateDhcpScope_PoolsNullClearsToEmptyArray(t *testing.T) {
 		updateResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4},
 	}
 	body := []byte(`{"pools": null}`)
-	req := httptest.NewRequest("PATCH", "/ipam/dhcp/scopes/"+id.String(), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
@@ -384,11 +364,7 @@ func TestUpdateDhcpScope_PdPoolsNullClearsToNull(t *testing.T) {
 		updateResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 6},
 	}
 	body := []byte(`{"pd_pools": null}`)
-	req := httptest.NewRequest("PATCH", "/ipam/dhcp/scopes/"+id.String(), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
@@ -410,11 +386,7 @@ func TestUpdateDhcpScope_AuditDiffOnlySetKeys(t *testing.T) {
 	}
 	body := []byte(`{"name": "renamed", "enabled": false}`)
 	rec := &recordingAudit{}
-	req := httptest.NewRequest("PATCH", "/ipam/dhcp/scopes/"+id.String(), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, rec).ServeHTTP(w, req)
+	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, rec)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
@@ -445,10 +417,7 @@ func TestDeleteDhcpScope_HappyPath_204(t *testing.T) {
 		getResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24", Enabled: true},
 	}
 	rec := &recordingAudit{}
-	req := httptest.NewRequest("DELETE", "/ipam/dhcp/scopes/"+id.String(), nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, rec).ServeHTTP(w, req)
+	w := runMutationRequest(t, "DELETE", "/ipam/dhcp/scopes/"+id.String(), nil, f, rec)
 	if w.Code != http.StatusNoContent {
 		t.Errorf("status = %d, want 204", w.Code)
 	}
@@ -477,10 +446,7 @@ func TestDeleteDhcpScope_AlreadySoftDeleted_404(t *testing.T) {
 		serverFabricID: uuid.New(),
 		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), DeletedAt: &deletedAt},
 	}
-	req := httptest.NewRequest("DELETE", "/ipam/dhcp/scopes/"+id.String(), nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "DELETE", "/ipam/dhcp/scopes/"+id.String(), nil, f, &recordingAudit{})
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 (Python parity: missing + already-deleted collapse)", w.Code)
 	}
@@ -501,10 +467,7 @@ func TestRestoreDhcpScope_HappyPath_200(t *testing.T) {
 		restoreResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24"},
 	}
 	rec := &recordingAudit{}
-	req := httptest.NewRequest("POST", "/ipam/dhcp/scopes/"+id.String()+"/restore", nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, rec).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/scopes/"+id.String()+"/restore", nil, f, rec)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
@@ -522,10 +485,7 @@ func TestRestoreDhcpScope_NotSoftDeleted_400(t *testing.T) {
 		serverFabricID: uuid.New(),
 		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), DeletedAt: nil},
 	}
-	req := httptest.NewRequest("POST", "/ipam/dhcp/scopes/"+id.String()+"/restore", nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/scopes/"+id.String()+"/restore", nil, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", w.Code)
 	}
@@ -536,10 +496,7 @@ func TestRestoreDhcpScope_NotFound_404(t *testing.T) {
 		serverFabricID: uuid.New(),
 		getErr:         pgx.ErrNoRows,
 	}
-	req := httptest.NewRequest("POST", "/ipam/dhcp/scopes/"+uuid.New().String()+"/restore", nil)
-	req = withPrincipal(req, "*")
-	w := httptest.NewRecorder()
-	mountDhcpMut(f, &recordingAudit{}).ServeHTTP(w, req)
+	w := runMutationRequest(t, "POST", "/ipam/dhcp/scopes/"+uuid.New().String()+"/restore", nil, f, &recordingAudit{})
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
 	}
