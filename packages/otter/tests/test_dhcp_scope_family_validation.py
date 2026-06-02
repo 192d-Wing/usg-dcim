@@ -12,17 +12,19 @@ from __future__ import annotations
 
 import pytest
 
+from dcim.errors import ValidationError
+from dcim.schemas.ipam import DhcpReservation
+
 pytestmark = pytest.mark.skip(
     reason="PR 17 cutover: DHCP routes + helpers moved to otter-go; "
     "parity now pinned in internal/ipam/dhcp_scope_mutations.go tests",
 )
 
-# Stub so the import doesn't fail at collection; the skip mark above
-# prevents any test from actually running.
+
+# Stub so the body type-checks; pytestmark above prevents any test
+# below from running.
 def _validate_reservations_against_family(*_a, **_kw):  # pragma: no cover
     raise NotImplementedError
-from dcim.errors import ValidationError
-from dcim.schemas.ipam import DhcpReservation
 
 # ----- v4 scope: must have mac; rejects duid -----
 
