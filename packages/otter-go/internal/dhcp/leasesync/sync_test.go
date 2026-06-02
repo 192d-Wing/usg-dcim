@@ -97,21 +97,44 @@ func newServer() Server {
 	}
 }
 
+// singleSubnetQ wires a captureQ with one /24 subnet + the
+// (address → existing-row) map. Pulls the 6-line captureQ literal
+// out of every test that exercises the per-lease decision branches.
+func singleSubnetQ(subnetID uuid.UUID, findResults map[string]dbq.FindDhcpLeaseIPAddressRow) *captureQ {
+	if findResults == nil {
+		findResults = map[string]dbq.FindDhcpLeaseIPAddressRow{}
+	}
+	return &captureQ{
+		subnetRows:  []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
+		findResults: findResults,
+	}
+}
+
+// oneLease4Kea wires a stubKea with one v4 lease, optional hostname,
+// + an empty v6 envelope. Pulls the 10-line stubKea literal out of
+// every test that exercises the v4 happy path. Pass hostname="" to
+// omit the field entirely.
+func oneLease4Kea(t *testing.T, address, mac, hostname string) *stubKea {
+	t.Helper()
+	lease := map[string]any{
+		"ip-address": address,
+		"hw-address": mac,
+		"state":      float64(0),
+	}
+	if hostname != "" {
+		lease["hostname"] = hostname
+	}
+	return &stubKea{
+		lease4Body: leaseEnvelope(t, []map[string]any{lease}),
+		lease6Body: []byte(`[]`),
+	}
+}
+
 func TestSyncServer_HappyPath_InsertsNewLease(t *testing.T) {
 	srv := newServer()
 	subnetID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{},
-	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5",
-			"hw-address": "aa:bb:cc:dd:ee:01",
-			"state":      float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(subnetID, nil)
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
 	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -138,21 +161,10 @@ func TestSyncServer_ExistingDhcpLease_Updates(t *testing.T) {
 	srv := newServer()
 	subnetID := uuid.New()
 	ipID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{
-			subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
-		},
-	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5",
-			"hw-address": "aa:bb:cc:dd:ee:01",
-			"hostname":   "host-1",
-			"state":      float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
+		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
+	})
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "host-1")
 	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -172,18 +184,10 @@ func TestSyncServer_StaticRowLeftAlone(t *testing.T) {
 	srv := newServer()
 	subnetID := uuid.New()
 	ipID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{
-			subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "static"},
-		},
-	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5", "hw-address": "aa:bb:cc:dd:ee:01", "state": float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
+		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "static"},
+	})
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
 	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -202,18 +206,10 @@ func TestSyncServer_ReservationRowLeftAlone(t *testing.T) {
 	// Same posture as static: source=reservation is operator-owned.
 	srv := newServer()
 	subnetID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{
-			subnetID.String() + "/10.0.0.5": {ID: uuid.New(), Source: "reservation"},
-		},
-	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5", "hw-address": "aa:bb:cc:dd:ee:01", "state": float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
+		subnetID.String() + "/10.0.0.5": {ID: uuid.New(), Source: "reservation"},
+	})
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
 	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -228,17 +224,9 @@ func TestSyncServer_ReservationRowLeftAlone(t *testing.T) {
 
 func TestSyncServer_UnmatchedLease_SkippedNoSubnet(t *testing.T) {
 	srv := newServer()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: uuid.New(), Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{},
-	}
-	k := &stubKea{
-		// 192.168.1.1 isn't in any subnet of the fabric.
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "192.168.1.1", "hw-address": "aa:bb:cc:dd:ee:01", "state": float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(uuid.New(), nil)
+	// 192.168.1.1 isn't in 10.0.0.0/24.
+	k := oneLease4Kea(t, "192.168.1.1", "aa:bb:cc:dd:ee:01", "")
 	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -280,16 +268,9 @@ func TestSyncServer_Lease6ErrorSwallowed(t *testing.T) {
 	// silently dropped so a v4-only Kea fleet still syncs.
 	srv := newServer()
 	subnetID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{},
-	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5", "hw-address": "aa:bb:cc:dd:ee:01", "state": float64(0),
-		}}),
-		lease6Err: errors.New("dhcp6 not running"),
-	}
+	q := singleSubnetQ(subnetID, nil)
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
+	k.lease6Err = errors.New("dhcp6 not running")
 	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -331,21 +312,10 @@ func TestSyncServer_UpdateOverwritesDnsNameWhenHostnameSet(t *testing.T) {
 	srv := newServer()
 	subnetID := uuid.New()
 	ipID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{
-			subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
-		},
-	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5",
-			"hw-address": "aa:bb:cc:dd:ee:01",
-			"hostname":   "new-host",
-			"state":      float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
+		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
+	})
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "new-host")
 	_, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -366,22 +336,12 @@ func TestSyncServer_UpdateKeepsExistingDnsNameWhenHostnameEmpty(t *testing.T) {
 	srv := newServer()
 	subnetID := uuid.New()
 	ipID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{
-			subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
-		},
-	}
-	k := &stubKea{
-		// No hostname field; parser emits "" which nilIfEmpty
-		// translates to nil → COALESCE keeps existing.
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5",
-			"hw-address": "aa:bb:cc:dd:ee:01",
-			"state":      float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
+		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
+	})
+	// No hostname → parser emits "" → nilIfEmpty → nil → COALESCE
+	// keeps existing column on the DB side.
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
 	_, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -408,12 +368,7 @@ func TestSyncServer_FindLeaseTransientError_Propagates(t *testing.T) {
 		},
 		err: errors.New("conn reset"),
 	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5", "hw-address": "aa:bb:cc:dd:ee:01", "state": float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
 	_, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err == nil {
 		t.Fatal("expected non-nil err on transient find failure")
@@ -456,16 +411,8 @@ func TestSyncServer_EmptyHostnameWritesNull(t *testing.T) {
 	// always NULL on missing — keep parity).
 	srv := newServer()
 	subnetID := uuid.New()
-	q := &captureQ{
-		subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
-		findResults: map[string]dbq.FindDhcpLeaseIPAddressRow{},
-	}
-	k := &stubKea{
-		lease4Body: leaseEnvelope(t, []map[string]any{{
-			"ip-address": "10.0.0.5", "hw-address": "aa:bb:cc:dd:ee:01", "state": float64(0),
-		}}),
-		lease6Body: []byte(`[]`),
-	}
+	q := singleSubnetQ(subnetID, nil)
+	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
 	_, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
 	if err != nil {
 		t.Fatal(err)
