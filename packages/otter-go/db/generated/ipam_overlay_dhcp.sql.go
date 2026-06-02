@@ -391,3 +391,112 @@ func (q *Queries) GetDhcpScopeTemplate(ctx context.Context, id uuid.UUID) (DhcpS
 	)
 	return t, err
 }
+
+// dhcpScopeListCols is shared between ListDhcpScopesByServer and
+// GetDhcpScope so a schema addition lands in one place. Includes
+// soft-deleted rows by column projection; the WHERE clause decides
+// whether to filter on deleted_at.
+const dhcpScopeReadCols = `id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix,
+       pools_json, pd_pools_json, options_json, reservations_json,
+       valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
+       preferred_lifetime_seconds, enabled, description, kea_subnet_id,
+       template_id, last_diff_at, last_diff_status, last_diff_delta_json,
+       auto_push_override, deleted_at, created_at, updated_at`
+
+func scanDhcpScope(row interface{ Scan(...any) error }, s *DhcpScope) error {
+	return row.Scan(
+		&s.ID, &s.DhcpServerID, &s.SubnetID, &s.Name, &s.IPFamily, &s.Prefix,
+		&s.PoolsJSON, &s.PdPoolsJSON, &s.OptionsJSON, &s.ReservationsJSON,
+		&s.ValidLifetimeSeconds, &s.RenewTimerSeconds, &s.RebindTimerSeconds,
+		&s.PreferredLifetimeSeconds, &s.Enabled, &s.Description, &s.KeaSubnetID,
+		&s.TemplateID, &s.LastDiffAt, &s.LastDiffStatus, &s.LastDiffDeltaJSON,
+		&s.AutoPushOverride, &s.DeletedAt, &s.CreatedAt, &s.UpdatedAt,
+	)
+}
+
+const listDhcpScopesByServer = `-- name: ListDhcpScopesByServer :many
+SELECT ` + dhcpScopeReadCols + `
+FROM dhcp_scopes
+WHERE dhcp_server_id = $3
+  AND ($4::bool OR deleted_at IS NULL)
+  AND ($5::int  IS NULL OR ip_family       = $5)
+  AND ($6::bool IS NULL OR enabled         = $6)
+  AND ($7::text IS NULL OR last_diff_status = $7)
+ORDER BY created_at
+LIMIT $1 OFFSET $2`
+
+// ListDhcpScopesByServerParams pairs the page bounds with the four
+// filter knobs Python's list_dhcp_scopes exposes. include_deleted is
+// a bool because Python's default is FALSE; passing TRUE keeps soft-
+// deleted rows in the response (restore-workflow case).
+type ListDhcpScopesByServerParams struct {
+	Limit           int32      `json:"limit"`
+	Offset          int32      `json:"offset"`
+	DhcpServerID    uuid.UUID  `json:"dhcp_server_id"`
+	IncludeDeleted  bool       `json:"include_deleted"`
+	IPFamily        *int32     `json:"ip_family"`
+	Enabled         *bool      `json:"enabled"`
+	DiffStatus      *string    `json:"diff_status"`
+}
+
+func (q *Queries) ListDhcpScopesByServer(ctx context.Context, arg ListDhcpScopesByServerParams) ([]DhcpScope, error) {
+	rows, err := q.db.Query(ctx, listDhcpScopesByServer,
+		arg.Limit, arg.Offset, arg.DhcpServerID, arg.IncludeDeleted,
+		arg.IPFamily, arg.Enabled, arg.DiffStatus)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DhcpScope
+	for rows.Next() {
+		var s DhcpScope
+		if err := scanDhcpScope(rows, &s); err != nil {
+			return nil, err
+		}
+		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
+const countDhcpScopesByServer = `-- name: CountDhcpScopesByServer :one
+SELECT count(*)::bigint
+FROM dhcp_scopes
+WHERE dhcp_server_id = $1
+  AND ($2::bool OR deleted_at IS NULL)
+  AND ($3::int  IS NULL OR ip_family       = $3)
+  AND ($4::bool IS NULL OR enabled         = $4)
+  AND ($5::text IS NULL OR last_diff_status = $5)`
+
+type CountDhcpScopesByServerParams struct {
+	DhcpServerID   uuid.UUID `json:"dhcp_server_id"`
+	IncludeDeleted bool      `json:"include_deleted"`
+	IPFamily       *int32    `json:"ip_family"`
+	Enabled        *bool     `json:"enabled"`
+	DiffStatus     *string   `json:"diff_status"`
+}
+
+func (q *Queries) CountDhcpScopesByServer(ctx context.Context, arg CountDhcpScopesByServerParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDhcpScopesByServer,
+		arg.DhcpServerID, arg.IncludeDeleted, arg.IPFamily, arg.Enabled, arg.DiffStatus)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
+const getDhcpScope = `-- name: GetDhcpScope :one
+SELECT ` + dhcpScopeReadCols + `
+FROM dhcp_scopes
+WHERE id = $1`
+
+// GetDhcpScope intentionally returns soft-deleted rows so the same
+// SELECT serves the read-only GET handler, the restore endpoint, and
+// the future PATCH/DELETE handlers. Python's get_dhcp_scope at
+// api/ipam.py:2070 also returns tombstones — the response shape
+// carries deleted_at so the client sees the tombstone state and
+// can decide whether to call restore.
+func (q *Queries) GetDhcpScope(ctx context.Context, id uuid.UUID) (DhcpScope, error) {
+	row := q.db.QueryRow(ctx, getDhcpScope, id)
+	var s DhcpScope
+	err := scanDhcpScope(row, &s)
+	return s, err
+}

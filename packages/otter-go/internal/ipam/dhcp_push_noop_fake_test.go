@@ -118,3 +118,18 @@ func (dhcpPushNoop) ListDhcpScopeDriftStatusByServers(_ context.Context, _ []uui
 func (dhcpPushNoop) ListFiringDhcpDriftAlertKeys(_ context.Context) ([]string, error) {
 	return nil, nil
 }
+
+// DHCP scope CRUD reads (PR 10). LIST returns nil + count zero;
+// GetDhcpScope returns ErrNoRows so unrelated tests fall through to
+// 404 paths rather than half-defined scope state.
+func (dhcpPushNoop) ListDhcpScopesByServer(_ context.Context, _ dbq.ListDhcpScopesByServerParams) ([]dbq.DhcpScope, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) CountDhcpScopesByServer(_ context.Context, _ dbq.CountDhcpScopesByServerParams) (int64, error) {
+	return 0, nil
+}
+
+func (dhcpPushNoop) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
+	return dbq.DhcpScope{}, pgx.ErrNoRows
+}
