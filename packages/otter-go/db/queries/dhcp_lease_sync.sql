@@ -71,3 +71,37 @@ SET last_sync_at         = $2::timestamptz,
     last_sync_lease_count = $5::int,
     updated_at           = NOW()
 WHERE id = $1;
+
+-- ===== Cron driver queries (PR 16) =====
+
+-- name: ListEnabledDhcpServersForLeaseSync :many
+-- Projection the dhcp_sync cron walks. Includes the auth password
+-- because the orchestrator hands the server to KeaClient.New —
+-- distinct from the bundle/push projection (which omits the
+-- password for the operator-facing read endpoint).
+SELECT id, fabric_id, kea_url, auth_username, auth_password
+FROM dhcp_servers
+WHERE enabled = TRUE
+ORDER BY name;
+
+-- name: DeprecateExpiredDhcpLeases :execrows
+-- dhcp_age_out step 1 (services/kea.py:372-384). Flip active dhcp
+-- rows whose lease lapsed > grace_seconds ago to status=deprecated.
+-- Static + reservation rows are untouched (the source filter).
+UPDATE ip_addresses
+SET status     = 'deprecated',
+    updated_at = NOW()
+WHERE source = 'dhcp'
+  AND status = 'active'
+  AND dhcp_lease_expires_at IS NOT NULL
+  AND dhcp_lease_expires_at < $1::timestamptz;
+
+-- name: DeleteDeprecatedDhcpLeases :execrows
+-- dhcp_age_out step 2 (services/kea.py:388-399). Hard-delete dhcp
+-- rows that have been deprecated > 1 day — they're noise at this
+-- point. Same source guard as step 1.
+DELETE FROM ip_addresses
+WHERE source = 'dhcp'
+  AND status = 'deprecated'
+  AND dhcp_lease_expires_at IS NOT NULL
+  AND dhcp_lease_expires_at < $1::timestamptz;

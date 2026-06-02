@@ -56,8 +56,10 @@ import (
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpageout"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpbundle"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpdriftcheck"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpsync"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcptombstone"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnspurge"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssecrotate"
@@ -120,6 +122,17 @@ func main() {
 	// sweep (:00, :05, …). Python defends the cadence at PR 81 in
 	// worker.py:535.
 	dhcpDriftCheckCron := env.String("DCIM_DHCP_DRIFT_CHECK_CRON", "9-54/15 * * * *")
+	// Default spec "2-57/5 * * * *" mirrors Python's
+	// cron(dhcp_sync, minute=set(range(2, 60, 5))) — every 5 minutes
+	// at :02, :07, :12, … The :02 offset is intentional: it staggers
+	// vs freshness_sweep (:00, :05, …) and dhcp_drift_check (:09, …)
+	// so the lease-pull traffic to Kea doesn't pile up with other
+	// heavy passes on the same minute boundary.
+	dhcpSyncCron := env.String("DCIM_DHCP_SYNC_CRON", "2-57/5 * * * *")
+	// Default spec "7 * * * *" mirrors Python's
+	// cron(dhcp_age_out, minute={7}) — hourly at :07. Off-round so
+	// the SQL UPDATE + DELETE don't compete with top-of-hour ticks.
+	dhcpAgeOutCron := env.String("DCIM_DHCP_AGE_OUT_CRON", "7 * * * *")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -160,6 +173,8 @@ func main() {
 	mustRegister(zskRotateCron, &dnssecrotate.Job{Q: q, Log: log})
 	mustRegister(dhcpBundleCron, &dhcpbundle.Job{Q: q, Log: log})
 	mustRegister(dhcpDriftCheckCron, &dhcpdriftcheck.Job{Q: q, Log: log})
+	mustRegister(dhcpSyncCron, &dhcpsync.Job{Q: q, Log: log})
+	mustRegister(dhcpAgeOutCron, &dhcpageout.Job{Q: q})
 
 	// /healthz + /readyz mirror the otter-go-worker shape so k8s
 	// probes can target either binary without per-pod config

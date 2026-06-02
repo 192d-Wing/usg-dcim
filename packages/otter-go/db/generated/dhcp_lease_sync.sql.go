@@ -142,3 +142,72 @@ func (q *Queries) UpdateDhcpServerSyncState(ctx context.Context, arg UpdateDhcpS
 		arg.ID, arg.LastSyncAt, arg.LastSyncStatus, arg.LastSyncError, arg.LastSyncLeaseCount)
 	return err
 }
+
+// DhcpServerForLeaseSyncRow projects the dhcp_servers columns the
+// lease-sync cron iterates over. Includes auth_password because the
+// orchestrator passes the server straight to KeaClient.New — distinct
+// from the API-facing DhcpServer projection which omits the password.
+type DhcpServerForLeaseSyncRow struct {
+	ID           uuid.UUID `json:"id"`
+	FabricID     uuid.UUID `json:"fabric_id"`
+	KeaURL       string    `json:"kea_url"`
+	AuthUsername *string   `json:"auth_username"`
+	AuthPassword *string   `json:"-"`
+}
+
+const listEnabledDhcpServersForLeaseSync = `-- name: ListEnabledDhcpServersForLeaseSync :many
+SELECT id, fabric_id, kea_url, auth_username, auth_password
+FROM dhcp_servers
+WHERE enabled = TRUE
+ORDER BY name`
+
+func (q *Queries) ListEnabledDhcpServersForLeaseSync(ctx context.Context) ([]DhcpServerForLeaseSyncRow, error) {
+	rows, err := q.db.Query(ctx, listEnabledDhcpServersForLeaseSync)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []DhcpServerForLeaseSyncRow{}
+	for rows.Next() {
+		var r DhcpServerForLeaseSyncRow
+		if err := rows.Scan(&r.ID, &r.FabricID, &r.KeaURL, &r.AuthUsername, &r.AuthPassword); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+const deprecateExpiredDhcpLeases = `-- name: DeprecateExpiredDhcpLeases :execrows
+UPDATE ip_addresses
+SET status     = 'deprecated',
+    updated_at = NOW()
+WHERE source = 'dhcp'
+  AND status = 'active'
+  AND dhcp_lease_expires_at IS NOT NULL
+  AND dhcp_lease_expires_at < $1::timestamptz`
+
+// DeprecateExpiredDhcpLeases returns the row count so the dhcp_age_out
+// job can surface "how many leases lapsed this tick" in its result map.
+func (q *Queries) DeprecateExpiredDhcpLeases(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := q.db.Exec(ctx, deprecateExpiredDhcpLeases, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected(), nil
+}
+
+const deleteDeprecatedDhcpLeases = `-- name: DeleteDeprecatedDhcpLeases :execrows
+DELETE FROM ip_addresses
+WHERE source = 'dhcp'
+  AND status = 'deprecated'
+  AND dhcp_lease_expires_at IS NOT NULL
+  AND dhcp_lease_expires_at < $1::timestamptz`
+
+func (q *Queries) DeleteDeprecatedDhcpLeases(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := q.db.Exec(ctx, deleteDeprecatedDhcpLeases, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected(), nil
+}
