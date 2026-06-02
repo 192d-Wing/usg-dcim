@@ -49,6 +49,37 @@ FROM dns_records
 WHERE zone_id = ANY($1::uuid[])
 ORDER BY zone_id, name, type;
 
+-- name: GetEnabledDnsCatalogZoneByFabric :one
+-- One row max — uq_dns_catalog_zone_fabric guarantees a fabric
+-- can have at most one catalog. Returns no-rows when the catalog
+-- is missing or disabled; bundle assembler skips catalog emission
+-- on either case.
+SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
+FROM dns_catalog_zones
+WHERE fabric_id = $1 AND enabled = true;
+
+-- name: ListEnabledAuthDnsServersByFabric :many
+-- For the RFC 9432 §4.2.3 catalog primaries property records —
+-- consumers (BIND 9.20+) use unicast_ip to AXFR each member zone.
+SELECT id, fabric_id, name, role::text AS role, unicast_ip,
+       enabled, created_at, updated_at
+FROM dns_servers
+WHERE fabric_id = $1
+  AND role = 'auth'::dns_server_role
+  AND enabled = true;
+
+-- name: ListDnsKeysByZoneIDs :many
+-- Bulk-fetch every DnsKey across a set of zones. Bundle assembler
+-- uses this for both DNSSEC key-file emission and CDNSKEY/CDS
+-- appendix lines. Ordered (zone_id, role, key_tag) so per-zone
+-- slicing is contiguous.
+SELECT id, zone_id, catalog_id, role::text AS role,
+       algorithm::text AS algorithm, private_pem, public_key_b64,
+       key_tag, active_from, retired_at
+FROM dns_keys
+WHERE zone_id = ANY($1::uuid[])
+ORDER BY zone_id, role, key_tag;
+
 -- name: ListUnhealthyEnabledHealthChecksByFabric :many
 -- IDs only — the bundle assembler uses the set to skip records
 -- whose health_check_id is unhealthy. The renderer's `unhealthy`

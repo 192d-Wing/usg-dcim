@@ -43,6 +43,15 @@ func (f *fakeBundleQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) 
 func (f *fakeBundleQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
 	return f.unhealthyIDs, f.unhealthyErr
 }
+func (f *fakeBundleQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
+	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
+}
+func (f *fakeBundleQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+	return nil, nil
+}
+func (f *fakeBundleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+	return nil, nil
+}
 
 func mkBundleZoneRow(id uuid.UUID, name string, ts time.Time) dbq.DnsZone {
 	return dbq.DnsZone{
