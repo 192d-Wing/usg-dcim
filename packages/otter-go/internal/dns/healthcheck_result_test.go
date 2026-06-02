@@ -13,6 +13,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 )
 
@@ -32,6 +34,19 @@ func (f *fakeHCResultQ) SetDnsHealthCheckResult(_ context.Context, id uuid.UUID,
 	f.gotStatus = status
 	f.gotErr = e
 	return f.rows, nil
+}
+func (f *fakeHCResultQ) ListDnsBlocklistPatternsByID(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeHCResultQ) GetDnsCatalogZone(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
+	return dbq.DnsCatalogZone{}, nil
+}
+func (f *fakeHCResultQ) ListDnsKeyTagsByCatalog(_ context.Context, _ uuid.UUID) ([]int32, error) {
+	return nil, nil
+}
+func (f *fakeHCResultQ) DeleteDnsKeysByCatalog(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeHCResultQ) SetDnsCatalogZoneSigned(_ context.Context, _ dbq.SetDnsCatalogZoneSignedParams) error {
+	return nil
 }
 
 func mountHC(f *fakeHCResultQ) http.Handler {

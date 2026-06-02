@@ -35,6 +35,15 @@ LIMIT $1 OFFSET $2;
 SELECT count(*)::bigint FROM dns_blocklist_entries
 WHERE blocklist_id = $1;
 
+-- name: ListDnsBlocklistPatternsByID :many
+-- Unpaginated pattern projection for the /entries/bulk endpoint —
+-- the bulk-add handler reads the existing patterns once to compute
+-- the to_add set vs the incoming patterns. Returns just the
+-- normalized pattern string to keep the result tiny on big lists.
+SELECT pattern
+FROM dns_blocklist_entries
+WHERE blocklist_id = $1;
+
 -- ===== DNS views =====
 -- name: ListDnsViews :many
 SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at

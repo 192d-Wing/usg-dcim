@@ -266,3 +266,52 @@ func (q *Queries) CountDnsCatalogZones(ctx context.Context, arg CountDnsCatalogZ
 	err := row.Scan(&n)
 	return n, err
 }
+
+const getDnsCatalogZone = `SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
+FROM dns_catalog_zones WHERE id = $1`
+
+func (q *Queries) GetDnsCatalogZone(ctx context.Context, id uuid.UUID) (DnsCatalogZone, error) {
+	row := q.db.QueryRow(ctx, getDnsCatalogZone, id)
+	var c DnsCatalogZone
+	err := row.Scan(&c.ID, &c.FabricID, &c.Name, &c.Enabled, &c.Signed,
+		&c.CreatedAt, &c.UpdatedAt)
+	return c, err
+}
+
+const listDnsKeyTagsByCatalog = `SELECT key_tag FROM dns_keys WHERE catalog_id = $1`
+
+func (q *Queries) ListDnsKeyTagsByCatalog(ctx context.Context, catalogID uuid.UUID) ([]int32, error) {
+	rows, err := q.db.Query(ctx, listDnsKeyTagsByCatalog, catalogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var t int32
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		items = append(items, t)
+	}
+	return items, rows.Err()
+}
+
+const deleteDnsKeysByCatalog = `DELETE FROM dns_keys WHERE catalog_id = $1`
+
+func (q *Queries) DeleteDnsKeysByCatalog(ctx context.Context, catalogID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDnsKeysByCatalog, catalogID)
+	return err
+}
+
+const setDnsCatalogZoneSigned = `UPDATE dns_catalog_zones SET signed = $2, updated_at = NOW() WHERE id = $1`
+
+type SetDnsCatalogZoneSignedParams struct {
+	ID     uuid.UUID `json:"id"`
+	Signed bool      `json:"signed"`
+}
+
+func (q *Queries) SetDnsCatalogZoneSigned(ctx context.Context, arg SetDnsCatalogZoneSignedParams) error {
+	_, err := q.db.Exec(ctx, setDnsCatalogZoneSigned, arg.ID, arg.Signed)
+	return err
+}
