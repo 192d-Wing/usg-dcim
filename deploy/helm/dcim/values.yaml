@@ -127,6 +127,12 @@ otter-go:
   # umbrella's ingress (`ingress.hosts[].paths`):
   #   /api/v1/lir/*                        LIR pools/requests/allocations
   #   /api/v1/ipam/supernets/{id}/move     tenant supernet move
+  #   /api/v1/ipam/dhcp/*                  full DHCP push/diff/CRUD/
+  #                                        reconcile/lease-ingest surface
+  #                                        (PR 17 cutover; covers the
+  #                                        bundle endpoint that previously
+  #                                        rode the ImplementationSpecific
+  #                                        regex)
   # replicaCount + PDB + service.port live in the subchart's own
   # values.yaml; override here only when a deployment needs different.
 
@@ -236,18 +242,15 @@ ingress:
         - path: /api/v1/ipam/supernets/[^/]+/move
           pathType: ImplementationSpecific
           backend: otter-go
-        # DHCP bundle endpoint moves to otter-go — closes out the
-        # 4-PR bundle work (renderer PR #216, queries PR #217, HTTP
-        # endpoint PR #218, rerender cron PR #219). The rest of
-        # /api/v1/ipam/dhcp/* (servers/scopes CRUD, push, sync, diff)
-        # stays on Python until the DHCP push port lands. UUID class
-        # is [0-9A-Fa-f-] to match upper- + lower-case ids (Python's
-        # uuid.UUID accepts both); the literal `/bundle` suffix is
-        # anchored so a future sibling subpath (e.g. `/bundle/raw`)
-        # falls through to /api → otter instead of silently 404'ing
-        # on otter-go.
-        - path: /api/v1/ipam/dhcp/servers/[0-9A-Fa-f-]+/bundle
-          pathType: ImplementationSpecific
+        # /api/v1/ipam/dhcp/* fully on otter-go — closes the 17-PR
+        # DHCP push/diff/CRUD port (PRs #216-#239 incl. the bundle
+        # work, push/diff orchestrators, scope CRUD, reconcile, lease
+        # ingest, and the two new crons). The dhcp-site puller's
+        # GET /bundle was the first cutover; this Prefix rule
+        # supersedes the ImplementationSpecific regex it used so the
+        # rest of the surface joins the same backend.
+        - path: /api/v1/ipam/dhcp
+          pathType: Prefix
           backend: otter-go
         - path: /api/v1/lir
           pathType: Prefix

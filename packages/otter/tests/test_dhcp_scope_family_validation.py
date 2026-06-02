@@ -1,17 +1,30 @@
 """PR 101 — tests for cross-family reservation validation.
 
-Pure: pins _validate_reservations_against_family for both shapes
-the API handlers feed it (Pydantic DhcpReservation on Create;
-dict on Update, from payload.model_dump(exclude_unset=True)).
+DHCP routes moved to otter-go (PR 17 cutover) along with the
+_validate_reservations_against_family helper. The parity is now
+pinned in Go at internal/ipam/dhcp_scope_mutations.go::validate
+ReservationsAgainstFamily + the v4-reservation-with-duid / v6-
+reservation-missing-duid handler tests. This file is kept for
+historical context.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from dcim.api.ipam import _validate_reservations_against_family
 from dcim.errors import ValidationError
 from dcim.schemas.ipam import DhcpReservation
+
+pytestmark = pytest.mark.skip(
+    reason="PR 17 cutover: DHCP routes + helpers moved to otter-go; "
+    "parity now pinned in internal/ipam/dhcp_scope_mutations.go tests",
+)
+
+
+# Stub so the body type-checks; pytestmark above prevents any test
+# below from running.
+def _validate_reservations_against_family(*_a, **_kw):  # pragma: no cover
+    raise NotImplementedError
 
 # ----- v4 scope: must have mac; rejects duid -----
 

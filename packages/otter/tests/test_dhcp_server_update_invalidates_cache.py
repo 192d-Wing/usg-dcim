@@ -18,7 +18,31 @@ from __future__ import annotations
 
 import inspect
 
-from dcim.api import ipam
+import pytest
+
+# PR 17 cutover: PATCH /dhcp/servers/{id} moved to otter-go. The
+# bundle cache invalidation that this test file was pinning happens
+# now via the dhcp_bundle_rerender cron (PR #219, runs every 2 min)
+# rather than the inline background_tasks enqueue Python used. The
+# Go HTTP handler doesn't NULL the cache columns inline because the
+# cron rewrites them on the next tick. Skipping all four tests
+# below — the invariant they protect no longer applies to the cut-
+# over code path.
+
+pytestmark = pytest.mark.skip(
+    reason="PR 17 cutover: PATCH /dhcp/servers/{id} on otter-go; "
+    "bundle invalidation now via dhcp_bundle_rerender cron",
+)
+
+
+# Stub so the import doesn't crash collection. The pytestmark above
+# prevents any test below from running.
+class _StubModule:  # pragma: no cover
+    def __getattr__(self, _name):
+        raise NotImplementedError
+
+
+ipam = _StubModule()
 
 
 def test_update_dhcp_server_accepts_background_tasks():
