@@ -49,6 +49,16 @@ FROM dns_records
 WHERE zone_id = ANY($1::uuid[])
 ORDER BY zone_id, name, type;
 
+-- name: ListDnsViewsByFabric :many
+-- Split-horizon: every view bound to a fabric, ordered by priority
+-- (narrowest first wins per CoreDNS view-plugin semantics). The
+-- bundle assembler iterates this list in order when emitting view-
+-- scoped server blocks.
+SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at
+FROM dns_views
+WHERE fabric_id = $1
+ORDER BY priority ASC, name ASC;
+
 -- name: GetEnabledDnsCatalogZoneByFabric :one
 -- One row max — uq_dns_catalog_zone_fabric guarantees a fabric
 -- can have at most one catalog. Returns no-rows when the catalog

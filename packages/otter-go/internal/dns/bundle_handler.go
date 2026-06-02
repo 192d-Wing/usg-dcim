@@ -45,6 +45,7 @@ type bundleQuerier interface {
 	GetEnabledDnsCatalogZoneByFabric(ctx context.Context, fabricID uuid.UUID) (dbq.DnsCatalogZone, error)
 	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error)
 	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKeyRow, error)
+	ListDnsViewsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsView, error)
 }
 
 // loadAuthBundleInput fetches the data an auth-server bundle needs.
@@ -90,12 +91,7 @@ func loadAuthBundleInput(ctx context.Context, q bundleQuerier, server dbq.DnsSer
 	}
 	in.CatalogName = catalogName
 	in.CatalogMembers = catalogMembers
-	_ = primaries // catalog renderer takes primaries via a future plumb; today
-	// Python passes them through render_catalog_zone — the assembler doesn't
-	// currently forward; that wire-up lands in the cutover-flip PR alongside
-	// the AuthBundleInput.CatalogPrimaries field. For now catalog renders
-	// without primaries, which means BIND 9.20+ consumers fall back to the
-	// transfer machinery's `to *` (acceptable degradation until cutover).
+	in.CatalogPrimaries = primaries
 
 	// DNSSEC artifacts. decryptPEM left nil here — wiring the Fernet
 	// secret reader lives in the HTTP handler init alongside the
@@ -117,6 +113,15 @@ func loadAuthBundleInput(ctx context.Context, q bundleQuerier, server dbq.DnsSer
 		return in, err
 	}
 	in.ExtraLinesByZone = extras
+
+	// Split-horizon views: per-zone view-bound record grouping +
+	// per-view zone-file rendering.
+	split, err := loadSplitHorizonZoneFiles(ctx, q, zones, byZone, unhealthy)
+	if err != nil {
+		return in, err
+	}
+	in.ViewsByZone = split.ViewsByZone
+	in.SplitHorizonZoneFiles = split.ZoneFiles
 
 	if in.KeyFiles == nil {
 		in.KeyFiles = map[string]string{}
