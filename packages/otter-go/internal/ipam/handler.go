@@ -168,6 +168,13 @@ type Querier interface {
 	ListDhcpServersForDriftSummary(ctx context.Context, scopeFabricIds []uuid.UUID) ([]dbq.DhcpServerDriftSummaryRow, error)
 	ListDhcpScopeDriftStatusByServers(ctx context.Context, serverIDs []uuid.UUID) ([]dbq.DhcpScopeDriftStatusRow, error)
 	ListFiringDhcpDriftAlertKeys(ctx context.Context) ([]string, error)
+
+	// DHCP scope read surface (PR 10). LIST per server with filters,
+	// GET by id (returns tombstones too — wire shape carries
+	// deleted_at). Mutation queries land in a follow-up PR.
+	ListDhcpScopesByServer(ctx context.Context, arg dbq.ListDhcpScopesByServerParams) ([]dbq.DhcpScope, error)
+	CountDhcpScopesByServer(ctx context.Context, arg dbq.CountDhcpScopesByServerParams) (int64, error)
+	GetDhcpScope(ctx context.Context, id uuid.UUID) (dbq.DhcpScope, error)
 }
 
 type Handler struct {
@@ -344,6 +351,12 @@ func (h *Handler) Mount(r chi.Router) {
 		// uses). Empty-scope and empty-fleet branches both short-
 		// circuit to the zero-fleet shape. See dhcp_drift_summary.go.
 		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/drift-summary", h.dhcpDriftSummary)
+
+		// DHCP scope read surface (PR 10). LIST per server + GET
+		// single. Mutations (POST/PATCH/DELETE/RESTORE) land in a
+		// follow-up PR. See dhcp_scopes.go.
+		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/servers/{id}/scopes", h.listDhcpScopes)
+		r.With(auth.RequireCapability(capDhcpScopesRead)).Get("/dhcp/scopes/{id}", h.getDhcpScope)
 	})
 }
 
