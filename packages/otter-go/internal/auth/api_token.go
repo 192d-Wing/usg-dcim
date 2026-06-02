@@ -19,6 +19,11 @@ func hashAPIToken(plain string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// HashAPIToken is the exported entry point for packages outside auth
+// that need the same hashing (e.g. collectors enrollment tokens stored
+// in collectors.enrollment_token_hash).
+func HashAPIToken(plain string) string { return hashAPIToken(plain) }
+
 // generateAPIToken returns (plaintext, digest). Plaintext is
 // "dcim_" + base64url(32 random bytes), matching Python's
 // generate_api_token which uses secrets.token_urlsafe(32).

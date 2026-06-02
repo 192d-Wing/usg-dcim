@@ -1,6 +1,8 @@
-// Package collectors holds GET handlers for the /api/v1/collectors resource.
-// Write paths (enroll, heartbeat, config patch) still served by the Python
-// otter — they need crypto + audit wiring that hasn't been ported yet.
+// Package collectors serves /api/v1/collectors: list/get plus the
+// enroll + heartbeat write paths and config/enabled/decommission
+// mutations. Wire shapes, capability codes, and audit-event shapes
+// match Python's api/collectors.py so the cutover flips ingress
+// without observable behavior change.
 package collectors
 
 import (
@@ -18,13 +20,28 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+const (
+	capCollectorsUpdate = "collectors:collectors:update"
+	capCollectorsEnroll = "collectors:collectors:enroll"
+	capIngestWrite      = "collectors:ingest:write"
+)
+
 type Querier interface {
 	ListCollectors(ctx context.Context, arg dbq.ListCollectorsParams) ([]dbq.Collector, error)
 	CountCollectors(ctx context.Context, arg dbq.CountCollectorsParams) (int64, error)
 	GetCollector(ctx context.Context, id uuid.UUID) (dbq.Collector, error)
+	EnrollCollector(ctx context.Context, arg dbq.EnrollCollectorParams) (dbq.EnrollCollectorRow, error)
+	HeartbeatCollector(ctx context.Context, arg dbq.HeartbeatCollectorParams) ([]byte, error)
+	InsertCollectorHeartbeat(ctx context.Context, arg dbq.InsertCollectorHeartbeatParams) error
 	SetCollectorConfigOverrides(ctx context.Context, arg dbq.SetCollectorConfigOverridesParams) (dbq.Collector, error)
 	SetCollectorEnabled(ctx context.Context, arg dbq.SetCollectorEnabledParams) (dbq.Collector, error)
 	DecommissionCollector(ctx context.Context, id uuid.UUID) (dbq.Collector, error)
+
+	// EnforceSiteScope dependencies — required so enroll can refuse a
+	// site outside the operator's scope.
+	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
+	GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
+	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type Handler struct {
@@ -36,9 +53,11 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Route("/collectors", func(r chi.Router) {
 		r.Get("/", h.list)
 		r.Get("/{id}", h.get)
-		r.With(auth.RequireCapability("collectors:collectors:update")).Patch("/{id}/config", h.patchConfig)
-		r.With(auth.RequireCapability("collectors:collectors:update")).Patch("/{id}/enabled", h.patchEnabled)
-		r.With(auth.RequireCapability("collectors:collectors:update")).Delete("/{id}", h.decommission)
+		r.With(auth.RequireCapability(capCollectorsEnroll)).Post("/enroll", h.enroll)
+		r.With(auth.RequireCapability(capIngestWrite)).Post("/{id}/heartbeat", h.heartbeat)
+		r.With(auth.RequireCapability(capCollectorsUpdate)).Patch("/{id}/config", h.patchConfig)
+		r.With(auth.RequireCapability(capCollectorsUpdate)).Patch("/{id}/enabled", h.patchEnabled)
+		r.With(auth.RequireCapability(capCollectorsUpdate)).Delete("/{id}", h.decommission)
 	})
 }
 

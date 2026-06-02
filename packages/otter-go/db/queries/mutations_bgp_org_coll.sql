@@ -225,8 +225,44 @@ SELECT count(*)::bigint FROM bgp_asns WHERE organization_id = $1;
 DELETE FROM organizations WHERE id = $1;
 
 -- ===== Collectors =====
--- Enroll + heartbeat are intentionally NOT here — they need
--- crypto + audit wiring deferred to a follow-up.
+
+-- name: EnrollCollector :one
+-- Creates a pending collector row with the hashed enrollment token.
+-- The collector exchanges the plaintext token for an mTLS cert + API
+-- token on first call. capabilities is the JSONB array of collector
+-- self-declared capability codes (kept as JSONB for parity with Python).
+INSERT INTO collectors (id, site_id, name, capabilities, status,
+                        enrollment_token_hash, buffered_samples, enabled,
+                        config_overrides, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3::jsonb, 'pending'::collector_status,
+        $4, 0, true, '{}'::jsonb, NOW(), NOW())
+RETURNING id, site_id;
+
+-- name: HeartbeatCollector :one
+-- Updates the collector row on heartbeat and returns the current
+-- config_overrides so the response can echo them back to the agent.
+-- $3 (version) is non-null only when the agent advertised one; null
+-- preserves the existing value via COALESCE. $4 (status) flips between
+-- 'healthy' and 'degraded' based on whether last_error was set.
+UPDATE collectors
+SET last_seen_at      = $2::timestamptz,
+    buffered_samples  = $5::int,
+    version           = COALESCE($3::text, version),
+    status            = $4::collector_status,
+    updated_at        = NOW()
+WHERE id = $1
+RETURNING config_overrides;
+
+-- name: InsertCollectorHeartbeat :exec
+-- Heartbeat audit-trail row. metrics_json is the agent's free-form
+-- key/value blob. last_error is nullable; queue_depth defaults to 0
+-- when the agent doesn't send it.
+INSERT INTO collector_heartbeats (id, collector_id, received_at,
+                                  queue_depth, last_error, metrics_json,
+                                  created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2::timestamptz,
+        $3::int, $4, $5::jsonb,
+        NOW(), NOW());
 
 -- name: SetCollectorConfigOverrides :one
 UPDATE collectors

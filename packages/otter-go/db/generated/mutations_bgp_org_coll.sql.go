@@ -5,6 +5,7 @@ package dbq
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -647,6 +648,76 @@ func (q *Queries) DeleteOrganization(ctx context.Context, id uuid.UUID) error {
 }
 
 // ---- Collectors ----
+
+const enrollCollector = `INSERT INTO collectors (id, site_id, name, capabilities, status,
+                        enrollment_token_hash, buffered_samples, enabled,
+                        config_overrides, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3::jsonb, 'pending'::collector_status,
+        $4, 0, true, '{}'::jsonb, NOW(), NOW())
+RETURNING id, site_id`
+
+type EnrollCollectorParams struct {
+	SiteID              uuid.UUID `json:"site_id"`
+	Name                string    `json:"name"`
+	CapabilitiesJson    []byte    `json:"capabilities"`
+	EnrollmentTokenHash string    `json:"enrollment_token_hash"`
+}
+
+type EnrollCollectorRow struct {
+	ID     uuid.UUID `json:"id"`
+	SiteID uuid.UUID `json:"site_id"`
+}
+
+func (q *Queries) EnrollCollector(ctx context.Context, arg EnrollCollectorParams) (EnrollCollectorRow, error) {
+	row := q.db.QueryRow(ctx, enrollCollector, arg.SiteID, arg.Name, arg.CapabilitiesJson, arg.EnrollmentTokenHash)
+	var r EnrollCollectorRow
+	err := row.Scan(&r.ID, &r.SiteID)
+	return r, err
+}
+
+const heartbeatCollector = `UPDATE collectors
+SET last_seen_at      = $2::timestamptz,
+    buffered_samples  = $5::int,
+    version           = COALESCE($3::text, version),
+    status            = $4::collector_status,
+    updated_at        = NOW()
+WHERE id = $1
+RETURNING config_overrides`
+
+type HeartbeatCollectorParams struct {
+	ID              uuid.UUID `json:"id"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
+	Version         *string   `json:"version"`
+	Status          string    `json:"status"`
+	BufferedSamples int32     `json:"buffered_samples"`
+}
+
+func (q *Queries) HeartbeatCollector(ctx context.Context, arg HeartbeatCollectorParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, heartbeatCollector, arg.ID, arg.LastSeenAt, arg.Version, arg.Status, arg.BufferedSamples)
+	var overrides []byte
+	err := row.Scan(&overrides)
+	return overrides, err
+}
+
+const insertCollectorHeartbeat = `INSERT INTO collector_heartbeats (id, collector_id, received_at,
+                                  queue_depth, last_error, metrics_json,
+                                  created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2::timestamptz,
+        $3::int, $4, $5::jsonb,
+        NOW(), NOW())`
+
+type InsertCollectorHeartbeatParams struct {
+	CollectorID uuid.UUID `json:"collector_id"`
+	ReceivedAt  time.Time `json:"received_at"`
+	QueueDepth  int32     `json:"queue_depth"`
+	LastError   *string   `json:"last_error"`
+	MetricsJson []byte    `json:"metrics_json"`
+}
+
+func (q *Queries) InsertCollectorHeartbeat(ctx context.Context, arg InsertCollectorHeartbeatParams) error {
+	_, err := q.db.Exec(ctx, insertCollectorHeartbeat, arg.CollectorID, arg.ReceivedAt, arg.QueueDepth, arg.LastError, arg.MetricsJson)
+	return err
+}
 
 const collectorRetCols = `id, site_id, name, version, mtls_fingerprint,
           status::text AS status, capabilities,

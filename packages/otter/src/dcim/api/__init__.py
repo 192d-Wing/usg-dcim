@@ -2,7 +2,6 @@
 
 from fastapi import APIRouter
 
-from .collectors import router as collectors_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
 from .regiondeploy import router as regiondeploy_router
@@ -18,7 +17,11 @@ router = APIRouter()
 # /api/v1/inventory/* fully moved to otter-go (this PR). Cables PATCH
 # was the last gap; with it ported, the longer-prefix
 # /api/v1/inventory/cables → otter ingress rule was collapsed.
-router.include_router(collectors_router)
+# /api/v1/collectors/* fully moved to otter-go (PR 21). Go now has
+# parity on the enroll + heartbeat write paths (the previously
+# deferred crypto + audit wiring) alongside list/get/config/enabled/
+# decommission. Token shape: "enroll_" + token_urlsafe(32);
+# sha256-hashed and stored in collectors.enrollment_token_hash.
 # /api/v1/ingest/telemetry remains on Python until the high-throughput
 # fallback gets a Go port; heron already owns the mTLS path.
 router.include_router(ingest_router)

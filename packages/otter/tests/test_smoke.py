@@ -24,8 +24,11 @@ def test_openapi_published() -> None:
     # spot-check the key surfaces are mounted. /api/v1/inventory/*
     # (including cables) is fully on otter-go now; the umbrella chart
     # routes the whole prefix via a single rule.
+    # /api/v1/collectors/* fully moved to otter-go in PR 21 — the
+    # positive-assert moved to the negative list below. Only the
+    # JSON ingest fallback stays on Python until the high-throughput
+    # variant gets a Go port.
     for needle in [
-        "/api/v1/collectors",
         "/api/v1/ingest/telemetry",
     ]:
         assert any(p.startswith(needle) for p in paths), f"missing route: {needle}"
@@ -62,6 +65,10 @@ def test_openapi_published() -> None:
         # the test endpoint). services/notifications.py stays in
         # Python because the alert eval loop still uses it.
         "/api/v1/notifications",
+        # /api/v1/collectors/* fully moved to otter-go (PR 21 cutover
+        # — enroll + heartbeat were the deferred crypto+audit paths;
+        # list/get/config/enabled/decommission were already on Go).
+        "/api/v1/collectors",
         # /api/v1/ipam/* fully moved to otter-go (PR 17 cutover for
         # DHCP; PR 18 cutover for the rest — fabrics, vrfs,
         # vrf-bgp-peers, supernets, subnets, addresses, overlays,
