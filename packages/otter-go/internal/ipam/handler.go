@@ -191,6 +191,13 @@ type Querier interface {
 	// internal/dhcp/reconcile classifies each reservation against
 	// these rows.
 	ListIPAddressesInSubnetForReconcile(ctx context.Context, subnetID uuid.UUID) ([]dbq.DhcpReconcileIPRow, error)
+
+	// DHCP reconcile sync (PR 13). INSERT for unbacked reservations,
+	// UPDATE for source=dhcp → source=reservation promotions. The
+	// orchestrator in internal/dhcp/reconcile picks which to call
+	// per reservation.
+	InsertReservationIPAddress(ctx context.Context, arg dbq.InsertReservationIPAddressParams) (uuid.UUID, error)
+	PromoteDhcpLeaseToReservation(ctx context.Context, arg dbq.PromoteDhcpLeaseToReservationParams) error
 }
 
 type Handler struct {
@@ -393,6 +400,11 @@ func (h *Handler) Mount(r chi.Router) {
 		// can grant the cross-check view without granting the
 		// mutating sync (PR 13). See dhcp_reconcile.go.
 		r.With(auth.RequireCapability("ipam:dhcp-scopes:reconcile")).Get("/dhcp/scopes/{id}/reconcile", h.reconcileDhcpScope)
+
+		// Reconcile sync (PR 13) — mutating IPAM materialization.
+		// Distinct capability so operators who can see the cross-
+		// check (PR 12) may not be the ones authorized to mutate.
+		r.With(auth.RequireCapability("ipam:dhcp-scopes:reconcile-sync")).Post("/dhcp/scopes/{id}/reconcile/sync", h.reconcileSyncDhcpScope)
 	})
 }
 

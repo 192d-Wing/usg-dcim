@@ -166,6 +166,158 @@ func TestReconcileDhcpScope_CollisionThreadedThrough(t *testing.T) {
 	}
 }
 
+// ---- POST /reconcile/sync handler tests ----
+
+// reconcileSyncFakeQ extends the read fake with capture of the two
+// mutating queries the sync handler invokes via the reconcile
+// orchestrator.
+type reconcileSyncFakeQ struct {
+	reconcileFakeQ
+	inserts  []dbq.InsertReservationIPAddressParams
+	promotes []dbq.PromoteDhcpLeaseToReservationParams
+}
+
+func (f *reconcileSyncFakeQ) InsertReservationIPAddress(_ context.Context, arg dbq.InsertReservationIPAddressParams) (uuid.UUID, error) {
+	f.inserts = append(f.inserts, arg)
+	return uuid.New(), nil
+}
+func (f *reconcileSyncFakeQ) PromoteDhcpLeaseToReservation(_ context.Context, arg dbq.PromoteDhcpLeaseToReservationParams) error {
+	f.promotes = append(f.promotes, arg)
+	return nil
+}
+
+func mountReconcileSync(f *reconcileSyncFakeQ, rec *recordingAudit) http.Handler {
+	r := chi.NewRouter()
+	(&Handler{Q: f, Audit: rec}).Mount(r)
+	return r
+}
+
+func TestReconcileSyncDhcpScope_HappyPath_InsertsAndAudits(t *testing.T) {
+	scopeID := uuid.New()
+	subnetID := uuid.New()
+	f := &reconcileSyncFakeQ{
+		reconcileFakeQ: reconcileFakeQ{
+			scopeFabricID: uuid.New(),
+			scope: dbq.DhcpScope{
+				ID: scopeID, IPFamily: 4, Prefix: "10.0.0.0/24",
+				SubnetID: &subnetID,
+				ReservationsJSON: json.RawMessage(`[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.5"}]`),
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			},
+			// No existing IP row → reservation lands in upserted.
+		},
+	}
+	rec := &recordingAudit{}
+	req := httptest.NewRequest("POST", "/ipam/dhcp/scopes/"+scopeID.String()+"/reconcile/sync", nil)
+	req = withPrincipal(req, "*")
+	w := httptest.NewRecorder()
+	mountReconcileSync(f, rec).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if len(f.inserts) != 1 {
+		t.Errorf("inserts = %d, want 1", len(f.inserts))
+	}
+	if len(rec.calls) != 1 || rec.calls[0].Action != "dhcp_scope.reconcile_sync" {
+		t.Errorf("audit calls = %+v", rec.calls)
+	}
+	// Audit metadata carries the per-decision counters Python uses
+	// at api/ipam.py:2346-2355.
+	var meta map[string]any
+	if err := json.Unmarshal(rec.calls[0].MetadataJson, &meta); err != nil {
+		t.Fatal(err)
+	}
+	if total, _ := meta["upserted"].(float64); int(total) != 1 {
+		t.Errorf("metadata.upserted = %v, want 1", meta["upserted"])
+	}
+	for _, key := range []string{
+		"promoted", "skipped_collision", "skipped_clean",
+		"skipped_mac_mismatch", "skipped_duid_mismatch", "skipped_no_subnet",
+	} {
+		if _, ok := meta[key]; !ok {
+			t.Errorf("metadata missing %q (Python parity for audit shape)", key)
+		}
+	}
+}
+
+func TestReconcileSyncDhcpScope_DhcpToReservationPromotion(t *testing.T) {
+	scopeID := uuid.New()
+	subnetID := uuid.New()
+	ipID := uuid.New()
+	mac := "aa:bb:cc:dd:ee:01"
+	f := &reconcileSyncFakeQ{
+		reconcileFakeQ: reconcileFakeQ{
+			scopeFabricID: uuid.New(),
+			scope: dbq.DhcpScope{
+				ID: scopeID, SubnetID: &subnetID,
+				ReservationsJSON: json.RawMessage(`[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.5"}]`),
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			},
+			ipRows: []dbq.DhcpReconcileIPRow{
+				{ID: ipID, Address: "10.0.0.5", Source: "dhcp", DhcpMac: &mac},
+			},
+		},
+	}
+	req := httptest.NewRequest("POST", "/ipam/dhcp/scopes/"+scopeID.String()+"/reconcile/sync", nil)
+	req = withPrincipal(req, "*")
+	w := httptest.NewRecorder()
+	mountReconcileSync(f, &recordingAudit{}).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	if len(f.promotes) != 1 || f.promotes[0].ID != ipID {
+		t.Errorf("promotes = %+v", f.promotes)
+	}
+	if len(f.inserts) != 0 {
+		t.Errorf("promotion path must not insert; got %d inserts", len(f.inserts))
+	}
+}
+
+func TestReconcileSyncDhcpScope_NoSubnetSkipsEverything(t *testing.T) {
+	scopeID := uuid.New()
+	f := &reconcileSyncFakeQ{
+		reconcileFakeQ: reconcileFakeQ{
+			scopeFabricID: uuid.New(),
+			scope: dbq.DhcpScope{
+				ID: scopeID, SubnetID: nil,
+				ReservationsJSON: json.RawMessage(`[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.5"}]`),
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			},
+		},
+	}
+	req := httptest.NewRequest("POST", "/ipam/dhcp/scopes/"+scopeID.String()+"/reconcile/sync", nil)
+	req = withPrincipal(req, "*")
+	w := httptest.NewRecorder()
+	mountReconcileSync(f, &recordingAudit{}).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if len(f.inserts) != 0 || len(f.promotes) != 0 {
+		t.Errorf("no-subnet must not mutate; got inserts=%d promotes=%d", len(f.inserts), len(f.promotes))
+	}
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"skipped_no_subnet":1`)) {
+		t.Errorf("body missing skipped_no_subnet:1, got %s", w.Body.String())
+	}
+}
+
+func TestReconcileSyncDhcpScope_ForbiddenWithoutScopedCap(t *testing.T) {
+	scopeID := uuid.New()
+	f := &reconcileSyncFakeQ{reconcileFakeQ: reconcileFakeQ{scopeFabricID: uuid.New()}}
+	req := httptest.NewRequest("POST", "/ipam/dhcp/scopes/"+scopeID.String()+"/reconcile/sync", nil)
+	p := auth.Principal{
+		Capabilities: []string{"ipam:dhcp-scopes:reconcile-sync"},
+		Scopes: map[string]auth.Scope{
+			"ipam:dhcp-scopes:reconcile-sync": {FabricIDs: map[uuid.UUID]struct{}{uuid.New(): {}}},
+		},
+	}
+	req = req.WithContext(auth.WithPrincipal(req.Context(), p))
+	w := httptest.NewRecorder()
+	mountReconcileSync(f, &recordingAudit{}).ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", w.Code)
+	}
+}
+
 func TestReconcileDhcpScope_WireShapeMatchesPython(t *testing.T) {
 	// Python's response (api/ipam.py:2299) keys: scope_id, subnet_id,
 	// total, counts, entries. Regression guard against a struct-tag

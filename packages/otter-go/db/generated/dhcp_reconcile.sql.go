@@ -44,3 +44,61 @@ func (q *Queries) ListIPAddressesInSubnetForReconcile(ctx context.Context, subne
 	}
 	return out, rows.Err()
 }
+
+const insertReservationIPAddress = `-- name: InsertReservationIPAddress :one
+INSERT INTO ip_addresses (
+    id, subnet_id, address, role, status, source,
+    dhcp_mac, dhcp_duid, dns_name,
+    created_at, updated_at
+)
+VALUES (gen_random_uuid(), $1, $2::inet, 'data', 'reserved', 'reservation',
+        $3, $4, $5, NOW(), NOW())
+RETURNING id`
+
+// InsertReservationIPAddressParams. Address is the canonical text form
+// of the reservation IP — the SQL casts to inet so a malformed
+// string surfaces as 22P02 (invalid_text_representation), mapped to
+// 400 by httpx.Mapped. dhcp_mac/dhcp_duid/dns_name pointers stay nil
+// when the reservation didn't declare them; the column accepts NULL.
+type InsertReservationIPAddressParams struct {
+	SubnetID uuid.UUID `json:"subnet_id"`
+	Address  string    `json:"address"`
+	DhcpMac  *string   `json:"dhcp_mac"`
+	DhcpDuid *string   `json:"dhcp_duid"`
+	DnsName  *string   `json:"dns_name"`
+}
+
+func (q *Queries) InsertReservationIPAddress(ctx context.Context, arg InsertReservationIPAddressParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, insertReservationIPAddress,
+		arg.SubnetID, arg.Address, arg.DhcpMac, arg.DhcpDuid, arg.DnsName)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const promoteDhcpLeaseToReservation = `-- name: PromoteDhcpLeaseToReservation :exec
+UPDATE ip_addresses
+SET source     = 'reservation',
+    status     = 'reserved',
+    dhcp_mac   = COALESCE(dhcp_mac,  $2::text),
+    dhcp_duid  = COALESCE(dhcp_duid, $3::text),
+    dns_name   = COALESCE(dns_name,  $4::text),
+    updated_at = NOW()
+WHERE id = $1`
+
+// PromoteDhcpLeaseToReservationParams. Pointers carry the
+// reservation's mac/duid/hostname; the SQL's COALESCE keeps an
+// already-populated column intact (Python parity: only backfill,
+// never overwrite — services/dhcp_reconcile.py:354-367).
+type PromoteDhcpLeaseToReservationParams struct {
+	ID       uuid.UUID `json:"id"`
+	DhcpMac  *string   `json:"dhcp_mac"`
+	DhcpDuid *string   `json:"dhcp_duid"`
+	DnsName  *string   `json:"dns_name"`
+}
+
+func (q *Queries) PromoteDhcpLeaseToReservation(ctx context.Context, arg PromoteDhcpLeaseToReservationParams) error {
+	_, err := q.db.Exec(ctx, promoteDhcpLeaseToReservation,
+		arg.ID, arg.DhcpMac, arg.DhcpDuid, arg.DnsName)
+	return err
+}
