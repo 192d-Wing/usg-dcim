@@ -366,6 +366,16 @@ ingress:
         - path: /api/v1/notifications
           pathType: Prefix
           backend: otter-go
+        # PR 19 cutover: organization + stencils on otter-go. Both
+        # had full Go parity already (organization CRUD in
+        # internal/organization; stencils LIST in internal/stencils);
+        # this PR routes the ingress + drops the Python routers.
+        - path: /api/v1/organizations
+          pathType: Prefix
+          backend: otter-go
+        - path: /api/v1/stencils
+          pathType: Prefix
+          backend: otter-go
         # Region-deploy read-side split. Detail GET + paginated event
         # history move to otter-go now; LIST + CREATE + the lifecycle
         # endpoints (preflight/start/abort/SSE/kubeconfig callback)

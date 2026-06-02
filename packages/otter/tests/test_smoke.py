@@ -69,6 +69,11 @@ def test_openapi_published() -> None:
         # bulk endpoints). The broader prefix supersedes the
         # /api/v1/ipam/dhcp negative-assert that lived here for PR 17.
         "/api/v1/ipam",
+        # /api/v1/organizations + /api/v1/stencils fully moved to
+        # otter-go (PR 19). Go's internal/organization has CRUD
+        # parity; internal/stencils serves the static catalog LIST.
+        "/api/v1/organizations",
+        "/api/v1/stencils",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
