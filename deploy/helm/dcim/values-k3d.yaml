@@ -100,6 +100,10 @@ ingress:
         - { path: /api/v1/alerts, pathType: Prefix, backend: otter-go }
         # /api/v1/dns/bgp-peers/* on otter-go; rest of /dns stays Python.
         - { path: /api/v1/dns/bgp-peers, pathType: Prefix, backend: otter-go }
+        # /api/v1/ipam/dhcp/* fully on otter-go (PR 17 cutover —
+        # closes the 17-PR DHCP push/diff/CRUD/reconcile/lease-ingest
+        # port). The dhcp-site puller's /bundle is included.
+        - { path: /api/v1/ipam/dhcp, pathType: Prefix, backend: otter-go }
         # Notifications fully on otter-go after the test endpoint port.
         - { path: /api/v1/notifications, pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }

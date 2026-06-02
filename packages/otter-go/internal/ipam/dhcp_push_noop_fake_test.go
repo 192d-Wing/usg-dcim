@@ -170,3 +170,29 @@ func (dhcpPushNoop) InsertReservationIPAddress(_ context.Context, _ dbq.InsertRe
 func (dhcpPushNoop) PromoteDhcpLeaseToReservation(_ context.Context, _ dbq.PromoteDhcpLeaseToReservationParams) error {
 	return nil
 }
+
+// On-demand sync stubs (PR 17). leasesync.Querier embeds five methods
+// + ListEnabledDhcpServersForLeaseSync. All return empty/ErrNoRows.
+func (dhcpPushNoop) ListEnabledDhcpServersForLeaseSync(_ context.Context) ([]dbq.DhcpServerForLeaseSyncRow, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) ListSubnetsForFabricLeaseSync(_ context.Context, _ uuid.UUID) ([]dbq.SubnetForLeaseSyncRow, error) {
+	return nil, nil
+}
+
+func (dhcpPushNoop) FindDhcpLeaseIPAddress(_ context.Context, _ dbq.FindDhcpLeaseIPAddressParams) (dbq.FindDhcpLeaseIPAddressRow, error) {
+	return dbq.FindDhcpLeaseIPAddressRow{}, pgx.ErrNoRows
+}
+
+func (dhcpPushNoop) UpdateDhcpLease(_ context.Context, _ dbq.UpdateDhcpLeaseParams) error {
+	return nil
+}
+
+func (dhcpPushNoop) InsertDhcpLease(_ context.Context, _ dbq.InsertDhcpLeaseParams) error {
+	return nil
+}
+
+func (dhcpPushNoop) UpdateDhcpServerSyncState(_ context.Context, _ dbq.UpdateDhcpServerSyncStateParams) error {
+	return nil
+}

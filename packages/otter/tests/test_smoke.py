@@ -62,16 +62,13 @@ def test_openapi_published() -> None:
         # the test endpoint). services/notifications.py stays in
         # Python because the alert eval loop still uses it.
         "/api/v1/notifications",
+        # /api/v1/ipam/dhcp/* fully moved to otter-go (PR 17 cutover —
+        # closes the 17-PR DHCP push/diff/CRUD/reconcile/lease-ingest
+        # port). Covers servers CRUD, scope CRUD, push/diff/history,
+        # bulk endpoints, reconcile, scope-templates CRUD, the bundle
+        # endpoint, the manual /sync endpoint, and drift-summary.
+        "/api/v1/ipam/dhcp",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
         )
-    # /api/v1/ipam/dhcp/servers/{id}/bundle moved to otter-go (PRs
-    # #216-#219 ported the renderer + queries + HTTP endpoint +
-    # rerender cron). The rest of /api/v1/ipam/dhcp/servers/* (CRUD,
-    # /sync, /diff) stays Python-canonical, so we can't use the
-    # startswith form above — we'd accidentally flag every other
-    # endpoint on the same prefix. Negative-assert the exact path.
-    assert not any(p.endswith("/bundle") and "/dhcp/servers/" in p for p in paths), (
-        "Python should not advertise /ipam/dhcp/servers/{id}/bundle — otter-go is canonical"
-    )

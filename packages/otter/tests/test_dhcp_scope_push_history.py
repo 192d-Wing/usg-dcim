@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
 from sqlalchemy import inspect as sa_inspect
 
 from dcim.api import ipam as ipam_api
@@ -89,27 +90,29 @@ def test_delete_scope_from_kea_accepts_optional_db():
 
 
 # ----- API endpoint registration -----
+# PR 17 cutover: the GET /dhcp/scopes/{id}/push-history route moved
+# to otter-go (see internal/ipam/dhcp_push.go). The capability +
+# ordering invariants are now pinned in the Go handler tests
+# (TestPushHistory_DefaultLimit + TestPushHistory_Success). Tests
+# below stay in the tree so a future re-port of the schemas + DB
+# helpers (the earlier tests in this file) doesn't need to
+# reconstruct the original PR-104 coverage.
 
+@pytest.mark.skip(reason="PR 17 cutover: route is on otter-go")
 def test_list_push_history_endpoint_registered():
-    # GET /dhcp/scopes/{scope_id}/push-history must be on the
-    # router; absent registration would route to 404 silently.
     paths = {
         r.path for r in ipam_api.router.routes if hasattr(r, "path")
     }
     assert "/ipam/dhcp/scopes/{scope_id}/push-history" in paths
 
 
+@pytest.mark.skip(reason="PR 17 cutover: route is on otter-go")
 def test_list_push_history_uses_read_capability():
-    # Same capability as GET /dhcp/scopes/{id} — operators who
-    # can see a scope can see its push history; mutating
-    # capabilities aren't required.
     src = inspect.getsource(ipam_api.list_dhcp_scope_push_history)
     assert 'ipam:dhcp-scopes:read' in src
 
 
+@pytest.mark.skip(reason="PR 17 cutover: route is on otter-go")
 def test_list_push_history_orders_newest_first():
-    # The (scope_id, attempted_at DESC) index in migration 0064
-    # only pays off if the query asks for DESC. Pin the order so
-    # a future refactor doesn't quietly invalidate the index plan.
     src = inspect.getsource(ipam_api.list_dhcp_scope_push_history)
     assert "attempted_at.desc()" in src

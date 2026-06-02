@@ -19,6 +19,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/dhcp/diff"
+	"github.com/usg-dcim/packages/otter-go/internal/dhcp/leasesync"
 	"github.com/usg-dcim/packages/otter-go/internal/dhcp/push"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
@@ -198,6 +199,14 @@ type Querier interface {
 	// per reservation.
 	InsertReservationIPAddress(ctx context.Context, arg dbq.InsertReservationIPAddressParams) (uuid.UUID, error)
 	PromoteDhcpLeaseToReservation(ctx context.Context, arg dbq.PromoteDhcpLeaseToReservationParams) error
+
+	// DHCP server on-demand sync (PR 17). leasesync.Querier embeds
+	// the per-server SyncServer surface; ListEnabledDhcpServers
+	// ForLeaseSync resolves the URL server_id to the full row
+	// (the orchestrator wants the auth pair, which the standard
+	// DhcpServer projection omits).
+	leasesync.Querier
+	ListEnabledDhcpServersForLeaseSync(ctx context.Context) ([]dbq.DhcpServerForLeaseSyncRow, error)
 }
 
 type Handler struct {
@@ -212,6 +221,11 @@ type Handler struct {
 	// dhcp_push.go.
 	PushKea push.KeaClientBuilder
 	DiffKea diff.KeaClientBuilder
+	// LeaseKea injects the lease-fetch client used by the on-demand
+	// POST /dhcp/servers/{id}/sync endpoint (PR 17). nil falls back
+	// to leasesync.DefaultKeaClientBuilder via leaseKeaBuilder() in
+	// dhcp_server_sync.go.
+	LeaseKea leasesync.KeaClientBuilder
 }
 
 // scopedListFilter resolves the caller's fabric scope for capCode and
@@ -405,6 +419,12 @@ func (h *Handler) Mount(r chi.Router) {
 		// Distinct capability so operators who can see the cross-
 		// check (PR 12) may not be the ones authorized to mutate.
 		r.With(auth.RequireCapability("ipam:dhcp-scopes:reconcile-sync")).Post("/dhcp/scopes/{id}/reconcile/sync", h.reconcileSyncDhcpScope)
+
+		// On-demand DHCP server sync (PR 17). Same code path the
+		// dhcp_sync cron uses, exposed manually for operators who
+		// just edited a server config. Capability matches Python's
+		// :update (api/ipam.py:1848).
+		r.With(auth.RequireCapability("ipam:dhcp-servers:update")).Post("/dhcp/servers/{id}/sync", h.syncDhcpServer)
 	})
 }
 
