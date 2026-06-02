@@ -367,6 +367,7 @@ ingress:
           pathType: Prefix
           backend: otter-go
 <<<<<<< HEAD
+<<<<<<< HEAD
         # PR 19 cutover: organization + stencils on otter-go. Both
         # had full Go parity already (organization CRUD in
         # internal/organization; stencils LIST in internal/stencils);
@@ -394,6 +395,16 @@ ingress:
         # and the audit shape for collector.enroll. The list/get/
         # config/enabled/decommission paths were already on Go (PR 44).
         - path: /api/v1/collectors
+=======
+        # PR 22 cutover: /api/v1/ingest/telemetry on otter-go. This
+        # is the JSON fallback path; heron remains the canonical mTLS
+        # bulk path. The Go handler matches Python's wire shape
+        # ({accepted, errors, received_at}) and freshness-then-samples
+        # write order. DCIM_TELEMETRY_WRITE_HYPERTABLE=false on stock
+        # Postgres without TimescaleDB → freshness still updates,
+        # samples are skipped, errors:true mirrors Python's behavior.
+        - path: /api/v1/ingest
+>>>>>>> 887b77b (port+cutover(ingest): /api/v1/ingest/telemetry JSON fallback on otter-go)
           pathType: Prefix
           backend: otter-go
         # Region-deploy read-side split. Detail GET + paginated event

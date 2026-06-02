@@ -29,6 +29,72 @@ func (q *Queries) FlipStaleTelemetrySources(ctx context.Context) (int64, error) 
 	return tag.RowsAffected(), nil
 }
 
+const upsertTelemetrySource = `INSERT INTO telemetry_sources (id, site_id, asset_id, collector_id,
+                               metric, unit, freshness,
+                               last_success_at, last_reading_at, last_value,
+                               poll_interval_seconds, created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3,
+        $4, $5, 'current'::freshness_state,
+        $6::timestamptz, $7::timestamptz, $8::float,
+        60, NOW(), NOW())
+ON CONFLICT (asset_id, metric) DO UPDATE
+SET collector_id     = EXCLUDED.collector_id,
+    unit             = COALESCE(NULLIF(EXCLUDED.unit, ''), telemetry_sources.unit),
+    last_success_at  = EXCLUDED.last_success_at,
+    last_reading_at  = EXCLUDED.last_reading_at,
+    last_value       = EXCLUDED.last_value,
+    freshness        = 'current'::freshness_state,
+    updated_at       = NOW()`
+
+type UpsertTelemetrySourceParams struct {
+	SiteID         uuid.UUID `json:"site_id"`
+	AssetID        uuid.UUID `json:"asset_id"`
+	CollectorID    uuid.UUID `json:"collector_id"`
+	Metric         string    `json:"metric"`
+	Unit           *string   `json:"unit"`
+	LastSuccessAt  time.Time `json:"last_success_at"`
+	LastReadingAt  time.Time `json:"last_reading_at"`
+	LastValue      float64   `json:"last_value"`
+}
+
+func (q *Queries) UpsertTelemetrySource(ctx context.Context, arg UpsertTelemetrySourceParams) error {
+	_, err := q.db.Exec(ctx, upsertTelemetrySource,
+		arg.SiteID, arg.AssetID, arg.CollectorID,
+		arg.Metric, arg.Unit,
+		arg.LastSuccessAt, arg.LastReadingAt, arg.LastValue)
+	return err
+}
+
+const insertTelemetrySample = `INSERT INTO telemetry_samples (ts, site_id, asset_id, collector_id,
+                               batch_id, seq, metric, value, unit,
+                               received_at, tags)
+VALUES ($1::timestamptz, $2, $3, $4,
+        $5, $6::int, $7, $8::float, $9,
+        $10::timestamptz, $11::jsonb)
+ON CONFLICT ON CONSTRAINT uq_telem_sample_dedup DO NOTHING`
+
+type InsertTelemetrySampleParams struct {
+	TS          time.Time `json:"ts"`
+	SiteID      uuid.UUID `json:"site_id"`
+	AssetID     uuid.UUID `json:"asset_id"`
+	CollectorID uuid.UUID `json:"collector_id"`
+	BatchID     string    `json:"batch_id"`
+	Seq         int32     `json:"seq"`
+	Metric      string    `json:"metric"`
+	Value       float64   `json:"value"`
+	Unit        *string   `json:"unit"`
+	ReceivedAt  time.Time `json:"received_at"`
+	Tags        []byte    `json:"tags"`
+}
+
+func (q *Queries) InsertTelemetrySample(ctx context.Context, arg InsertTelemetrySampleParams) error {
+	_, err := q.db.Exec(ctx, insertTelemetrySample,
+		arg.TS, arg.SiteID, arg.AssetID, arg.CollectorID,
+		arg.BatchID, arg.Seq, arg.Metric, arg.Value, arg.Unit,
+		arg.ReceivedAt, arg.Tags)
+	return err
+}
+
 const getTelemetrySeries = `-- name: GetTelemetrySeries :many
 SELECT ts, value
 FROM telemetry_samples

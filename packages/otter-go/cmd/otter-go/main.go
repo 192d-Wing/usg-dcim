@@ -27,6 +27,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
 	"github.com/usg-dcim/packages/otter-go/internal/cables"
 	"github.com/usg-dcim/packages/otter-go/internal/collectors"
+	"github.com/usg-dcim/packages/otter-go/internal/ingest"
 	"github.com/usg-dcim/packages/otter-go/internal/dashboards"
 	"github.com/usg-dcim/packages/otter-go/internal/dns"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
@@ -86,6 +87,12 @@ func main() {
 	oh := &organization.Handler{Q: q, Audit: q}
 	sth := &stencils.Handler{}
 	th := &telemetry.Handler{Q: q}
+	// JSON telemetry-ingest fallback. heron is the canonical mTLS
+	// path; this handler covers operator tools + collectors without
+	// a heron-shaped client. DCIM_TELEMETRY_WRITE_HYPERTABLE=false
+	// matches Python's settings.telemetry_write_hypertable opt-out
+	// for stock-Postgres deployments lacking TimescaleDB.
+	igh := &ingest.Handler{Q: q, WriteHypertable: env.Bool("DCIM_TELEMETRY_WRITE_HYPERTABLE", true)}
 	// Default DNS recursive_upstreams — same shape Python's
 	// settings.dns_recursive_upstreams handles (comma-separated env
 	// override, hard-coded {1.1.1.1, 8.8.8.8} fallback). Surfaced
@@ -250,6 +257,7 @@ func main() {
 			alh.Mount(r)
 			nh.Mount(r)
 			coh.Mount(r)
+			igh.Mount(r)
 			oh.Mount(r)
 			sth.Mount(r)
 			th.Mount(r)
