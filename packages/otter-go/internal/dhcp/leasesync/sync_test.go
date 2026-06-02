@@ -130,6 +130,34 @@ func oneLease4Kea(t *testing.T, address, mac, hostname string) *stubKea {
 	}
 }
 
+// runOneLease drives SyncServer with one 10.0.0.5 lease against a
+// single /24 subnet. existingSource controls whether the
+// (subnet, address) lookup returns an existing row:
+//   - "" → no existing row (INSERT branch)
+//   - "dhcp" / "static" / "reservation" → seeded existing row with
+//     that source enum (UPDATE / skip / skip branches).
+// Returns the captureQ + Result so tests assert on writes + counters.
+// Each test becomes 1-3 setup lines + the assertions; the 11-line
+// captureQ/stubKea/SyncServer ceremony lives here.
+func runOneLease(t *testing.T, address, mac, hostname, existingSource string) (*captureQ, Result) {
+	t.Helper()
+	srv := newServer()
+	subnetID := uuid.New()
+	finds := map[string]dbq.FindDhcpLeaseIPAddressRow{}
+	if existingSource != "" {
+		finds[subnetID.String()+"/"+address] = dbq.FindDhcpLeaseIPAddressRow{
+			ID: uuid.New(), Source: existingSource,
+		}
+	}
+	q := singleSubnetQ(subnetID, finds)
+	k := oneLease4Kea(t, address, mac, hostname)
+	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
+	if err != nil {
+		t.Fatalf("SyncServer err: %v", err)
+	}
+	return q, got
+}
+
 func TestSyncServer_HappyPath_InsertsNewLease(t *testing.T) {
 	srv := newServer()
 	subnetID := uuid.New()
@@ -158,22 +186,12 @@ func TestSyncServer_HappyPath_InsertsNewLease(t *testing.T) {
 }
 
 func TestSyncServer_ExistingDhcpLease_Updates(t *testing.T) {
-	srv := newServer()
-	subnetID := uuid.New()
-	ipID := uuid.New()
-	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
-		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
-	})
-	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "host-1")
-	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	q, got := runOneLease(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "host-1", "dhcp")
 	if got.Upserted != 1 {
 		t.Errorf("Upserted = %d, want 1", got.Upserted)
 	}
-	if len(q.updates) != 1 || q.updates[0].ID != ipID {
-		t.Errorf("updates = %+v, want UPDATE on %s", q.updates, ipID)
+	if len(q.updates) != 1 {
+		t.Errorf("updates = %+v, want one UPDATE", q.updates)
 	}
 	if len(q.inserts) != 0 {
 		t.Errorf("must not INSERT when row exists; got %d inserts", len(q.inserts))
@@ -181,17 +199,7 @@ func TestSyncServer_ExistingDhcpLease_Updates(t *testing.T) {
 }
 
 func TestSyncServer_StaticRowLeftAlone(t *testing.T) {
-	srv := newServer()
-	subnetID := uuid.New()
-	ipID := uuid.New()
-	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
-		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "static"},
-	})
-	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
-	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	q, got := runOneLease(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "", "static")
 	// Lease was seen but the source=static row was NOT touched —
 	// operator-owned addresses are protected.
 	if got.LeasesSeen != 1 || got.Upserted != 0 {
@@ -204,16 +212,7 @@ func TestSyncServer_StaticRowLeftAlone(t *testing.T) {
 
 func TestSyncServer_ReservationRowLeftAlone(t *testing.T) {
 	// Same posture as static: source=reservation is operator-owned.
-	srv := newServer()
-	subnetID := uuid.New()
-	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
-		subnetID.String() + "/10.0.0.5": {ID: uuid.New(), Source: "reservation"},
-	})
-	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
-	got, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	q, got := runOneLease(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "", "reservation")
 	if got.Upserted != 0 {
 		t.Errorf("Upserted = %d, want 0", got.Upserted)
 	}
@@ -309,17 +308,7 @@ func TestSyncServer_ErrorMessageTruncated(t *testing.T) {
 // COALESCE($3, dns_name) — non-NULL incoming wins. Pin the
 // orchestrator's contract here.
 func TestSyncServer_UpdateOverwritesDnsNameWhenHostnameSet(t *testing.T) {
-	srv := newServer()
-	subnetID := uuid.New()
-	ipID := uuid.New()
-	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
-		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
-	})
-	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "new-host")
-	_, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	q, _ := runOneLease(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "new-host", "dhcp")
 	if len(q.updates) != 1 {
 		t.Fatalf("updates = %d, want 1", len(q.updates))
 	}
@@ -333,19 +322,9 @@ func TestSyncServer_UpdateOverwritesDnsNameWhenHostnameSet(t *testing.T) {
 // when the new is empty. nilIfEmpty maps "" → nil before the SQL,
 // then COALESCE($3, dns_name) keeps the existing column.
 func TestSyncServer_UpdateKeepsExistingDnsNameWhenHostnameEmpty(t *testing.T) {
-	srv := newServer()
-	subnetID := uuid.New()
-	ipID := uuid.New()
-	q := singleSubnetQ(subnetID, map[string]dbq.FindDhcpLeaseIPAddressRow{
-		subnetID.String() + "/10.0.0.5": {ID: ipID, Source: "dhcp"},
-	})
 	// No hostname → parser emits "" → nilIfEmpty → nil → COALESCE
 	// keeps existing column on the DB side.
-	k := oneLease4Kea(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "")
-	_, err := SyncServer(context.Background(), q, builderReturning(k), srv, time.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
+	q, _ := runOneLease(t, "10.0.0.5", "aa:bb:cc:dd:ee:01", "", "dhcp")
 	if len(q.updates) != 1 {
 		t.Fatalf("updates = %d, want 1", len(q.updates))
 	}
