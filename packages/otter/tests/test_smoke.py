@@ -62,12 +62,13 @@ def test_openapi_published() -> None:
         # the test endpoint). services/notifications.py stays in
         # Python because the alert eval loop still uses it.
         "/api/v1/notifications",
-        # /api/v1/ipam/dhcp/* fully moved to otter-go (PR 17 cutover —
-        # closes the 17-PR DHCP push/diff/CRUD/reconcile/lease-ingest
-        # port). Covers servers CRUD, scope CRUD, push/diff/history,
-        # bulk endpoints, reconcile, scope-templates CRUD, the bundle
-        # endpoint, the manual /sync endpoint, and drift-summary.
-        "/api/v1/ipam/dhcp",
+        # /api/v1/ipam/* fully moved to otter-go (PR 17 cutover for
+        # DHCP; PR 18 cutover for the rest — fabrics, vrfs,
+        # vrf-bgp-peers, supernets, subnets, addresses, overlays,
+        # vnis, vteps, vtep-memberships, free-space, utilization,
+        # bulk endpoints). The broader prefix supersedes the
+        # /api/v1/ipam/dhcp negative-assert that lived here for PR 17.
+        "/api/v1/ipam",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

@@ -125,14 +125,14 @@ otter-go:
   enabled: true
   # Endpoints currently owned by otter-go and routed via the
   # umbrella's ingress (`ingress.hosts[].paths`):
-  #   /api/v1/lir/*                        LIR pools/requests/allocations
-  #   /api/v1/ipam/supernets/{id}/move     tenant supernet move
-  #   /api/v1/ipam/dhcp/*                  full DHCP push/diff/CRUD/
-  #                                        reconcile/lease-ingest surface
-  #                                        (PR 17 cutover; covers the
-  #                                        bundle endpoint that previously
-  #                                        rode the ImplementationSpecific
-  #                                        regex)
+  #   /api/v1/lir/*    LIR pools/requests/allocations
+  #   /api/v1/ipam/*   full IPAM surface (PR 18 cutover):
+  #                    fabrics + vrfs + vrf-bgp-peers + supernets +
+  #                    subnets + addresses + overlays + vnis + vteps +
+  #                    vtep-memberships + free-space + utilization +
+  #                    bulk endpoints + DHCP (push/diff/CRUD/reconcile/
+  #                    lease-ingest from PR 17). The supernets/{id}/move
+  #                    regex rule collapsed into this Prefix.
   # replicaCount + PDB + service.port live in the subchart's own
   # values.yaml; override here only when a deployment needs different.
 
@@ -220,12 +220,16 @@ badger:
 ingress:
   enabled: true
   className: nginx
-  # nginx-ingress regex support is required for the /api/v1/ipam/supernets/{id}/move
-  # rule below — that endpoint lives in otter-go but Python otter owns the rest
-  # of /api/v1/ipam/supernets/* CRUD. Without use-regex an ImplementationSpecific
-  # path falls back to literal matching. Operators on non-nginx controllers
-  # need a controller-specific equivalent (Traefik middleware, Gateway API
-  # HTTPRouteRule with a URLRewrite).
+  # nginx-ingress regex annotation is preserved for compatibility
+  # with any controller-specific filters operators have layered on
+  # top, but the IPAM cutover (PR 18) collapsed the
+  # supernets/{id}/move ImplementationSpecific rule into the broader
+  # /api/v1/ipam Prefix rule — every non-DHCP IPAM resource is now
+  # on otter-go via PR 42's basic CRUD + PR 54/55's ABAC. The /dhcp
+  # Prefix rule still sits below /api/v1/ipam but is now redundant
+  # under the broader rule; kept as a marker since the DHCP backend
+  # share between Go's dhcp endpoints and the rest of IPAM happens
+  # to land in the same backend.
   annotations:
     nginx.ingress.kubernetes.io/use-regex: "true"
   hosts:
@@ -239,17 +243,14 @@ ingress:
         # convention. ImplementationSpecific paths take precedence over
         # Prefix when use-regex is on (nginx behavior), which is what makes
         # the supernets/.../move regex catch before the /api Prefix.
-        - path: /api/v1/ipam/supernets/[^/]+/move
-          pathType: ImplementationSpecific
-          backend: otter-go
-        # /api/v1/ipam/dhcp/* fully on otter-go — closes the 17-PR
-        # DHCP push/diff/CRUD port (PRs #216-#239 incl. the bundle
-        # work, push/diff orchestrators, scope CRUD, reconcile, lease
-        # ingest, and the two new crons). The dhcp-site puller's
-        # GET /bundle was the first cutover; this Prefix rule
-        # supersedes the ImplementationSpecific regex it used so the
-        # rest of the surface joins the same backend.
-        - path: /api/v1/ipam/dhcp
+        # PR 18 cutover: all of /api/v1/ipam/* on otter-go. PR 42
+        # ported the basic CRUD; PR 54 + 55 added the 1-hop and
+        # 2+ hop ABAC; PR 17 brought DHCP under the umbrella. This
+        # broad Prefix rule supersedes the supernets/.../move
+        # ImplementationSpecific regex and the /api/v1/ipam/dhcp
+        # Prefix that lived here before — both still route to
+        # otter-go, just via the wider rule now.
+        - path: /api/v1/ipam
           pathType: Prefix
           backend: otter-go
         - path: /api/v1/lir
