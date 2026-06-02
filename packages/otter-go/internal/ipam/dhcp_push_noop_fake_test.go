@@ -159,3 +159,14 @@ func (dhcpPushNoop) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpSc
 func (dhcpPushNoop) ListIPAddressesInSubnetForReconcile(_ context.Context, _ uuid.UUID) ([]dbq.DhcpReconcileIPRow, error) {
 	return nil, nil
 }
+
+// DHCP reconcile sync write paths (PR 13). InsertReservationIPAddress
+// returns a fresh UUID; PromoteDhcpLeaseToReservation is a no-op.
+// Tests that exercise the sync path override these.
+func (dhcpPushNoop) InsertReservationIPAddress(_ context.Context, _ dbq.InsertReservationIPAddressParams) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
+func (dhcpPushNoop) PromoteDhcpLeaseToReservation(_ context.Context, _ dbq.PromoteDhcpLeaseToReservationParams) error {
+	return nil
+}
