@@ -42,6 +42,9 @@ type bundleQuerier interface {
 	ListDnsZonesByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsZone, error)
 	ListDnsRecordsByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsRecordForBundle, error)
 	ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, fabricID uuid.UUID) ([]uuid.UUID, error)
+	GetEnabledDnsCatalogZoneByFabric(ctx context.Context, fabricID uuid.UUID) (dbq.DnsCatalogZone, error)
+	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error)
+	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKeyRow, error)
 }
 
 // loadAuthBundleInput fetches the data an auth-server bundle needs.
@@ -80,10 +83,44 @@ func loadAuthBundleInput(ctx context.Context, q bundleQuerier, server dbq.DnsSer
 	}
 	in.UnhealthyCheckIDs = unhealthy
 
-	// Maps caller-empty until the follow-up PR ports the rest of the
-	// helpers. AssembleAuthBundle treats nil maps as "no DNSSEC, no
-	// catalog, no extras" — degrades cleanly.
-	in.KeyFiles = map[string]string{}
+	// PR 31 — catalog + DNSSEC + extras integration.
+	catalogName, catalogMembers, primaries, err := loadCatalogForBundle(ctx, q, server.FabricID, zones)
+	if err != nil {
+		return in, err
+	}
+	in.CatalogName = catalogName
+	in.CatalogMembers = catalogMembers
+	_ = primaries // catalog renderer takes primaries via a future plumb; today
+	// Python passes them through render_catalog_zone — the assembler doesn't
+	// currently forward; that wire-up lands in the cutover-flip PR alongside
+	// the AuthBundleInput.CatalogPrimaries field. For now catalog renders
+	// without primaries, which means BIND 9.20+ consumers fall back to the
+	// transfer machinery's `to *` (acceptable degradation until cutover).
+
+	// DNSSEC artifacts. decryptPEM left nil here — wiring the Fernet
+	// secret reader lives in the HTTP handler init alongside the
+	// other settings. nil at the loader means the renderer will 5xx
+	// on encrypted PEM, which is the correct loud-failure mode if
+	// the operator hasn't configured at-rest decryption yet.
+	dnssec, err := loadDnssecArtifacts(ctx, q, zones, nil)
+	if err != nil {
+		return in, err
+	}
+	in.KeyFiles = dnssec.KeyFiles
+	in.DnssecKeysByZone = dnssec.DnssecKeysByZone
+	in.Nsec3ParamsByZone = dnssec.Nsec3ParamsByZone
+
+	// Extras: DS for delegated children + CDNSKEY/CDS for signed
+	// zones with publish_cds=true.
+	extras, err := loadZoneExtraLines(ctx, q, zones)
+	if err != nil {
+		return in, err
+	}
+	in.ExtraLinesByZone = extras
+
+	if in.KeyFiles == nil {
+		in.KeyFiles = map[string]string{}
+	}
 	return in, nil
 }
 

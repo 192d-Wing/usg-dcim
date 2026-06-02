@@ -172,6 +172,83 @@ func (q *Queries) ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, 
 	return out, rows.Err()
 }
 
+const getEnabledDnsCatalogZoneByFabric = `SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
+FROM dns_catalog_zones
+WHERE fabric_id = $1 AND enabled = true`
+
+func (q *Queries) GetEnabledDnsCatalogZoneByFabric(ctx context.Context, fabricID uuid.UUID) (DnsCatalogZone, error) {
+	row := q.db.QueryRow(ctx, getEnabledDnsCatalogZoneByFabric, fabricID)
+	var c DnsCatalogZone
+	err := row.Scan(&c.ID, &c.FabricID, &c.Name, &c.Enabled, &c.Signed,
+		&c.CreatedAt, &c.UpdatedAt)
+	return c, err
+}
+
+// AuthDnsServerForCatalog is the slim projection the catalog
+// renderer needs from each auth server: just unicast_ip for the
+// primaries property records.
+type AuthDnsServerForCatalog struct {
+	ID        uuid.UUID `json:"id"`
+	FabricID  uuid.UUID `json:"fabric_id"`
+	Name      string    `json:"name"`
+	Role      string    `json:"role"`
+	UnicastIP *string   `json:"unicast_ip"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+const listEnabledAuthDnsServersByFabric = `SELECT id, fabric_id, name, role::text AS role, unicast_ip::text,
+       enabled, created_at, updated_at
+FROM dns_servers
+WHERE fabric_id = $1
+  AND role = 'auth'::dns_server_role
+  AND enabled = true`
+
+func (q *Queries) ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]AuthDnsServerForCatalog, error) {
+	rows, err := q.db.Query(ctx, listEnabledAuthDnsServersByFabric, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuthDnsServerForCatalog
+	for rows.Next() {
+		var s AuthDnsServerForCatalog
+		if err := rows.Scan(&s.ID, &s.FabricID, &s.Name, &s.Role,
+			&s.UnicastIP, &s.Enabled, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+const listDnsKeysByZoneIDs = `SELECT id, zone_id, catalog_id, role::text AS role,
+       algorithm::text AS algorithm, private_pem, public_key_b64,
+       key_tag, active_from, retired_at
+FROM dns_keys
+WHERE zone_id = ANY($1::uuid[])
+ORDER BY zone_id, role, key_tag`
+
+func (q *Queries) ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]DnsKeyRow, error) {
+	rows, err := q.db.Query(ctx, listDnsKeysByZoneIDs, zoneIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DnsKeyRow
+	for rows.Next() {
+		var k DnsKeyRow
+		if err := rows.Scan(&k.ID, &k.ZoneID, &k.CatalogID, &k.Role,
+			&k.Algorithm, &k.PrivatePem, &k.PublicKeyB64,
+			&k.KeyTag, &k.ActiveFrom, &k.RetiredAt); err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, rows.Err()
+}
+
 const getDnsZone = `-- name: GetDnsZone :one
 SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
        soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
