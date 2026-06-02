@@ -376,6 +376,15 @@ ingress:
         - path: /api/v1/stencils
           pathType: Prefix
           backend: otter-go
+        # PR 20 cutover: /api/v1/power on otter-go. The Go handler now
+        # matches Python's audit shape (action="power.connect"/
+        # "power.disconnect", target_type="outlet", asset_id metadata)
+        # and the catalog-advertised capability codes
+        # (power:outlets:{read,create,delete}) which finch's
+        # power-chain-panel.tsx already checks for UI gating.
+        - path: /api/v1/power
+          pathType: Prefix
+          backend: otter-go
         # Region-deploy read-side split. Detail GET + paginated event
         # history move to otter-go now; LIST + CREATE + the lifecycle
         # endpoints (preflight/start/abort/SSE/kubeconfig callback)

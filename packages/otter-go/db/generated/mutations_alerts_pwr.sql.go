@@ -287,6 +287,28 @@ func (q *Queries) DeleteNotificationChannel(ctx context.Context, id uuid.UUID) e
 
 // ---- Power: outlet connect/disconnect ----
 
+const getOutletByID = `SELECT id, pdu_asset_id, position, label, phase, max_amps, receptacle, created_at, updated_at
+FROM outlets WHERE id = $1`
+
+func (q *Queries) GetOutletByID(ctx context.Context, id uuid.UUID) (Outlet, error) {
+	row := q.db.QueryRow(ctx, getOutletByID, id)
+	var o Outlet
+	err := row.Scan(&o.ID, &o.PduAssetID, &o.Position, &o.Label, &o.Phase, &o.MaxAmps,
+		&o.Receptacle, &o.CreatedAt, &o.UpdatedAt)
+	return o, err
+}
+
+const getPowerConnectionByOutlet = `SELECT id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at
+FROM power_connections WHERE outlet_id = $1`
+
+func (q *Queries) GetPowerConnectionByOutlet(ctx context.Context, outletID uuid.UUID) (PowerConnection, error) {
+	row := q.db.QueryRow(ctx, getPowerConnectionByOutlet, outletID)
+	var p PowerConnection
+	err := row.Scan(&p.ID, &p.OutletID, &p.AssetID, &p.PsuIndex, &p.CordColor, &p.CordLengthM,
+		&p.CreatedAt, &p.UpdatedAt)
+	return p, err
+}
+
 const createPowerConnection = `INSERT INTO power_connections (id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::numeric, NOW(), NOW())
 RETURNING id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at`
