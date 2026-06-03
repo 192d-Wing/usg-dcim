@@ -5,7 +5,6 @@ from fastapi import APIRouter
 from .collectors import router as collectors_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
-from .power import router as power_router
 from .regiondeploy import router as regiondeploy_router
 
 router = APIRouter()
@@ -43,7 +42,13 @@ router.include_router(ingest_router)
 # implementation in internal/stencils serves the static catalog;
 # Python no longer registers the router so a misrouted internal
 # call fails loud instead of silently double-serving.
-router.include_router(power_router)
+# /api/v1/power/* fully moved to otter-go (PR 20). Go now matches
+# Python byte-for-byte on capability codes (power:outlets:*), audit
+# event shape (action="power.connect"/"power.disconnect",
+# target_type="outlet", metadata={asset_id,...}), and the friendly
+# 409 "already connected; disconnect it first" message that the UI
+# surfaces. The PDU outlet listing + connect/disconnect handlers all
+# move together so finch's power-chain panel keeps working as-is.
 # /api/v1/audit/* moved to otter-go (PR 180). The umbrella chart
 # routes /api/v1/audit → otter-go; Python no longer registers the
 # router so a misrouted internal call fails loud instead of silently

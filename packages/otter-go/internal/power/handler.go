@@ -1,7 +1,12 @@
-// Package power holds GET handlers for /api/v1/power. Currently just
-// GET /pdus/{pdu_id}/outlets — the only read endpoint in the Python
-// power router. The POST/DELETE connection endpoints stay on Python
-// until Phase 2 (writes need the audit log subsystem).
+// Package power serves /api/v1/power: outlet listing + connection
+// connect/disconnect. Capability codes, audit-event shape, and 4xx
+// error messages match Python's api/power.py so the cutover flips
+// ingress without observable behavior change on the paths finch
+// exercises. The connect response excludes updated_at to match
+// Python's PowerConnectionOut; cord_length_m ships as a JSON string
+// in both the connect response and listOutlets connected sub-object
+// because pgx's NUMERIC scanner emits *string (pre-existing on the
+// list path, kept here for consistency).
 package power
 
 import (
@@ -24,7 +29,12 @@ type Querier interface {
 	ListOutletsByPdu(ctx context.Context, pduID uuid.UUID) ([]dbq.Outlet, error)
 	ListPowerConnectionsByOutletIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.PowerConnection, error)
 
-	// Mutations (PR 45) — outlet connect/disconnect.
+	// Mutations — outlet connect/disconnect. Pre-flight lookups
+	// (GetOutletByID, GetAsset, GetPowerConnectionByOutlet) back
+	// the 404/409 paths so error messages match Python's verbatim.
+	GetOutletByID(ctx context.Context, id uuid.UUID) (dbq.Outlet, error)
+	GetAsset(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
+	GetPowerConnectionByOutlet(ctx context.Context, outletID uuid.UUID) (dbq.PowerConnection, error)
 	CreatePowerConnection(ctx context.Context, arg dbq.CreatePowerConnectionParams) (dbq.PowerConnection, error)
 	DeleteOutletConnection(ctx context.Context, outletID uuid.UUID) error
 }
@@ -38,9 +48,9 @@ func (h *Handler) Mount(r chi.Router) {
 	// Python mounts the power router with prefix `/power`; preserved
 	// here so the URL is `/api/v1/power/pdus/{id}/outlets`.
 	r.Route("/power", func(r chi.Router) {
-		r.Get("/pdus/{pdu_id}/outlets", h.listOutlets)
-		r.With(auth.RequireCapability("inventory:power-connections:create")).Post("/outlets/{outlet_id}/connect", h.connect)
-		r.With(auth.RequireCapability("inventory:power-connections:delete")).Delete("/outlets/{outlet_id}/connect", h.disconnect)
+		r.With(auth.RequireCapability("power:outlets:read")).Get("/pdus/{pdu_id}/outlets", h.listOutlets)
+		r.With(auth.RequireCapability("power:outlets:create")).Post("/outlets/{outlet_id}/connect", h.connect)
+		r.With(auth.RequireCapability("power:outlets:delete")).Delete("/outlets/{outlet_id}/connect", h.disconnect)
 	})
 }
 

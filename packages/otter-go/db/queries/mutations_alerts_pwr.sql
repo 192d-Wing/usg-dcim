@@ -98,6 +98,14 @@ RETURNING id, name, kind, config_json, min_severity,
 DELETE FROM notification_channels WHERE id = $1;
 
 -- ===== Power: outlet connect/disconnect =====
+-- name: GetOutletByID :one
+SELECT id, pdu_asset_id, position, label, phase, max_amps, receptacle, created_at, updated_at
+FROM outlets WHERE id = $1;
+
+-- name: GetPowerConnectionByOutlet :one
+SELECT id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at
+FROM power_connections WHERE outlet_id = $1;
+
 -- name: CreatePowerConnection :one
 INSERT INTO power_connections (id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::numeric, NOW(), NOW())

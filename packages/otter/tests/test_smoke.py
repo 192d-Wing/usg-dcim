@@ -74,6 +74,11 @@ def test_openapi_published() -> None:
         # parity; internal/stencils serves the static catalog LIST.
         "/api/v1/organizations",
         "/api/v1/stencils",
+        # /api/v1/power/* fully moved to otter-go (PR 20). PDU outlet
+        # listing + connect/disconnect; the Go handlers were dark in
+        # production until cap names + audit shape were aligned with
+        # Python's (and finch's UI gating) in the same PR.
+        "/api/v1/power",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"
