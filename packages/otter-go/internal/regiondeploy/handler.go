@@ -1,10 +1,8 @@
 // Package regiondeploy holds the otter-go handlers for
 // /api/v1/region-deployments. Reads (list/get/events) + abort + create
-// + preflight + kubeconfig callback landed. start/SSE follow in later
-// PRs — start still needs the arq → Go scheduler equivalent. The
-// callback handler intentionally does NOT publish to Redis pubsub —
-// that lands with the SSE port; persisting the event row alone is
-// enough for the GET /events history endpoint to surface it.
+// + preflight + kubeconfig callback + SSE stream landed. start
+// follows in a later PR — it still needs the arq → Go scheduler
+// equivalent.
 package regiondeploy
 
 import (
@@ -80,6 +78,11 @@ type Handler struct {
 	// event (matches Python's OSError/RuntimeError branch). In prod
 	// main.go wires NewInPodK8sClient.
 	K8s k8sSecretWriter
+	// Redis is the pubsub subscriber the SSE stream uses for live
+	// events. nil → backfill-only mode (drain DB backlog, then
+	// heartbeat-only) so dev/tests still see a usable stream. Wire
+	// NewRedisAdapter(redis.NewClient(...)) in production.
+	Redis PubsubSubscriber
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -98,6 +101,7 @@ func (h *Handler) Mount(r chi.Router) {
 	// uses CAP_READ — the check is informational; the hard-gate happens
 	// at /start when the orchestrator re-runs it).
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/preflight", h.preflight)
+	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/events/stream", h.streamEvents)
 }
 
 // preflight runs the seven pure checks Python's preflight.run_all

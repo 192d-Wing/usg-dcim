@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/admin"
@@ -127,12 +128,26 @@ func main() {
 		log.Warn("regiondeploy_k8s_unconfigured", "err", k8sErr,
 			"msg", "kubeconfig callback will record secret_ref but skip the K8s Secret write")
 	}
+	// Region-deploy SSE streams subscribe to Redis pubsub `dcim:deploy:{id}`.
+	// nil Redis → backfill-only mode (drain DB backlog, then heartbeats).
+	// Same DSN env Python uses; parse failure logs a warning and the
+	// SSE handler gracefully degrades.
+	var rdRedis regiondeploy.PubsubSubscriber
+	if redisDSN := env.String("DCIM_REDIS_DSN", ""); redisDSN != "" {
+		if opts, err := redis.ParseURL(redisDSN); err == nil {
+			rdRedis = regiondeploy.NewRedisAdapter(redis.NewClient(opts))
+		} else {
+			log.Warn("regiondeploy_redis_parse_failed", "err", err,
+				"msg", "SSE stream will run backfill-only (no live updates)")
+		}
+	}
 	rdh := &regiondeploy.Handler{
 		Q:              q,
 		Audit:          q,
 		Pool:           pool,
 		CallbackSecret: env.String("DCIM_REGIONDEPLOY_CALLBACK_SECRET", ""),
 		K8s:            rdK8s,
+		Redis:          rdRedis,
 	}
 
 	r := chi.NewRouter()
