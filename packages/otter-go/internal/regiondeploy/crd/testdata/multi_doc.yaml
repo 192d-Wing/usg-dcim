@@ -1,0 +1,141 @@
+apiVersion: tinkerbell.org/v1alpha1
+kind: Template
+metadata:
+  name: rd-11111111-install
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+spec:
+  data: "version: '0.1'\nname: rd-11111111-install\nglobal_timeout: 1800\ntasks:\n\
+    - name: os-install\n  worker: '{{.device_1}}'\n  actions:\n  - name: stream-image\n\
+    \    image: quay.io/tinkerbell-actions/image2disk:v1.0.0\n    timeout: 600\n \
+    \   environment:\n      DEST_DISK: /dev/sda\n      IMG_URL: '{{.image_url}}'\n\
+    \      COMPRESSED: 'true'\n  - name: write-ignition\n    image: quay.io/tinkerbell-actions/writefile:v1.0.0\n\
+    \    timeout: 90\n    environment:\n      DEST_DISK: /dev/sda6\n      FS_TYPE:\
+    \ ext4\n      DEST_PATH: /ignition.json\n      CONTENTS: '{{.ignition_json}}'\n\
+    \      UID: '0'\n      GID: '0'\n      MODE: '0644'\n      DIRMODE: '0755'\n \
+    \ - name: reboot\n    image: ghcr.io/jacobweinstock/waitdaemon:0.2.0\n    timeout:\
+    \ 90\n    pid: host\n    command:\n    - reboot\n    volumes:\n    - /worker:/worker\n"
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Hardware
+metadata:
+  name: rd-11111111-n01-region-example-mil
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 33333333-3333-3333-3333-333333333333
+spec:
+  metadata:
+    facility:
+      facility_code: site-22222222
+    instance:
+      hostname: n01.region.example.mil
+      id: 33333333-3333-3333-3333-333333333333
+      ipv6_address: fd00:site:42:1::10
+  interfaces:
+  - dhcp:
+      mac: aa:bb:cc:dd:ee:01
+      hostname: n01.region.example.mil
+      ip:
+        address: 0.0.0.0
+        netmask: 255.255.255.255
+        gateway: 0.0.0.0
+        family: 4
+    netboot:
+      allowPXE: true
+---
+apiVersion: bmc.tinkerbell.org/v1alpha1
+kind: Machine
+metadata:
+  name: rd-11111111-n01-region-example-mil
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 33333333-3333-3333-3333-333333333333
+spec:
+  connection:
+    host: fd00:site:42:9::10
+    port: 443
+    insecureTLS: true
+    authSecretRef:
+      name: n01-creds
+      namespace: dcim-bmc
+    providerOptions: {}
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Workflow
+metadata:
+  name: rd-11111111-n01-region-example-mil
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 33333333-3333-3333-3333-333333333333
+spec:
+  templateRef: rd-11111111-install
+  hardwareRef: rd-11111111-n01-region-example-mil
+  hardwareMap:
+    device_1: aa:bb:cc:dd:ee:01
+    image_url: https://example.mil/flatcar.img.bz2
+    ignition_json: '{"ignition":{"version":"3.4.0","node":"n01"}}'
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Hardware
+metadata:
+  name: rd-11111111-n02
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 44444444-4444-4444-4444-444444444444
+spec:
+  metadata:
+    facility:
+      facility_code: site-22222222
+    instance:
+      hostname: n02
+      id: 44444444-4444-4444-4444-444444444444
+  interfaces:
+  - dhcp:
+      mac: aa:bb:cc:dd:ee:02
+      hostname: n02
+      ip:
+        address: 0.0.0.0
+        netmask: 255.255.255.255
+        gateway: 0.0.0.0
+        family: 4
+    netboot:
+      allowPXE: true
+---
+apiVersion: bmc.tinkerbell.org/v1alpha1
+kind: Machine
+metadata:
+  name: rd-11111111-n02
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 44444444-4444-4444-4444-444444444444
+spec:
+  connection:
+    host: 10.0.0.42
+    port: 443
+    insecureTLS: true
+    authSecretRef:
+      name: ''
+      namespace: ''
+    providerOptions: {}
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Workflow
+metadata:
+  name: rd-11111111-n02
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 44444444-4444-4444-4444-444444444444
+spec:
+  templateRef: rd-11111111-install
+  hardwareRef: rd-11111111-n02
+  hardwareMap:
+    device_1: aa:bb:cc:dd:ee:02
+    image_url: https://example.mil/flatcar.img.bz2
+    ignition_json: '{"ignition":{"version":"3.4.0","node":"n02"}}'

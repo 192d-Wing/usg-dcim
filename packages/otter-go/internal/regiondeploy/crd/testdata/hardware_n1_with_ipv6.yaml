@@ -1,0 +1,27 @@
+apiVersion: tinkerbell.org/v1alpha1
+kind: Hardware
+metadata:
+  name: rd-11111111-n01-region-example-mil
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 33333333-3333-3333-3333-333333333333
+spec:
+  metadata:
+    facility:
+      facility_code: site-22222222
+    instance:
+      hostname: n01.region.example.mil
+      id: 33333333-3333-3333-3333-333333333333
+      ipv6_address: fd00:site:42:1::10
+  interfaces:
+  - dhcp:
+      mac: aa:bb:cc:dd:ee:01
+      hostname: n01.region.example.mil
+      ip:
+        address: 0.0.0.0
+        netmask: 255.255.255.255
+        gateway: 0.0.0.0
+        family: 4
+    netboot:
+      allowPXE: true

@@ -1,0 +1,17 @@
+apiVersion: bmc.tinkerbell.org/v1alpha1
+kind: Machine
+metadata:
+  name: rd-11111111-n01-region-example-mil
+  labels:
+    dcim.region-deployment: 11111111-1111-1111-1111-111111111111
+    dcim.region-deployment-name: region-deploy-east
+    dcim.region-deployment-node: 33333333-3333-3333-3333-333333333333
+spec:
+  connection:
+    host: fd00:site:42:9::10
+    port: 443
+    insecureTLS: true
+    authSecretRef:
+      name: n01-creds
+      namespace: dcim-bmc
+    providerOptions: {}
