@@ -172,6 +172,133 @@ func (q *Queries) ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, 
 	return out, rows.Err()
 }
 
+// ---- Recursive bundle queries (PR 35) ----
+
+const listApexZoneNamesByFabric = `SELECT name FROM dns_zones
+WHERE fabric_id = $1 AND kind = 'apex'::dns_zone_kind`
+
+func (q *Queries) ListApexZoneNamesByFabric(ctx context.Context, fabricID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listApexZoneNamesByFabric, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+const getSameSiteAuthUnicastIP = `SELECT host(unicast_ip) FROM dns_servers
+WHERE site_id = $1 AND role = 'auth'::dns_server_role
+LIMIT 1`
+
+func (q *Queries) GetSameSiteAuthUnicastIP(ctx context.Context, siteID uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getSameSiteAuthUnicastIP, siteID)
+	var ip string
+	err := row.Scan(&ip)
+	return ip, err
+}
+
+// DnsForwarderRow projects what the recursive bundle needs from
+// dns_forwarders. upstreams is JSONB → caller decodes into []string.
+type DnsForwarderRow struct {
+	ZonePattern string `json:"zone_pattern"`
+	Upstreams   []byte `json:"upstreams"`
+}
+
+const listDnsForwardersForBundle = `SELECT zone_pattern, upstreams::jsonb
+FROM dns_forwarders WHERE fabric_id = $1`
+
+func (q *Queries) ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]DnsForwarderRow, error) {
+	rows, err := q.db.Query(ctx, listDnsForwardersForBundle, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DnsForwarderRow
+	for rows.Next() {
+		var r DnsForwarderRow
+		if err := rows.Scan(&r.ZonePattern, &r.Upstreams); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// BlocklistForBundleRow is the per-blocklist projection feeding
+// the recursive bundle's RPZ / Corefile-template emission.
+type BlocklistForBundleRow struct {
+	ID           uuid.UUID `json:"id"`
+	Action       string    `json:"action"`
+	SinkIPv4     *string   `json:"sink_ipv4"`
+	SinkIPv6     *string   `json:"sink_ipv6"`
+	PatternsJson []byte    `json:"patterns_json"`
+}
+
+const listEnabledBlocklistsWithPatternsByFabric = `SELECT
+    bl.id,
+    bl.action::text AS action,
+    host(bl.sink_ipv4) AS sink_ipv4,
+    host(bl.sink_ipv6) AS sink_ipv6,
+    COALESCE(
+      (SELECT jsonb_agg(e.pattern ORDER BY e.pattern)
+       FROM dns_blocklist_entries e
+       WHERE e.blocklist_id = bl.id),
+      '[]'::jsonb
+    ) AS patterns_json
+FROM dns_blocklists bl
+WHERE bl.fabric_id = $1 AND bl.enabled = true`
+
+func (q *Queries) ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]BlocklistForBundleRow, error) {
+	rows, err := q.db.Query(ctx, listEnabledBlocklistsWithPatternsByFabric, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BlocklistForBundleRow
+	for rows.Next() {
+		var r BlocklistForBundleRow
+		if err := rows.Scan(&r.ID, &r.Action, &r.SinkIPv4, &r.SinkIPv6, &r.PatternsJson); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// FabricForRecursiveBundle projects the four columns the recursive
+// bundle assembler reads from the fabric. Each JSON column is the
+// raw bytes; the loader decodes into []string. Nil/empty → no
+// override.
+type FabricForRecursiveBundle struct {
+	ID                    uuid.UUID `json:"id"`
+	RecursiveEngine       string    `json:"recursive_engine"`
+	DnsRecursiveUpstreams []byte    `json:"dns_recursive_upstreams"`
+	DnsDenyNetworks       []byte    `json:"dns_deny_networks"`
+	DnsAllowNetworks      []byte    `json:"dns_allow_networks"`
+}
+
+const getFabricForRecursiveBundle = `SELECT id,
+       recursive_engine,
+       dns_recursive_upstreams::jsonb,
+       dns_deny_networks::jsonb,
+       dns_allow_networks::jsonb
+FROM fabrics WHERE id = $1`
+
+func (q *Queries) GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (FabricForRecursiveBundle, error) {
+	row := q.db.QueryRow(ctx, getFabricForRecursiveBundle, id)
+	var f FabricForRecursiveBundle
+	err := row.Scan(&f.ID, &f.RecursiveEngine, &f.DnsRecursiveUpstreams, &f.DnsDenyNetworks, &f.DnsAllowNetworks)
+	return f, err
+}
+
 const listDnsViewsByFabric = `SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at
 FROM dns_views
 WHERE fabric_id = $1

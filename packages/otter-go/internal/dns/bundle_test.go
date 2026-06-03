@@ -55,6 +55,24 @@ func (f *fakeBundleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]
 func (f *fakeBundleQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
 	return nil, nil
 }
+func (f *fakeBundleQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeBundleQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
+	return "", pgx.ErrNoRows
+}
+func (f *fakeBundleQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+	return nil, nil
+}
+func (f *fakeBundleQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+	return nil, nil
+}
+func (f *fakeBundleQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
+	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+}
+func (f *fakeBundleQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
+	return dbq.SystemSetting{}, pgx.ErrNoRows
+}
 
 func mkBundleZoneRow(id uuid.UUID, name string, ts time.Time) dbq.DnsZone {
 	return dbq.DnsZone{
@@ -206,12 +224,42 @@ func TestBundleHandler_ServerNotFound(t *testing.T) {
 	}
 }
 
-func TestBundleHandler_RecursiveReturns501(t *testing.T) {
-	q := &fakeBundleQ{server: dbq.DnsServer{Role: "recursive"}}
+// PR 35 wired the recursive path. Bundle returns 200 with the
+// recursive Corefile + RPZ zones (when on Hickory) instead of the
+// 501 that PR 30 documented.
+func TestBundleHandler_RecursiveReturnsBundle(t *testing.T) {
+	q := &recursiveOKFakeQ{role: "recursive"}
 	rec := doBundle(t, mountBundle(q), "/dns/servers/"+uuid.New().String()+"/bundle", "")
-	if rec.Code != http.StatusNotImplemented {
-		t.Errorf("got %d, want 501 (recursive bundle not yet ported)", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s, want 200 with recursive bundle", rec.Code, rec.Body.String())
 	}
+	if rec.Header().Get("ETag") == "" {
+		t.Error("ETag header not set on recursive 200")
+	}
+	var out BundleResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("body decode: %v", err)
+	}
+	if out.Engine != "coredns" {
+		t.Errorf("default engine should be coredns; got %q", out.Engine)
+	}
+	if !strings.Contains(out.Corefile, ".:53 {") {
+		t.Errorf("recursive Corefile missing catchall block; got %q", out.Corefile)
+	}
+}
+
+// recursiveOKFakeQ wraps fakeBundleQ but returns a populated
+// FabricForRecursiveBundle so the loader doesn't trip on ErrNoRows.
+type recursiveOKFakeQ struct {
+	fakeBundleQ
+	role string
+}
+
+func (f *recursiveOKFakeQ) GetDnsServer(_ context.Context, id uuid.UUID) (dbq.DnsServer, error) {
+	return dbq.DnsServer{ID: id, Role: f.role, FabricID: uuid.New()}, nil
+}
+func (f *recursiveOKFakeQ) GetFabricForRecursiveBundle(_ context.Context, id uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
+	return dbq.FabricForRecursiveBundle{ID: id, RecursiveEngine: "coredns"}, nil
 }
 
 func TestBundleHandler_AuthOK_SetsEtagHeader(t *testing.T) {

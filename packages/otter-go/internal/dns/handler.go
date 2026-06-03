@@ -66,6 +66,17 @@ type Querier interface {
 	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKeyRow, error)
 	ListDnsViewsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsView, error)
 
+	// Recursive bundle (PR 35) — fabric apex names, local auth IP,
+	// forwarders, blocklists, the fabric's recursive_engine + ACL
+	// + upstream-override columns, plus the system_settings row for
+	// the deployment-wide default upstreams.
+	ListApexZoneNamesByFabric(ctx context.Context, fabricID uuid.UUID) ([]string, error)
+	GetSameSiteAuthUnicastIP(ctx context.Context, siteID uuid.UUID) (string, error)
+	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsForwarderRow, error)
+	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.BlocklistForBundleRow, error)
+	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.FabricForRecursiveBundle, error)
+	GetSystemSetting(ctx context.Context, key string) (dbq.SystemSetting, error)
+
 	// Mutations (PR 43). Action endpoints (freeze/unfreeze, import,
 	// sync-from-ipam, enable/disable-dnssec, nsec3, render-status,
 	// health-checks/result, blocklists/entries/bulk) are deferred to a
@@ -170,6 +181,12 @@ type Querier interface {
 type Handler struct {
 	Q     Querier
 	Audit audit.Recorder
+	// Recursive-bundle settings (PR 35). main.go threads env-derived
+	// values (system default upstreams, Hickory TLS/DoH/Prometheus
+	// listener config). Zero value is "no overrides, no Hickory
+	// listeners" — a fabric on the CoreDNS engine renders cleanly
+	// without any of these set.
+	RecursiveBundleCfg RecursiveBundleConfig
 }
 
 // scopedListFilter resolves the caller's fabric scope for capCode and
