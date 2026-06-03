@@ -108,7 +108,25 @@ func main() {
 		// (600). Operators override via DCIM_COLLECTOR_STALE_SECONDS.
 		CollectorStaleSeconds: env.Int("DCIM_COLLECTOR_STALE_SECONDS", 600),
 	}
-	rdh := &regiondeploy.Handler{Q: q, Audit: q, Pool: pool}
+	// Kubeconfig callback wiring. CallbackSecret matches Python's
+	// settings.regiondeploy_callback_secret env var; empty → callback
+	// returns 503. K8s is the in-pod Secret writer; nil if not running
+	// in-cluster (NewInPodK8sClient errors when KUBERNETES_SERVICE_HOST
+	// is unset or the SA token file is unreadable) — the handler still
+	// records the secret_ref + writes an error event row, matching
+	// Python's OSError/RuntimeError branch.
+	rdK8s, k8sErr := regiondeploy.NewInPodK8sClient()
+	if k8sErr != nil {
+		log.Warn("regiondeploy_k8s_unconfigured", "err", k8sErr,
+			"msg", "kubeconfig callback will record secret_ref but skip the K8s Secret write")
+	}
+	rdh := &regiondeploy.Handler{
+		Q:              q,
+		Audit:          q,
+		Pool:           pool,
+		CallbackSecret: env.String("DCIM_REGIONDEPLOY_CALLBACK_SECRET", ""),
+		K8s:            rdK8s,
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

@@ -231,6 +231,7 @@ func (q *Queries) ListRegionDeploymentEvents(ctx context.Context, arg ListRegion
 	return items, rows.Err()
 }
 
+
 const abortRegionDeployment = `-- name: AbortRegionDeployment :one
 WITH cur AS (
     SELECT status::text AS prior_status
@@ -326,4 +327,63 @@ func (q *Queries) CreateRegionDeploymentNode(ctx context.Context, arg CreateRegi
 		&n.Mac, &n.PrimaryIpV6, &n.ProvisioningIpV6, &n.BmcAddress,
 		&n.Role, &n.Status, &n.LastEvent, &n.JoinedAt)
 	return n, err
+}
+
+const setRegionDeploymentKubeconfigSecretRef = `-- name: SetRegionDeploymentKubeconfigSecretRef :one
+WITH cur AS (
+    SELECT status::text AS prior_status
+    FROM region_deployments
+    WHERE id = $1
+), upd AS (
+    UPDATE region_deployments
+    SET kubeconfig_secret_ref = $2, updated_at = NOW()
+    WHERE id = $1
+      AND status IN ('provisioning'::region_deployment_status,
+                     'joining'::region_deployment_status)
+    RETURNING site_id
+)
+SELECT cur.prior_status,
+       (SELECT count(*) FROM upd)::bigint AS updated,
+       (SELECT site_id FROM upd) AS site_id
+FROM cur
+`
+
+type SetRegionDeploymentKubeconfigSecretRefRow struct {
+	PriorStatus string     `json:"prior_status"`
+	Updated     int64      `json:"updated"`
+	SiteID      *uuid.UUID `json:"site_id"`
+}
+
+type SetRegionDeploymentKubeconfigSecretRefParams struct {
+	ID                  uuid.UUID `json:"id"`
+	KubeconfigSecretRef *string   `json:"kubeconfig_secret_ref"`
+}
+
+func (q *Queries) SetRegionDeploymentKubeconfigSecretRef(ctx context.Context, arg SetRegionDeploymentKubeconfigSecretRefParams) (SetRegionDeploymentKubeconfigSecretRefRow, error) {
+	row := q.db.QueryRow(ctx, setRegionDeploymentKubeconfigSecretRef, arg.ID, arg.KubeconfigSecretRef)
+	var r SetRegionDeploymentKubeconfigSecretRefRow
+	err := row.Scan(&r.PriorStatus, &r.Updated, &r.SiteID)
+	return r, err
+}
+
+const createRegionDeploymentEvent = `-- name: CreateRegionDeploymentEvent :one
+INSERT INTO region_deployment_events (deployment_id, stage, level, message, payload)
+VALUES ($1, $2, $3::region_deployment_event_level, $4, $5::jsonb)
+RETURNING id, stage, level::text AS level, message, payload, created_at
+`
+
+type CreateRegionDeploymentEventParams struct {
+	DeploymentID uuid.UUID       `json:"deployment_id"`
+	Stage        string          `json:"stage"`
+	Level        string          `json:"level"`
+	Message      string          `json:"message"`
+	Payload      json.RawMessage `json:"payload"`
+}
+
+func (q *Queries) CreateRegionDeploymentEvent(ctx context.Context, arg CreateRegionDeploymentEventParams) (RegionDeploymentEvent, error) {
+	row := q.db.QueryRow(ctx, createRegionDeploymentEvent,
+		arg.DeploymentID, arg.Stage, arg.Level, arg.Message, arg.Payload)
+	var e RegionDeploymentEvent
+	err := row.Scan(&e.ID, &e.Stage, &e.Level, &e.Message, &e.Payload, &e.CreatedAt)
+	return e, err
 }

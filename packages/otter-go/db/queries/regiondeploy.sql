@@ -123,3 +123,35 @@ RETURNING id, deployment_id, hostname,
           role::text AS role,
           status::text AS status,
           last_event, joined_at;
+
+-- name: SetRegionDeploymentKubeconfigSecretRef :one
+-- Conditional UPDATE for the kubeconfig callback: only flips the
+-- column when the deployment is currently `provisioning` or `joining`
+-- (matches Python regiondeploy.py's status gate). The CTE returns
+-- the prior status regardless so the handler can distinguish 404
+-- (no row), 422 (wrong stage), and success in one round-trip.
+WITH cur AS (
+    SELECT status::text AS prior_status
+    FROM region_deployments
+    WHERE id = $1
+), upd AS (
+    UPDATE region_deployments
+    SET kubeconfig_secret_ref = $2, updated_at = NOW()
+    WHERE id = $1
+      AND status IN ('provisioning'::region_deployment_status,
+                     'joining'::region_deployment_status)
+    RETURNING site_id
+)
+SELECT cur.prior_status,
+       (SELECT count(*) FROM upd)::bigint AS updated,
+       (SELECT site_id FROM upd) AS site_id
+FROM cur;
+
+-- name: CreateRegionDeploymentEvent :one
+-- Append a deploy event for the SSE backlog + history endpoint.
+-- The kubeconfig callback emits two flavors: `info` on Secret-write
+-- success, `error` on Secret-write failure (Python emits both via
+-- rd_events.emit). NULL payload is valid — the column is JSONB.
+INSERT INTO region_deployment_events (deployment_id, stage, level, message, payload)
+VALUES ($1, $2, $3::region_deployment_event_level, $4, $5::jsonb)
+RETURNING id, stage, level::text AS level, message, payload, created_at;

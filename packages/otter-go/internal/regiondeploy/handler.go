@@ -1,7 +1,10 @@
 // Package regiondeploy holds the otter-go handlers for
 // /api/v1/region-deployments. Reads (list/get/events) + abort + create
-// landed. Preflight/start/kubeconfig-callback/SSE follow in later
-// PRs — start still needs the arq → Go scheduler equivalent.
+// + kubeconfig callback landed. Preflight/start/SSE follow in later
+// PRs — start still needs the arq → Go scheduler equivalent. The
+// callback handler intentionally does NOT publish to Redis pubsub —
+// that lands with the SSE port; persisting the event row alone is
+// enough for the GET /events history endpoint to surface it.
 package regiondeploy
 
 import (
@@ -40,6 +43,8 @@ type Querier interface {
 	AbortRegionDeployment(ctx context.Context, id uuid.UUID) (dbq.AbortRegionDeploymentRow, error)
 	CreateRegionDeployment(ctx context.Context, arg dbq.CreateRegionDeploymentParams) (dbq.RegionDeployment, error)
 	CreateRegionDeploymentNode(ctx context.Context, arg dbq.CreateRegionDeploymentNodeParams) (dbq.RegionDeploymentNode, error)
+	SetRegionDeploymentKubeconfigSecretRef(ctx context.Context, arg dbq.SetRegionDeploymentKubeconfigSecretRefParams) (dbq.SetRegionDeploymentKubeconfigSecretRefRow, error)
+	CreateRegionDeploymentEvent(ctx context.Context, arg dbq.CreateRegionDeploymentEventParams) (dbq.RegionDeploymentEvent, error)
 	// Site-scope expansion for the list filter + per-row ABAC.
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
@@ -59,12 +64,22 @@ type TxBeginner interface {
 
 type Handler struct {
 	Q     Querier
-	Audit audit.Recorder // used by abort + create (and forthcoming start); list/get/events are reads-only
+	Audit audit.Recorder // used by abort + create + kubeconfig callback; reads stay no-op
 	// Pool is optional. When nil, create runs the deployment + node
 	// inserts via h.Q (autocommit-per-insert; existing tests work
 	// unchanged). When set, both inserts run inside a single tx so
 	// partial failure rolls back atomically.
 	Pool TxBeginner
+	// CallbackSecret is the server-side HMAC key Python's
+	// settings.regiondeploy_callback_secret carries (env
+	// DCIM_REGIONDEPLOY_CALLBACK_SECRET). Empty → callback handler
+	// returns 503 (fail-closed; no plaintext fallback by design).
+	CallbackSecret string
+	// K8s is the in-pod Secret writer the callback uses. nil → the
+	// handler still records kubeconfig_secret_ref + writes an error
+	// event (matches Python's OSError/RuntimeError branch). In prod
+	// main.go wires NewInPodK8sClient.
+	K8s k8sSecretWriter
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -75,6 +90,10 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/events", h.listEvents)
 	r.With(auth.RequireCapability(capAbort)).Post("/region-deployments/{id}/abort", h.abort)
 	r.With(auth.RequireCapability(capCreate)).Post("/region-deployments", h.create)
+	// Kubeconfig callback is NOT gated by a capability — the in-cluster
+	// Workflow action that calls it has no DCIM session/API token. The
+	// per-deployment HMAC bearer token is the auth here.
+	r.Post("/region-deployments/{id}/kubeconfig/callback", h.kubeconfigCallback)
 }
 
 // detailOut mirrors Python's RegionDeploymentOut: the row plus nodes
