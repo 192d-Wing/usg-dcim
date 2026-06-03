@@ -31,7 +31,6 @@ from .logging_setup import configure_logging
 from .models.alerts import Alert
 from .models.dns import DnsServerMetricsSample, DnsZone, DnsZoneKind
 from .models.telemetry_meta import FreshnessState, TelemetrySource
-from .regiondeploy.orchestrator import run_region_deploy
 from .services import alerts as alerts_svc
 from .services import dns as dns_svc
 from .services import kea as kea_svc
@@ -495,33 +494,10 @@ async def shutdown(ctx) -> None:
     log.info("worker_shutdown")
 
 
-def _msgpack_dumps(data) -> bytes:
-    """Cross-language serializer for arq jobs. msgpack lets the Go
-    /start handler enqueue `run_region_deploy` jobs the Python worker
-    deserializes — Go has no pickle equivalent, so swapping arq's
-    default pickle for msgpack is the seam that closes the API
-    deprecation.
-    """
-    import msgpack
-    return msgpack.packb(data, use_bin_type=True)
-
-
-def _msgpack_loads(raw: bytes):
-    import msgpack
-    return msgpack.unpackb(raw, raw=False)
-
-
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(str(get_settings().redis_dsn))
     on_startup = startup
     on_shutdown = shutdown
-    # Override arq's default pickle serializer with msgpack so the Go
-    # /start handler can enqueue `run_region_deploy` jobs the Python
-    # worker deserializes. Same wire on both sides; the Go enqueuer
-    # at internal/regiondeploy/arq.go emits the identical
-    # `{t, f, a, k, et}` msgpack shape.
-    job_serializer = staticmethod(_msgpack_dumps)
-    job_deserializer = staticmethod(_msgpack_loads)
     functions: ClassVar[list] = [
         # Kept registered so an operator can `arq` enqueue them ad-hoc for
         # rollback / one-shot runs even though their crons have been
@@ -534,9 +510,6 @@ class WorkerSettings:
         dns_sync_from_ipam,
         dns_rotate_zsks, dns_purge_metrics,
         notify_bridge,
-        # Region-deploy orchestrator — enqueued on demand from the
-        # API when an operator clicks Start. No cron entry.
-        run_region_deploy,
     ]
     cron_jobs: ClassVar[list] = [
         # No active cron entries — every former cron moved to

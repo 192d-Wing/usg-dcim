@@ -12,9 +12,9 @@ of scope for this chart.
 
 ## Install
 
-The values dict is produced by
-[`packages/otter/src/dcim/regiondeploy/dhcp_site.py`](../../../packages/otter/src/dcim/regiondeploy/dhcp_site.py)
-from a `DhcpServer` row + chosen anycast IP(s).
+Operator-supplied values from a `DhcpServer` row + chosen anycast IP(s).
+The regiondeploy auto-renderer was retired; populate the values file
+by hand or via whatever tooling owns site bring-up.
 
 ```bash
 # Operator-owned: Kea config + auth (chart does not generate these).
@@ -36,8 +36,7 @@ the LB-pinned endpoint.
 
 - Cilium with BGP control plane + LB-IPAM enabled in the site cluster.
 - A `CiliumBGPAdvertisement` matching `dcim.io/bgp-advertise=true`
-  (umbrella PR 70 ships one; regional-deploy clusters get one through
-  `regiondeploy/cilium.py`).
+  (umbrella PR 70 ships one; site clusters need their own).
 - Operator-managed `ConfigMap` containing `kea-ctrl-agent.conf` and
   `Secret` containing Kea's basic-auth CSV.
 - Optional TLS Secret (`tls.crt` + `tls.key`) for HTTPS Kea REST.

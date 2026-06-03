@@ -9,9 +9,8 @@
     3. CiliumBGPAdvertisement    — what to advertise (LB IPs via selector)
     4. CiliumLoadBalancerIPPool  — IP range Cilium hands out for LB Services
 
-  Cilium 1.16+ promotes these to cilium.io/v2; we stay on v2alpha1 to
-  match the renderer in regiondeploy/cilium.py so central and regional
-  clusters speak the same CRD dialect. Bump in lockstep with that file.
+  Cilium 1.16+ promotes these to cilium.io/v2; we stay on v2alpha1
+  for now. Bump in lockstep with the cluster's installed Cilium.
 
   This is a NO-OP unless `bgp.enabled=true`. The status quo (ClusterIP
   behind nginx-ingress) keeps working as long as the operator does not

@@ -1,6 +1,7 @@
 # Per-DhcpServer values. One release per DhcpServer row.
-# Populated by packages/otter/src/dcim/regiondeploy/dhcp_site.py from
-# the matching DhcpServer model row.
+# Operator-supplied — the regiondeploy renderer was retired
+# (deprecation PR). Populate the fields below by hand or via
+# whatever tooling owns site bring-up.
 
 server:
   id: ""        # DhcpServer.id (uuid)

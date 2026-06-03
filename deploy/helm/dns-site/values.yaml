@@ -1,7 +1,7 @@
-# Per-DnsServer values. One release per DnsServer row. Most fields
-# are populated by the Python renderer
-# (packages/otter/src/dcim/regiondeploy/dns_site.py); operators only
-# override credentials + bundle URL out-of-band.
+# Per-DnsServer values. One release per DnsServer row.
+# Operator-supplied — the regiondeploy renderer was retired
+# (deprecation PR). Populate the fields below by hand or via
+# whatever tooling owns site bring-up.
 
 # Identity — used for labels and resource names. Stable per server.
 server:

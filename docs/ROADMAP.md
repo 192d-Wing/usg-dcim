@@ -134,7 +134,6 @@ deletion.
 | `/api/v1/alerts/*` | List/ack + rules CRUD + maintenance-windows CRUD (PR #207). Alert evaluation loop still on Python's arq. |
 | `/api/v1/notifications/*` | Channels CRUD + test endpoint (PR #215). Channel test reuses the dispatcher service; STARTTLS default fixed in port. |
 | `/api/v1/dns/bgp-peers` | Sub-prefix cutover (PR #214). The rest of `/dns/*` still routes to Python. |
-| `/api/v1/region-deployments` (read-side) | LIST + detail GET + paginated event history (PR #201). The 6 lifecycle endpoints stay on Python. |
 
 ### Six cron jobs ported to `otter-go-scheduler`
 

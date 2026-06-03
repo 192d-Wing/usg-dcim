@@ -114,10 +114,6 @@ authoritative record.
 
 ### Cutover queue — small route-level gaps (1–3 PRs each)
 
-- [ ] **Region-deploy API** (9 Python routes, 0 Go). Tinkerbell CRDs,
-      Cilium policy, Ignition rendering, SSE event stream, kubeconfig
-      callback. Stateful; finch consumer at
-      `packages/finch/src/pages/region-deploy-new.tsx`. ~2–3 PRs.
 - [ ] **Finish alerts** (6 of 12 routes ported). Remaining: arq-driven
       evaluation + delivery loops. Will need the Go scheduler before
       the cron paths can move. ~3–5 PRs.
@@ -146,9 +142,6 @@ authoritative record.
       need the scheduler first. Operator-accepted risk: unit tests pin
       shapes but don't validate against real Kea — paired-running
       staging validation required before cutover. ~25–30 PRs.
-- [ ] **Region-deploy orchestrator** (separate from the API above).
-      The SSE event stream + kubeconfig callback + Cilium policy
-      apply paths. Likely lands after the region-deploy API. ~5–10 PRs.
 
 ### Infrastructure-level moves
 
@@ -192,10 +185,10 @@ authoritative record.
 ### Operational risk notes (user-accepted 2026-05-25)
 
 Unit tests pin shapes + call contracts but **do not** validate behavior
-against real Kea / collector / IdP / Tinkerbell. A "green" DHCP or
-region-deploy port could still break in prod when external systems
-return unexpected error codes. **Staging soak + paired-running
-required before any cron-job or orchestration cutover.**
+against real Kea / collector / IdP. A "green" DHCP port could still
+break in prod when external systems return unexpected error codes.
+**Staging soak + paired-running required before any cron-job or
+orchestration cutover.**
 
 ---
 
@@ -250,10 +243,8 @@ Replace the `auth.Require` stub:
       `dcim.security.scope`)
 - [ ] Audit log middleware writing on every state-changing request
 
-### Phase 4 — region-deploy + workers (target: 4–6 weeks)
+### Phase 4 — workers (target: 4–6 weeks)
 
-- [ ] region-deploy orchestrator → Go (the k8s client is canonically
-      Go, this gets cleaner not messier)
 - [ ] Replace `arq` worker with `river` or `asynq`; reroute
       `dcim:notify:bridge` consumer
 - [ ] Port notification dispatchers (email/webhook)

@@ -21,10 +21,9 @@ def test_openapi_published() -> None:
     r = client.get("/openapi.json")
     assert r.status_code == 200
     paths = r.json()["paths"]
-    # Every route is on otter-go now (PR /start cutover closed
-    # /api/v1/region-deployments/{id}/start, the last Python-canonical
-    # endpoint). The OpenAPI surface should advertise no /api/v1/*
-    # routes from Python at all. The negative-assert loop below
+    # Every route is on otter-go now. The OpenAPI surface should
+    # advertise no /api/v1/* routes from Python at all. The
+    # negative-assert loop below
     # enforces this; the empty-app sanity check on /healthz above
     # catches the trivial empty-routes regression.
     # /api/v1/auth/* (PR 179), /api/v1/telemetry/series (PR 178),
@@ -87,12 +86,6 @@ def test_openapi_published() -> None:
         # production until cap names + audit shape were aligned with
         # Python's (and finch's UI gating) in the same PR.
         "/api/v1/power",
-        # /api/v1/region-deployments/* fully moved to otter-go after
-        # the /start port. The arq enqueuer at internal/regiondeploy/
-        # arq.go pushes run_region_deploy jobs the Python worker
-        # (orchestrator) still picks up; the worker is the only
-        # Python piece still serving real traffic post-cutover.
-        "/api/v1/region-deployments",
     ):
         assert not any(p.startswith(gone) for p in paths), (
             f"Python should not advertise {gone}* — otter-go is canonical"

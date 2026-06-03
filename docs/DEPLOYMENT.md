@@ -109,9 +109,7 @@ heron:
 
 The CRD apiVersion is `cilium.io/v2` (PR 91 graduated BGP CRDs +
 CiliumLoadBalancerIPPool from `v2alpha1` in lockstep with Cilium
-1.16+) — same as the regional cluster renderer in
-[`packages/otter/src/dcim/regiondeploy/cilium.py`](../packages/otter/src/dcim/regiondeploy/cilium.py)
-so central and regional clusters speak the same dialect. Requires
+1.16+). Requires
 Cilium ≥ 1.16; older clusters need to roll back to `v2alpha1`
 manually (the CRD shape is identical, only the group/version
 differs). `CiliumL2AnnouncementPolicy` (PR 89) stays at
@@ -177,17 +175,13 @@ is pinned to the matching `AnycastGroup` addresses via the
 replaced by Cilium BGP advertising the Service label
 `dcim.io/bgp-advertise=true`.
 
-Render values from a `DnsServer` + `AnycastGroup` row via
-[`packages/otter/src/dcim/regiondeploy/dns_site.py`](../packages/otter/src/dcim/regiondeploy/dns_site.py)
-(`render_dns_site_values(server, anycast_group=..., bundle_api_base_url=...)`).
 See [`deploy/helm/dns-site/README.md`](../deploy/helm/dns-site/README.md)
 for the install flow and required prerequisites (Cilium BGP, bundle
 token Secret, optional private-CA Secret).
 
 `AnycastBgpBinding` rows are no longer consumed by config generation
 in the k8s-native path — they remain as audit/policy state. The
-cluster's BGP peer list comes from `regiondeploy/cilium.py` (regional)
-or the umbrella `bgp.peers` values (central).
+cluster's BGP peer list comes from the umbrella `bgp.peers` values.
 
 ## Site DHCP (Kea Control Agent) via Cilium BGP (PR 72)
 
@@ -203,9 +197,6 @@ requires DHCP Relay (RFC 1542) at the router; point the relay's
 `giaddr` / helper-address at the chart's anycast IP and Kea hears
 the relayed unicast frame.
 
-Render values from a `DhcpServer` row via
-[`packages/otter/src/dcim/regiondeploy/dhcp_site.py`](../packages/otter/src/dcim/regiondeploy/dhcp_site.py)
-(`render_dhcp_site_values(server, anycast_ips=[...], dhcpv6=...)`).
 See [`deploy/helm/dhcp-site/README.md`](../deploy/helm/dhcp-site/README.md)
 for the install flow.
 
