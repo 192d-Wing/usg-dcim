@@ -1,16 +1,23 @@
-"""Telemetry ingest pipeline.
+"""Telemetry ingest pipeline — **DEPRECATED on PR 22**.
+
+The HTTP route `/api/v1/ingest/telemetry` is now served by otter-go
+(packages/otter-go/internal/ingest); `api/ingest.py` is a stub. The
+ingest()/_write_hypertable()/_update_freshness() functions here are
+no longer reachable from the FastAPI app and exist only because
+tests/test_telemetry_hypertable.py still imports `_hypertable_rows`
+to assert dedup-key shape. Do NOT re-wire `api/ingest.py` through
+this module — that would double-serve the endpoint and cause
+duplicate freshness writes / double-counted Prometheus metrics.
+
+Will be deleted entirely once the helper test is rewritten as a
+Go test against `internal/ingest/handler.go`, expected in a follow-up.
+
+Original docs:
 
 - Inserts samples into the TimescaleDB `telemetry_samples` hypertable.
   Idempotent on (collector_id, batch_id, seq, ts) via the unique constraint
   from migration 0046; collector retries are no-ops.
 - Updates per-source freshness rows so the UI can show stale/current.
-
-OpenSearch was the original telemetry store but was retired after the read
-paths moved to the hypertable (steps 2a/2b/2c of the migration). The
-`telemetry_write_hypertable` setting remains as an opt-out for deployments
-running on stock Postgres without the TimescaleDB extension — when False
-the freshness write still runs and the request returns 202-style success
-without any sample being persisted.
 """
 
 from __future__ import annotations

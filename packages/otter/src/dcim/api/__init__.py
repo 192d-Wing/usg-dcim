@@ -3,7 +3,6 @@
 from fastapi import APIRouter
 
 from .dns import router as dns_router
-from .ingest import router as ingest_router
 from .regiondeploy import router as regiondeploy_router
 
 router = APIRouter()
@@ -22,9 +21,11 @@ router = APIRouter()
 # deferred crypto + audit wiring) alongside list/get/config/enabled/
 # decommission. Token shape: "enroll_" + token_urlsafe(32);
 # sha256-hashed and stored in collectors.enrollment_token_hash.
-# /api/v1/ingest/telemetry remains on Python until the high-throughput
-# fallback gets a Go port; heron already owns the mTLS path.
-router.include_router(ingest_router)
+# /api/v1/ingest/telemetry JSON fallback moved to otter-go (PR 22).
+# heron already owned the high-throughput mTLS path; the Python
+# JSON-fallback handler is gone. The Go handler emits no Prometheus
+# metrics — heron is canonical for dcim_telemetry_* counters, matching
+# the cutover policy in metrics.py L26-L38 (_GO_PORTED_DISABLED).
 # /api/v1/telemetry/series moved to otter-go (PR 178). The umbrella
 # chart routes /api/v1/telemetry → otter-go; Python no longer registers
 # the router so a misrouted internal call fails loud instead of
