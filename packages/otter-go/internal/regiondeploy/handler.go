@@ -1,6 +1,6 @@
 // Package regiondeploy holds the otter-go handlers for
 // /api/v1/region-deployments. Reads (list/get/events) + abort + create
-// + kubeconfig callback landed. Preflight/start/SSE follow in later
+// + preflight + kubeconfig callback landed. start/SSE follow in later
 // PRs — start still needs the arq → Go scheduler equivalent. The
 // callback handler intentionally does NOT publish to Redis pubsub —
 // that lands with the SSE port; persisting the event row alone is
@@ -94,6 +94,46 @@ func (h *Handler) Mount(r chi.Router) {
 	// Workflow action that calls it has no DCIM session/API token. The
 	// per-deployment HMAC bearer token is the auth here.
 	r.Post("/region-deployments/{id}/kubeconfig/callback", h.kubeconfigCallback)
+	// preflight is read-gated, matching Python (regiondeploy.py L113-118
+	// uses CAP_READ — the check is informational; the hard-gate happens
+	// at /start when the orchestrator re-runs it).
+	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/preflight", h.preflight)
+}
+
+// preflight runs the seven pure checks Python's preflight.run_all
+// (include_external=True) exercises today. External (network-hitting)
+// checks aren't wired yet on either side — Python's framework still
+// returns the same seven outcomes. When BMC/Redfish/Tinkerbell
+// reachability checks land, they register from their owning modules.
+func (h *Handler) preflight(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, badIDMsg)
+		return
+	}
+	row, err := h.Q.GetRegionDeployment(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, notFound)
+			return
+		}
+		writeMapped(w, err)
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, row.SiteID, capRead); serr != nil {
+		writeMapped(w, serr)
+		return
+	}
+	nodes, err := h.Q.ListRegionDeploymentNodes(r.Context(), id)
+	if err != nil {
+		writeMapped(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, runPreflight(preflightContext{
+		Nodes:  nodes,
+		Config: decodeConfig(row.Config),
+	}))
 }
 
 // detailOut mirrors Python's RegionDeploymentOut: the row plus nodes
