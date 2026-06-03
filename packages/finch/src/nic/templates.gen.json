@@ -202,7 +202,7 @@
         {
           "title": "Justification",
           "fields": [
-            { "key": "justification", "label": "Justification", "type": "text", "required": true, "requiredForActions": ["N"], "help": "Required for all New domain requests." },
+            { "key": "justification", "label": "Justification", "type": "text", "requiredForActions": ["N"], "help": "Required for all New domain requests." },
             { "key": "user_comments", "label": "User Comments", "type": "text", "required": false }
           ]
         }
@@ -272,7 +272,7 @@
         {
           "title": "Justification",
           "fields": [
-            { "key": "justification", "label": "Justification", "type": "text", "required": true, "requiredForActions": ["N"], "help": "Required for all New network requests." },
+            { "key": "justification", "label": "Justification", "type": "text", "requiredForActions": ["N"], "help": "Required for all New network requests." },
             { "key": "user_comments", "label": "User Comments", "type": "text", "required": false }
           ]
         }
@@ -338,7 +338,7 @@
             { "key": "domain_handle", "label": "Domain Handle / Name", "type": "string", "required": true, "maxLength": 256 },
             { "key": "start_date", "label": "Start Date", "type": "date", "required": true, "help": "Effective date NIC includes the key in the .MIL zone." },
             { "key": "end_date", "label": "End Date", "type": "date", "required": true, "help": "Last day NIC includes the KSK; validity cannot exceed 2 years." },
-            { "key": "ksk_value", "label": "KSK Value", "type": "text", "required": true, "requiredForActions": ["N"], "help": "Record contents from the KSK public key file." }
+            { "key": "ksk_value", "label": "KSK Value", "type": "text", "requiredForActions": ["N"], "help": "Record contents from the KSK public key file." }
           ]
         },
         {

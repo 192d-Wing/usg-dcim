@@ -107,6 +107,54 @@ func TestValidate_EnumAndDate(t *testing.T) {
 	}
 }
 
+func TestValidate_NewOnlyFieldsNotRequiredForModify(t *testing.T) {
+	// justification is New-only: required for N, not for M.
+	base := map[string]any{
+		"org_handle": "O", "tech_poc_handle": "T", "admin_poc_handle": "A",
+		"ip_version": "ipv4", "network_aggregator": "niprnet", "classification": "unclassified",
+		"customer_network_name": "N", "cidr": float64(24),
+		"hosts_initial": float64(1), "hosts_6mo": float64(1), "hosts_max": float64(1),
+	}
+	if err := Validate("network", "N", cloneMap(base)); err == nil ||
+		!strings.Contains(err.Error(), "Justification") {
+		t.Fatalf("New network must require Justification, got %v", err)
+	}
+	if err := Validate("network", "M", cloneMap(base)); err != nil {
+		t.Fatalf("Modify network must NOT require Justification, got %v", err)
+	}
+	// dnskey ksk_value New-only.
+	dk := map[string]any{"domain_handle": "abc.mil", "start_date": "20260601", "end_date": "20270601"}
+	if err := Validate("dnskey", "N", cloneMap(dk)); err == nil ||
+		!strings.Contains(err.Error(), "KSK Value") {
+		t.Fatalf("New dnskey must require KSK Value, got %v", err)
+	}
+	if err := Validate("dnskey", "M", cloneMap(dk)); err != nil {
+		t.Fatalf("Modify dnskey must NOT require KSK Value, got %v", err)
+	}
+}
+
+func TestValidate_RepeatBlankBypassAndIntWholeNumber(t *testing.T) {
+	// host with a required ip_addresses repeat (min 1) submitted as all-blank
+	// must be rejected, not silently stored as an empty array.
+	err := Validate("host", "N", map[string]any{
+		"org_handle": "O", "primary_poc_handle": "P", "secondary_poc_handle": "S",
+		"hostname": "ns1.abc.mil", "ip_addresses": []any{"", "  "},
+	})
+	if err == nil || !strings.Contains(err.Error(), "IP Addresses") {
+		t.Fatalf("all-blank required repeat must fail min check, got %v", err)
+	}
+	// non-whole number for an int field is rejected.
+	err = Validate("asn", "N", map[string]any{
+		"org_handle": "O", "tech_poc_handle": "T", "admin_poc_handle": "A",
+		"network_aggregator": "niprnet", "classification": "unclassified",
+		"customer_asn_name": "AS1", "justification": "j", "user_comments": "c",
+		"num_routers": 3.5,
+	})
+	if err == nil || !strings.Contains(err.Error(), "whole number") {
+		t.Fatalf("non-whole int must be rejected, got %v", err)
+	}
+}
+
 func cloneMap(m map[string]any) map[string]any {
 	out := make(map[string]any, len(m))
 	for k, v := range m {

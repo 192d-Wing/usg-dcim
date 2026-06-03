@@ -16,6 +16,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -194,16 +195,25 @@ func validateValue(f Field, raw any) string {
 	if !ok {
 		return f.Label + " must be a list"
 	}
-	if len(arr) < f.Repeat.Min {
-		return fmt.Sprintf("%s requires at least %d value(s)", f.Label, f.Repeat.Min)
-	}
-	if f.Repeat.Max > 0 && len(arr) > f.Repeat.Max {
-		return fmt.Sprintf("%s allows at most %d value(s)", f.Label, f.Repeat.Max)
-	}
+	// Blank entries are dropped before insert (stringSlice), so min/max
+	// must be measured against non-empty values — otherwise a required
+	// repeat field submitted as [""] would slip past the min check and
+	// store an empty array.
+	nonEmpty := 0
 	for _, el := range arr {
+		if isEmptyValue(el) {
+			continue
+		}
+		nonEmpty++
 		if msg := validateScalar(f, el); msg != "" {
 			return msg
 		}
+	}
+	if nonEmpty < f.Repeat.Min {
+		return fmt.Sprintf("%s requires at least %d value(s)", f.Label, f.Repeat.Min)
+	}
+	if f.Repeat.Max > 0 && nonEmpty > f.Repeat.Max {
+		return fmt.Sprintf("%s allows at most %d value(s)", f.Label, f.Repeat.Max)
 	}
 	return ""
 }
@@ -247,6 +257,9 @@ func validateInt(f Field, raw any) string {
 	n, ok := asFloat(raw)
 	if !ok {
 		return f.Label + " must be a number"
+	}
+	if n != math.Trunc(n) {
+		return f.Label + " must be a whole number"
 	}
 	if f.Min != nil && n < float64(*f.Min) {
 		return fmt.Sprintf("%s must be >= %d", f.Label, *f.Min)
