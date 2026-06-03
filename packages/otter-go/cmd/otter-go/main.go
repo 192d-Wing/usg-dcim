@@ -108,7 +108,7 @@ func main() {
 		// (600). Operators override via DCIM_COLLECTOR_STALE_SECONDS.
 		CollectorStaleSeconds: env.Int("DCIM_COLLECTOR_STALE_SECONDS", 600),
 	}
-	rdh := &regiondeploy.Handler{Q: q, Audit: q}
+	rdh := &regiondeploy.Handler{Q: q, Audit: q, Pool: pool}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)

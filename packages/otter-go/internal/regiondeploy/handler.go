@@ -1,7 +1,7 @@
 // Package regiondeploy holds the otter-go handlers for
-// /api/v1/region-deployments. Reads (list/get/events) + abort
-// landed. Create/preflight/start/kubeconfig-callback/SSE follow in
-// later PRs — start still needs the arq → Go scheduler equivalent.
+// /api/v1/region-deployments. Reads (list/get/events) + abort + create
+// landed. Preflight/start/kubeconfig-callback/SSE follow in later
+// PRs — start still needs the arq → Go scheduler equivalent.
 package regiondeploy
 
 import (
@@ -23,10 +23,11 @@ import (
 )
 
 const (
-	capRead  = "infrastructure:region-deployments:read"
-	capAbort = "infrastructure:region-deployments:abort"
-	notFound = "region deployment not found"
-	badIDMsg = "id is not a uuid"
+	capRead   = "infrastructure:region-deployments:read"
+	capAbort  = "infrastructure:region-deployments:abort"
+	capCreate = "infrastructure:region-deployments:create"
+	notFound  = "region deployment not found"
+	badIDMsg  = "id is not a uuid"
 )
 
 type Querier interface {
@@ -37,6 +38,8 @@ type Querier interface {
 	ListRegionDeploymentServices(ctx context.Context, deploymentID uuid.UUID) ([]dbq.RegionDeploymentService, error)
 	ListRegionDeploymentEvents(ctx context.Context, arg dbq.ListRegionDeploymentEventsParams) ([]dbq.RegionDeploymentEvent, error)
 	AbortRegionDeployment(ctx context.Context, id uuid.UUID) (dbq.AbortRegionDeploymentRow, error)
+	CreateRegionDeployment(ctx context.Context, arg dbq.CreateRegionDeploymentParams) (dbq.RegionDeployment, error)
+	CreateRegionDeploymentNode(ctx context.Context, arg dbq.CreateRegionDeploymentNodeParams) (dbq.RegionDeploymentNode, error)
 	// Site-scope expansion for the list filter + per-row ABAC.
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
@@ -44,9 +47,24 @@ type Querier interface {
 	ListSiteGroupIDsForSite(ctx context.Context, siteID uuid.UUID) ([]uuid.UUID, error)
 }
 
+// TxBeginner is the slim subset of *pgxpool.Pool the create handler
+// uses to wrap the deployment + nodes inserts in a single tx — partial
+// failure rolls back atomically (no orphan deployment row when a node
+// insert violates the uq_rdn_deployment_mac unique constraint). Tests
+// pass nil to fall back to autocommit-per-insert via h.Q; production
+// wires *pgxpool.Pool. Mirrors the bgp.Handler pattern from PR #205.
+type TxBeginner interface {
+	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
+}
+
 type Handler struct {
 	Q     Querier
-	Audit audit.Recorder // used by abort (and forthcoming start/create); list/get/events are reads-only
+	Audit audit.Recorder // used by abort + create (and forthcoming start); list/get/events are reads-only
+	// Pool is optional. When nil, create runs the deployment + node
+	// inserts via h.Q (autocommit-per-insert; existing tests work
+	// unchanged). When set, both inserts run inside a single tx so
+	// partial failure rolls back atomically.
+	Pool TxBeginner
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -56,6 +74,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}", h.get)
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/events", h.listEvents)
 	r.With(auth.RequireCapability(capAbort)).Post("/region-deployments/{id}/abort", h.abort)
+	r.With(auth.RequireCapability(capCreate)).Post("/region-deployments", h.create)
 }
 
 // detailOut mirrors Python's RegionDeploymentOut: the row plus nodes
@@ -307,6 +326,178 @@ func (h *Handler) reloadDetail(ctx context.Context, id uuid.UUID) (detailOut, er
 		Nodes:    toNodeOuts(nodes),
 		Services: toServiceOuts(services),
 	}, nil
+}
+
+// createReq mirrors Python's RegionDeploymentCreate. Field tags use
+// JSON snake_case so the wire is identical. Validation is hand-rolled
+// (chi has no Pydantic equivalent) — see validate() below.
+type createReq struct {
+	SiteID uuid.UUID       `json:"site_id"`
+	Name   string          `json:"name"`
+	Config json.RawMessage `json:"config"`
+	Nodes  []createNodeReq `json:"nodes"`
+}
+
+type createNodeReq struct {
+	Hostname          string  `json:"hostname"`
+	Mac               string  `json:"mac"`
+	BmcAddress        string  `json:"bmc_address"`
+	Role              string  `json:"role"`
+	PrimaryIpV6       *string `json:"primary_ip_v6"`
+	ProvisioningIpV6  *string `json:"provisioning_ip_v6"`
+	BmcCredsSecretRef *string `json:"bmc_creds_secret_ref"`
+}
+
+// validNodeRoles is the trio Python's RegionDeploymentNodeRole accepts
+// at create time. Other roles get rejected with 400 here rather than
+// surfacing as a pg invalid_enum_value at INSERT time.
+var validNodeRoles = map[string]struct{}{
+	"control_plane": {}, "worker": {}, "edge": {},
+}
+
+const isRequired = "is required"
+
+func nodeErr(i int, field, suffix string) string {
+	return "nodes[" + strconv.Itoa(i) + "]." + field + " " + suffix
+}
+
+func (req *createReq) validate() (string, bool) {
+	if req.SiteID == uuid.Nil {
+		return "site_id " + isRequired, false
+	}
+	if req.Name == "" {
+		return "name " + isRequired, false
+	}
+	// Match Python's Pydantic `config: dict = Field(default_factory=dict)`:
+	// omitted → {}, literal JSON null → 422. Without this guard, json.RawMessage
+	// would pass the 4 bytes `null` to SQL where 'null'::jsonb is a valid
+	// (but wrong) value — COALESCE($3::jsonb, '{}') doesn't catch JSON null,
+	// only SQL NULL.
+	if len(req.Config) == 0 {
+		req.Config = json.RawMessage("{}")
+	} else if string(req.Config) == "null" {
+		return "config cannot be null (omit or send {})", false
+	}
+	for i, n := range req.Nodes {
+		if n.Hostname == "" {
+			return nodeErr(i, "hostname", isRequired), false
+		}
+		if n.Mac == "" {
+			return nodeErr(i, "mac", isRequired), false
+		}
+		if n.BmcAddress == "" {
+			return nodeErr(i, "bmc_address", isRequired), false
+		}
+		if _, ok := validNodeRoles[n.Role]; !ok {
+			return nodeErr(i, "role", "must be one of control_plane|worker|edge"), false
+		}
+	}
+	return "", true
+}
+
+// nodeInserter is the slim sub-interface create's per-node insert loop
+// uses. Lets the in-tx path swap in dbq.New(tx) without dragging the
+// rest of the Querier surface through the type system.
+type nodeInserter interface {
+	CreateRegionDeployment(ctx context.Context, arg dbq.CreateRegionDeploymentParams) (dbq.RegionDeployment, error)
+	CreateRegionDeploymentNode(ctx context.Context, arg dbq.CreateRegionDeploymentNodeParams) (dbq.RegionDeploymentNode, error)
+}
+
+func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
+	var req createReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad request body")
+		return
+	}
+	if msg, ok := req.validate(); !ok {
+		httpx.Error(w, http.StatusUnprocessableEntity, msg)
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, req.SiteID, capCreate); serr != nil {
+		writeMapped(w, serr)
+		return
+	}
+	created, nodes, err := h.runCreate(r.Context(), req)
+	if err != nil {
+		writeMapped(w, err)
+		return
+	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "region_deployment.create", TargetType: "region_deployment",
+		TargetID: created.ID.String(), SiteID: &created.SiteID,
+	})
+	httpx.JSON(w, http.StatusCreated, detailOut{
+		ID: created.ID, SiteID: created.SiteID, Name: created.Name, Status: created.Status,
+		CurrentStage: created.CurrentStage, LastError: created.LastError,
+		Config:              defaultConfig(created.Config),
+		KubeconfigSecretRef: created.KubeconfigSecretRef,
+		CreatedBy:           created.CreatedBy, CreatedAt: created.CreatedAt, UpdatedAt: created.UpdatedAt,
+		StartedAt: created.StartedAt, FinishedAt: created.FinishedAt,
+		Nodes:    toNodeOuts(nodes),
+		Services: []serviceOut{},
+	})
+}
+
+// runCreate inserts the deployment row + each node. When h.Pool is set
+// (production) the inserts run inside a single tx so partial failure
+// (e.g. nodes[2] hits a uq_rdn_deployment_mac duplicate) rolls back
+// the deployment too. When nil (most existing tests) inserts autocommit
+// one-by-one — sufficient for the unit-test fakeQ which never fails.
+func (h *Handler) runCreate(ctx context.Context, req createReq) (dbq.RegionDeployment, []dbq.RegionDeploymentNode, error) {
+	run := func(q nodeInserter) (dbq.RegionDeployment, []dbq.RegionDeploymentNode, error) {
+		created, err := q.CreateRegionDeployment(ctx, dbq.CreateRegionDeploymentParams{
+			SiteID: req.SiteID, Name: req.Name, Config: req.Config,
+		})
+		if err != nil {
+			return dbq.RegionDeployment{}, nil, err
+		}
+		nodes := make([]dbq.RegionDeploymentNode, 0, len(req.Nodes))
+		for _, n := range req.Nodes {
+			out, err := q.CreateRegionDeploymentNode(ctx, dbq.CreateRegionDeploymentNodeParams{
+				DeploymentID: created.ID, Hostname: n.Hostname, Mac: n.Mac,
+				BmcAddress: n.BmcAddress, Role: n.Role,
+				PrimaryIpV6:       deref(n.PrimaryIpV6),
+				ProvisioningIpV6:  deref(n.ProvisioningIpV6),
+				BmcCredsSecretRef: n.BmcCredsSecretRef,
+			})
+			if err != nil {
+				return dbq.RegionDeployment{}, nil, err
+			}
+			nodes = append(nodes, out)
+		}
+		return created, nodes, nil
+	}
+	if h.Pool == nil {
+		return run(h.Q)
+	}
+	tx, err := h.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return dbq.RegionDeployment{}, nil, err
+	}
+	// Rollback on a fresh background context (5s) so cleanup runs
+	// even when the request ctx is already cancelled by client
+	// disconnect — same pattern as bgp.rotateInsert.
+	defer func() {
+		rbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rbCtx)
+	}()
+	created, nodes, err := run(dbq.New(tx))
+	if err != nil {
+		return dbq.RegionDeployment{}, nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return dbq.RegionDeployment{}, nil, err
+	}
+	return created, nodes, nil
+}
+
+func deref(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func toNodeOuts(in []dbq.RegionDeploymentNode) []nodeOut {

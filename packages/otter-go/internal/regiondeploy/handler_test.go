@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,8 +20,9 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
-// fakeAudit captures InsertAuditLog calls so abort tests can assert
-// that a region_deployment.abort row was (or wasn't) written. Other
+// fakeAudit captures InsertAuditLog calls so abort/create tests can
+// assert that a region_deployment.{abort,create} row was (or wasn't)
+// written. Other
 // tests in this file keep Audit: nil because read paths don't record.
 type fakeAudit struct {
 	rows []dbq.InsertAuditLogParams
@@ -46,9 +49,18 @@ type fakeQ struct {
 	events         []dbq.RegionDeploymentEvent
 	lastEventArg   dbq.ListRegionDeploymentEventsParams
 	siteRegionErr  error
-	abortRow       dbq.AbortRegionDeploymentRow
-	abortErr       error
-	abortCalls     int
+
+	abortRow   dbq.AbortRegionDeploymentRow
+	abortErr   error
+	abortCalls int
+
+	createDepRow      dbq.RegionDeployment
+	createDepErr      error
+	createDepParams   dbq.CreateRegionDeploymentParams
+	createNodeReturns []dbq.RegionDeploymentNode
+	createNodeErr     error
+	createNodeParams  []dbq.CreateRegionDeploymentNodeParams
+	createNodeFailAt  int // 1-indexed; 0 = never fail
 }
 
 func (f *fakeQ) ListRegionDeployments(_ context.Context, a dbq.ListRegionDeploymentsParams) ([]dbq.RegionDeploymentSummary, error) {
@@ -89,6 +101,46 @@ func (f *fakeQ) AbortRegionDeployment(_ context.Context, _ uuid.UUID) (dbq.Abort
 	return f.abortRow, f.abortErr
 }
 
+func (f *fakeQ) CreateRegionDeployment(_ context.Context, a dbq.CreateRegionDeploymentParams) (dbq.RegionDeployment, error) {
+	f.createDepParams = a
+	if f.createDepErr != nil {
+		return dbq.RegionDeployment{}, f.createDepErr
+	}
+	// Mirror what the SQL RETURNING populates from a fresh insert: id +
+	// timestamps assigned, status defaulted to "pending", echo back the
+	// caller-supplied site_id/name/config so the response shape parity
+	// assertions can verify the round-trip.
+	row := f.createDepRow
+	if row.ID == uuid.Nil {
+		row.ID = uuid.New()
+	}
+	row.SiteID = a.SiteID
+	row.Name = a.Name
+	if row.Status == "" {
+		row.Status = "pending"
+	}
+	row.Config = a.Config
+	return row, nil
+}
+
+func (f *fakeQ) CreateRegionDeploymentNode(_ context.Context, a dbq.CreateRegionDeploymentNodeParams) (dbq.RegionDeploymentNode, error) {
+	f.createNodeParams = append(f.createNodeParams, a)
+	if f.createNodeFailAt > 0 && len(f.createNodeParams) == f.createNodeFailAt {
+		return dbq.RegionDeploymentNode{}, f.createNodeErr
+	}
+	if f.createNodeErr != nil && f.createNodeFailAt == 0 {
+		return dbq.RegionDeploymentNode{}, f.createNodeErr
+	}
+	idx := len(f.createNodeParams) - 1
+	if idx < len(f.createNodeReturns) {
+		return f.createNodeReturns[idx], nil
+	}
+	return dbq.RegionDeploymentNode{
+		ID: uuid.New(), DeploymentID: a.DeploymentID, Hostname: a.Hostname,
+		Mac: a.Mac, BmcAddress: a.BmcAddress, Role: a.Role, Status: "pending",
+	}, nil
+}
+
 // audit.Recorder satisfaction: nothing exercises it on reads, but the
 // Handler struct requires it. Stub returns nil.
 func (f *fakeQ) Record(_ context.Context, _ ...any) error { return nil }
@@ -107,9 +159,13 @@ func doReq(t *testing.T, h http.Handler, p auth.Principal, path string) *httptes
 	return rec
 }
 
-func doPost(t *testing.T, h http.Handler, p auth.Principal, path string) *httptest.ResponseRecorder {
+func doPost(t *testing.T, h http.Handler, p auth.Principal, path string, body []byte) *httptest.ResponseRecorder {
 	t.Helper()
-	req := authtest.Request(http.MethodPost, path, p, nil)
+	var r io.Reader
+	if body != nil {
+		r = bytes.NewReader(body)
+	}
+	req := authtest.Request(http.MethodPost, path, p, r)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -320,6 +376,7 @@ func TestListEvents_NotFound(t *testing.T) {
 	}
 }
 
+
 // ─── Abort ──────────────────────────────────────────────────────────────
 
 func TestAbort_OK_ReturnsReloadedDetail_AndEmitsAudit(t *testing.T) {
@@ -331,7 +388,7 @@ func TestAbort_OK_ReturnsReloadedDetail_AndEmitsAudit(t *testing.T) {
 		abortRow: dbq.AbortRegionDeploymentRow{PriorStatus: "provisioning", Updated: 1},
 	}
 	a := &fakeAudit{}
-	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -342,22 +399,15 @@ func TestAbort_OK_ReturnsReloadedDetail_AndEmitsAudit(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	// Response must be the post-abort reload — status field should
-	// reflect the new state, mirroring Python's _reload(...) return.
 	if body.Status != "aborted" {
 		t.Errorf("expected reloaded status=aborted, got %q", body.Status)
 	}
-	// detailOut shape parity with GET /{id}: nil slices/config must
-	// serialize as `[]` / `{}` so finch doesn't see nulls on a fresh
-	// deploy with no nodes/services yet.
 	raw := rec.Body.Bytes()
 	for _, want := range []string{`"nodes":[]`, `"services":[]`, `"config":{}`} {
 		if !bytes.Contains(raw, []byte(want)) {
 			t.Errorf("response missing %q; body=%s", want, raw)
 		}
 	}
-	// Exactly one audit row, with the Python-parity action name and
-	// the deployment's site id.
 	if len(a.rows) != 1 {
 		t.Fatalf("expected one audit row, got %d", len(a.rows))
 	}
@@ -383,7 +433,7 @@ func TestAbort_TerminalState_422_NoAudit(t *testing.T) {
 		abortRow: dbq.AbortRegionDeploymentRow{PriorStatus: "ready", Updated: 0},
 	}
 	a := &fakeAudit{}
-	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort", nil)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -401,7 +451,7 @@ func TestAbort_AlreadyAborted_422(t *testing.T) {
 		getRow:   dbq.RegionDeployment{ID: id, SiteID: sid, Status: "aborted"},
 		abortRow: dbq.AbortRegionDeploymentRow{PriorStatus: "aborted", Updated: 0},
 	}
-	rec := doPost(t, mount(f), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	rec := doPost(t, mount(f), wildcardP(), "/region-deployments/"+id.String()+"/abort", nil)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -410,7 +460,7 @@ func TestAbort_AlreadyAborted_422(t *testing.T) {
 func TestAbort_NotFound_NoAudit(t *testing.T) {
 	f := &fakeQ{getErr: pgx.ErrNoRows}
 	a := &fakeAudit{}
-	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+uuid.New().String()+"/abort")
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+uuid.New().String()+"/abort", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -423,15 +473,13 @@ func TestAbort_NotFound_NoAudit(t *testing.T) {
 }
 
 func TestAbort_RaceDeletedBetweenScopeAndUpdate_404(t *testing.T) {
-	// Row exists at the scope-check but is deleted before the
-	// conditional UPDATE runs — the CTE returns no row → ErrNoRows.
 	id, sid := uuid.New(), uuid.New()
 	f := &fakeQ{
 		getRow:   dbq.RegionDeployment{ID: id, SiteID: sid, Status: "pending"},
 		abortErr: pgx.ErrNoRows,
 	}
 	a := &fakeAudit{}
-	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort", nil)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 on race, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -444,7 +492,7 @@ func TestAbort_RaceDeletedBetweenScopeAndUpdate_404(t *testing.T) {
 }
 
 func TestAbort_BadID_400(t *testing.T) {
-	rec := doPost(t, mount(&fakeQ{}), wildcardP(), "/region-deployments/not-a-uuid/abort")
+	rec := doPost(t, mount(&fakeQ{}), wildcardP(), "/region-deployments/not-a-uuid/abort", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("got %d", rec.Code)
 	}
@@ -456,7 +504,7 @@ func TestAbort_OutOfScope_403_NoAudit(t *testing.T) {
 	scope := auth.Scope{SiteIDs: map[uuid.UUID]struct{}{otherSite: {}}}
 	p := authtest.PrincipalWithScopes([]string{capAbort}, map[string]auth.Scope{capAbort: scope})
 	a := &fakeAudit{}
-	rec := doPost(t, mountWithAudit(f, a), p, "/region-deployments/"+id.String()+"/abort")
+	rec := doPost(t, mountWithAudit(f, a), p, "/region-deployments/"+id.String()+"/abort", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -471,13 +519,237 @@ func TestAbort_OutOfScope_403_NoAudit(t *testing.T) {
 func TestAbort_NoCap_403(t *testing.T) {
 	id, sid := uuid.New(), uuid.New()
 	f := &fakeQ{getRow: dbq.RegionDeployment{ID: id, SiteID: sid, Status: "pending"}}
-	// Has :read but not :abort — the cap gate on the route must reject.
 	p := authtest.PrincipalWithCaps(capRead)
-	rec := doPost(t, mount(f), p, "/region-deployments/"+id.String()+"/abort")
+	rec := doPost(t, mount(f), p, "/region-deployments/"+id.String()+"/abort", nil)
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if f.abortCalls != 0 {
 		t.Errorf("must not mutate without abort capability")
+	}
+}
+
+// ─── Create ─────────────────────────────────────────────────────────────
+
+func createBody(t *testing.T, payload any) []byte {
+	t.Helper()
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func assertCreateInsertParams(t *testing.T, f *fakeQ, sid uuid.UUID) {
+	t.Helper()
+	if f.createDepParams.SiteID != sid || f.createDepParams.Name != "edge-7" {
+		t.Errorf("deployment insert params wrong: %+v", f.createDepParams)
+	}
+	if string(f.createDepParams.Config) != `{"edge_mode":true}` {
+		t.Errorf("config not threaded: %s", f.createDepParams.Config)
+	}
+	if len(f.createNodeParams) != 2 {
+		t.Fatalf("expected 2 node inserts, got %d", len(f.createNodeParams))
+	}
+	if f.createNodeParams[0].Hostname != "n01" || f.createNodeParams[1].Role != "worker" {
+		t.Errorf("node insert params drift: %+v", f.createNodeParams)
+	}
+}
+
+func assertCreateResponseShape(t *testing.T, raw []byte) {
+	t.Helper()
+	var out detailOut
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "pending" {
+		t.Errorf("new deploy must start as pending, got %q", out.Status)
+	}
+	if len(out.Nodes) != 2 || out.Nodes[0].Hostname != "n01" {
+		t.Errorf("response nodes wrong: %+v", out.Nodes)
+	}
+	if !bytes.Contains(raw, []byte(`"services":[]`)) {
+		t.Errorf("services should serialize as []; body=%s", raw)
+	}
+}
+
+func assertCreateAudit(t *testing.T, a *fakeAudit, sid uuid.UUID) {
+	t.Helper()
+	if len(a.rows) != 1 || a.rows[0].Action != "region_deployment.create" {
+		t.Errorf("audit not emitted correctly: %+v", a.rows)
+		return
+	}
+	if a.rows[0].SiteID == nil || *a.rows[0].SiteID != sid {
+		t.Errorf("audit SiteID wrong: %v", a.rows[0].SiteID)
+	}
+}
+
+func TestCreate_OK_201_AndEmitsAudit(t *testing.T) {
+	sid := uuid.New()
+	f := &fakeQ{}
+	a := &fakeAudit{}
+	body := createBody(t, map[string]any{
+		"site_id": sid,
+		"name":    "edge-7",
+		"config":  map[string]any{"edge_mode": true},
+		"nodes": []map[string]any{
+			{"hostname": "n01", "mac": "aa:bb:cc:dd:ee:01", "bmc_address": "10.0.0.1", "role": "control_plane"},
+			{"hostname": "n02", "mac": "aa:bb:cc:dd:ee:02", "bmc_address": "10.0.0.2", "role": "worker"},
+		},
+	})
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	assertCreateInsertParams(t, f, sid)
+	assertCreateResponseShape(t, rec.Body.Bytes())
+	assertCreateAudit(t, a, sid)
+}
+
+func TestCreate_NoNodes_OK(t *testing.T) {
+	f := &fakeQ{}
+	body := createBody(t, map[string]any{
+		"site_id": uuid.New(), "name": "stub", "config": map[string]any{},
+	})
+	rec := doPost(t, mount(f), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(f.createNodeParams) != 0 {
+		t.Errorf("expected no node inserts, got %d", len(f.createNodeParams))
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"nodes":[]`)) {
+		t.Errorf("nodes should serialize as []; body=%s", rec.Body.String())
+	}
+}
+
+func TestCreate_ConfigJSONNull_422(t *testing.T) {
+	f := &fakeQ{}
+	rec := doPost(t, mount(f), wildcardP(), "/region-deployments",
+		[]byte(`{"site_id":"`+uuid.New().String()+`","name":"x","config":null}`))
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if f.createDepParams.Name != "" {
+		t.Errorf("must reject before deployment insert")
+	}
+}
+
+func TestCreate_OmittedConfig_DefaultsToEmptyObject(t *testing.T) {
+	f := &fakeQ{}
+	body := createBody(t, map[string]any{
+		"site_id": uuid.New(), "name": "no-cfg",
+	})
+	rec := doPost(t, mount(f), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"config":{}`)) {
+		t.Errorf("config should serialize as {}; body=%s", rec.Body.String())
+	}
+}
+
+func TestCreate_BadJSON_400(t *testing.T) {
+	rec := doPost(t, mount(&fakeQ{}), wildcardP(), "/region-deployments", []byte("{not-json"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+func TestCreate_MissingSiteID_422(t *testing.T) {
+	body := createBody(t, map[string]any{"name": "edge-7"})
+	rec := doPost(t, mount(&fakeQ{}), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreate_MissingName_422(t *testing.T) {
+	body := createBody(t, map[string]any{"site_id": uuid.New()})
+	rec := doPost(t, mount(&fakeQ{}), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreate_BadNodeRole_422(t *testing.T) {
+	body := createBody(t, map[string]any{
+		"site_id": uuid.New(), "name": "x",
+		"nodes": []map[string]any{
+			{"hostname": "n01", "mac": "aa:bb:cc:dd:ee:01", "bmc_address": "10.0.0.1", "role": "router"},
+		},
+	})
+	f := &fakeQ{}
+	rec := doPost(t, mount(f), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if f.createDepParams.Name != "" {
+		t.Errorf("must reject before deployment insert; got Name=%q", f.createDepParams.Name)
+	}
+}
+
+func TestCreate_NodeMissingHostname_422(t *testing.T) {
+	body := createBody(t, map[string]any{
+		"site_id": uuid.New(), "name": "x",
+		"nodes": []map[string]any{
+			{"mac": "aa:bb:cc:dd:ee:01", "bmc_address": "10.0.0.1", "role": "worker"},
+		},
+	})
+	rec := doPost(t, mount(&fakeQ{}), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreate_OutOfScope_403_NoInsert_NoAudit(t *testing.T) {
+	otherSite := uuid.New()
+	body := createBody(t, map[string]any{
+		"site_id": uuid.New(), "name": "edge-7",
+	})
+	scope := auth.Scope{SiteIDs: map[uuid.UUID]struct{}{otherSite: {}}}
+	p := authtest.PrincipalWithScopes([]string{capCreate}, map[string]auth.Scope{capCreate: scope})
+	f := &fakeQ{}
+	a := &fakeAudit{}
+	rec := doPost(t, mountWithAudit(f, a), p, "/region-deployments", body)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if f.createDepParams.Name != "" {
+		t.Errorf("must not insert when scope denies")
+	}
+	if len(a.rows) != 0 {
+		t.Errorf("403 must not write an audit row; got %d", len(a.rows))
+	}
+}
+
+func TestCreate_NoCap_403(t *testing.T) {
+	body := createBody(t, map[string]any{"site_id": uuid.New(), "name": "x"})
+	p := authtest.PrincipalWithCaps(capRead)
+	rec := doPost(t, mount(&fakeQ{}), p, "/region-deployments", body)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCreate_NodeInsertFails_500_NoAudit(t *testing.T) {
+	f := &fakeQ{
+		createNodeErr:    errors.New("uq_rdn_deployment_mac duplicate"),
+		createNodeFailAt: 2,
+	}
+	a := &fakeAudit{}
+	body := createBody(t, map[string]any{
+		"site_id": uuid.New(), "name": "x",
+		"nodes": []map[string]any{
+			{"hostname": "n01", "mac": "aa:bb:cc:dd:ee:01", "bmc_address": "10.0.0.1", "role": "worker"},
+			{"hostname": "n02", "mac": "aa:bb:cc:dd:ee:01", "bmc_address": "10.0.0.2", "role": "worker"},
+		},
+	})
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments", body)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 on node-insert failure, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(a.rows) != 0 {
+		t.Errorf("partial-insert failure must not write a region_deployment.create audit row; got %d", len(a.rows))
 	}
 }

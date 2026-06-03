@@ -366,6 +366,7 @@ ingress:
         - path: /api/v1/notifications
           pathType: Prefix
           backend: otter-go
+<<<<<<< HEAD
         # PR 19 cutover: organization + stencils on otter-go. Both
         # had full Go parity already (organization CRUD in
         # internal/organization; stencils LIST in internal/stencils);
@@ -402,13 +403,23 @@ ingress:
         # place (followups). nginx-ingress sorts by longest prefix so
         # the Python sub-path rules below win for the named lifecycle
         # subpaths even though both ends share the bare prefix.
+=======
+        # Region-deploy read-side + create (LIST + POST on bare
+        # collection) on otter-go. Remaining on Python: preflight,
+        # start, abort, SSE, kubeconfig-callback (each ports in its
+        # own follow-up).
+        # nginx-ingress sorts by longest prefix so the Python sub-path
+        # rules below win for the named lifecycle subpaths even though
+        # both ends share the bare prefix.
+>>>>>>> dd825e1 (port+cutover(regiondeploy): POST /region-deployments on otter-go (PR 2 of N))
         #
         # UUID character class is [0-9A-Fa-f-] so both upper- and
         # lower-case ids match the otter-go rules consistently
         # (Python's uuid.UUID accepts both). The catch-all detail
         # rule below is anchored with (/|$) so any future sub-path
         # we haven't carved out falls through to /api → otter
-        # instead of silently 404'ing on otter-go.
+        # instead of silently 404'ing on otter-go. The bare collection
+        # rule covers both LIST (GET) and CREATE (POST).
         - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/events/stream
           pathType: ImplementationSpecific
           backend: otter
@@ -428,6 +439,11 @@ ingress:
           pathType: ImplementationSpecific
           backend: otter-go
         - path: /api/v1/region-deployments/[0-9A-Fa-f-]+$
+          pathType: ImplementationSpecific
+          backend: otter-go
+        # Bare collection: GET (list) was already on otter-go via
+        # the read-side cutover. POST (create) joins it now.
+        - path: /api/v1/region-deployments$
           pathType: ImplementationSpecific
           backend: otter-go
         - path: /api
