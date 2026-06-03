@@ -102,12 +102,11 @@ func TestExpectedAlembicHeadIsLatest(t *testing.T) {
 		t.Fatal("no embedded versions")
 	}
 	last := versions[len(versions)-1]
-	// 20260531_0068 → last alembic 4-digit ID is 68 (lex-order index 67
-	// since the chain has a gap at slot 30/47/48/65/66 etc.). The check
-	// is intentionally weak (numeric magnitude) — it catches "forgot to
-	// bump" but won't flag a clean, intentional add-and-bump.
-	if last != 67 {
-		t.Errorf("embedded migrations changed (last version_id=%d); update expectedAlembicHead constant", last)
+	// Highest embedded goose version_id. Bump this when a migration is
+	// added so the guard keeps catching an accidental/forgotten add.
+	// 68 = 00068_nicreg_module.sql (the NIC registration intake module).
+	if last != 68 {
+		t.Errorf("embedded migrations changed (last version_id=%d); bump the expected version in this test", last)
 	}
 	if expectedAlembicHead == "" {
 		t.Error("expectedAlembicHead must not be empty")
