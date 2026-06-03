@@ -1,0 +1,24 @@
+server:
+  id: 44444444-4444-4444-4444-444444444444
+  name: dhcp01
+  fabricId: 33333333-3333-3333-3333-333333333333
+  dhcpv6: false
+service:
+  type: LoadBalancer
+  anycastIPs:
+  - 10.0.0.67
+  labels:
+    dcim.io/bgp-advertise: 'true'
+    dcim.io/dhcp-role: ctrl-agent
+  annotations: {}
+ctrlAgent:
+  port: 8000
+  configMapName: kea-ctrl-agent-config
+  configKey: kea-ctrl-agent.conf
+  tls:
+    enabled: true
+    serverCertSecret: kea-tls
+  basicAuth:
+    secretName: kea-ctrl-agent-auth
+    secretKey: auth.csv
+replicaCount: 2

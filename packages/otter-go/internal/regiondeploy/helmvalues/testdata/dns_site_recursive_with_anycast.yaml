@@ -1,0 +1,23 @@
+server:
+  id: 44444444-4444-4444-4444-444444444444
+  name: ns02
+  role: recursive
+  fabricId: 33333333-3333-3333-3333-333333333333
+  siteId: 22222222-2222-2222-2222-222222222222
+service:
+  type: LoadBalancer
+  port: 53
+  anycastIPs:
+  - 10.0.0.53
+  - fd00:any::53
+  labels:
+    dcim.io/bgp-advertise: 'true'
+    dcim.io/dns-role: recursive
+  annotations: {}
+bundle:
+  apiBaseUrl: https://dcim.example.mil/api/v1/dns
+  tokenSecretName: dcim-dns-site-token
+  tokenSecretKey: token
+  pollSeconds: 30
+  caBundleSecretName: dcim-ca-bundle
+replicaCount: 3

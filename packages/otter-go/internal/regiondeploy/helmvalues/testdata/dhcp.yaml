@@ -1,0 +1,19 @@
+replicaCount: 2
+image:
+  repository: cloudnativelabs/kea
+  tag: 2.6.1
+hostNetwork: true
+controlAgent:
+  enabled: true
+  port: 8000
+dhcp6:
+  enabled: true
+  subnets:
+  - subnet: fd00:dhcp:1::/64
+    pool:
+    - fd00:dhcp:1::100-fd00:dhcp:1::200
+  stateless: true
+dhcp4:
+  enabled: false
+dcim:
+  deployment_id: 11111111-1111-1111-1111-111111111111

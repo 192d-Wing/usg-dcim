@@ -1,0 +1,20 @@
+server:
+  id: 44444444-4444-4444-4444-444444444444
+  name: ns01
+  role: authoritative
+  fabricId: 33333333-3333-3333-3333-333333333333
+  siteId: 22222222-2222-2222-2222-222222222222
+service:
+  type: LoadBalancer
+  port: 53
+  anycastIPs: []
+  labels:
+    dcim.io/bgp-advertise: 'true'
+    dcim.io/dns-role: authoritative
+  annotations: {}
+bundle:
+  apiBaseUrl: https://dcim.example.mil/api/v1/dns
+  tokenSecretName: dcim-dns-site-token
+  tokenSecretKey: token
+  pollSeconds: 60
+replicaCount: 1
