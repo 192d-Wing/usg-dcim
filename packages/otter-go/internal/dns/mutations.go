@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -802,7 +804,7 @@ func (h *Handler) createCatalogZone(w http.ResponseWriter, r *http.Request) {
 		FabricID: req.FabricID, Name: req.Name, Enabled: enabled,
 	})
 	if err != nil {
-		mapErr(w, err, "catalog zone not found")
+		mapErr(w, err, errCatalogZoneNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_catalog_zone.create", TargetType: "dns_catalog_zone", TargetID: out.ID.String()})
@@ -821,7 +823,7 @@ func (h *Handler) updateCatalogZone(w http.ResponseWriter, r *http.Request) {
 	}
 	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
 		return h.Q.GetDnsCatalogZoneFabricID(ctx, id)
-	}, "catalog zone not found")
+	}, errCatalogZoneNotFound)
 	if !ok {
 		return
 	}
@@ -837,7 +839,7 @@ func (h *Handler) updateCatalogZone(w http.ResponseWriter, r *http.Request) {
 		ID: id, Name: req.Name, Enabled: req.Enabled,
 	})
 	if err != nil {
-		mapErr(w, err, "catalog zone not found")
+		mapErr(w, err, errCatalogZoneNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_catalog_zone.update", TargetType: "dns_catalog_zone", TargetID: id.String()})
@@ -851,7 +853,7 @@ func (h *Handler) deleteCatalogZone(w http.ResponseWriter, r *http.Request) {
 	}
 	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
 		return h.Q.GetDnsCatalogZoneFabricID(ctx, id)
-	}, "catalog zone not found")
+	}, errCatalogZoneNotFound)
 	if !ok {
 		return
 	}
@@ -859,7 +861,7 @@ func (h *Handler) deleteCatalogZone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Q.DeleteDnsCatalogZone(r.Context(), id); err != nil {
-		mapErr(w, err, "catalog zone not found")
+		mapErr(w, err, errCatalogZoneNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_catalog_zone.delete", TargetType: "dns_catalog_zone", TargetID: id.String()})
@@ -898,7 +900,7 @@ func (h *Handler) createBlocklist(w http.ResponseWriter, r *http.Request) {
 		Enabled: enabled, Description: req.Description,
 	})
 	if err != nil {
-		mapErr(w, err, "blocklist not found")
+		mapErr(w, err, errBlocklistNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist.create", TargetType: "dns_blocklist", TargetID: out.ID.String()})
@@ -953,7 +955,7 @@ func (h *Handler) updateBlocklist(w http.ResponseWriter, r *http.Request) {
 	}
 	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
 		return h.Q.GetDnsBlocklistFabricID(ctx, id)
-	}, "blocklist not found")
+	}, errBlocklistNotFound)
 	if !ok {
 		return
 	}
@@ -973,7 +975,7 @@ func (h *Handler) updateBlocklist(w http.ResponseWriter, r *http.Request) {
 		DescriptionSet: req.descriptionSet, Description: req.Description,
 	})
 	if err != nil {
-		mapErr(w, err, "blocklist not found")
+		mapErr(w, err, errBlocklistNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist.update", TargetType: "dns_blocklist", TargetID: id.String()})
@@ -987,7 +989,7 @@ func (h *Handler) deleteBlocklist(w http.ResponseWriter, r *http.Request) {
 	}
 	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
 		return h.Q.GetDnsBlocklistFabricID(ctx, id)
-	}, "blocklist not found")
+	}, errBlocklistNotFound)
 	if !ok {
 		return
 	}
@@ -995,7 +997,7 @@ func (h *Handler) deleteBlocklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Q.DeleteDnsBlocklist(r.Context(), id); err != nil {
-		mapErr(w, err, "blocklist not found")
+		mapErr(w, err, errBlocklistNotFound)
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist.delete", TargetType: "dns_blocklist", TargetID: id.String()})
@@ -1019,7 +1021,7 @@ func (h *Handler) createBlocklistEntry(w http.ResponseWriter, r *http.Request) {
 	// that scope.
 	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
 		return h.Q.GetDnsBlocklistFabricID(ctx, blID)
-	}, "blocklist not found")
+	}, errBlocklistNotFound)
 	if !ok {
 		return
 	}
@@ -1061,6 +1063,163 @@ func (h *Handler) deleteBlocklistEntry(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	audit.Record(r.Context(), h.Audit, nil, audit.Event{Action: "dns_blocklist_entry.delete", TargetType: "dns_blocklist_entry", TargetID: entryID.String()})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// normalizePatterns trim + lowercase + drop empties + dedupe — matches
+// Python's `{p.strip().lower() for p in payload.patterns if p.strip()}`.
+func normalizePatterns(in []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(in))
+	for _, p := range in {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			out[p] = struct{}{}
+		}
+	}
+	return out
+}
+
+// diffPatterns returns sorted (incoming - existing). Sort matches
+// Python's `sorted(incoming - existing_set)` so audit replay sees
+// deterministic insert order.
+func diffPatterns(incoming map[string]struct{}, existing []string) []string {
+	existingSet := make(map[string]struct{}, len(existing))
+	for _, p := range existing {
+		existingSet[p] = struct{}{}
+	}
+	out := make([]string, 0, len(incoming))
+	for p := range incoming {
+		if _, hit := existingSet[p]; !hit {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// bulkAddBlocklistEntries — idempotent bulk insert for threat-feed
+// imports. Mirrors Python's bulk_add_blocklist_entries: dedupes
+// incoming patterns within the payload, drops any that already exist
+// on the blocklist, INSERTs the residual set, and emits a single
+// audit row with `{added, skipped}` metadata. The single existing-
+// patterns SELECT is bounded by the blocklist size; bulk INSERT is
+// a per-row loop since per-pattern uniqueness is enforced by the
+// uq_dns_blocklist_entry constraint and there's no parameter-count
+// pressure (patterns are short strings, not parameterized rows).
+func (h *Handler) bulkAddBlocklistEntries(w http.ResponseWriter, r *http.Request) {
+	blID, ok := idFromURL(w, r, "id")
+	if !ok {
+		return
+	}
+	fid, ok := h.lookupFabricID(w, r.Context(), func(ctx context.Context) (uuid.UUID, error) {
+		return h.Q.GetDnsBlocklistFabricID(ctx, blID)
+	}, errBlocklistNotFound)
+	if !ok {
+		return
+	}
+	if !h.enforceFabric(w, r, fid, capBlocklistsUpdate) {
+		return
+	}
+	var req struct {
+		Patterns []string `json:"patterns"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "bad request body")
+		return
+	}
+	// Match Python's DnsBlocklistEntryBulk schema min_length=1.
+	// Empty list is a caller bug (broken upstream feed?) so a
+	// 400 surfaces it instead of silently returning {0, 0}.
+	if len(req.Patterns) == 0 {
+		httpx.Error(w, http.StatusBadRequest, "patterns must not be empty")
+		return
+	}
+	incoming := normalizePatterns(req.Patterns)
+	if len(incoming) == 0 {
+		httpx.JSON(w, http.StatusOK, map[string]int{"added": 0, "skipped": 0})
+		return
+	}
+	existing, err := h.Q.ListDnsBlocklistPatternsByID(r.Context(), blID)
+	if err != nil {
+		mapErr(w, err, errBlocklistNotFound)
+		return
+	}
+	toAdd := diffPatterns(incoming, existing)
+	for _, pat := range toAdd {
+		if _, err := h.Q.CreateDnsBlocklistEntry(r.Context(), dbq.CreateDnsBlocklistEntryParams{
+			BlocklistID: blID, Pattern: pat,
+		}); err != nil {
+			status, msg := httpx.Mapped(err)
+			httpx.Error(w, status, msg)
+			return
+		}
+	}
+	added := len(toAdd)
+	skipped := len(incoming) - added
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action:     "dns_blocklist_entry.bulk_add",
+		TargetType: "dns_blocklist",
+		TargetID:   blID.String(),
+		Metadata:   map[string]any{"added": added, "skipped": skipped},
+	})
+	httpx.JSON(w, http.StatusOK, map[string]int{"added": added, "skipped": skipped})
+}
+
+// disableCatalogDnssec mirrors Python's disable_catalog_dnssec:
+// retire every signing key for the catalog, flip signed=false,
+// audit the retired key_tags. No-op when the catalog is already
+// unsigned (matches Python's `if not catalog.signed: return` —
+// returns 204 with no body, no audit). Operators that have already
+// distributed the trust anchor downstream must reconfigure those
+// consumers before disabling.
+func (h *Handler) disableCatalogDnssec(w http.ResponseWriter, r *http.Request) {
+	catalogID, ok := idFromURL(w, r, "id")
+	if !ok {
+		return
+	}
+	catalog, err := h.Q.GetDnsCatalogZone(r.Context(), catalogID)
+	if err != nil {
+		mapErr(w, err, errCatalogZoneNotFound)
+		return
+	}
+	if !h.enforceFabric(w, r, catalog.FabricID, capKeysRotate) {
+		return
+	}
+	if !catalog.Signed {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	tags, err := h.Q.ListDnsKeyTagsByCatalog(r.Context(), catalogID)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if err := h.Q.DeleteDnsKeysByCatalog(r.Context(), catalogID); err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if err := h.Q.SetDnsCatalogZoneSigned(r.Context(), dbq.SetDnsCatalogZoneSignedParams{
+		ID: catalogID, Signed: false,
+	}); err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	// retired_key_tags as []int (not []int32) to match Python's
+	// JSON encoding (int32 marshals fine but the wire shape stays
+	// boring number).
+	retired := make([]int, len(tags))
+	for i, t := range tags {
+		retired[i] = int(t)
+	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action:     "dns_catalog_zone.disable_dnssec",
+		TargetType: "dns_catalog_zone",
+		TargetID:   catalogID.String(),
+		Metadata:   map[string]any{"retired_key_tags": retired},
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1338,7 +1497,14 @@ type bgpPeerCreateReq struct {
 	Enabled         *bool      `json:"enabled"`
 }
 
-const errBgpPeerNotFound = "bgp peer not found"
+const (
+	errBgpPeerNotFound      = "bgp peer not found"
+	// Python's NotFoundError messages from api/dns.py:132-133.
+	// Aligned here to match the wire-text post-cutover so ops
+	// runbooks/grep matches don't break.
+	errBlocklistNotFound    = "dns blocklist not found"
+	errCatalogZoneNotFound  = "dns catalog zone not found"
+)
 
 func (h *Handler) createBgpPeer(w http.ResponseWriter, r *http.Request) {
 	var req bgpPeerCreateReq

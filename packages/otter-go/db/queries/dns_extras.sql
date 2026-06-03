@@ -74,3 +74,27 @@ LIMIT $1 OFFSET $2;
 SELECT count(*)::bigint FROM dns_catalog_zones
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
+
+-- name: GetDnsCatalogZone :one
+SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
+FROM dns_catalog_zones WHERE id = $1;
+
+-- name: ListDnsKeyTagsByCatalog :many
+-- Read just the key_tags for the disable-dnssec audit metadata
+-- (`retired_key_tags`) — pulling the full row would scan the
+-- public-key blob for nothing.
+SELECT key_tag FROM dns_keys WHERE catalog_id = $1;
+
+-- name: DeleteDnsKeysByCatalog :exec
+-- Bulk-delete every signing key for a catalog zone. Mirror of
+-- Python's `delete(DnsKey).where(DnsKey.catalog_id == catalog_id)`
+-- in disable_catalog_dnssec.
+DELETE FROM dns_keys WHERE catalog_id = $1;
+
+-- name: SetDnsCatalogZoneSigned :exec
+-- Used by disable-dnssec to clear the signed flag after the
+-- key delete. Separate from UpdateDnsCatalogZone so the handler
+-- doesn't have to thread enabled/name/etc. through unchanged.
+UPDATE dns_catalog_zones
+SET signed = $2, updated_at = NOW()
+WHERE id = $1;

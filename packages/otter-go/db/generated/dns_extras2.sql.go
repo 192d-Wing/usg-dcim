@@ -133,6 +133,25 @@ func (q *Queries) CountDnsBlocklistEntries(ctx context.Context, blocklistID uuid
 	return n, err
 }
 
+const listDnsBlocklistPatternsByID = `SELECT pattern FROM dns_blocklist_entries WHERE blocklist_id = $1`
+
+func (q *Queries) ListDnsBlocklistPatternsByID(ctx context.Context, blocklistID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listDnsBlocklistPatternsByID, blocklistID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			return nil, err
+		}
+		items = append(items, s)
+	}
+	return items, rows.Err()
+}
+
 // ---- DNS views ----
 
 const listDnsViews = `-- name: ListDnsViews :many

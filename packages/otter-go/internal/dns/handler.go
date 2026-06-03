@@ -43,6 +43,11 @@ type Querier interface {
 	GetDnsBlocklist(ctx context.Context, id uuid.UUID) (dbq.DnsBlocklist, error)
 	ListDnsBlocklistEntries(ctx context.Context, arg dbq.ListDnsBlocklistEntriesParams) ([]dbq.DnsBlocklistEntry, error)
 	CountDnsBlocklistEntries(ctx context.Context, blocklistID uuid.UUID) (int64, error)
+	ListDnsBlocklistPatternsByID(ctx context.Context, blocklistID uuid.UUID) ([]string, error)
+	GetDnsCatalogZone(ctx context.Context, id uuid.UUID) (dbq.DnsCatalogZone, error)
+	ListDnsKeyTagsByCatalog(ctx context.Context, catalogID uuid.UUID) ([]int32, error)
+	DeleteDnsKeysByCatalog(ctx context.Context, catalogID uuid.UUID) error
+	SetDnsCatalogZoneSigned(ctx context.Context, arg dbq.SetDnsCatalogZoneSignedParams) error
 	ListDnsViews(ctx context.Context, arg dbq.ListDnsViewsParams) ([]dbq.DnsView, error)
 	CountDnsViews(ctx context.Context, arg dbq.CountDnsViewsParams) (int64, error)
 	ListDnsHealthChecks(ctx context.Context, arg dbq.ListDnsHealthChecksParams) ([]dbq.DnsHealthCheck, error)
@@ -184,6 +189,16 @@ func scopedListFilter(r *http.Request, capCode string) (ids []uuid.UUID, ok bool
 	return ids, true
 }
 
+// Reused cap literals to satisfy SonarCloud's duplicate-string rule.
+// dns:keys:rotate is the trust-anchor mutation class (enable-dnssec,
+// disable-dnssec, rotate-key) for both zones and catalog zones —
+// shared deliberately so the role-picker UI grants/revokes all
+// DNSSEC mutations together.
+const (
+	capKeysRotate       = "dns:keys:rotate"
+	capBlocklistsUpdate = "dns:blocklists:update"
+)
+
 func (h *Handler) Mount(r chi.Router) {
 	// Python mounts the dns router with prefix `/dns`.
 	r.Route("/dns", func(r chi.Router) {
@@ -213,9 +228,9 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:zones:read")).Get("/zones/{id}/preview", h.previewZone)
 		r.With(auth.RequireCapability("dns:keys:read")).Get("/zones/{id}/keys", h.listZoneKeys)
 		r.With(auth.RequireCapability("dns:keys:read")).Get("/zones/{id}/ds-records", h.listZoneDsRecords)
-		r.With(auth.RequireCapability("dns:keys:rotate")).Post("/zones/{id}/enable-dnssec", h.enableDnssec)
-		r.With(auth.RequireCapability("dns:keys:rotate")).Post("/zones/{id}/disable-dnssec", h.disableDnssec)
-		r.With(auth.RequireCapability("dns:keys:rotate")).Post("/zones/{id}/rotate-key/{role}", h.rotateZoneKey)
+		r.With(auth.RequireCapability(capKeysRotate)).Post("/zones/{id}/enable-dnssec", h.enableDnssec)
+		r.With(auth.RequireCapability(capKeysRotate)).Post("/zones/{id}/disable-dnssec", h.disableDnssec)
+		r.With(auth.RequireCapability(capKeysRotate)).Post("/zones/{id}/rotate-key/{role}", h.rotateZoneKey)
 		r.With(auth.RequireCapability("dns:keys:delete")).Delete("/keys/{id}", h.deleteDnsKey)
 		r.With(auth.RequireCapability("dns:zones:update")).Post("/zones/{id}/import", h.importZone)
 		r.With(auth.RequireCapability("dns:zones:update")).Post("/zones/{id}/sync-from-ipam", h.syncFromIPAM)
@@ -243,12 +258,18 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("dns:catalog-zones:create")).Post("/catalog-zones", h.createCatalogZone)
 		r.With(auth.RequireCapability("dns:catalog-zones:update")).Patch("/catalog-zones/{id}", h.updateCatalogZone)
 		r.With(auth.RequireCapability("dns:catalog-zones:delete")).Delete("/catalog-zones/{id}", h.deleteCatalogZone)
+		// disable-dnssec is keyed under dns:keys:rotate to match
+		// Python — same cap as enable-dnssec on zones + on catalog
+		// zones; treats DNSSEC trust-anchor mutations as a single
+		// privilege class.
+		r.With(auth.RequireCapability(capKeysRotate)).Post("/catalog-zones/{id}/disable-dnssec", h.disableCatalogDnssec)
 
 		r.With(auth.RequireCapability("dns:blocklists:create")).Post("/blocklists", h.createBlocklist)
-		r.With(auth.RequireCapability("dns:blocklists:update")).Patch("/blocklists/{id}", h.updateBlocklist)
+		r.With(auth.RequireCapability(capBlocklistsUpdate)).Patch("/blocklists/{id}", h.updateBlocklist)
 		r.With(auth.RequireCapability("dns:blocklists:delete")).Delete("/blocklists/{id}", h.deleteBlocklist)
-		r.With(auth.RequireCapability("dns:blocklists:update")).Post("/blocklists/{id}/entries", h.createBlocklistEntry)
-		r.With(auth.RequireCapability("dns:blocklists:update")).Delete("/blocklists/{id}/entries/{entry_id}", h.deleteBlocklistEntry)
+		r.With(auth.RequireCapability(capBlocklistsUpdate)).Post("/blocklists/{id}/entries", h.createBlocklistEntry)
+		r.With(auth.RequireCapability(capBlocklistsUpdate)).Post("/blocklists/{id}/entries/bulk", h.bulkAddBlocklistEntries)
+		r.With(auth.RequireCapability(capBlocklistsUpdate)).Delete("/blocklists/{id}/entries/{entry_id}", h.deleteBlocklistEntry)
 
 		r.With(auth.RequireCapability("dns:views:create")).Post("/views", h.createView)
 		r.With(auth.RequireCapability("dns:views:update")).Patch("/views/{id}", h.updateView)

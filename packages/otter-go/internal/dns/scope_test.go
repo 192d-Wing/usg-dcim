@@ -24,6 +24,19 @@ type scopedFakeQ struct {
 func (s *scopedFakeQ) GetDnsZoneFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return s.fabric, nil
 }
+func (s *scopedFakeQ) ListDnsBlocklistPatternsByID(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (s *scopedFakeQ) GetDnsCatalogZone(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
+	return dbq.DnsCatalogZone{}, nil
+}
+func (s *scopedFakeQ) ListDnsKeyTagsByCatalog(_ context.Context, _ uuid.UUID) ([]int32, error) {
+	return nil, nil
+}
+func (s *scopedFakeQ) DeleteDnsKeysByCatalog(_ context.Context, _ uuid.UUID) error { return nil }
+func (s *scopedFakeQ) SetDnsCatalogZoneSigned(_ context.Context, _ dbq.SetDnsCatalogZoneSignedParams) error {
+	return nil
+}
 func (s *scopedFakeQ) GetDnsZone(_ context.Context, id uuid.UUID) (dbq.DnsZone, error) {
 	return dbq.DnsZone{ID: id, FabricID: s.fabric, Frozen: false}, nil
 }

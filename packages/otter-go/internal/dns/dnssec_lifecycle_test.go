@@ -35,6 +35,19 @@ type fakeLifecycleQ struct {
 func (f *fakeLifecycleQ) GetDnsZone(_ context.Context, _ uuid.UUID) (dbq.DnsZone, error) {
 	return f.zone, f.zoneErr
 }
+func (f *fakeLifecycleQ) ListDnsBlocklistPatternsByID(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return nil, nil
+}
+func (f *fakeLifecycleQ) GetDnsCatalogZone(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
+	return dbq.DnsCatalogZone{}, nil
+}
+func (f *fakeLifecycleQ) ListDnsKeyTagsByCatalog(_ context.Context, _ uuid.UUID) ([]int32, error) {
+	return nil, nil
+}
+func (f *fakeLifecycleQ) DeleteDnsKeysByCatalog(_ context.Context, _ uuid.UUID) error { return nil }
+func (f *fakeLifecycleQ) SetDnsCatalogZoneSigned(_ context.Context, _ dbq.SetDnsCatalogZoneSignedParams) error {
+	return nil
+}
 
 func (f *fakeLifecycleQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, _ uuid.UUID, role string) ([]dbq.DnsKeyRow, error) {
 	return f.activeByRole[role], nil

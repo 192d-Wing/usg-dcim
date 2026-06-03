@@ -2,8 +2,10 @@ package dns
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/auth"
 )
 
 type fakeQ struct {
@@ -28,6 +31,22 @@ type fakeQ struct {
 	lastPeer    dbq.ListBgpPeersParams
 	lastBind    dbq.ListAnycastBindingsParams
 	blGetErr    error
+	// Bulk blocklist add (PR 23).
+	bulkPatterns    []string
+	existingPats    []string
+	// Catalog disable-dnssec (PR 23).
+	catalogZone     dbq.DnsCatalogZone
+	catalogGetErr   error
+	catalogKeyTags  []int32
+	catalogDeleted  bool
+	catalogSignedSet *bool
+	// Call-ordering counters — read-tags MUST happen before delete-keys
+	// before set-signed; otherwise the retired_key_tags audit metadata
+	// is captured at the wrong moment.
+	catalogReadTagsAt  int
+	catalogDeletedAt   int
+	catalogSignedSetAt int
+	catalogCallCounter int
 }
 
 func (f *fakeQ) ListDnsZones(_ context.Context, a dbq.ListDnsZonesParams) ([]dbq.DnsZone, error) {
@@ -90,6 +109,33 @@ func (f *fakeQ) GetDnsBlocklist(_ context.Context, _ uuid.UUID) (dbq.DnsBlocklis
 		return dbq.DnsBlocklist{}, f.blGetErr
 	}
 	return dbq.DnsBlocklist{}, nil
+}
+func (f *fakeQ) ListDnsBlocklistPatternsByID(_ context.Context, _ uuid.UUID) ([]string, error) {
+	return f.existingPats, nil
+}
+func (f *fakeQ) GetDnsCatalogZone(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
+	if f.catalogGetErr != nil {
+		return dbq.DnsCatalogZone{}, f.catalogGetErr
+	}
+	return f.catalogZone, nil
+}
+func (f *fakeQ) ListDnsKeyTagsByCatalog(_ context.Context, _ uuid.UUID) ([]int32, error) {
+	f.catalogCallCounter++
+	f.catalogReadTagsAt = f.catalogCallCounter
+	return f.catalogKeyTags, nil
+}
+func (f *fakeQ) DeleteDnsKeysByCatalog(_ context.Context, _ uuid.UUID) error {
+	f.catalogCallCounter++
+	f.catalogDeletedAt = f.catalogCallCounter
+	f.catalogDeleted = true
+	return nil
+}
+func (f *fakeQ) SetDnsCatalogZoneSigned(_ context.Context, a dbq.SetDnsCatalogZoneSignedParams) error {
+	f.catalogCallCounter++
+	f.catalogSignedSetAt = f.catalogCallCounter
+	v := a.Signed
+	f.catalogSignedSet = &v
+	return nil
 }
 func (f *fakeQ) ListDnsBlocklistEntries(_ context.Context, a dbq.ListDnsBlocklistEntriesParams) ([]dbq.DnsBlocklistEntry, error) {
 	f.lastBLE = a
@@ -277,6 +323,7 @@ func (f *fakeQ) UpdateDnsBlocklist(_ context.Context, a dbq.UpdateDnsBlocklistPa
 }
 func (f *fakeQ) DeleteDnsBlocklist(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) CreateDnsBlocklistEntry(_ context.Context, a dbq.CreateDnsBlocklistEntryParams) (dbq.DnsBlocklistEntry, error) {
+	f.bulkPatterns = append(f.bulkPatterns, a.Pattern)
 	return dbq.DnsBlocklistEntry{ID: uuid.New(), BlocklistID: a.BlocklistID, Pattern: a.Pattern}, nil
 }
 func (f *fakeQ) DeleteDnsBlocklistEntry(_ context.Context, _ uuid.UUID) error { return nil }
@@ -331,6 +378,9 @@ func (f *fakeQ) GetDnsCatalogZoneFabricID(_ context.Context, _ uuid.UUID) (uuid.
 	return uuid.Nil, nil
 }
 func (f *fakeQ) GetDnsBlocklistFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
+	if f.blGetErr != nil {
+		return uuid.Nil, f.blGetErr
+	}
 	return uuid.Nil, nil
 }
 func (f *fakeQ) GetDnsBlocklistEntryFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
@@ -370,6 +420,24 @@ func (f *fakeQ) ListSiteIDsForExpansion(_ context.Context, _ dbq.ListSiteIDsForE
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f}).Mount(r)
+	return r
+}
+
+// fakeAudit captures audit.Record calls so PR 23's bulk_add and
+// disable-dnssec parity (action/target_type/target_id/metadata)
+// can be asserted directly rather than reviewed-only.
+type fakeAudit struct {
+	calls []dbq.InsertAuditLogParams
+}
+
+func (a *fakeAudit) InsertAuditLog(_ context.Context, p dbq.InsertAuditLogParams) error {
+	a.calls = append(a.calls, p)
+	return nil
+}
+
+func mountWithAudit(f *fakeQ, a *fakeAudit) http.Handler {
+	r := chi.NewRouter()
+	(&Handler{Q: f, Audit: a}).Mount(r)
 	return r
 }
 func do(t *testing.T, h http.Handler, p string) *httptest.ResponseRecorder {
@@ -577,5 +645,238 @@ func TestBadUUIDs(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: got %d", p, rec.Code)
 		}
+	}
+}
+
+// ===== PR 23: bulk blocklist entries + catalog disable-dnssec =====
+
+func postJSON(t *testing.T, h http.Handler, path, body string, caps ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	if len(caps) == 0 {
+		caps = []string{"*"}
+	}
+	req := httptest.NewRequest("POST", path, strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithPrincipal(req.Context(), auth.Principal{Capabilities: caps}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// Python normalizes patterns (trim+lowercase, drop empties, dedupe);
+// Go must match so threat-feed imports stay byte-equivalent.
+func TestBulkAddBlocklistEntries_NormalizesAndDedups(t *testing.T) {
+	f := &fakeQ{existingPats: []string{"baz.example."}}
+	id := uuid.New().String()
+	body := `{"patterns": ["  FOO.example. ", "foo.example.", "bar.example.", "baz.example.", "", "  "]}`
+	rec := postJSON(t, mount(f), "/dns/blocklists/"+id+"/entries/bulk", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct{ Added, Skipped int }
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	// Incoming deduped to 3 distinct (foo, bar, baz). baz already
+	// exists. Added = 2 (foo, bar), Skipped = 1 (baz).
+	if out.Added != 2 || out.Skipped != 1 {
+		t.Errorf("added/skipped: got %d/%d, want 2/1", out.Added, out.Skipped)
+	}
+	// Sort to match Python's `sorted(incoming - existing_set)` —
+	// pattern insert order is alphabetical.
+	if len(f.bulkPatterns) != 2 || f.bulkPatterns[0] != "bar.example." || f.bulkPatterns[1] != "foo.example." {
+		t.Errorf("insert order/values wrong: %v", f.bulkPatterns)
+	}
+}
+
+func TestBulkAddBlocklistEntries_EmptyAfterNormalizeNoOps(t *testing.T) {
+	f := &fakeQ{}
+	id := uuid.New().String()
+	rec := postJSON(t, mount(f), "/dns/blocklists/"+id+"/entries/bulk", `{"patterns": ["", "   "]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if len(f.bulkPatterns) != 0 {
+		t.Errorf("should NOT insert anything when normalized input is empty; got %v", f.bulkPatterns)
+	}
+}
+
+// patterns:[] is a caller bug per Python's pydantic min_length=1
+// — Go now matches with 400, not silent {0,0}.
+func TestBulkAddBlocklistEntries_EmptyListRejected(t *testing.T) {
+	f := &fakeQ{}
+	id := uuid.New().String()
+	rec := postJSON(t, mount(f), "/dns/blocklists/"+id+"/entries/bulk", `{"patterns": []}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("got %d, want 400 (Python pydantic min_length=1 parity)", rec.Code)
+	}
+}
+
+// Incoming entirely-duplicate: ListPatterns covers all, toAdd is
+// empty, CreateDnsBlocklistEntry is never called, audit still fires
+// with {added:0, skipped:N}. Guards against a diffPatterns regression
+// that mishandles set semantics (e.g., returning `existing` or
+// `incoming` instead of `incoming - existing`).
+func TestBulkAddBlocklistEntries_AllDuplicatesAuditOnly(t *testing.T) {
+	f := &fakeQ{existingPats: []string{"foo.example.", "bar.example."}}
+	id := uuid.New().String()
+	body := `{"patterns": ["foo.example.", "bar.example."]}`
+	rec := postJSON(t, mount(f), "/dns/blocklists/"+id+"/entries/bulk", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	if len(f.bulkPatterns) != 0 {
+		t.Errorf("CreateDnsBlocklistEntry must NOT be called when every pattern already exists; got %v", f.bulkPatterns)
+	}
+	var out struct{ Added, Skipped int }
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	if out.Added != 0 || out.Skipped != 2 {
+		t.Errorf("added/skipped: got %d/%d, want 0/2", out.Added, out.Skipped)
+	}
+}
+
+func TestBulkAddBlocklistEntries_BlocklistNotFound(t *testing.T) {
+	f := &fakeQ{blGetErr: pgx.ErrNoRows}
+	id := uuid.New().String()
+	rec := postJSON(t, mount(f), "/dns/blocklists/"+id+"/entries/bulk", `{"patterns":["x"]}`)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404 blocklist not found", rec.Code)
+	}
+}
+
+func TestBulkAddBlocklistEntries_RequiresCap(t *testing.T) {
+	f := &fakeQ{}
+	id := uuid.New().String()
+	rec := postJSON(t, mount(f), "/dns/blocklists/"+id+"/entries/bulk", `{"patterns":["x"]}`, "unrelated")
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("got %d, want 403 without dns:blocklists:update", rec.Code)
+	}
+}
+
+// disable-dnssec on an already-unsigned catalog is a no-op 204 with
+// no audit + no key DELETE — mirror Python's `if not catalog.signed: return`.
+func TestDisableCatalogDnssec_AlreadyUnsignedNoOp(t *testing.T) {
+	f := &fakeQ{catalogZone: dbq.DnsCatalogZone{ID: uuid.New(), FabricID: uuid.New(), Signed: false}}
+	rec := postJSON(t, mount(f), "/dns/catalog-zones/"+f.catalogZone.ID.String()+"/disable-dnssec", "")
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("got %d, want 204 no-op on unsigned catalog", rec.Code)
+	}
+	if f.catalogDeleted {
+		t.Error("DeleteDnsKeysByCatalog called on unsigned catalog")
+	}
+	if f.catalogSignedSet != nil {
+		t.Error("SetDnsCatalogZoneSigned called on unsigned catalog")
+	}
+}
+
+func TestDisableCatalogDnssec_SignedRetiresKeys(t *testing.T) {
+	cid := uuid.New()
+	f := &fakeQ{
+		catalogZone: dbq.DnsCatalogZone{
+			ID: cid, FabricID: uuid.New(), Signed: true,
+		},
+		catalogKeyTags: []int32{12345, 54321},
+	}
+	a := &fakeAudit{}
+	rec := postJSON(t, mountWithAudit(f, a), "/dns/catalog-zones/"+cid.String()+"/disable-dnssec", "")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	// Call ordering: read tags FIRST so the audit metadata captures
+	// the real retired set; then DELETE keys; then flip signed. A
+	// refactor that runs SetSigned before DELETE would corrupt the
+	// catalog state under concurrent reads, and a refactor that
+	// reads tags after DELETE would emit retired_key_tags=[].
+	if !(f.catalogReadTagsAt < f.catalogDeletedAt && f.catalogDeletedAt < f.catalogSignedSetAt) {
+		t.Errorf("call order wrong: readTags=%d delete=%d setSigned=%d (want read<delete<setSigned)",
+			f.catalogReadTagsAt, f.catalogDeletedAt, f.catalogSignedSetAt)
+	}
+	if f.catalogSignedSet == nil || *f.catalogSignedSet != false {
+		t.Errorf("signed flag not set to false: %v", f.catalogSignedSet)
+	}
+	// Audit shape parity with Python: action="dns_catalog_zone.disable_dnssec",
+	// target_type="dns_catalog_zone", target_id=catalog_id,
+	// metadata.retired_key_tags=[<ints>].
+	if len(a.calls) != 1 {
+		t.Fatalf("audit calls: got %d, want 1", len(a.calls))
+	}
+	c := a.calls[0]
+	if c.Action != "dns_catalog_zone.disable_dnssec" {
+		t.Errorf("audit action: got %q, want dns_catalog_zone.disable_dnssec", c.Action)
+	}
+	if c.TargetType == nil || *c.TargetType != "dns_catalog_zone" {
+		t.Errorf("audit target_type: got %v", c.TargetType)
+	}
+	if c.TargetID == nil || *c.TargetID != cid.String() {
+		t.Errorf("audit target_id: got %v, want %s", c.TargetID, cid)
+	}
+	// retired_key_tags is JSON-encoded into MetadataJson — decode and
+	// compare. Python encodes as a JSON int array.
+	var meta struct {
+		RetiredKeyTags []int `json:"retired_key_tags"`
+	}
+	if err := json.Unmarshal(c.MetadataJson, &meta); err != nil {
+		t.Fatalf("audit metadata not JSON: %v (raw=%s)", err, c.MetadataJson)
+	}
+	if len(meta.RetiredKeyTags) != 2 || meta.RetiredKeyTags[0] != 12345 || meta.RetiredKeyTags[1] != 54321 {
+		t.Errorf("retired_key_tags: got %v, want [12345 54321]", meta.RetiredKeyTags)
+	}
+}
+
+// Audit shape parity for bulk_add — note target_type is
+// "dns_blocklist" (the parent) even though the action namespace is
+// dns_blocklist_entry. Mirror of Python's audit.record call;
+// downstream audit consumers index events by target_type so this
+// asymmetry is deliberate.
+func TestBulkAddBlocklistEntries_AuditShape(t *testing.T) {
+	blID := uuid.New()
+	f := &fakeQ{}
+	// Stub the FabricID lookup to return a non-Nil fabric — the
+	// default Nil/nil branch above will still satisfy enforceFabric
+	// when the principal has "*", which is what postJSON uses.
+	a := &fakeAudit{}
+	body := `{"patterns": ["foo.example.", "bar.example."]}`
+	rec := postJSON(t, mountWithAudit(f, a), "/dns/blocklists/"+blID.String()+"/entries/bulk", body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	if len(a.calls) != 1 {
+		t.Fatalf("audit calls: got %d, want 1", len(a.calls))
+	}
+	c := a.calls[0]
+	if c.Action != "dns_blocklist_entry.bulk_add" {
+		t.Errorf("audit action: got %q", c.Action)
+	}
+	if c.TargetType == nil || *c.TargetType != "dns_blocklist" {
+		t.Errorf("audit target_type: got %v (must be dns_blocklist not dns_blocklist_entry — see Python parity)", c.TargetType)
+	}
+	if c.TargetID == nil || *c.TargetID != blID.String() {
+		t.Errorf("audit target_id: got %v, want %s", c.TargetID, blID)
+	}
+	var meta struct {
+		Added, Skipped int
+	}
+	if err := json.Unmarshal(c.MetadataJson, &meta); err != nil {
+		t.Fatalf("audit metadata: %v", err)
+	}
+	if meta.Added != 2 || meta.Skipped != 0 {
+		t.Errorf("audit metadata added/skipped: got %d/%d, want 2/0", meta.Added, meta.Skipped)
+	}
+}
+
+func TestDisableCatalogDnssec_NotFound(t *testing.T) {
+	f := &fakeQ{catalogGetErr: pgx.ErrNoRows}
+	id := uuid.New().String()
+	rec := postJSON(t, mount(f), "/dns/catalog-zones/"+id+"/disable-dnssec", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404 catalog not found", rec.Code)
+	}
+}
+
+func TestDisableCatalogDnssec_RequiresKeysRotateCap(t *testing.T) {
+	f := &fakeQ{catalogZone: dbq.DnsCatalogZone{ID: uuid.New(), FabricID: uuid.New(), Signed: true}}
+	rec := postJSON(t, mount(f), "/dns/catalog-zones/"+f.catalogZone.ID.String()+"/disable-dnssec", "", "dns:zones:update")
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("got %d, want 403 without dns:keys:rotate", rec.Code)
 	}
 }
