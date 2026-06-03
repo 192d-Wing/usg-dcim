@@ -544,41 +544,25 @@ class WorkerSettings:
         # dcim:notify:bridge. Runs every 5s; each tick pulls up to
         # _NOTIFY_BRIDGE_BATCH entries so a notification burst clears
         # quickly without holding the worker for long.
+        # Still on Python — Go scheduler has no Redis pubsub reader yet.
         cron(notify_bridge, second=set(range(0, 60, 5))),
-        cron(freshness_sweep, minute=set(range(0, 60, 5))),
-        # DHCP sync every 5 minutes; aging swept hourly so deprecated +
-        # already-stale rows don't pile up.
-        cron(dhcp_sync, minute=set(range(2, 60, 5))),
-        cron(dhcp_age_out, minute={7}),
-        # PR 81 — refresh persisted drift state. Default :09 / :24 /
-        # :39 / :54 (every 15 min, offset from the lease sync so the
-        # two cron groups don't pile up). Each tick walks every
-        # enabled DhcpServer; for tens of servers with tens of scopes
-        # each, well under a minute.
-        cron(dhcp_drift_check, minute={9, 24, 39, 54}),
         # PR 99 — IPAM utilization gauges. Every 5 min at :13/:18/...
-        # offset from the drift check + dhcp_sync so the worker
-        # doesn't pile up on a single minute boundary. Three SELECTs
-        # against the indexed columns; well under a second on
-        # realistic fleets.
+        # Still on Python — pending Go port.
         cron(ipam_utilization_sweep, minute=set(range(3, 60, 5))),
-        # PR 100 — DHCP tombstone purge runs once daily at 03:30 UTC
-        # (off-peak, after DNS ZSK rotation at 03:17 so the two
-        # heavier off-hours tasks don't pile up). Retention is
-        # configurable via settings.dhcp_tombstone_retention_days
-        # (default 30); zero or negative effectively disables.
-        cron(dhcp_scope_tombstone_purge, hour={3}, minute={30}),
-        # DNS IPAM-projection: 5 minutes offset from DHCP so a freshly-
-        # ingested lease has time to land before its DNS record renders.
-        cron(dns_sync_from_ipam, minute=set(range(4, 60, 5))),
-        # ZSK rotation once a day at 03:17 UTC — the cron skips zones
-        # whose policy hasn't elapsed, so a daily wakeup is cheap and
-        # avoids tight loops near boundary seconds.
-        cron(dns_rotate_zsks, hour={3}, minute={17}),
-        # Metrics retention runs hourly at :23 — far enough from the
-        # other DNS cron jobs that worker bursts don't pile up.
-        cron(dns_purge_metrics, minute={23}),
-        # RETIRED — moved to native Go services. Re-enable for rollback:
+        # RETIRED — Go scheduler (otter-go-scheduler subchart) owns
+        # these now. Function names stay registered in `functions:`
+        # above so operators can `arq` enqueue ad-hoc for rollback /
+        # one-shot runs without re-instating the cron entries.
+        #   freshness_sweep              → internal/scheduler/jobs/freshness
+        #   dhcp_sync                    → internal/scheduler/jobs/dhcpsync
+        #   dhcp_age_out                 → internal/scheduler/jobs/dhcpageout
+        #   dhcp_drift_check             → internal/scheduler/jobs/dhcpdriftcheck
+        #   dhcp_scope_tombstone_purge   → internal/scheduler/jobs/dhcptombstone
+        #   dns_sync_from_ipam           → internal/scheduler/jobs/dnssync
+        #   dns_rotate_zsks              → internal/scheduler/jobs/dnssecrotate
+        #   dns_purge_metrics            → internal/scheduler/jobs/dnspurge
+        #   dhcp_bundle_rerender         → internal/scheduler/jobs/dhcpbundle
+        # Previously retired (still listed for the rollback ledger):
         #   cron(evaluate_alerts, second={0, 30}),   # → services/go-alerts
         #   cron(sweep_collectors, second=15),        # → services/go-alerts
         #   cron(dns_health_checks, second={0, 30}),  # → services/go-dns-probe

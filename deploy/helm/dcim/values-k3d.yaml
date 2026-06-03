@@ -46,10 +46,9 @@ otter-go:
   podDisruptionBudget:
     enabled: false
 
-# Opt the lab cluster into the new Go scheduler so the harness gets
-# real validation alongside Python's arq. Both fire dns_purge_metrics
-# (Python at minute=23, Go default same) — DELETE is idempotent so
-# the overlap is wasted-work, not corruption.
+# Default-on now that the matching arq crons are retired from
+# packages/otter/src/dcim/worker.py — kept here for parity with the
+# prod values block.
 otter-go-scheduler:
   enabled: true
 

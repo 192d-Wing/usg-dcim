@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from dcim import worker
 
 
@@ -19,22 +21,18 @@ def test_dhcp_drift_check_is_registered_in_worker_functions():
     assert worker.dhcp_drift_check in worker.WorkerSettings.functions
 
 
+@pytest.mark.skip(reason="cron moved to otter-go-scheduler (internal/scheduler/jobs/dhcpdriftcheck)")
 def test_dhcp_drift_check_has_a_cron_entry():
-    # The cron list carries CronJob objects (one per cron() call).
-    # Each carries a .coroutine attribute pointing at the registered
-    # task; we walk them to confirm dhcp_drift_check is scheduled.
     coros = [
         getattr(c, "coroutine", None) for c in worker.WorkerSettings.cron_jobs
     ]
     assert worker.dhcp_drift_check in coros
 
 
+@pytest.mark.skip(reason="cron moved to otter-go-scheduler (internal/scheduler/jobs/dhcpdriftcheck)")
 def test_dhcp_drift_check_cron_cadence_runs_four_times_per_hour():
-    # 15-minute cadence. If this number changes the operator-doc
-    # paragraph in PR 81's commit message goes stale.
     for c in worker.WorkerSettings.cron_jobs:
         if getattr(c, "coroutine", None) is worker.dhcp_drift_check:
-            # arq stores the minute set on .minute (set[int]).
             assert len(c.minute) == 4
             break
     else:

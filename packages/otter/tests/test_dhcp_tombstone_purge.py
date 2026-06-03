@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
+
 from dcim import worker
 from dcim.settings import Settings
 
@@ -18,6 +20,7 @@ def test_dhcp_scope_tombstone_purge_is_registered():
     assert worker.dhcp_scope_tombstone_purge in worker.WorkerSettings.functions
 
 
+@pytest.mark.skip(reason="cron moved to otter-go-scheduler (internal/scheduler/jobs/dhcptombstone)")
 def test_dhcp_scope_tombstone_purge_has_a_cron_entry():
     coros = [
         getattr(c, "coroutine", None) for c in worker.WorkerSettings.cron_jobs
@@ -25,10 +28,8 @@ def test_dhcp_scope_tombstone_purge_has_a_cron_entry():
     assert worker.dhcp_scope_tombstone_purge in coros
 
 
+@pytest.mark.skip(reason="cron moved to otter-go-scheduler (internal/scheduler/jobs/dhcptombstone)")
 def test_dhcp_scope_tombstone_purge_runs_once_daily():
-    # Off-peak daily — minute={30} hour={3}. Once a day is plenty;
-    # the worst-case extra retention is 24h of accumulated tombstones
-    # past the cutoff before the next run picks them up.
     for c in worker.WorkerSettings.cron_jobs:
         if getattr(c, "coroutine", None) is worker.dhcp_scope_tombstone_purge:
             assert c.minute == {30}

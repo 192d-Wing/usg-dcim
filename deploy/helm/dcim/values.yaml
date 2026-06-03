@@ -123,12 +123,15 @@ otter-go:
   # values.yaml; override here only when a deployment needs different.
 
 otter-go-scheduler:
-  # Disabled by default — Python's arq worker is still firing the
-  # same crons today. Set to true once a deployment is ready to
-  # validate the Go scheduler alongside arq (the dns_purge_metrics
-  # job is idempotent so brief overlap is safe). Follow-up PRs
-  # disable matching arq cron entries once the Go side is verified.
-  enabled: false
+  # Default-on now that the matching arq crons are retired from
+  # packages/otter/src/dcim/worker.py. The Go scheduler owns:
+  #   dns_purge_metrics, freshness_sweep, dns_sync_from_ipam,
+  #   dhcp_scope_tombstone_purge, dns_rotate_zsks, dhcp_bundle_rerender,
+  #   dhcp_drift_check, dhcp_sync, dhcp_age_out.
+  # Still on Python's arq:
+  #   notify_bridge (5s pubsub drain — needs a Go Redis pubsub reader)
+  #   ipam_utilization_sweep (5min — pending Go port)
+  enabled: true
 
 otter-worker:
   enabled: true
