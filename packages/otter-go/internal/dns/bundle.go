@@ -20,14 +20,17 @@ import (
 )
 
 // BundleResult mirrors Python's render_bundle_for_server dict
-// return at services/dns.py L2464. Wire shape matches byte-for-byte
-// for the auth-server case; recursive fields (Gobgp,
-// AnycastPrefixes) are nil/empty on auth.
+// return at services/dns.py L2464, minus the deprecated `gobgp`
+// field (PR #257 deprecated GoBGP across the stack — Cilium BGP
+// owns route advertisement at the cluster level; the in-pod
+// gobgpd process is gone, and badger no longer reads or writes
+// gobgp.yaml). Etag is computed without gobgp so a stale Python-
+// rendered Gobgp value from before the cutover can't keep the
+// recursive bundle from re-keying.
 type BundleResult struct {
 	Engine          string            `json:"engine"`
 	Corefile        string            `json:"corefile"`
 	Zones           map[string]string `json:"zones"`
-	Gobgp           any               `json:"gobgp"`
 	KeyFiles        map[string]string `json:"key_files"`
 	Etag            string            `json:"etag"`
 	DnstapSocket    *string           `json:"dnstap_socket"`
@@ -149,7 +152,6 @@ func AssembleAuthBundle(in AuthBundleInput) (BundleResult, error) {
 		Engine:          "coredns",
 		Corefile:        corefile,
 		Zones:           zoneFiles,
-		Gobgp:           nil,
 		KeyFiles:        keyFiles,
 		Etag:            etag,
 		DnstapSocket:    in.DnstapSocket,

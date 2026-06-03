@@ -124,7 +124,6 @@ func AssembleRecursiveBundle(in RecursiveBundleInput) BundleResult {
 		Engine:          engine,
 		Corefile:        corefile,
 		Zones:           zoneFiles,
-		Gobgp:           nil, // deprecated — Cilium BGP owns it
 		KeyFiles:        map[string]string{},
 		Etag:            etag,
 		DnstapSocket:    nil, // Hickory has no dnstap; CoreDNS recursive doesn't emit either
@@ -201,19 +200,37 @@ func loadRecursiveBundleInput(
 		return in, err
 	}
 
-	fwdRows, err := q.ListDnsForwardersForBundle(ctx, server.FabricID)
+	if err := loadFwdAndBlocklists(ctx, q, server.FabricID, &in); err != nil {
+		return in, err
+	}
+
+	if engine == "hickory" {
+		applyHickoryFields(&in, fabric, cfg)
+	}
+
+	return in, nil
+}
+
+// loadFwdAndBlocklists fetches the conditional forwarders + enabled
+// blocklists for the fabric and translates the raw row shapes into
+// the assembler-input types. Pulled out so loadRecursiveBundleInput
+// stays under SonarCloud's cognitive-complexity cap.
+func loadFwdAndBlocklists(
+	ctx context.Context, q recursiveBundleQuerier,
+	fabricID uuid.UUID, in *RecursiveBundleInput,
+) error {
+	fwdRows, err := q.ListDnsForwardersForBundle(ctx, fabricID)
 	if err != nil {
-		return in, fmt.Errorf("forwarders: %w", err)
+		return fmt.Errorf("forwarders: %w", err)
 	}
 	for _, row := range fwdRows {
 		var ups []string
 		_ = json.Unmarshal(row.Upstreams, &ups)
 		in.Forwarders = append(in.Forwarders, ConditionalForwarder{Pattern: row.ZonePattern, Upstreams: ups})
 	}
-
-	blRows, err := q.ListEnabledBlocklistsWithPatternsByFabric(ctx, server.FabricID)
+	blRows, err := q.ListEnabledBlocklistsWithPatternsByFabric(ctx, fabricID)
 	if err != nil {
-		return in, fmt.Errorf("blocklists: %w", err)
+		return fmt.Errorf("blocklists: %w", err)
 	}
 	for _, row := range blRows {
 		var patterns []string
@@ -225,12 +242,7 @@ func loadRecursiveBundleInput(
 			SinkIPv6: row.SinkIPv6,
 		})
 	}
-
-	if engine == "hickory" {
-		applyHickoryFields(&in, fabric, cfg)
-	}
-
-	return in, nil
+	return nil
 }
 
 // applyHickoryFields copies the Hickory-only listener + ACL knobs

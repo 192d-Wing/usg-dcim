@@ -126,101 +126,22 @@ func TestBundleEtag_AnycastSortedDeterministic(t *testing.T) {
 	}
 }
 
-// ===== GoBGP JSON canonical encoding =====
-
-func TestBundleEtag_GobgpKeyOrderCanonical(t *testing.T) {
-	// Same dict, different insertion order → same etag. Python's
-	// json.dumps(sort_keys=True) sorts; Go's canonicalJSON must too.
-	a := BundleEtag(EtagInput{
-		Corefile: "",
-		Gobgp:    map[string]any{"local_as": 65000, "router_id": "10.0.0.1"},
-	})
-	b := BundleEtag(EtagInput{
-		Corefile: "",
-		Gobgp:    map[string]any{"router_id": "10.0.0.1", "local_as": 65000},
-	})
-	if a != b {
-		t.Errorf("gobgp dict key order must not matter: %s vs %s", a, b)
-	}
-}
-
-// Python's json.dumps(default) does NOT HTML-escape; Go's default
-// json.Marshal DOES. The renderer must use SetEscapeHTML(false) so
-// strings containing `<` `>` `&` produce the same bytes.
-func TestBundleEtag_GobgpStringNoHTMLEscape(t *testing.T) {
-	// We can't directly observe the bytes hashed (sha256 is one-way),
-	// but we can prove the renderer doesn't HTML-escape by checking
-	// that a tag containing `&` etag-matches whatever Python's
-	// json.dumps for the same input would hash.
-	// Pin via test-against-fixture: this etag value was computed by
-	// running BundleEtag once with this exact input; if a future
-	// change causes a regression to default HTML-escaping, this
-	// fails. (See PR #216 — DHCP bundle hit the same trap.)
-	val := map[string]any{
-		"comment": "a < b & c > d",
-	}
-	got := BundleEtag(EtagInput{Corefile: "", Gobgp: val})
-	// Recompute manually using the same algorithm (proves the
-	// no-HTML-escape path produces a stable value).
-	expected := manualBundleEtag(t, EtagInput{Corefile: "", Gobgp: val})
-	if got != expected {
-		t.Errorf("HTML-escape behavior diverged from manual computation:\nwant %s\ngot  %s", expected, got)
-	}
-}
-
-func TestBundleEtag_GobgpNestedMap(t *testing.T) {
-	in := EtagInput{
-		Corefile: "",
-		Gobgp: map[string]any{
-			"global": map[string]any{
-				"router_id": "10.0.0.1",
-				"as":        65000,
-			},
-			"neighbors": []any{
-				map[string]any{"peer_as": 65001, "neighbor_address": "10.0.0.2"},
-			},
-		},
-	}
-	got := BundleEtag(in)
-	if len(got) != 32 {
-		t.Errorf("nested gobgp dict must still produce 32-char etag; got %d", len(got))
-	}
-	// Re-key-order at the nested level → same etag.
-	in2 := EtagInput{
-		Corefile: "",
-		Gobgp: map[string]any{
-			"neighbors": []any{
-				map[string]any{"neighbor_address": "10.0.0.2", "peer_as": 65001},
-			},
-			"global": map[string]any{
-				"as":        65000,
-				"router_id": "10.0.0.1",
-			},
-		},
-	}
-	if got != BundleEtag(in2) {
-		t.Error("nested gobgp key reorder must not change etag")
-	}
-}
+// PR 36 dropped the Gobgp field — Cilium BGP owns route
+// advertisement; the in-pod gobgpd is gone. canonicalJSON itself is
+// still useful for any future generic-JSON etag input, so the
+// canonicalJSON tests below stay.
 
 // manualBundleEtag computes the etag directly via the same SHA-256
-// + 0x00 separator + canonical JSON formula as BundleEtag, so we
-// can verify the production function's output independent of any
-// implementation refactor. Used to pin no-HTML-escape behavior
-// without committing a golden hex string that gets brittle on
-// algorithm changes.
+// + 0x00 separator formula as BundleEtag, so we can verify the
+// production function's output independent of any implementation
+// refactor. Used in tests that pin etag-stability properties without
+// committing a golden hex string that gets brittle on algorithm
+// changes.
 func manualBundleEtag(t *testing.T, in EtagInput) string {
 	t.Helper()
 	h := sha256.New()
 	h.Write([]byte(in.Corefile))
 	h.Write([]byte{0x00})
-	if in.Gobgp != nil {
-		buf, err := canonicalJSON(in.Gobgp)
-		if err != nil {
-			t.Fatal(err)
-		}
-		h.Write(buf)
-	}
 	return hex.EncodeToString(h.Sum(nil))[:32]
 }
 

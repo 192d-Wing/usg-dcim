@@ -58,16 +58,15 @@ func TestAssembleRecursive_HickoryPathRendersRpzZoneFiles(t *testing.T) {
 	}
 }
 
-// GoBGP deprecation: Gobgp is always nil. AnycastPrefixes also nil
-// because the recursive assembler no longer surfaces them (the
-// agent's RIB-reconcile loop is gone — Cilium owns the BGP session).
-func TestAssembleRecursive_GobgpAndAnycastNil(t *testing.T) {
+// PR 36 dropped the gobgp wire field entirely. The recursive
+// bundle no longer surfaces anycast_prefixes either — the agent's
+// RIB-reconcile loop is gone (PR #257; Cilium BGP owns the session
+// at the cluster level). Pin those two negatives so a future
+// re-introduction of either field on the recursive path fails.
+func TestAssembleRecursive_AnycastNil(t *testing.T) {
 	out := AssembleRecursiveBundle(RecursiveBundleInput{
 		Engine: "coredns", Now: time.Unix(1700000000, 0).UTC(),
 	})
-	if out.Gobgp != nil {
-		t.Errorf("gobgp must be nil (Cilium BGP owns advertisement); got %v", out.Gobgp)
-	}
 	if out.AnycastPrefixes != nil {
 		t.Errorf("anycast_prefixes must be nil on recursive bundles; got %v", out.AnycastPrefixes)
 	}
