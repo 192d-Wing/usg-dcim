@@ -13,9 +13,28 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
+	"github.com/usg-dcim/packages/otter-go/internal/audit"
 	"github.com/usg-dcim/packages/otter-go/internal/auth"
 	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
+
+// fakeAudit captures InsertAuditLog calls so abort tests can assert
+// that a region_deployment.abort row was (or wasn't) written. Other
+// tests in this file keep Audit: nil because read paths don't record.
+type fakeAudit struct {
+	rows []dbq.InsertAuditLogParams
+}
+
+func (a *fakeAudit) InsertAuditLog(_ context.Context, p dbq.InsertAuditLogParams) error {
+	a.rows = append(a.rows, p)
+	return nil
+}
+
+func mountWithAudit(f *fakeQ, a audit.Recorder) http.Handler {
+	r := chi.NewRouter()
+	(&Handler{Q: f, Audit: a}).Mount(r)
+	return r
+}
 
 type fakeQ struct {
 	list           []dbq.RegionDeploymentSummary
@@ -27,6 +46,9 @@ type fakeQ struct {
 	events         []dbq.RegionDeploymentEvent
 	lastEventArg   dbq.ListRegionDeploymentEventsParams
 	siteRegionErr  error
+	abortRow       dbq.AbortRegionDeploymentRow
+	abortErr       error
+	abortCalls     int
 }
 
 func (f *fakeQ) ListRegionDeployments(_ context.Context, a dbq.ListRegionDeploymentsParams) ([]dbq.RegionDeploymentSummary, error) {
@@ -62,6 +84,11 @@ func (f *fakeQ) ListSiteGroupIDsForSite(_ context.Context, _ uuid.UUID) ([]uuid.
 	return nil, nil
 }
 
+func (f *fakeQ) AbortRegionDeployment(_ context.Context, _ uuid.UUID) (dbq.AbortRegionDeploymentRow, error) {
+	f.abortCalls++
+	return f.abortRow, f.abortErr
+}
+
 // audit.Recorder satisfaction: nothing exercises it on reads, but the
 // Handler struct requires it. Stub returns nil.
 func (f *fakeQ) Record(_ context.Context, _ ...any) error { return nil }
@@ -75,6 +102,14 @@ func mount(f *fakeQ) http.Handler {
 func doReq(t *testing.T, h http.Handler, p auth.Principal, path string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := authtest.Request(http.MethodGet, path, p, nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func doPost(t *testing.T, h http.Handler, p auth.Principal, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := authtest.Request(http.MethodPost, path, p, nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
@@ -282,5 +317,167 @@ func TestListEvents_NotFound(t *testing.T) {
 	rec := doReq(t, mount(f), wildcardP(), "/region-deployments/"+uuid.New().String()+"/events")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+// ─── Abort ──────────────────────────────────────────────────────────────
+
+func TestAbort_OK_ReturnsReloadedDetail_AndEmitsAudit(t *testing.T) {
+	id, sid := uuid.New(), uuid.New()
+	f := &fakeQ{
+		getRow: dbq.RegionDeployment{
+			ID: id, SiteID: sid, Name: "edge-7", Status: "aborted",
+		},
+		abortRow: dbq.AbortRegionDeploymentRow{PriorStatus: "provisioning", Updated: 1},
+	}
+	a := &fakeAudit{}
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if f.abortCalls != 1 {
+		t.Errorf("expected one AbortRegionDeployment call, got %d", f.abortCalls)
+	}
+	var body detailOut
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	// Response must be the post-abort reload — status field should
+	// reflect the new state, mirroring Python's _reload(...) return.
+	if body.Status != "aborted" {
+		t.Errorf("expected reloaded status=aborted, got %q", body.Status)
+	}
+	// detailOut shape parity with GET /{id}: nil slices/config must
+	// serialize as `[]` / `{}` so finch doesn't see nulls on a fresh
+	// deploy with no nodes/services yet.
+	raw := rec.Body.Bytes()
+	for _, want := range []string{`"nodes":[]`, `"services":[]`, `"config":{}`} {
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Errorf("response missing %q; body=%s", want, raw)
+		}
+	}
+	// Exactly one audit row, with the Python-parity action name and
+	// the deployment's site id.
+	if len(a.rows) != 1 {
+		t.Fatalf("expected one audit row, got %d", len(a.rows))
+	}
+	got := a.rows[0]
+	if got.Action != "region_deployment.abort" {
+		t.Errorf("Action wrong: %q", got.Action)
+	}
+	if got.TargetType == nil || *got.TargetType != "region_deployment" {
+		t.Errorf("TargetType wrong: %v", got.TargetType)
+	}
+	if got.TargetID == nil || *got.TargetID != id.String() {
+		t.Errorf("TargetID wrong: %v", got.TargetID)
+	}
+	if got.SiteID == nil || *got.SiteID != sid {
+		t.Errorf("SiteID wrong: %v", got.SiteID)
+	}
+}
+
+func TestAbort_TerminalState_422_NoAudit(t *testing.T) {
+	id, sid := uuid.New(), uuid.New()
+	f := &fakeQ{
+		getRow:   dbq.RegionDeployment{ID: id, SiteID: sid, Status: "ready"},
+		abortRow: dbq.AbortRegionDeploymentRow{PriorStatus: "ready", Updated: 0},
+	}
+	a := &fakeAudit{}
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("ready")) {
+		t.Errorf("error message should name the prior status; body=%s", rec.Body.String())
+	}
+	if len(a.rows) != 0 {
+		t.Errorf("422 must not write an audit row; got %d", len(a.rows))
+	}
+}
+
+func TestAbort_AlreadyAborted_422(t *testing.T) {
+	id, sid := uuid.New(), uuid.New()
+	f := &fakeQ{
+		getRow:   dbq.RegionDeployment{ID: id, SiteID: sid, Status: "aborted"},
+		abortRow: dbq.AbortRegionDeploymentRow{PriorStatus: "aborted", Updated: 0},
+	}
+	rec := doPost(t, mount(f), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAbort_NotFound_NoAudit(t *testing.T) {
+	f := &fakeQ{getErr: pgx.ErrNoRows}
+	a := &fakeAudit{}
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+uuid.New().String()+"/abort")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("got %d", rec.Code)
+	}
+	if f.abortCalls != 0 {
+		t.Errorf("must not mutate a missing row")
+	}
+	if len(a.rows) != 0 {
+		t.Errorf("404 must not write an audit row; got %d", len(a.rows))
+	}
+}
+
+func TestAbort_RaceDeletedBetweenScopeAndUpdate_404(t *testing.T) {
+	// Row exists at the scope-check but is deleted before the
+	// conditional UPDATE runs — the CTE returns no row → ErrNoRows.
+	id, sid := uuid.New(), uuid.New()
+	f := &fakeQ{
+		getRow:   dbq.RegionDeployment{ID: id, SiteID: sid, Status: "pending"},
+		abortErr: pgx.ErrNoRows,
+	}
+	a := &fakeAudit{}
+	rec := doPost(t, mountWithAudit(f, a), wildcardP(), "/region-deployments/"+id.String()+"/abort")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 on race, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if f.abortCalls != 1 {
+		t.Errorf("race coverage requires AbortRegionDeployment to actually be invoked; got %d", f.abortCalls)
+	}
+	if len(a.rows) != 0 {
+		t.Errorf("race-404 must not write an audit row; got %d", len(a.rows))
+	}
+}
+
+func TestAbort_BadID_400(t *testing.T) {
+	rec := doPost(t, mount(&fakeQ{}), wildcardP(), "/region-deployments/not-a-uuid/abort")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+func TestAbort_OutOfScope_403_NoAudit(t *testing.T) {
+	id, sid, otherSite := uuid.New(), uuid.New(), uuid.New()
+	f := &fakeQ{getRow: dbq.RegionDeployment{ID: id, SiteID: sid, Status: "pending"}}
+	scope := auth.Scope{SiteIDs: map[uuid.UUID]struct{}{otherSite: {}}}
+	p := authtest.PrincipalWithScopes([]string{capAbort}, map[string]auth.Scope{capAbort: scope})
+	a := &fakeAudit{}
+	rec := doPost(t, mountWithAudit(f, a), p, "/region-deployments/"+id.String()+"/abort")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if f.abortCalls != 0 {
+		t.Errorf("must not mutate when scope denies")
+	}
+	if len(a.rows) != 0 {
+		t.Errorf("403 must not write an audit row; got %d", len(a.rows))
+	}
+}
+
+func TestAbort_NoCap_403(t *testing.T) {
+	id, sid := uuid.New(), uuid.New()
+	f := &fakeQ{getRow: dbq.RegionDeployment{ID: id, SiteID: sid, Status: "pending"}}
+	// Has :read but not :abort — the cap gate on the route must reject.
+	p := authtest.PrincipalWithCaps(capRead)
+	rec := doPost(t, mount(f), p, "/region-deployments/"+id.String()+"/abort")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if f.abortCalls != 0 {
+		t.Errorf("must not mutate without abort capability")
 	}
 }
