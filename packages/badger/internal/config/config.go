@@ -111,17 +111,20 @@ type Device struct {
 
 // DNSServerConfig mirrors collector/dcim_collector/config.py:DnsServerConfig.
 // One entry per CoreDNS / Hickory deployment the agent renders configs
-// for. Phase 4 implements bundle apply + metrics scrape + dnstap + anycast.
+// for. Phase 4 implements bundle apply + metrics scrape + dnstap.
+//
+// GoBGP deprecation: the prior gobgp_pidfile + gobgp_api_host fields
+// are gone. Cilium BGP owns the BGP session at the cluster level —
+// the in-pod gobgpd process no longer runs, so there's nothing for
+// the agent to PID-signal or RIB-reconcile.
 type DNSServerConfig struct {
-	ID              uuid.UUID `yaml:"id"`
-	Role            string    `yaml:"role"` // auth | recursive
-	OutputDir       string    `yaml:"output_dir"`
-	CoreDNSPIDFile  string    `yaml:"coredns_pidfile,omitempty"`
-	GoBGPPIDFile    string    `yaml:"gobgp_pidfile,omitempty"`
-	MetricsURL      string    `yaml:"metrics_url,omitempty"`
-	MetricsEnabled  *bool     `yaml:"metrics_enabled,omitempty"`
-	DnstapSocket    string    `yaml:"dnstap_socket,omitempty"`
-	GoBGPAPIHost    string    `yaml:"gobgp_api_host,omitempty"`
+	ID             uuid.UUID `yaml:"id"`
+	Role           string    `yaml:"role"` // auth | recursive
+	OutputDir      string    `yaml:"output_dir"`
+	CoreDNSPIDFile string    `yaml:"coredns_pidfile,omitempty"`
+	MetricsURL     string    `yaml:"metrics_url,omitempty"`
+	MetricsEnabled *bool     `yaml:"metrics_enabled,omitempty"`
+	DnstapSocket   string    `yaml:"dnstap_socket,omitempty"`
 }
 
 func (s *DNSServerConfig) MetricsOn() bool {

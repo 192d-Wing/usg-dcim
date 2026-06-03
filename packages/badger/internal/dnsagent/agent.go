@@ -23,11 +23,15 @@ import (
 //   - serverLoop:    poll bundle, apply on etag change
 //   - metricsLoop:   scrape Prom endpoint, POST delta + top-K
 //   - dnstapLoop:    listen on dnstap socket, fold into top-K
-//   - advertiseLoop: reconcile gobgpd RIB to bundle's anycast prefixes
 //
 // All return cleanly when ctx is cancelled. metricsLoop + dnstapLoop
-// + advertiseLoop are skipped per-server when their preconditions
-// aren't met (metrics_enabled=false, no dnstap socket, no gobgp host).
+// are skipped per-server when their preconditions aren't met
+// (metrics_enabled=false, no dnstap socket).
+//
+// GoBGP deprecation: the prior advertiseLoop is gone. Cilium BGP
+// advertises recursive DNS at the cluster level via
+// CiliumBGPPeeringPolicy + CiliumLoadBalancerIPPool, so the in-pod
+// gobgpd + RIB reconciler are obsolete.
 func Run(ctx context.Context, cfg *config.Config, token string, rt *runtime.Config, log *slog.Logger) {
 	if !cfg.DNS.Enabled || len(cfg.DNS.Servers) == 0 {
 		log.Info("dns_agent_disabled")
@@ -36,7 +40,6 @@ func Run(ctx context.Context, cfg *config.Config, token string, rt *runtime.Conf
 	}
 	apiBase := cfg.APIBase()
 	client := &http.Client{Timeout: 30 * time.Second}
-	anycast := newAnycastState()
 	reservoir := newTopK()
 
 	var wg sync.WaitGroup
@@ -47,7 +50,7 @@ func Run(ctx context.Context, cfg *config.Config, token string, rt *runtime.Conf
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			serverLoop(ctx, cfg, s, apiBase, client, token, anycast, slog)
+			serverLoop(ctx, cfg, s, apiBase, client, token, slog)
 		}()
 		if cfg.DNS.MetricsEnabled && s.MetricsOn() && s.MetricsURL != "" {
 			wg.Add(1)
@@ -63,13 +66,6 @@ func Run(ctx context.Context, cfg *config.Config, token string, rt *runtime.Conf
 				dnstapLoop(ctx, s, reservoir, slog)
 			}()
 		}
-		if s.Role == "recursive" && s.GoBGPAPIHost != "" {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				advertiseLoop(ctx, s, anycast, slog)
-			}()
-		}
 	}
 	wg.Wait()
 }
@@ -79,13 +75,13 @@ func serverLoop(
 	ctx context.Context,
 	cfg *config.Config, s *config.DNSServerConfig,
 	apiBase string, client *http.Client, token string,
-	anycast *anycastState, log *slog.Logger,
+	log *slog.Logger,
 ) {
 	log.Info("dns_agent_server_start", "output", s.OutputDir)
 	interval := cfg.DNS.PollInterval()
 	var lastEtag string
 	for {
-		err := serverCycle(ctx, s, apiBase, client, token, anycast, &lastEtag, log)
+		err := serverCycle(ctx, s, apiBase, client, token, &lastEtag, log)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Warn("dns_agent_cycle_failed", "err", err)
 			postStatus(ctx, client, apiBase, s.ID.String(), token, "error", err.Error(), lastEtag)
@@ -99,7 +95,7 @@ func serverLoop(
 func serverCycle(
 	ctx context.Context, s *config.DNSServerConfig,
 	apiBase string, client *http.Client, token string,
-	anycast *anycastState, lastEtag *string, log *slog.Logger,
+	lastEtag *string, log *slog.Logger,
 ) error {
 	bundle, err := fetchBundle(ctx, client, apiBase, s.ID.String(), *lastEtag, token)
 	if err != nil {
@@ -122,12 +118,11 @@ func serverCycle(
 	if err := applyBundle(s, bundle); err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}
-	resolverOK, gobgpOK := signalReloads(s, engine)
-	anycast.set(s.ID.String(), bundle.AnycastPrefixes)
+	resolverOK := signalReloads(s, engine)
 	*lastEtag = bundle.Etag
 	log.Info("dns_bundle_applied",
 		"engine", engine, "etag", bundle.Etag,
-		"resolver_reloaded", resolverOK, "gobgp_reloaded", gobgpOK,
+		"resolver_reloaded", resolverOK,
 	)
 	postStatus(ctx, client, apiBase, s.ID.String(), token, "ok", "", bundle.Etag)
 	return nil
@@ -261,25 +256,6 @@ func dnstapLoop(ctx context.Context, s *config.DNSServerConfig, reservoir *topK,
 			log.Warn("dnstap_loop_restart", "err", err)
 		}
 		if ctxSleep(ctx, 2*time.Second) {
-			return
-		}
-	}
-}
-
-// advertiseLoop reconciles gobgpd's RIB to the bundle's most-recent
-// desired prefixes every 30s. A drift (operator removes a prefix by
-// hand) gets healed on the next tick.
-func advertiseLoop(ctx context.Context, s *config.DNSServerConfig, anycast *anycastState, log *slog.Logger) {
-	log.Info("advertise_loop_start", "gobgp_api_host", s.GoBGPAPIHost)
-	for {
-		desired := anycast.get(s.ID.String())
-		added, removed, errs := reconcileAdvertise(ctx, s, desired)
-		if len(added) > 0 || len(removed) > 0 || len(errs) > 0 {
-			log.Info("anycast_reconcile",
-				"desired", desired, "added", added, "removed", removed, "errors", errs,
-			)
-		}
-		if ctxSleep(ctx, 30*time.Second) {
 			return
 		}
 	}

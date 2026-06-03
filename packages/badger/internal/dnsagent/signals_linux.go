@@ -13,24 +13,23 @@ import (
 	"github.com/usg-dcim/packages/badger/internal/config"
 )
 
-// signalReloads sends the resolver + GoBGP the reload signals each
-// process expects. CoreDNS reloads on SIGUSR1, Hickory on SIGHUP,
-// GoBGP also on SIGHUP. Resolver PID comes from the pidfile when set;
-// for Hickory (no pidfile) we fall back to scanning /proc for the
-// binary name. Production deployments run the collector with `pid:
-// host` so it can see the resolver's PID namespace directly.
-func signalReloads(server *config.DNSServerConfig, engine string) (resolverReloaded, gobgpReloaded bool) {
+// signalReloads sends the resolver the reload signal it expects.
+// CoreDNS reloads on SIGUSR1, Hickory on SIGHUP. Resolver PID comes
+// from the pidfile when set; for Hickory (no pidfile) we fall back
+// to scanning /proc for the binary name. Production deployments run
+// the collector with `pid: host` so it can see the resolver's PID
+// namespace directly.
+//
+// GoBGP deprecation: the prior gobgpd SIGHUP path is gone. Cilium
+// BGP owns the BGP session at the cluster level; the in-pod gobgpd
+// process no longer runs.
+func signalReloads(server *config.DNSServerConfig, engine string) (resolverReloaded bool) {
 	resolverPID := resolvePID(server, engine)
 	var resolverSig syscall.Signal = syscall.SIGUSR1 // CoreDNS
 	if engine == "hickory" {
 		resolverSig = syscall.SIGHUP
 	}
-	resolverReloaded = kill(resolverPID, resolverSig)
-
-	if server.Role == "recursive" {
-		gobgpReloaded = kill(readPID(server.GoBGPPIDFile), syscall.SIGHUP)
-	}
-	return
+	return kill(resolverPID, resolverSig)
 }
 
 func resolvePID(server *config.DNSServerConfig, engine string) int {
