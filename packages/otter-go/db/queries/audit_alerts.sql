@@ -79,6 +79,18 @@ WHERE (sqlc.narg(site_scope_id)::uuid IS NULL OR site_scope_id = sqlc.narg(site_
 -- ===== Alerts =====
 -- alerts.site_id is NOT NULL per migration 0002, so the scope filter
 -- is the straightforward fabric-pattern shape.
+-- name: GetAlert :one
+-- Single-row fetch the notify_bridge cron uses to hydrate an alert
+-- payload pulled off the dcim:notify:bridge Redis queue. Same column
+-- shape as ListAlerts so the dispatcher fan-out can reuse the row.
+SELECT id, rule_id, site_id, asset_id, collector_id,
+       severity::text AS severity, state::text AS state,
+       dedupe_key, correlation_key, summary, detail,
+       first_seen_at, last_seen_at, acked_by, acked_at, resolved_at,
+       labels_json, created_at, updated_at
+FROM alerts
+WHERE id = $1;
+
 -- name: ListAlerts :many
 SELECT id, rule_id, site_id, asset_id, collector_id,
        severity::text AS severity, state::text AS state,

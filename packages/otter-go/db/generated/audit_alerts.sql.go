@@ -198,6 +198,27 @@ func (q *Queries) CountAlertRules(ctx context.Context, arg CountAlertRulesParams
 
 // ---- Alerts ----
 
+const getAlert = `-- name: GetAlert :one
+SELECT id, rule_id, site_id, asset_id, collector_id,
+       severity::text AS severity, state::text AS state,
+       dedupe_key, correlation_key, summary, detail,
+       first_seen_at, last_seen_at, acked_by, acked_at, resolved_at,
+       labels_json, created_at, updated_at
+FROM alerts
+WHERE id = $1
+`
+
+func (q *Queries) GetAlert(ctx context.Context, id uuid.UUID) (Alert, error) {
+	row := q.db.QueryRow(ctx, getAlert, id)
+	var a Alert
+	err := row.Scan(&a.ID, &a.RuleID, &a.SiteID, &a.AssetID, &a.CollectorID,
+		&a.Severity, &a.State, &a.DedupeKey, &a.CorrelationKey,
+		&a.Summary, &a.Detail,
+		&a.FirstSeenAt, &a.LastSeenAt, &a.AckedBy, &a.AckedAt, &a.ResolvedAt,
+		&a.LabelsJson, &a.CreatedAt, &a.UpdatedAt)
+	return a, err
+}
+
 const listAlerts = `-- name: ListAlerts :many
 SELECT id, rule_id, site_id, asset_id, collector_id,
        severity::text AS severity, state::text AS state,

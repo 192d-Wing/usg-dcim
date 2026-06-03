@@ -47,6 +47,35 @@ const countNotificationChannels = `-- name: CountNotificationChannels :one
 SELECT count(*)::bigint FROM notification_channels
 `
 
+const listEnabledNotificationChannels = `-- name: ListEnabledNotificationChannels :many
+SELECT id, name, kind::text AS kind, config_json,
+       severity_to_text(min_severity) AS min_severity,
+       notify_on_fire, notify_on_resolve, enabled,
+       created_at, updated_at
+FROM notification_channels
+WHERE enabled = true
+ORDER BY name
+`
+
+func (q *Queries) ListEnabledNotificationChannels(ctx context.Context) ([]NotificationChannel, error) {
+	rows, err := q.db.Query(ctx, listEnabledNotificationChannels)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationChannel
+	for rows.Next() {
+		var c NotificationChannel
+		if err := rows.Scan(&c.ID, &c.Name, &c.Kind, &c.ConfigJson,
+			&c.MinSeverity, &c.NotifyOnFire, &c.NotifyOnResolve, &c.Enabled,
+			&c.CreatedAt, &c.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, c)
+	}
+	return items, rows.Err()
+}
+
 func (q *Queries) CountNotificationChannels(ctx context.Context) (int64, error) {
 	row := q.db.QueryRow(ctx, countNotificationChannels)
 	var n int64

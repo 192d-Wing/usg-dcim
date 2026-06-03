@@ -56,6 +56,8 @@ spec:
             - { name: DCIM_DNS_ROTATE_ZSKS_CRON,       value: {{ .Values.dnsRotateZsks.cron | quote }} }
             - { name: DCIM_DHCP_BUNDLE_RERENDER_CRON,  value: {{ .Values.dhcpBundleRerender.cron | quote }} }
             - { name: DCIM_IPAM_UTILIZATION_CRON,      value: {{ .Values.ipamUtilization.cron | quote }} }
+            - { name: DCIM_NOTIFY_BRIDGE_CRON,         value: {{ .Values.notifyBridge.cron | quote }} }
+            - { name: DCIM_REDIS_DSN,                  value: {{ .Values.global.redis.dsn | quote }} }
           readinessProbe: {{- toYaml .Values.readinessProbe | nindent 12 }}
           livenessProbe:  {{- toYaml .Values.livenessProbe  | nindent 12 }}
           resources:      {{- toYaml .Values.resources      | nindent 12 }}
