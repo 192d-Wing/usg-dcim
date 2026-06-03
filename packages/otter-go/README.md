@@ -38,31 +38,39 @@ packages/otter-go/
 └── Containerfile
 ```
 
-## Schema ownership during migration
+## Schema ownership
 
-**Alembic in [packages/otter](../otter) is the source of truth for the
-schema.** otter-go reads the same DB. We do not run goose alongside
-Alembic — two migration systems against one database is how data-loss
-incidents happen. goose adoption is gated on every router moving to
-otter-go (see migration doc).
+**[cmd/otter-go-migrate](cmd/otter-go-migrate) is the source of truth
+for the schema** — a Go binary that embeds 67 goose .sql migrations
+and runs them via `goose up`. Alembic was retired in PR #277 along
+with the rest of the Python; the bootstrap shim handles the cutover
+from the alembic_version table.
 
 ## Regenerating queries
 
-`db/generated/` was hand-written to match what `sqlc generate` would
-emit. Before adding more queries, run sqlc for real **once** so the
-canonical output replaces the hand-written version:
+Adding a new query? Run `sqlc generate` locally against a Postgres
+that's been migrated by `otter-go-migrate`, then commit both the
+query and the regenerated `db/generated/`:
 
 ```sh
-# 1. Dump the live Alembic-managed schema sqlc needs for type inference.
-#    Run against any DB that's caught up to `alembic upgrade head`.
-pg_dump -s -O -x -d "$DCIM_POSTGRES_DSN_RAW" > packages/otter-go/db/schema.sql
+# 1. Spin up Postgres (any way — docker, podman, brew, k3d…) and set
+#    DCIM_POSTGRES_DSN to a connection string that can reach it.
 
-# 2. Regenerate.
-cd packages/otter-go/db && sqlc generate
+# 2. Apply migrations.
+go run ./cmd/otter-go-migrate -cmd up
 
-# 3. Commit schema.sql + the regenerated db/generated/.
+# 3. Dump the schema sqlc needs for type inference.
+pg_dump -s -O -x -d "$DCIM_POSTGRES_DSN" > db/schema.sql
+
+# 4. Regenerate.
+cd db && sqlc generate
+
+# 5. Commit db/generated/ (schema.sql is gitignored).
 ```
 
-CI has a `sqlc-drift` job that's a no-op until `db/schema.sql` lands;
-once committed, the job runs `sqlc generate` and fails the build on
-any diff in `db/generated/`. So step 3 is the bit that arms the gate.
+CI does **not** currently validate sqlc drift — the old `sqlc-drift`
+job was waiting on an alembic schema dump that never landed, and
+after the alembic→goose cutover the dump path is gone entirely. A
+Postgres-in-CI replacement (service container + the workflow above)
+is a tracked follow-up; until it lands, the contract is "regenerate
+before you commit query changes".
