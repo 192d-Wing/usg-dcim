@@ -1,0 +1,23 @@
+{{- if and .Values.enabled .Values.global.monitoring.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "otter-go-scheduler.fullname" . }}
+  namespace: {{ .Values.global.monitoring.serviceMonitor.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "otter-go-scheduler.labels" . | nindent 4 }}
+    {{- with .Values.global.monitoring.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels: {{- include "otter-go-scheduler.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.global.monitoring.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.global.monitoring.serviceMonitor.scrapeTimeout }}
+{{- end }}

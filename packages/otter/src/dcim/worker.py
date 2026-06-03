@@ -546,9 +546,6 @@ class WorkerSettings:
         # quickly without holding the worker for long.
         # Still on Python — Go scheduler has no Redis pubsub reader yet.
         cron(notify_bridge, second=set(range(0, 60, 5))),
-        # PR 99 — IPAM utilization gauges. Every 5 min at :13/:18/...
-        # Still on Python — pending Go port.
-        cron(ipam_utilization_sweep, minute=set(range(3, 60, 5))),
         # RETIRED — Go scheduler (otter-go-scheduler subchart) owns
         # these now. Function names stay registered in `functions:`
         # above so operators can `arq` enqueue ad-hoc for rollback /
@@ -562,6 +559,7 @@ class WorkerSettings:
         #   dns_rotate_zsks              → internal/scheduler/jobs/dnssecrotate
         #   dns_purge_metrics            → internal/scheduler/jobs/dnspurge
         #   dhcp_bundle_rerender         → internal/scheduler/jobs/dhcpbundle
+        #   ipam_utilization_sweep       → internal/scheduler/jobs/ipamutilization
         # Previously retired (still listed for the rollback ledger):
         #   cron(evaluate_alerts, second={0, 30}),   # → services/go-alerts
         #   cron(sweep_collectors, second=15),        # → services/go-alerts

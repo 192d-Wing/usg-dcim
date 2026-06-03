@@ -7,6 +7,7 @@ host route, /32 host), and the gauge definitions + scrape output.
 
 from __future__ import annotations
 
+import pytest
 from prometheus_client import generate_latest
 
 from dcim import metrics, worker
@@ -147,6 +148,7 @@ def test_ipam_utilization_sweep_is_registered():
     assert worker.ipam_utilization_sweep in worker.WorkerSettings.functions
 
 
+@pytest.mark.skip(reason="cron moved to otter-go-scheduler (internal/scheduler/jobs/ipamutilization)")
 def test_ipam_utilization_sweep_has_cron_entry():
     coros = [
         getattr(c, "coroutine", None) for c in worker.WorkerSettings.cron_jobs
@@ -154,10 +156,10 @@ def test_ipam_utilization_sweep_has_cron_entry():
     assert worker.ipam_utilization_sweep in coros
 
 
+@pytest.mark.skip(reason="cron moved to otter-go-scheduler (internal/scheduler/jobs/ipamutilization)")
 def test_ipam_utilization_sweep_cron_cadence_is_every_5_minutes():
     for c in worker.WorkerSettings.cron_jobs:
         if getattr(c, "coroutine", None) is worker.ipam_utilization_sweep:
-            # range(3, 60, 5) → 12 minute marks per hour.
             assert len(c.minute) == 12
             break
     else:
