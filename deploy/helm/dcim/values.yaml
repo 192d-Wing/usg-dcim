@@ -336,21 +336,15 @@ ingress:
         - path: /api/v1/alerts
           pathType: Prefix
           backend: otter-go
-        # /api/v1/dns/bgp-peers/* moves to otter-go (this PR). The
-        # rest of /api/v1/dns/* stays on Python until the DNS module
-        # is fully cut over (zones/records/keys/health-checks/anycast-
-        # bindings are still Python-canonical). nginx-ingress
-        # longest-prefix routing peels off bgp-peers before the bare
-        # /api → otter catch-all wins for the rest of /dns. The four
-        # Go routes (list/create/patch/delete) already exist on
-        # otter-go and have full parity with Python — same ABAC
-        # (dns:bgp-peers:<verb>), same Asn/TcpAoKeyChain FK
-        # validation (Asn checks run inside CreateBgpPeer's SQL
-        # and surface as 4xx via httpx.Mapped), same anycast-binding
-        # in-use → 409 conflict on delete (FK violation maps to 409
-        # post-PR-#198). Python's /bgp-peers handlers in api/dns.py
-        # are removed in this PR so the route owner is unambiguous.
-        - path: /api/v1/dns/bgp-peers
+        # PR 33 cutover: full /api/v1/dns/* on otter-go. The
+        # bundle-renderer port (PRs #247-#255) finally closed the
+        # last gap. Auth-server bundle endpoint is feature-complete;
+        # recursive servers return 501 until GoBGP YAML + RPZ zone
+        # + recursive engine helpers port in a follow-up. The
+        # broader prefix supersedes the /api/v1/dns/bgp-peers Prefix
+        # from PR #214 (still routes to the same backend, just via
+        # the broader rule).
+        - path: /api/v1/dns
           pathType: Prefix
           backend: otter-go
         # Notifications module fully on otter-go after the test
@@ -366,8 +360,6 @@ ingress:
         - path: /api/v1/notifications
           pathType: Prefix
           backend: otter-go
-<<<<<<< HEAD
-<<<<<<< HEAD
         # PR 19 cutover: organization + stencils on otter-go. Both
         # had full Go parity already (organization CRUD in
         # internal/organization; stencils LIST in internal/stencils);
@@ -378,51 +370,34 @@ ingress:
         - path: /api/v1/stencils
           pathType: Prefix
           backend: otter-go
-        # PR 20 cutover: /api/v1/power on otter-go. The Go handler now
-        # matches Python's audit shape (action="power.connect"/
-        # "power.disconnect", target_type="outlet", asset_id metadata)
-        # and the catalog-advertised capability codes
-        # (power:outlets:{read,create,delete}) which finch's
-        # power-chain-panel.tsx already checks for UI gating.
+        # PR 20 cutover: /api/v1/power on otter-go.
         - path: /api/v1/power
           pathType: Prefix
           backend: otter-go
-        # PR 21 cutover: /api/v1/collectors on otter-go. The Go
-        # handler now matches Python's enroll-token shape ("enroll_"
-        # + token_urlsafe(32) → sha256 hash stored in
-        # collectors.enrollment_token_hash), the healthy/degraded
-        # status flip on heartbeat (degraded when last_error is set),
-        # and the audit shape for collector.enroll. The list/get/
-        # config/enabled/decommission paths were already on Go (PR 44).
+        # PR 21 cutover: /api/v1/collectors on otter-go.
         - path: /api/v1/collectors
-=======
-        # PR 22 cutover: /api/v1/ingest/telemetry on otter-go. This
-        # is the JSON fallback path; heron remains the canonical mTLS
-        # bulk path. The Go handler matches Python's wire shape
-        # ({accepted, errors, received_at}) and freshness-then-samples
-        # write order. DCIM_TELEMETRY_WRITE_HYPERTABLE=false on stock
-        # Postgres without TimescaleDB → freshness still updates,
-        # samples are skipped, errors:true mirrors Python's behavior.
-        - path: /api/v1/ingest
->>>>>>> 887b77b (port+cutover(ingest): /api/v1/ingest/telemetry JSON fallback on otter-go)
           pathType: Prefix
           backend: otter-go
-        # Region-deploy read-side split. Detail GET + paginated event
-        # history move to otter-go now; LIST + CREATE + the lifecycle
-        # endpoints (preflight/start/abort/SSE/kubeconfig callback)
-        # stay on Python until the Go scheduler + arq client are in
-        # place (followups). nginx-ingress sorts by longest prefix so
-        # the Python sub-path rules below win for the named lifecycle
-        # subpaths even though both ends share the bare prefix.
-=======
-        # Region-deploy read-side + create (LIST + POST on bare
-        # collection) on otter-go. Remaining on Python: preflight,
-        # start, abort, SSE, kubeconfig-callback (each ports in its
-        # own follow-up).
+        # PR 22 cutover: /api/v1/ingest/telemetry on otter-go.
+        - path: /api/v1/ingest
+          pathType: Prefix
+          backend: otter-go
+        # PR 33 cutover: /api/v1/dns/* fully on otter-go (the bundle
+        # endpoint + the rest of the zones/records/keys/health-checks/
+        # anycast-bindings/blocklists/views/forwarders/catalog-zones
+        # surface). The longer-prefix /api/v1/dns/bgp-peers rule
+        # collapses into this broader rule; auth servers are feature-
+        # complete, recursive servers return 501 until the GoBGP + RPZ
+        # + recursive engine helpers port in a follow-up.
+        - path: /api/v1/dns
+          pathType: Prefix
+          backend: otter-go
+        # Region-deploy read-side + abort + create + preflight + SSE +
+        # kubeconfig-callback on otter-go. Remaining on Python: start
+        # (it still needs the arq → Go scheduler equivalent).
         # nginx-ingress sorts by longest prefix so the Python sub-path
         # rules below win for the named lifecycle subpaths even though
         # both ends share the bare prefix.
->>>>>>> dd825e1 (port+cutover(regiondeploy): POST /region-deployments on otter-go (PR 2 of N))
         #
         # UUID character class is [0-9A-Fa-f-] so both upper- and
         # lower-case ids match the otter-go rules consistently

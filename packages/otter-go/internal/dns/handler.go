@@ -207,6 +207,12 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Get("/records", h.listRecords)
 		r.Get("/servers", h.listServers)
 		r.Get("/servers/{id}", h.getServer)
+		// PR 33 cutover: bundle endpoint, collector-facing. The
+		// dns:servers:bundle capability matches Python's
+		// require_capability call at api/dns.py L1099 — separate
+		// from dns:servers:read so the collector token's grant
+		// stays narrowly scoped to bundle pulls.
+		r.With(auth.RequireCapability("dns:servers:bundle")).Get("/servers/{id}/bundle", h.getDnsServerBundle)
 		r.Get("/anycast-groups", h.listAnycastGroups)
 		r.Get("/forwarders", h.listForwarders)
 		r.Get("/catalog-zones", h.listCatalogZones)
