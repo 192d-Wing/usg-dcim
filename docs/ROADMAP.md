@@ -33,9 +33,8 @@ What's shipped on `main`:
 - Telemetry samples live in a **TimescaleDB `telemetry_samples` hypertable** in the same Postgres database as inventory: monthly chunks, columnar compression after 7 days, 24-month retention, hourly continuous aggregate, freshness tracking. Migration 0046 set this up; the full OpenSearch → Timescale cutover (writes and all three reader paths) completed in PRs #42, #45, #46, #47, #48 and OpenSearch was removed in the follow-up PR.
 - Idempotent batch ingest, freshness tracking per device.
 - Alert engine: threshold rules with duration, dedup, suppression, maintenance windows, collector-down sweep.
-- arq Python worker with cron jobs (alert eval, collector sweep, freshness).
 - Go ports of hot loops: `go-ingest`, `go-alerts`, `go-dns-probe` — additive, traffic-shifted at cutover (see [services/README.md](../services/README.md)).
-- Full **otter-go** backend at `packages/otter-go/`: the long-running Python→Go migration of the main API has now cut over the Auth, Audit, Admin, Telemetry-read, Search, Inventory, Dashboards, BGP, Alerts, Notifications, and `/dns/bgp-peers` surfaces. A separate `otter-go-scheduler` binary runs six ported cron jobs (DNS purge metrics, freshness sweep, DNS sync from IPAM, DHCP tombstone purge, DNS ZSK rotation, DHCP bundle rerender). See "Python → Go backend migration" below for the full status.
+- Full **otter-go** backend at `packages/otter-go/`: the Python→Go migration is complete. Every former Python router lives on Go (Auth, Audit, Admin, Telemetry-read, Search, Inventory, Dashboards, BGP, Alerts, Notifications, DNS, DHCP, IPAM, LIR, collectors, ingest, organizations, stencils, power). A separate `otter-go-scheduler` binary runs every former arq cron job. The final Python rip + alembic→goose cutover landed in PRs #276 / #279 / #280; `packages/otter/` is gone from `main`.
 - Notifications: webhook, Slack, email adapters with per-channel fire/resolve filters and severity routing.
 
 ### Site collector
@@ -73,7 +72,7 @@ What's shipped on `main`:
 
 ### Production hardening (formerly Phase 2)
 
-- GitHub Actions CI: ruff + pytest (backend), vitest (frontend), container builds, Helm lint, alembic up→down→up reversibility gate.
+- GitHub Actions CI: vitest (finch), Go build/vet/test matrix across every Go package, container builds, Helm lint, CodeQL on Go + JS/TS, SonarCloud quality gate.
 - Real OIDC against Keycloak (with pre-seeded realm in compose): code exchange, JWKS validation, nonce + at_hash, refresh-token rotation, RFC 8176 `amr` MFA.
 - Notifications service with webhook / Slack / email adapters and per-channel routing.
 - Helm chart at `deploy/helm/dcim/` (api, worker, ingest, frontend, migrations job, NetworkPolicy templates, `values-k3d.yaml`).
@@ -105,72 +104,51 @@ All three remaining items are blocked on upstream releases. They each have a doc
 
 ---
 
-## Python → Go backend migration (in flight)
+## Python → Go backend migration (COMPLETE)
 
 Goal: retire `packages/otter/` (Python FastAPI + SQLAlchemy + arq) in favor of
 `packages/otter-go/` (Go chi + pgx + sqlc + robfig/cron). Driven by performance,
-maintainability, and a smaller deployable surface. Migration runs as
-PR-per-endpoint with unit-test parity; each cutover is an ingress flip plus a
+maintainability, and a smaller deployable surface. Migration ran as
+PR-per-endpoint with unit-test parity; each cutover was an ingress flip plus a
 Python deletion (no parallel-write window).
 
-The work is **not a discrete phase** — it ran alongside Phase 1-2 from late
-2026-Q1 and is roughly 70% complete as of 2026-06. The remaining items here
-are the long tail, ordered by what unblocks the most downstream Python
-deletion.
+**Status as of 2026-06-03: done.** The final wave landed in:
 
-### Cut over (Python routers retired)
+- **PR #270** — `ipam_utilization_sweep` ported to `otter-go-scheduler`.
+- **PR #271** — `notify_bridge` (5s Redis pubsub drain) ported.
+- **PR #267** — `POST /region-deployments/{id}/start` cut over; Python's
+  regiondeploy API trimmed to dead code.
+- **PR #276** — Region-deploy surface ripped entirely (orchestrator + 12-file
+  Python module + Go module + helm subchart + ~12k lines).
+- **PR #279** — Final Python rip: `packages/otter/` and `packages/mole/`
+  deleted; alembic replaced by an embedded-goose runner
+  (`packages/otter-go/cmd/otter-go-migrate/`) with 67 translated migrations
+  and an `alembic_version → goose_db_version` bootstrap shim for cutover DBs.
+  ~32k lines deleted.
+- **PR #280** — Dead `sqlc-drift` CI gate retired; `sqlc.yaml` + otter-go
+  README updated to point at the goose migrations as schema source of truth.
 
-| Surface | Notes |
+`packages/otter/` no longer exists on `main`. The umbrella chart no longer
+mounts an otter container or otter-worker subchart. CI no longer runs ruff
+or pytest. Workspace languages: **Go + TypeScript only**.
+
+### What stayed Python-free but kept
+
+The DB models (`packages/otter/src/dcim/models/`) and Alembic version
+history are gone from the codebase; the equivalent column definitions live
+in the goose `.sql` files at
+`packages/otter-go/cmd/otter-go-migrate/migrations/`. The schema itself is
+unchanged — `cmd/otter-go-migrate -cmd up` against a fresh database
+produces the same shape as the final alembic head, and the bootstrap shim
+handles in-place cutover of any DB last touched by alembic.
+
+### Follow-ups from the rip (not blocking)
+
+| Item | Why |
 |---|---|
-| `/api/v1/auth/*` | OIDC, JWKS, refresh, /me — otter-go canonical since PR #179. |
-| `/api/v1/audit/*` | Server-paged audit log + filters (PR #180). |
-| `/api/v1/admin/*` | Users, roles, scope assignments, OIDC mappings, capabilities/catalog, system DNS settings (PRs #182 + #184). |
-| `/api/v1/telemetry/series` | Read-side moved (PR #178); ingest stays on Python via `/api/v1/ingest/telemetry`. |
-| `/api/v1/search` | Global search across four buckets + IP-parse path (PR #187). |
-| `/api/v1/dashboards/*` | Enterprise + free-space + sites/at-risk + assets/sites/racks detail + 3 forecast endpoints (PRs #188–#194). |
-| `/api/v1/inventory/*` | Sites, regions, buildings, rooms, rows, racks, assets — cables PATCH closed the last gap (PRs #195, #197, #198). |
-| `/api/v1/lir` + `/api/v1/ipam/supernets/{id}/move` | LIR catalog + tenant supernet relocation (PR 175). |
-| `/api/v1/bgp/*` | Full BGP catalog: ASNs, prefix-lists, community-lists, route-maps + entries; TCP-AO keychains + keys + rotate-batch (PRs #203 + #204 + #205 + #206). |
-| `/api/v1/alerts/*` | List/ack + rules CRUD + maintenance-windows CRUD (PR #207). Alert evaluation loop still on Python's arq. |
-| `/api/v1/notifications/*` | Channels CRUD + test endpoint (PR #215). Channel test reuses the dispatcher service; STARTTLS default fixed in port. |
-| `/api/v1/dns/bgp-peers` | Sub-prefix cutover (PR #214). The rest of `/dns/*` still routes to Python. |
-
-### Six cron jobs ported to `otter-go-scheduler`
-
-| Job | Cadence | Notes |
-|---|---|---|
-| `dns_purge_metrics` | hourly `:23` | Migration 0067 adds a missing index (PR #208). |
-| `freshness_sweep` | every 5 min | Constant-memory single-UPDATE instead of Python's load-loop (PR #210). |
-| `dns_sync_from_ipam` | every 5 min `:04-:59` | Re-projects IPAM allocations into source=ipam DNS records (PR #211). |
-| `dhcp_scope_tombstone_purge` | daily `03:30` | Migration 0068 adds a partial index `WHERE deleted_at IS NOT NULL` (PR #212). |
-| `dns_rotate_zsks` | daily `03:17` | Reuses the operator-driven `RotateZoneKey` helper (PR #213). |
-| `dhcp_bundle_rerender` | every 2 min | Renders + caches the Kea config bundle per server; HTTP endpoint short-circuits on the cache (PR #219). |
-
-### Remaining Python — ordered by likely cutover
-
-| Priority | Surface | Why it's still on Python |
-|---|---|---|
-| **High** | DHCP push to Kea (`api/ipam.py /dhcp/scopes/*/push`, `/dhcp/servers/*/sync`, `/dhcp/scopes/*/diff`) | Stateful Kea Control Agent integration (~5000 lines across `services/dhcp_push.py` + `dhcp_drift_summary.py` + `dhcp_reconcile.py`). The bundle work (PRs #216–#220) ported the **read-side**; the **write-side** to Kea is the heavier port. Also pulls in five DHCP arq cron entries (`dhcp_sync`, `dhcp_age_out`, `dhcp_drift_check`, plus the existing `dhcp_scope_tombstone_purge` already on Go, plus `ipam_utilization_sweep`). ~20-25 PRs. |
-| **Medium** | Region-deploy lifecycle (6 of 9 routes) | POST create/start/abort/preflight, kubeconfig callback, SSE event stream. Now unblocked because the Go scheduler exists; the SSE endpoint needs a Go-native streaming shape. ~5-10 PRs. |
-| **Medium** | DNS module beyond `/dns/bgp-peers` | Zones, records, keys, health-checks, anycast-bindings — large surface but all CRUD. Most handlers are dark code on Go already; mostly an ingress + Python deletion exercise once parity is audited. ~3-5 PRs. |
-| **Medium** | `notify_bridge` arq cron | Drains notification events the magpie alerts service pushes onto `dcim:notify:bridge`. Runs every 5s on Python today; would slot into otter-go-scheduler alongside the existing six cron jobs. ~1 PR. |
-| **Lower** | IPAM mutation parity | Most ipam mutations are on Go; remaining gaps are FK-validation messages + the `bulk` paths. ~2-3 PRs. |
-| **Infrastructure** | Alembic → Go migration tool | 68 versions to migrate or co-own. Atlas, Goose, or hand-rolled. Decision deferred until the Python deletion endgame. |
-
-**Not in this table because they're already shipped on Go**, despite older docs
-suggesting otherwise: the alert-evaluation loop and the collector-down sweep
-both run in the standalone `packages/magpie/` binary (referenced as
-`services/go-alerts` in older READMEs); the DNS health-check probes run in
-`packages/beagle/` (`services/go-dns-probe`); telemetry ingest runs in the Go
-ingest path. The Python `worker.py` cron registrations for `evaluate_alerts`,
-`sweep_collectors`, and `dns_health_checks` are commented out as `# RETIRED`
-in lines 558-561. If you're auditing whether a Python `services/*.py` module
-is dead code, check the cron list AND the standalone Go binaries before
-assuming work is needed.
-
-**Definition of done for the migration:** `packages/otter/` is deleted from
-`main`; the umbrella chart no longer mounts the otter container; CI loses the
-`otter (ruff + pytest)` job.
+| Postgres-in-CI for sqlc drift | The Postgres + goose + `sqlc generate` workflow that would replace the retired sqlc-drift gate also requires regenerating every committed `db/generated/*.sql.go` against a modern sqlc, which produces a hundreds-of-lines diff with `pgtype` wrappers and would surface at least one real pre-existing bug (`InsertAuditLog` writes to `audit_logs` plural; the table is `audit_log` singular). Wants its own focused PR. |
+| `docker compose` migrations service | After the rip, the compose stack no longer auto-applies the schema on `up`. Local dev path is `go run ./packages/otter-go/cmd/otter-go-migrate -cmd up` against the compose Postgres. Wire as a one-shot service when the UX bites. |
+| Goose Postgres integration test | The marker + version-uniqueness + DSN tests cover the static surface of the migrate binary. A Postgres service container that actually runs `goose up` against a fresh DB would catch SQL-parser regressions the static tests can't. Same Postgres setup as the sqlc-drift follow-up. |
 
 ---
 
@@ -280,4 +258,4 @@ These come up but we're not chasing them:
 
 ---
 
-*Last updated: 2026-06-01. Edit me as plans change.*
+*Last updated: 2026-06-03. Edit me as plans change.*
