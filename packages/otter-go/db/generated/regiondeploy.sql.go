@@ -231,7 +231,6 @@ func (q *Queries) ListRegionDeploymentEvents(ctx context.Context, arg ListRegion
 	return items, rows.Err()
 }
 
-
 const abortRegionDeployment = `-- name: AbortRegionDeployment :one
 WITH cur AS (
     SELECT status::text AS prior_status
@@ -386,4 +385,39 @@ func (q *Queries) CreateRegionDeploymentEvent(ctx context.Context, arg CreateReg
 	var e RegionDeploymentEvent
 	err := row.Scan(&e.ID, &e.Stage, &e.Level, &e.Message, &e.Payload, &e.CreatedAt)
 	return e, err
+}
+
+const startRegionDeployment = `-- name: StartRegionDeployment :one
+WITH cur AS (
+    SELECT status::text AS prior_status
+    FROM region_deployments
+    WHERE id = $1
+), upd AS (
+    UPDATE region_deployments
+    SET status = 'preflight'::region_deployment_status,
+        last_error = NULL,
+        updated_at = NOW()
+    WHERE id = $1
+      AND status IN ('pending'::region_deployment_status,
+                     'failed'::region_deployment_status,
+                     'aborted'::region_deployment_status)
+    RETURNING site_id
+)
+SELECT cur.prior_status,
+       (SELECT count(*) FROM upd)::bigint AS updated,
+       (SELECT site_id FROM upd) AS site_id
+FROM cur
+`
+
+type StartRegionDeploymentRow struct {
+	PriorStatus string     `json:"prior_status"`
+	Updated     int64      `json:"updated"`
+	SiteID      *uuid.UUID `json:"site_id"`
+}
+
+func (q *Queries) StartRegionDeployment(ctx context.Context, id uuid.UUID) (StartRegionDeploymentRow, error) {
+	row := q.db.QueryRow(ctx, startRegionDeployment, id)
+	var r StartRegionDeploymentRow
+	err := row.Scan(&r.PriorStatus, &r.Updated, &r.SiteID)
+	return r, err
 }

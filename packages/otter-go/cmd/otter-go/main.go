@@ -28,10 +28,10 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/bgp"
 	"github.com/usg-dcim/packages/otter-go/internal/cables"
 	"github.com/usg-dcim/packages/otter-go/internal/collectors"
-	"github.com/usg-dcim/packages/otter-go/internal/ingest"
 	"github.com/usg-dcim/packages/otter-go/internal/dashboards"
 	"github.com/usg-dcim/packages/otter-go/internal/dns"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
+	"github.com/usg-dcim/packages/otter-go/internal/ingest"
 	"github.com/usg-dcim/packages/otter-go/internal/ipam"
 	"github.com/usg-dcim/packages/otter-go/internal/lir"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
@@ -131,14 +131,19 @@ func main() {
 	// Region-deploy SSE streams subscribe to Redis pubsub `dcim:deploy:{id}`.
 	// nil Redis → backfill-only mode (drain DB backlog, then heartbeats).
 	// Same DSN env Python uses; parse failure logs a warning and the
-	// SSE handler gracefully degrades.
+	// SSE handler gracefully degrades. The /start handler reuses the
+	// same Redis client to enqueue arq jobs the Python orchestrator
+	// worker picks up.
 	var rdRedis regiondeploy.PubsubSubscriber
+	var rdArq regiondeploy.ArqEnqueuer
 	if redisDSN := env.String("DCIM_REDIS_DSN", ""); redisDSN != "" {
 		if opts, err := redis.ParseURL(redisDSN); err == nil {
-			rdRedis = regiondeploy.NewRedisAdapter(redis.NewClient(opts))
+			redisClient := redis.NewClient(opts)
+			rdRedis = regiondeploy.NewRedisAdapter(redisClient)
+			rdArq = regiondeploy.NewArqRedisEnqueuer(redisClient)
 		} else {
 			log.Warn("regiondeploy_redis_parse_failed", "err", err,
-				"msg", "SSE stream will run backfill-only (no live updates)")
+				"msg", "SSE stream will run backfill-only; /start returns 503")
 		}
 	}
 	rdh := &regiondeploy.Handler{
@@ -148,6 +153,8 @@ func main() {
 		CallbackSecret: env.String("DCIM_REGIONDEPLOY_CALLBACK_SECRET", ""),
 		K8s:            rdK8s,
 		Redis:          rdRedis,
+		Arq:            rdArq,
+		ArqQueueName:   env.String("DCIM_REGIONDEPLOY_ARQ_QUEUE", ""),
 	}
 
 	r := chi.NewRouter()
