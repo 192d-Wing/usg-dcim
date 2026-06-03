@@ -20,13 +20,6 @@ global:
     jwtSecret: "k3d-dev-only-not-for-prod"
     collectorTokenSecret: "k3d-dev-only-not-for-prod"
 
-otter:
-  replicaCount: 1
-  autoscaling: { enabled: false }
-  resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 500m, memory: 1Gi }
-
 otter-worker:
   replicaCount: 1
   autoscaling: { enabled: false }
@@ -119,7 +112,7 @@ ingress:
         - { path: /api/v1/ingest,        pathType: Prefix, backend: otter-go }
         # PR 33 cutover: /api/v1/dns/* fully on otter-go.
         - { path: /api/v1/dns,           pathType: Prefix, backend: otter-go }
-        - { path: /api,              pathType: Prefix, backend: otter    }
+        - { path: /api,              pathType: Prefix, backend: otter-go }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []
 

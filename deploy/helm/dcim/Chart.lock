@@ -1,7 +1,4 @@
 dependencies:
-- name: otter
-  repository: ""
-  version: 0.1.0
 - name: otter-go
   repository: ""
   version: 0.1.0
@@ -26,5 +23,5 @@ dependencies:
 - name: badger
   repository: ""
   version: 0.1.0
-digest: sha256:b359431810a3a4cdaf935ab3a984affd586643a577643a928d263aa11e3358c9
-generated: "2026-05-31T03:06:43.09157-05:00"
+digest: sha256:0bd714424cea2a2efa2f32d45c23a147fed1601273b8bb77a0030a06585ff267
+generated: "2026-06-03T08:13:21.425438-05:00"

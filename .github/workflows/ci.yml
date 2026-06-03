@@ -18,7 +18,11 @@ concurrency:
 
 jobs:
   otter:
-    name: otter (ruff + pytest)
+    # The Python `otter` API service was retired after the full Go
+    # cutover; this job stays because packages/otter still owns the
+    # arq orchestrator + cron worker (otter-worker subchart) which
+    # ship from the same Python tree.
+    name: otter-worker (ruff + pytest)
     runs-on: ubuntu-latest
     defaults:
       run:

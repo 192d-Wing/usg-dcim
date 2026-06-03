@@ -1,15 +1,14 @@
 {{/*
 The finch container's nginx config proxies /api/ to upstream "api"
-(packages/finch/nginx.conf line 21). The otter subchart's Service
-name is derived from `{{ include "otter.fullname" . }}` (e.g.
-"dcim-otter"), so without this alias finch crashes at startup with
-`host not found in upstream "api"`.
+(packages/finch/nginx.conf line 21). The otter Python API subchart
+was retired after the full Go cutover; finch still needs a Service
+literally named `api` to resolve the upstream, so this template now
+emits an alias pointing at otter-go's pods instead.
 
-Emit a stable Service literally named `api` that selects otter pods.
-Same selector labels as the otter subchart's Service so it points at
-the same set of pods.
+Selector matches the otter-go subchart's Deployment labels so the
+Service routes traffic to the same pods otter-go's own Service does.
 */}}
-{{- if .Values.otter.enabled }}
+{{- if (index .Values "otter-go" "enabled") }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -18,11 +17,11 @@ metadata:
 spec:
   type: ClusterIP
   ports:
-    - port: {{ .Values.otter.service.port }}
+    - port: 8000
       targetPort: http
       protocol: TCP
       name: http
   selector:
-    app.kubernetes.io/name: otter
+    app.kubernetes.io/name: otter-go
     app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
