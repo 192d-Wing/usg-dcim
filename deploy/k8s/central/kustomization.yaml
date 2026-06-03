@@ -11,8 +11,6 @@ resources:
   - postgres.yaml
   - redis.yaml
   - keycloak.yaml
-  - otter.yaml
-  - worker.yaml
   - finch.yaml
   - heron.yaml
   - magpie.yaml

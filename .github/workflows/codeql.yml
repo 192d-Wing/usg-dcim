@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [python, javascript-typescript, go]
+        language: [javascript-typescript, go]
     steps:
       - uses: actions/checkout@v6
 

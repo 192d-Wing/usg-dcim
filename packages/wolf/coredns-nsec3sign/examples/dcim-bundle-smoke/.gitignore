@@ -1,7 +1,0 @@
-# Bundle artifacts produced by render_bundle.py — regenerated on
-# every run, never committed. The repo-root .gitignore blocks *.key
-# globally; we don't add an exception here (unlike quick-smoke) so
-# generated keys can't drift into version control on accident.
-Corefile
-zones/
-keys/
