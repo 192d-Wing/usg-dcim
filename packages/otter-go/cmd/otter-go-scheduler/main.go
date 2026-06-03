@@ -52,6 +52,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
@@ -65,6 +67,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssecrotate"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dnssync"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/freshness"
+	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/ipamutilization"
 	"github.com/usg-dcim/packages/shared-go/env"
 )
 
@@ -133,6 +136,13 @@ func main() {
 	// cron(dhcp_age_out, minute={7}) — hourly at :07. Off-round so
 	// the SQL UPDATE + DELETE don't compete with top-of-hour ticks.
 	dhcpAgeOutCron := env.String("DCIM_DHCP_AGE_OUT_CRON", "7 * * * *")
+	// Default spec "3-58/5 * * * *" mirrors Python's
+	// cron(ipam_utilization_sweep, minute=set(range(3, 60, 5))) — every
+	// 5 minutes at :03/:08/:13/... Offset 3 spreads vs freshness_sweep
+	// (:00, :05, …), dhcp_sync (:02, …), dns_sync_from_ipam (:04, …).
+	// Emits dcim_ipam_subnet_free_percent + _supernet_free_percent
+	// gauges to the /metrics endpoint below.
+	ipamUtilizationCron := env.String("DCIM_IPAM_UTILIZATION_CRON", "3-58/5 * * * *")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -176,10 +186,23 @@ func main() {
 	mustRegister(dhcpSyncCron, &dhcpsync.Job{Q: q, Log: log})
 	mustRegister(dhcpAgeOutCron, &dhcpageout.Job{Q: q})
 
+	// ipam_utilization_sweep emits Prometheus gauges (subnet +
+	// supernet free%), so it needs the scheduler's metrics registry
+	// to be live before the cron fires. Register the gauges on the
+	// default registry so promhttp.Handler() picks them up at
+	// /metrics below.
+	ipamGauges := ipamutilization.NewGauges(prometheus.DefaultRegisterer)
+	mustRegister(ipamUtilizationCron, &ipamutilization.Job{Q: q, Gauges: ipamGauges})
+
 	// /healthz + /readyz mirror the otter-go-worker shape so k8s
 	// probes can target either binary without per-pod config
 	// divergence.
 	mux := http.NewServeMux()
+	// /metrics exposes the Prometheus default registry — picks up the
+	// ipam_utilization_sweep gauges automatically because the job
+	// registered them via prometheus.DefaultRegisterer above. ServiceMonitor
+	// in the otter-go-scheduler subchart scrapes this path.
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})

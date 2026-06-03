@@ -78,6 +78,17 @@ dnsRotateZsks:
 dhcpBundleRerender:
   cron: "*/2 * * * *"
 
+# DCIM_IPAM_UTILIZATION_CRON — schedule for ipam_utilization_sweep.
+# Default "3-58/5 * * * *" mirrors Python's
+# cron(ipam_utilization_sweep, minute=set(range(3, 60, 5))) — every
+# 5 minutes at :03/:08/:13/... Offset 3 spreads vs freshness_sweep
+# (:00), dhcp_sync (:02), dns_sync_from_ipam (:04) on the same
+# minute boundary. Emits dcim_ipam_subnet_free_percent +
+# dcim_ipam_supernet_free_percent gauges on the /metrics endpoint
+# (ServiceMonitor scrapes them).
+ipamUtilization:
+  cron: "3-58/5 * * * *"
+
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
   limits:   { cpu: 500m, memory: 256Mi }
