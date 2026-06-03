@@ -156,6 +156,13 @@ func (f *fakeQ) CreateRegionDeploymentEvent(_ context.Context, _ dbq.CreateRegio
 	return dbq.RegionDeploymentEvent{}, nil
 }
 
+// Default no-op stub for the /start mutation — start_test.go shadows
+// this via startFakeQ; other tests need it to satisfy the Querier
+// interface added with the /start port.
+func (f *fakeQ) StartRegionDeployment(_ context.Context, _ uuid.UUID) (dbq.StartRegionDeploymentRow, error) {
+	return dbq.StartRegionDeploymentRow{}, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f, Audit: nil}).Mount(r)
@@ -386,7 +393,6 @@ func TestListEvents_NotFound(t *testing.T) {
 		t.Fatalf("got %d", rec.Code)
 	}
 }
-
 
 // ─── Abort ──────────────────────────────────────────────────────────────
 

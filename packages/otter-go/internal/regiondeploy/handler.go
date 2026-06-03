@@ -27,6 +27,7 @@ const (
 	capRead   = "infrastructure:region-deployments:read"
 	capAbort  = "infrastructure:region-deployments:abort"
 	capCreate = "infrastructure:region-deployments:create"
+	capStart  = "infrastructure:region-deployments:start"
 	notFound  = "region deployment not found"
 	badIDMsg  = "id is not a uuid"
 )
@@ -43,6 +44,7 @@ type Querier interface {
 	CreateRegionDeploymentNode(ctx context.Context, arg dbq.CreateRegionDeploymentNodeParams) (dbq.RegionDeploymentNode, error)
 	SetRegionDeploymentKubeconfigSecretRef(ctx context.Context, arg dbq.SetRegionDeploymentKubeconfigSecretRefParams) (dbq.SetRegionDeploymentKubeconfigSecretRefRow, error)
 	CreateRegionDeploymentEvent(ctx context.Context, arg dbq.CreateRegionDeploymentEventParams) (dbq.RegionDeploymentEvent, error)
+	StartRegionDeployment(ctx context.Context, id uuid.UUID) (dbq.StartRegionDeploymentRow, error)
 	// Site-scope expansion for the list filter + per-row ABAC.
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
@@ -83,6 +85,15 @@ type Handler struct {
 	// heartbeat-only) so dev/tests still see a usable stream. Wire
 	// NewRedisAdapter(redis.NewClient(...)) in production.
 	Redis PubsubSubscriber
+	// Arq is the enqueuer the /start handler uses to push
+	// run_region_deploy jobs to the Python worker. nil → /start
+	// returns 503; the Go handler can't drive the orchestrator on
+	// its own (orchestrator code still lives in Python).
+	Arq ArqEnqueuer
+	// ArqQueueName overrides the default queue name. Empty → arq's
+	// default ("arq:queue"). Operators running a non-default queue
+	// can set this so the Go enqueuer pushes into the right place.
+	ArqQueueName string
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -102,6 +113,7 @@ func (h *Handler) Mount(r chi.Router) {
 	// at /start when the orchestrator re-runs it).
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/preflight", h.preflight)
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/events/stream", h.streamEvents)
+	r.With(auth.RequireCapability(capStart)).Post("/region-deployments/{id}/start", h.start)
 }
 
 // preflight runs the seven pure checks Python's preflight.run_all

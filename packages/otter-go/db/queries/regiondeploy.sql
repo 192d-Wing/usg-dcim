@@ -155,3 +155,30 @@ FROM cur;
 INSERT INTO region_deployment_events (deployment_id, stage, level, message, payload)
 VALUES ($1, $2, $3::region_deployment_event_level, $4, $5::jsonb)
 RETURNING id, stage, level::text AS level, message, payload, created_at;
+
+-- name: StartRegionDeployment :one
+-- Conditional UPDATE for the start handler: flips status to
+-- 'preflight' and clears last_error when the current state is in the
+-- Python-canonical startable set (pending/failed/aborted). The CTE
+-- returns prior status regardless so the handler distinguishes 404
+-- (no row), 422 (already running — e.g. provisioning), and success
+-- in one round-trip.
+WITH cur AS (
+    SELECT status::text AS prior_status
+    FROM region_deployments
+    WHERE id = $1
+), upd AS (
+    UPDATE region_deployments
+    SET status = 'preflight'::region_deployment_status,
+        last_error = NULL,
+        updated_at = NOW()
+    WHERE id = $1
+      AND status IN ('pending'::region_deployment_status,
+                     'failed'::region_deployment_status,
+                     'aborted'::region_deployment_status)
+    RETURNING site_id
+)
+SELECT cur.prior_status,
+       (SELECT count(*) FROM upd)::bigint AS updated,
+       (SELECT site_id FROM upd) AS site_id
+FROM cur;
