@@ -5,10 +5,8 @@ from fastapi import APIRouter
 from .collectors import router as collectors_router
 from .dns import router as dns_router
 from .ingest import router as ingest_router
-from .organization import router as organization_router
 from .power import router as power_router
 from .regiondeploy import router as regiondeploy_router
-from .stencils import router as stencils_router
 
 router = APIRouter()
 # /api/v1/auth/* moved to otter-go (PR 179). The umbrella chart
@@ -41,7 +39,10 @@ router.include_router(ingest_router)
 # routes /api/v1/search → otter-go; Python no longer registers the
 # router so a misrouted internal call fails loud instead of silently
 # double-serving.
-router.include_router(stencils_router)
+# /api/v1/stencils/* fully moved to otter-go (PR 19). The Go
+# implementation in internal/stencils serves the static catalog;
+# Python no longer registers the router so a misrouted internal
+# call fails loud instead of silently double-serving.
 router.include_router(power_router)
 # /api/v1/audit/* moved to otter-go (PR 180). The umbrella chart
 # routes /api/v1/audit → otter-go; Python no longer registers the
@@ -63,7 +64,9 @@ router.include_router(power_router)
 # still exist — the alert evaluation loop in Python (untouched) calls
 # notif_svc.dispatch() directly during fire/resolve events. Channel
 # rows in Postgres remain the canonical config source for both.
-router.include_router(organization_router)
+# /api/v1/organizations/* fully moved to otter-go (PR 19). Go's
+# internal/organization has parity (CRUD). The ORM model still
+# exists for cross-module FK reads.
 # /api/v1/ipam/* fully moved to otter-go (PR 18). PR 42 ported the
 # basic CRUD; PR 54 + 55 added 1-hop and 2+ hop ABAC; PR 17 brought
 # DHCP under the same Prefix rule. Python no longer registers the

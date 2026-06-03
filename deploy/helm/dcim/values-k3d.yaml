@@ -108,6 +108,9 @@ ingress:
         - { path: /api/v1/ipam, pathType: Prefix, backend: otter-go }
         # Notifications fully on otter-go after the test endpoint port.
         - { path: /api/v1/notifications, pathType: Prefix, backend: otter-go }
+        # PR 19 cutover: organization + stencils on otter-go.
+        - { path: /api/v1/organizations, pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/stencils,      pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []
