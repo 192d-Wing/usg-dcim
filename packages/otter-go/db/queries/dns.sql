@@ -59,6 +59,66 @@ FROM dns_views
 WHERE fabric_id = $1
 ORDER BY priority ASC, name ASC;
 
+-- name: ListApexZoneNamesByFabric :many
+-- Recursive bundle: every apex zone bound to this fabric. The
+-- recursive Corefile emits a stub-forward per apex pointing at the
+-- local auth pod.
+SELECT name FROM dns_zones
+WHERE fabric_id = $1
+  AND kind = 'apex'::dns_zone_kind;
+
+-- name: GetSameSiteAuthUnicastIP :one
+-- For a recursive server: find the auth server at the same site so
+-- the recursive Corefile can stub-forward the fabric apex back to it.
+-- Returns the bare IP (CIDR suffix stripped via host()). At-most-one
+-- row per site is expected; LIMIT 1 keeps the query well-defined
+-- under the rare misconfig of multiple auth rows.
+SELECT host(unicast_ip) FROM dns_servers
+WHERE site_id = $1
+  AND role = 'auth'::dns_server_role
+LIMIT 1;
+
+-- name: ListDnsForwardersForBundle :many
+-- Conditional forwarders configured for this fabric. Empty
+-- upstreams are filtered out by the renderer (parity with Python).
+SELECT zone_pattern, upstreams::jsonb
+FROM dns_forwarders
+WHERE fabric_id = $1;
+
+-- name: ListEnabledBlocklistsWithPatternsByFabric :many
+-- Enabled blocklists for this fabric joined with their entries as
+-- a sorted JSONB array. One query instead of N+1 — the recursive
+-- bundle renderer wants {action, patterns, sink_ipv4, sink_ipv6}
+-- per blocklist.
+SELECT
+    bl.id,
+    bl.action::text AS action,
+    host(bl.sink_ipv4) AS sink_ipv4,
+    host(bl.sink_ipv6) AS sink_ipv6,
+    COALESCE(
+      (SELECT jsonb_agg(e.pattern ORDER BY e.pattern)
+       FROM dns_blocklist_entries e
+       WHERE e.blocklist_id = bl.id),
+      '[]'::jsonb
+    ) AS patterns_json
+FROM dns_blocklists bl
+WHERE bl.fabric_id = $1
+  AND bl.enabled = true;
+
+-- name: GetFabricForRecursiveBundle :one
+-- Slim projection: the fields the recursive bundle assembler reads
+-- from the fabric. Wider Fabric struct queries elsewhere skip the
+-- dns_allow_networks column today; pulling just this subset keeps
+-- the recursive path well-defined without churning the existing
+-- Fabric struct.
+SELECT id,
+       recursive_engine,
+       dns_recursive_upstreams::jsonb,
+       dns_deny_networks::jsonb,
+       dns_allow_networks::jsonb
+FROM fabrics
+WHERE id = $1;
+
 -- name: GetEnabledDnsCatalogZoneByFabric :one
 -- One row max — uq_dns_catalog_zone_fabric guarantees a fabric
 -- can have at most one catalog. Returns no-rows when the catalog

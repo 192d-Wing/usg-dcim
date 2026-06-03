@@ -25,7 +25,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -46,7 +48,45 @@ type bundleQuerier interface {
 	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error)
 	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKeyRow, error)
 	ListDnsViewsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsView, error)
+
+	// Recursive bundle (PR 35).
+	ListApexZoneNamesByFabric(ctx context.Context, fabricID uuid.UUID) ([]string, error)
+	GetSameSiteAuthUnicastIP(ctx context.Context, siteID uuid.UUID) (string, error)
+	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsForwarderRow, error)
+	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.BlocklistForBundleRow, error)
+	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.FabricForRecursiveBundle, error)
+	GetSystemSetting(ctx context.Context, key string) (dbq.SystemSetting, error)
 }
+
+// buildBundleForRole dispatches to the auth or recursive assembler
+// based on server.Role. Returns the BundleResult ready for JSON
+// serialization. Pulled out of the HTTP handler so the dispatch is
+// testable in isolation.
+func (h *Handler) buildBundleForRole(
+	r *http.Request, q bundleQuerier, server dbq.DnsServer,
+) (BundleResult, error) {
+	switch server.Role {
+	case "recursive":
+		in, err := loadRecursiveBundleInput(r.Context(), q, server, h.RecursiveBundleCfg, timeNow())
+		if err != nil {
+			return BundleResult{}, err
+		}
+		if !recursiveEngineKnown(in.Engine) {
+			return BundleResult{}, fmt.Errorf("unknown recursive_engine %q", in.Engine)
+		}
+		return AssembleRecursiveBundle(in), nil
+	default:
+		in, err := loadAuthBundleInput(r.Context(), q, server)
+		if err != nil {
+			return BundleResult{}, err
+		}
+		return AssembleAuthBundle(in)
+	}
+}
+
+// timeNow is the indirection the recursive RPZ renderer uses for
+// SOA serials. Replaced in tests via the package-level var swap.
+var timeNow = func() time.Time { return time.Now().UTC() }
 
 // loadAuthBundleInput fetches the data an auth-server bundle needs.
 // Pure orchestration: no rendering. Returns the AuthBundleInput
@@ -157,20 +197,7 @@ func (h *Handler) bundleHandlerWith(w http.ResponseWriter, r *http.Request, q bu
 		mapErr(w, err, "dns server not found")
 		return
 	}
-	// Recursive servers need GoBGP + RPZ + recursive-engine helpers
-	// not yet ported. Reject loudly so a misrouted client doesn't get
-	// a degraded auth bundle that doesn't apply.
-	if server.Role != "auth" {
-		httpx.Error(w, http.StatusNotImplemented, "recursive bundle not yet ported")
-		return
-	}
-	in, err := loadAuthBundleInput(r.Context(), q, server)
-	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	bundle, err := AssembleAuthBundle(in)
+	bundle, err := h.buildBundleForRole(r, q, server)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
