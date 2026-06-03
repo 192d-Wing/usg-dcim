@@ -41,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/collectors', text: 'Collectors' },
   { href: '/ipam',       text: 'IPAM',       cap: 'ipam:subnets:read' },
   { href: '/lir',        text: 'LIR',        cap: ['lir:requests:create', 'lir:requests:read', 'lir:allocations:read'] },
+  { href: '/registrations', text: 'Registrations', cap: ['nicreg:requests:create', 'nicreg:requests:read'] },
   { href: '/dns',        text: 'DNS',        cap: 'dns:servers:read' },
   { href: '/import',     text: 'Import',     cap: 'inventory:bulk:execute' },
   { href: '/audit',      text: 'Audit log',  cap: 'audit:events:read' },
