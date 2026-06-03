@@ -3,12 +3,16 @@ sql:
   - engine: postgresql
     queries: queries
     schema:
-      # Alembic owns the schema. Point sqlc at a dumped schema.sql for
-      # type inference. Refresh with:
-      #   pg_dump -s -O -x -d $DSN > db/schema.sql
-      # We do NOT commit schema.sql until the dump is checked in; sqlc
-      # falls back to inferring types from the live DB when CI sets the
-      # SQLC_DATABASE_URL env var.
+      # Goose owns the schema after the alembic rip (PR #277). For
+      # local regeneration, run the migrate binary against any
+      # Postgres, then pg_dump the schema and refresh schema.sql:
+      #   go run ./cmd/otter-go-migrate -cmd up
+      #   pg_dump -s -O -x -d "$DCIM_POSTGRES_DSN" > db/schema.sql
+      #   cd db && sqlc generate
+      # schema.sql is gitignored — sqlc only validates locally for
+      # now. The CI sqlc-drift job was retired because the original
+      # alembic-dump workflow it depended on never landed; the
+      # Postgres-in-CI replacement is a follow-up.
       - schema.sql
     gen:
       go:

@@ -82,50 +82,18 @@ jobs:
       - name: go test
         run: go test -race -count=1 ./...
 
-  sqlc-drift:
-    name: otter-go sqlc drift check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Skip when schema.sql is absent
-        id: gate
-        run: |
-          # sqlc needs a schema for type inference. We don't commit one
-          # until the first real Alembic dump lands (see
-          # packages/otter-go/README.md "Regenerating queries"). Until
-          # then this job is a no-op so the workflow doesn't block —
-          # but the job exists so the team can't quietly skip the gate
-          # once schema.sql does land.
-          if [ ! -f packages/otter-go/db/schema.sql ]; then
-            echo "::notice::packages/otter-go/db/schema.sql is absent; skipping sqlc drift check until it's committed."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: actions/setup-go@v5
-        if: steps.gate.outputs.skip == 'false'
-        with:
-          go-version: '1.22'
-
-      - name: Install sqlc
-        if: steps.gate.outputs.skip == 'false'
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.27.0
-
-      - name: Regenerate
-        if: steps.gate.outputs.skip == 'false'
-        working-directory: packages/otter-go/db
-        run: sqlc generate
-
-      - name: Verify no diff
-        if: steps.gate.outputs.skip == 'false'
-        working-directory: packages/otter-go
-        run: |
-          if ! git diff --exit-code -- db/generated/; then
-            echo "::error::sqlc generated output is out of date. Run 'task otter-go:sqlc' and commit."
-            exit 1
-          fi
+  # sqlc-drift was retired here. The job's gate was waiting on an
+  # alembic schema dump (packages/otter-go/db/schema.sql) that never
+  # landed; after the alembic→goose cutover (PR #277) the dump path
+  # is gone entirely. The drop-in replacement is a Postgres service
+  # container that runs `go run ./cmd/otter-go-migrate -cmd up`,
+  # `pg_dump`s the schema, and runs `sqlc generate` against that —
+  # but locking that down requires also regenerating every committed
+  # db/generated/*.sql.go file with current sqlc, which produces a
+  # very large diff that wants its own focused PR. Tracked as a
+  # follow-up. Until that lands, sqlc validation lives in the dev
+  # workflow only (run `task otter-go:sqlc` before committing query
+  # changes); CI no longer pretends to catch drift.
 
   wolf-coredns-nsec3sign:
     name: wolf/coredns-nsec3sign (build + test)
