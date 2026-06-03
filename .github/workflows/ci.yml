@@ -65,10 +65,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          # Matches the toolchain version in each packages/<animal>/go.mod.
-          go-version: '1.22'
+          # Matches the toolchain in go.work; setup-go v6 defaults
+          # GOTOOLCHAIN=local, so this must satisfy go.work's go directive.
+          go-version: '1.25.7'
           # Cache derived from the per-package go.sum so each matrix shard
           # gets its own warm cache without cross-contamination.
           cache-dependency-path: packages/${{ matrix.pkg }}/go.sum
@@ -110,9 +111,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: '1.22'
+          go-version: '1.25.7'
           cache-dependency-path: packages/wolf/coredns-nsec3sign/go.sum
 
       - name: go build
