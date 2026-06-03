@@ -76,8 +76,6 @@ exactly the prior `waitip 4` semantics.
 
 ## Refs
 
-- Region-deploy plan: <link to your usg-dcim docs/dev/region-deploy.md
-  in your fork or paste the relevant excerpt>.
 - Companion fork: github.com/1456055067/tinkerbell branch feat/dhcpv6.
 ```
 
@@ -293,7 +291,6 @@ For each PR:
   `ghcr.io/tinkerbell/tinkerbell` image + version.
 - Replace `deployment.additionalArgs` with first-class chart keys
   if upstream lands them.
-- Delete the FORK notes from `docs/dev/region-deploy.md` Phase 0a.
 - Archive the `1456055067/tinkerbell` and `1456055067/hook` forks
   (or keep them around for future divergence).
 ```

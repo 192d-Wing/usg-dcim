@@ -112,12 +112,6 @@ var capabilityCatalog = map[string]map[string][]string{
 	"notifications": {
 		"channels": {"create", "read", "update", "delete"},
 	},
-	"infrastructure": {
-		"region-deployments": {
-			"create", "read", "update", "delete",
-			"start", "abort", "download-kubeconfig",
-		},
-	},
 	"lir": {
 		"pools":    {"create", "read", "update", "delete"},
 		"requests": {"create", "read", "cancel", "approve", "reject"},

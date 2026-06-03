@@ -120,16 +120,6 @@ CAPABILITY_CATALOG: dict[str, dict[str, list[str]]] = {
     "notifications": {
         "channels": ["create", "read", "update", "delete"],
     },
-    # Bare-metal cluster bring-up — see docs/dev/region-deploy.md.
-    # `start`/`abort` are state-changing operations distinct from
-    # plain `update`; `download-kubeconfig` is elevated because the
-    # kubeconfig grants full cluster admin at the site.
-    "infrastructure": {
-        "region-deployments": [
-            "create", "read", "update", "delete",
-            "start", "abort", "download-kubeconfig",
-        ],
-    },
     # Local Internet Registry — pools (admin), requests (tenant
     # workflow), allocations (issued blocks + ARIN feed-up + return
     # lifecycle). Split into three resources so a tenant role can
@@ -164,7 +154,6 @@ _DASHBOARDS_READ = "dashboards:dashboards:read"
 _TELEMETRY_ALL = "telemetry:*"
 _COLLECTORS_READ = "collectors:collectors:read"
 _ALERTS_READ = "alerts:alerts:read"
-_REGION_DEPLOY_READ = "infrastructure:region-deployments:read"
 _INVENTORY_SITES_READ = "inventory:sites:read"
 
 
@@ -197,10 +186,6 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
         "alerts:*",
         "audit:events:read",
         "admin:api-tokens:*",
-        # Region-deploy: full lifecycle. download-kubeconfig is the
-        # one elevated capability — gates access to the cluster's
-        # admin kubeconfig.
-        "infrastructure:region-deployments:*",
     ],
     "SiteAdmin": [
         "inventory:racks:*", "inventory:rows:*", "inventory:rooms:*",
@@ -210,13 +195,6 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         "alerts:*",
         POWER_APPROVE,
-        # Region-deploy: site-scoped operators can create + run + stop
-        # deploys at their site, but not download the cluster
-        # kubeconfig (kept to RegionalAdmin / EnterpriseAdmin).
-        _REGION_DEPLOY_READ,
-        "infrastructure:region-deployments:create",
-        "infrastructure:region-deployments:start",
-        "infrastructure:region-deployments:abort",
     ],
     "DataCenterManager": [
         "inventory:racks:*", "inventory:assets:*",
@@ -244,16 +222,12 @@ BUILT_IN_ROLES: dict[str, list[str]] = {
         _TELEMETRY_ALL, _DASHBOARDS_READ,
         "maintenance:windows:read",
         "audit:events:read", "audit:events:export",
-        # Region-deploy: read-only — auditors see history + event
-        # streams but never trigger anything.
-        _REGION_DEPLOY_READ,
     ],
     "Viewer": [
         "inventory:*:read", "ipam:*:read", "dns:*:read",
         "lir:*:read",
         _COLLECTORS_READ, "alerts:*:read",
         _TELEMETRY_ALL, _DASHBOARDS_READ,
-        _REGION_DEPLOY_READ,
     ],
     # Workflow role for the DoW NIC team running the LIR approval
     # queue. Mirrors PowerOperator's shape (workflow-scoped, narrow

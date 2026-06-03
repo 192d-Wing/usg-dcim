@@ -41,7 +41,7 @@ func TestCapabilitiesCatalog_PythonParity(t *testing.T) {
 	required := []string{
 		"inventory", "routing", "search", "ipam", "dns", "collectors",
 		"alerts", "telemetry", "dashboards", "maintenance", "power",
-		"audit", "admin", "notifications", "infrastructure", "lir",
+		"audit", "admin", "notifications", "lir",
 	}
 	for _, domain := range required {
 		if _, ok := capabilityCatalog[domain]; !ok {

@@ -76,11 +76,6 @@ ingress:
         - { path: /api/v1/search,    pathType: Prefix, backend: otter-go }
         # Inventory module fully on otter-go after cables PATCH port.
         - { path: /api/v1/inventory,        pathType: Prefix, backend: otter-go }
-        # Region-deploy: read-side split lives only in values.yaml
-        # because k3d Traefik can't honor the regex Prefix rules we
-        # use to route /events vs /events/stream. On k3d the whole
-        # /api/v1/region-deployments tree stays on Python until the
-        # lifecycle PR collapses the split.
         # /api/v1/dashboards/* fully on otter-go after Phase 3. Single
         # Prefix rule supersedes the per-phase rules that lived here.
         - { path: /api/v1/dashboards, pathType: Prefix, backend: otter-go }

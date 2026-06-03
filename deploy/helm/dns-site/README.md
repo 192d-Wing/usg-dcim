@@ -11,9 +11,10 @@ same Corefile/zone semantics, no per-pod GoBGP container.
 
 ## Install
 
-The values dict is produced by
-[`packages/otter/src/dcim/regiondeploy/dns_site.py`](../../../packages/otter/src/dcim/regiondeploy/dns_site.py)
-from a `DnsServer` + `AnycastGroup` row. Render to a file and apply:
+Operator-supplied values from a `DnsServer` + `AnycastGroup` row.
+The regiondeploy auto-renderer was retired; populate the values
+file by hand or via whatever tooling owns site bring-up. Render
+to a file and apply:
 
 ```bash
 helm install dns-<server-name> deploy/helm/dns-site \
@@ -23,9 +24,8 @@ helm install dns-<server-name> deploy/helm/dns-site \
 
 ## Prerequisites in the site cluster
 
-1. **Cilium** with BGP control plane and LB-IPAM enabled (the regional
-   deploy provisions this — see
-   [`packages/otter/src/dcim/regiondeploy/cilium.py`](../../../packages/otter/src/dcim/regiondeploy/cilium.py)).
+1. **Cilium** with BGP control plane and LB-IPAM enabled in the site
+   cluster (operator-installed).
 2. **CiliumBGPAdvertisement** matching `dcim.io/bgp-advertise=true`
    (the umbrella chart `deploy/helm/dcim/templates/bgp.yaml` ships
    one — same selector value).
@@ -63,10 +63,9 @@ helm install dns-<server-name> deploy/helm/dns-site \
 
 ## What this chart does NOT do
 
-- **Cilium install** — the regional deploy owns that.
-- **BGP cluster/peer config** — owned by the umbrella chart (or the
-  regiondeploy renderer) on the cluster level. The chart only
-  *advertises* via label.
+- **Cilium install** — the operator owns that.
+- **BGP cluster/peer config** — owned by the umbrella chart on the
+  cluster level. The chart only *advertises* via label.
 - **Cilium L2 announcements** — if the upstream is L2-only (no BGP),
   emit a `CiliumL2AnnouncementPolicy` separately (out of scope here).
 - **Auth-server anycast** — `server.role=auth` is unicast-only;

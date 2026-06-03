@@ -52,15 +52,6 @@ global:
       redirectUri: ""
     saml:
       metadataUrl: ""
-    # Region-deploy kubeconfig-callback wiring. `centralUrl` is the
-    # public base URL the in-cluster kubeconfig-callback.service
-    # unit POSTs to (scheme://host[:port], no trailing /api). The
-    # secret is the HMAC key used to derive per-deployment bootstrap
-    # tokens; when left as PROVIDE_VIA_SECRET the callback endpoint
-    # fails closed with 503. Required for the region-deploy flow.
-    regiondeploy:
-      callbackSecret: "PROVIDE_VIA_SECRET"
-      centralUrl:     ""
     # Fernet key used for at-rest encryption of two distinct columns,
     # all reached via DCIM_DNS_DNSSEC_SECRET:
     #   * DnsKey.private_pem            — Python otter services/dns.py
@@ -381,13 +372,6 @@ ingress:
         - path: /api/v1/dns
           pathType: Prefix
           backend: otter-go
-        # Region-deploy fully on otter-go after the /start port. The
-        # per-route ImplementationSpecific regex rules collapsed into
-        # a single Prefix now that every subpath shares the same
-        # backend.
-        - path: /api/v1/region-deployments
-          pathType: Prefix
-          backend: otter-go
         # /api catch-all: otter-go now owns every /api/v1/* surface.
         # The chi router 404s unknown paths with a {"detail": "..."}
         # JSON body — a real API error shape, not finch's HTML 404 —
@@ -436,9 +420,8 @@ bgp:
     holdSeconds: 9
     keepAliveSeconds: 3
   gracefulRestartSeconds: 120
-  # AFI/SAFI families enabled per peer. v6-unicast first matches the
-  # regional-cluster default (regiondeploy/cilium.py); add v4-unicast
-  # for dual-stack clusters.
+  # AFI/SAFI families enabled per peer. v6-unicast first; add
+  # v4-unicast for dual-stack clusters.
   families:
     - { afi: ipv6, safi: unicast }
   # Which Services to advertise. Default selector keys on a single label

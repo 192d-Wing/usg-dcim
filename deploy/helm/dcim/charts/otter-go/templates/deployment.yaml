@@ -56,14 +56,6 @@ spec:
             - name: DCIM_DNS_DNSSEC_SECRET
               valueFrom: { secretKeyRef: { name: dcim-secrets, key: dnssec_secret } }
             {{- end }}
-            {{- if ne .Values.global.config.regiondeploy.callbackSecret "PROVIDE_VIA_SECRET" }}
-            # HMAC key the kubeconfig-callback handler uses to verify the
-            # per-deployment bearer token. Same secret Python otter reads
-            # via settings.regiondeploy_callback_secret. Empty → handler
-            # returns 503 (fail-closed; no plaintext fallback by design).
-            - name: DCIM_REGIONDEPLOY_CALLBACK_SECRET
-              valueFrom: { secretKeyRef: { name: dcim-secrets, key: regiondeploy_callback_secret } }
-            {{- end }}
             {{- if .Values.insecureAuthStub }}
             - { name: OTTER_GO_INSECURE_AUTH_STUB, value: {{ .Values.insecureAuthStub | quote }} }
             {{- end }}

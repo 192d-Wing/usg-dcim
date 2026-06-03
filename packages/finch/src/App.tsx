@@ -44,9 +44,6 @@ const IpamPage          = lazy(() => import('@/pages/ipam').then((m) => ({ defau
 const LirPage           = lazy(() => import('@/pages/lir').then((m) => ({ default: m.LirPage })));
 const VrfShowPage       = lazy(() => import('@/pages/vrf-show').then((m) => ({ default: m.VrfShowPage })));
 const DnsDashboardPage  = lazy(() => import('@/pages/dns-dashboard').then((m) => ({ default: m.DnsDashboardPage })));
-const RegionDeployPage    = lazy(() => import('@/pages/region-deploy').then((m) => ({ default: m.RegionDeployPage })));
-const RegionDeployNewPage  = lazy(() => import('@/pages/region-deploy-new').then((m) => ({ default: m.RegionDeployNewPage })));
-const RegionDeployShowPage = lazy(() => import('@/pages/region-deploy-show').then((m) => ({ default: m.RegionDeployShowPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -116,9 +113,6 @@ export function App() {
               <Route path="/ipam/vrfs/:id" element={<VrfShowPage />} />
               <Route path="/lir" element={<LirPage />} />
               <Route path="/dns" element={<DnsDashboardPage />} />
-              <Route path="/region-deploy" element={<RegionDeployPage />} />
-              <Route path="/region-deploy/new" element={<RegionDeployNewPage />} />
-              <Route path="/region-deploy/:id" element={<RegionDeployShowPage />} />
             </Route>
           </Route>
           <Route element={

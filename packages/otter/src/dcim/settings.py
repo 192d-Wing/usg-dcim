@@ -102,28 +102,6 @@ class Settings(BaseSettings):
     oidc_ca_bundle: str | None = None
     saml_metadata_url: str | None = None
 
-    # Central API URL the region-deploy ignition payload embeds in
-    # /etc/dcim/cluster.env. The first control-plane node's
-    # kubeconfig-callback.service uses this as the base URL when
-    # POSTing /api/v1/region-deployments/{id}/kubeconfig/callback back
-    # to central. Format: scheme://host[:port], no trailing slash and
-    # no /api path component (the unit appends those). Required for
-    # the region-deploy flow.
-    regiondeploy_central_url: str | None = None
-
-    # Region-deploy kubeconfig callback bootstrap-token secret.
-    # `POST /regiondeploy/{id}/kubeconfig/callback` is invoked from a
-    # freshly booted node before it has any DCIM credential, so the
-    # endpoint can't use the normal session/API-token auth path.
-    # Instead the orchestrator derives an HMAC-SHA256 token from this
-    # secret + the deployment UUID, embeds it in the node's Ignition
-    # payload at /etc/dcim/callback.token, and the callback handler
-    # requires it as `Authorization: Bearer …`.
-    # When unset (None) the callback is refused entirely — there is no
-    # plaintext fallback. Set this in any deployment that uses the
-    # region-deploy flow. Rotation invalidates any in-flight Ignition.
-    regiondeploy_callback_secret: str | None = None
-
     # Collector ingest
     collector_mtls_required: bool = True
     collector_ca_bundle: str | None = None

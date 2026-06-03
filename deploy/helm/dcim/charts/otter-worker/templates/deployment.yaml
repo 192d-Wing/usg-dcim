@@ -22,11 +22,6 @@ spec:
           env:
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.global.postgresql.dsn | quote }} }
             - { name: DCIM_REDIS_DSN,    value: {{ .Values.global.redis.dsn | quote }} }
-            {{- with .Values.global.config.regiondeploy }}
-            - name: DCIM_REGIONDEPLOY_CALLBACK_SECRET
-              valueFrom: { secretKeyRef: { name: dcim-secrets, key: regiondeploy_callback_secret } }
-            - { name: DCIM_REGIONDEPLOY_CENTRAL_URL, value: {{ .centralUrl | quote }} }
-            {{- end }}
             {{- if .Values.global.config.dnssecSecret }}
             # Worker runs DNSSEC zone-key rotation + IdP refresh paths;
             # both call Fernet at-rest (services/dns.py:285,
