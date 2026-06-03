@@ -436,7 +436,7 @@ ingress:
           backend: otter
         - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/preflight
           pathType: ImplementationSpecific
-          backend: otter
+          backend: otter-go
         - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/start
           pathType: ImplementationSpecific
           backend: otter
