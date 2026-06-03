@@ -92,11 +92,8 @@ global:
 
 # Per-animal subchart values (passed through to charts/<animal>/).
 
-# The Python `otter` API subchart was retired after the full Go cutover
-# (every former route lives on otter-go now). The `otter-worker` block
-# below stays because the arq orchestrator + cron worker still serves
-# real traffic; it just ships the dcim-otter image with an arq CMD
-# override.
+# otter-go is the sole canonical API surface; the Python otter stack
+# (API + arq orchestrator + cron worker) has been fully retired.
 
 otter-go:
   enabled: true
@@ -114,32 +111,12 @@ otter-go:
   # values.yaml; override here only when a deployment needs different.
 
 otter-go-scheduler:
-  # Default-on now that the matching arq crons are retired from
-  # packages/otter/src/dcim/worker.py. The Go scheduler owns:
+  # The Go scheduler owns:
   #   dns_purge_metrics, freshness_sweep, dns_sync_from_ipam,
   #   dhcp_scope_tombstone_purge, dns_rotate_zsks, dhcp_bundle_rerender,
-  #   dhcp_drift_check, dhcp_sync, dhcp_age_out.
-  # Still on Python's arq:
-  #   notify_bridge (5s pubsub drain — needs a Go Redis pubsub reader)
-  #   ipam_utilization_sweep (5min — pending Go port)
+  #   dhcp_drift_check, dhcp_sync, dhcp_age_out, notify_bridge,
+  #   ipam_utilization_sweep.
   enabled: true
-
-otter-worker:
-  enabled: true
-  replicaCount: 2
-  resources:
-    requests: { cpu: 250m, memory: 512Mi }
-    limits:   { cpu: 1,    memory: 2Gi }
-  autoscaling:
-    enabled: true
-    minReplicas: 2
-    maxReplicas: 10
-    queueDepthTarget: 50
-  # Grant CAP_NET_RAW so the worker can run ICMP health-check probes
-  # (RFC 792 echo). With CAP_NET_RAW disabled AND ping_group_range too
-  # narrow, the probe returns status=unknown with a "icmp socket requires
-  # CAP_NET_RAW or net.ipv4.ping_group_range" error and the UI flags it.
-  capNetRaw: true
 
 finch:
   enabled: true

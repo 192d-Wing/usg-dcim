@@ -7,9 +7,9 @@ metadata:
     {{- include "dcim.labels" . | nindent 4 }}
     app.kubernetes.io/component: migrations
   annotations:
-    # pre-install so the schema is in place before otter / otter-worker
-    # / heron / magpie / beagle / finch come up and start opening pools.
-    # With post-install + --wait, this hook never fired because the
+    # pre-install so the schema is in place before otter-go / heron /
+    # magpie / beagle / finch come up and start opening pools. With
+    # post-install + --wait this hook never fired because the
     # deployments couldn't go ready against an empty database.
     "helm.sh/hook": pre-install,pre-upgrade
     "helm.sh/hook-weight": "-5"
@@ -20,9 +20,19 @@ spec:
     spec:
       restartPolicy: OnFailure
       containers:
-        - name: alembic
-          image: {{ .Values.global.image.registry }}/dcim-otter:{{ .Values.global.image.tag }}
-          command: ["alembic", "upgrade", "head"]
+        - name: migrate
+          # otter-go-migrate replaces the prior alembic Job after the
+          # final Python rip. Lives in the multi-binary dcim-otter-go
+          # image alongside the HTTP server + scheduler + worker so a
+          # Helm release pins a single image tag for everything. The
+          # 67 goose .sql files are embedded; runtime carries no
+          # migration directory of its own. The binary auto-normalizes
+          # the SQLAlchemy `postgresql+asyncpg://` DSN scheme to
+          # `postgresql://` so the Helm value is unchanged from the
+          # alembic era.
+          image: {{ .Values.global.image.registry }}/dcim-otter-go:{{ .Values.global.image.tag }}
+          command: ["/otter-go-migrate"]
+          args: ["-cmd", "up"]
           env:
             - { name: DCIM_POSTGRES_DSN, value: {{ .Values.global.postgresql.dsn | quote }} }
 {{- end }}

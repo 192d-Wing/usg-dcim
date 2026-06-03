@@ -9,7 +9,6 @@ $root = Resolve-Path (Join-Path $PSScriptRoot '../../..')
 Push-Location $root
 
 $images = @(
-    @{ Name = 'dcim-otter';          Context = 'packages/otter' },
     @{ Name = 'dcim-finch';     Context = 'packages/finch' },
     @{ Name = 'dcim-badger'; Context = 'packages/badger' },
     @{ Name = 'dcim-heron';    Context = 'packages/heron' },

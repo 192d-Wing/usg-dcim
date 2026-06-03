@@ -5,9 +5,6 @@ dependencies:
 - name: otter-go-scheduler
   repository: ""
   version: 0.1.0
-- name: otter-worker
-  repository: ""
-  version: 0.1.0
 - name: finch
   repository: ""
   version: 0.1.0

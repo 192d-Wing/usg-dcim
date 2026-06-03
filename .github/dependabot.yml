@@ -1,28 +1,5 @@
 version: 2
 updates:
-  # ----- Python (uv workspace) -----
-  # otter: the central FastAPI API + workers (was /backend).
-  - package-ecosystem: "uv"
-    directory: "/packages/otter"
-    schedule: { interval: "weekly", day: "monday" }
-    open-pull-requests-limit: 5
-    groups:
-      python-runtime:
-        patterns: ["fastapi", "uvicorn*", "pydantic*", "sqlalchemy*", "asyncpg", "alembic"]
-      python-observability:
-        patterns: ["structlog", "prometheus-client", "opentelemetry*"]
-      python-dev:
-        dependency-type: "development"
-
-  # mole: legacy collector, deprecated (was /collector).
-  - package-ecosystem: "uv"
-    directory: "/packages/mole"
-    schedule: { interval: "weekly", day: "monday" }
-    open-pull-requests-limit: 5
-    groups:
-      python-dev:
-        dependency-type: "development"
-
   # ----- Frontend (npm) -----
   # finch: React + Vite dashboard (was /frontend).
   - package-ecosystem: "npm"
@@ -110,13 +87,7 @@ updates:
     schedule: { interval: "weekly", day: "monday" }
 
   - package-ecosystem: "docker"
-    directory: "/packages/otter"
-    schedule: { interval: "monthly" }
-  - package-ecosystem: "docker"
     directory: "/packages/finch"
-    schedule: { interval: "monthly" }
-  - package-ecosystem: "docker"
-    directory: "/packages/mole"
     schedule: { interval: "monthly" }
   - package-ecosystem: "docker"
     directory: "/packages/badger"

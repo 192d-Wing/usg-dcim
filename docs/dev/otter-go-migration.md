@@ -1,5 +1,7 @@
 # otter → otter-go migration plan
 
+> Phase 4 complete — Python `otter` package retired 2026-06-03 via deprecate/python-otter PR.
+
 Phase-2 port of the Python `otter` (FastAPI + SQLAlchemy + Alembic) to
 Go (`chi` + `pgx` + `sqlc`). Estimated effort: **4–8 months of senior
 engineering time** assuming one full-time porter plus reviews; not a

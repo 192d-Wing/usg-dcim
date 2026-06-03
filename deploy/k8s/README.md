@@ -49,8 +49,6 @@ helm upgrade --install dcim deploy/helm/dcim \
 
 Builds and tags all images `:dev`:
 
-- `dcim-otter:dev` — FastAPI backend
-- `dcim-worker:dev` — Async task worker
 - `dcim-finch:dev` — React UI
 - `dcim-heron:dev` — Telemetry ingest service
 - `dcim-magpie:dev` — Alert evaluation service
@@ -63,7 +61,7 @@ Builds and tags all images `:dev`:
 kubectl apply -k deploy/k8s/central/
 ```
 
-Deploys: postgres (TimescaleDB), redis, keycloak, api, otter-worker, finch, heron, magpie, beagle into the `dcim` namespace.
+Deploys: postgres (TimescaleDB), redis, keycloak, finch, heron, magpie, beagle into the `dcim` namespace.
 
 Wait for all pods:
 

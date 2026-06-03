@@ -20,13 +20,6 @@ global:
     jwtSecret: "k3d-dev-only-not-for-prod"
     collectorTokenSecret: "k3d-dev-only-not-for-prod"
 
-otter-worker:
-  replicaCount: 1
-  autoscaling: { enabled: false }
-  resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits:   { cpu: 500m, memory: 1Gi }
-
 heron:
   replicaCount: 1
   resources:
@@ -46,9 +39,7 @@ otter-go:
   podDisruptionBudget:
     enabled: false
 
-# Default-on now that the matching arq crons are retired from
-# packages/otter/src/dcim/worker.py — kept here for parity with the
-# prod values block.
+# Default-on.
 otter-go-scheduler:
   enabled: true
 

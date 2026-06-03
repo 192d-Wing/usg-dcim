@@ -1,6 +1,0 @@
-apiVersion: v2
-name: otter-worker
-description: Async task worker (arq) running the otter image. Shares the otter container; separate Deployment for independent scaling.
-type: application
-version: 0.1.0
-appVersion: "0.1.0"
