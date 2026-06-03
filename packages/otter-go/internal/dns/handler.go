@@ -52,6 +52,11 @@ type Querier interface {
 	ListAnycastBindings(ctx context.Context, arg dbq.ListAnycastBindingsParams) ([]dbq.AnycastBgpBinding, error)
 	CountAnycastBindings(ctx context.Context, arg dbq.CountAnycastBindingsParams) (int64, error)
 
+	// Bundle assembly (PR 30) — bulk reads.
+	ListDnsZonesByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsZone, error)
+	ListDnsRecordsByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsRecordForBundle, error)
+	ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, fabricID uuid.UUID) ([]uuid.UUID, error)
+
 	// Mutations (PR 43). Action endpoints (freeze/unfreeze, import,
 	// sync-from-ipam, enable/disable-dnssec, nsec3, render-status,
 	// health-checks/result, blocklists/entries/bulk) are deferred to a
