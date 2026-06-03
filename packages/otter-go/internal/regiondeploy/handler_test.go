@@ -145,6 +145,17 @@ func (f *fakeQ) CreateRegionDeploymentNode(_ context.Context, a dbq.CreateRegion
 // Handler struct requires it. Stub returns nil.
 func (f *fakeQ) Record(_ context.Context, _ ...any) error { return nil }
 
+// Default no-op stubs for the lifecycle mutations — the callback tests
+// embed *fakeQ in callbackFakeQ and shadow these. Read-side tests just
+// need the methods to exist so Querier is satisfied.
+func (f *fakeQ) SetRegionDeploymentKubeconfigSecretRef(_ context.Context, _ dbq.SetRegionDeploymentKubeconfigSecretRefParams) (dbq.SetRegionDeploymentKubeconfigSecretRefRow, error) {
+	return dbq.SetRegionDeploymentKubeconfigSecretRefRow{}, nil
+}
+
+func (f *fakeQ) CreateRegionDeploymentEvent(_ context.Context, _ dbq.CreateRegionDeploymentEventParams) (dbq.RegionDeploymentEvent, error) {
+	return dbq.RegionDeploymentEvent{}, nil
+}
+
 func mount(f *fakeQ) http.Handler {
 	r := chi.NewRouter()
 	(&Handler{Q: f, Audit: nil}).Mount(r)
