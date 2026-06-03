@@ -101,25 +101,11 @@ global:
 
 # Per-animal subchart values (passed through to charts/<animal>/).
 
-otter:
-  enabled: true
-  replicaCount: 3
-  resources:
-    requests: { cpu: 250m, memory: 512Mi }
-    limits:   { cpu: 1,    memory: 2Gi }
-  autoscaling:
-    enabled: true
-    minReplicas: 3
-    maxReplicas: 20
-    targetCPUUtilizationPercentage: 70
-  service:
-    type: ClusterIP
-    port: 8000
-    # Set type=LoadBalancer + add the dcim.io/bgp-advertise label to
-    # publish via Cilium BGP when bgp.enabled=true at the umbrella.
-    labels: {}
-    annotations: {}
-    loadBalancerClass: ""
+# The Python `otter` API subchart was retired after the full Go cutover
+# (every former route lives on otter-go now). The `otter-worker` block
+# below stays because the arq orchestrator + cron worker still serves
+# real traffic; it just ships the dcim-otter image with an arq CMD
+# override.
 
 otter-go:
   enabled: true
@@ -392,49 +378,20 @@ ingress:
         - path: /api/v1/dns
           pathType: Prefix
           backend: otter-go
-        # Region-deploy read-side + abort + create + preflight + SSE +
-        # kubeconfig-callback on otter-go. Remaining on Python: start
-        # (it still needs the arq → Go scheduler equivalent).
-        # nginx-ingress sorts by longest prefix so the Python sub-path
-        # rules below win for the named lifecycle subpaths even though
-        # both ends share the bare prefix.
-        #
-        # UUID character class is [0-9A-Fa-f-] so both upper- and
-        # lower-case ids match the otter-go rules consistently
-        # (Python's uuid.UUID accepts both). The catch-all detail
-        # rule below is anchored with (/|$) so any future sub-path
-        # we haven't carved out falls through to /api → otter
-        # instead of silently 404'ing on otter-go. The bare collection
-        # rule covers both LIST (GET) and CREATE (POST).
-        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/events/stream
-          pathType: ImplementationSpecific
+        # Region-deploy fully on otter-go after the /start port. The
+        # per-route ImplementationSpecific regex rules collapsed into
+        # a single Prefix now that every subpath shares the same
+        # backend.
+        - path: /api/v1/region-deployments
+          pathType: Prefix
           backend: otter-go
-        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/preflight
-          pathType: ImplementationSpecific
-          backend: otter-go
-        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/start
-          pathType: ImplementationSpecific
-          backend: otter-go
-        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/abort
-          pathType: ImplementationSpecific
-          backend: otter-go
-        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/kubeconfig/callback
-          pathType: ImplementationSpecific
-          backend: otter-go
-        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/events$
-          pathType: ImplementationSpecific
-          backend: otter-go
-        - path: /api/v1/region-deployments/[0-9A-Fa-f-]+$
-          pathType: ImplementationSpecific
-          backend: otter-go
-        # Bare collection: GET (list) was already on otter-go via
-        # the read-side cutover. POST (create) joins it now.
-        - path: /api/v1/region-deployments$
-          pathType: ImplementationSpecific
-          backend: otter-go
+        # /api catch-all: otter-go now owns every /api/v1/* surface.
+        # The chi router 404s unknown paths with a {"detail": "..."}
+        # JSON body — a real API error shape, not finch's HTML 404 —
+        # so any stray request to a deleted endpoint surfaces cleanly.
         - path: /api
           pathType: Prefix
-          backend: otter
+          backend: otter-go
         - path: /
           pathType: Prefix
           backend: finch
