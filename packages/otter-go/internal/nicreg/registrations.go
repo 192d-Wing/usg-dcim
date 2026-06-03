@@ -189,60 +189,75 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, listResponse{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-// ---- get (header + detail) ----
-
-func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
+// loadScoped fetches the registration named by the URL {id} and enforces the
+// principal's org-scope for capCode. On any failure it writes the response and
+// returns ok=false — a bad id is 400, a missing row 404, and an out-of-scope
+// row is masked as 404 so it leaks nothing about orgs the caller can't see.
+// Shared by get/submit/cancel/approve/reject so the load+scope preamble lives
+// in one place.
+func (h *Handler) loadScoped(w http.ResponseWriter, r *http.Request, capCode string) (auth.Principal, dbq.NicRegistration, bool) {
 	p, _ := auth.From(r.Context())
 	id, ok := parseUUIDParam(w, r, "id")
 	if !ok {
-		return
+		return p, dbq.NicRegistration{}, false
 	}
-	hdr, err := h.Q.GetNicRegistration(r.Context(), id)
+	reg, err := h.Q.GetNicRegistration(r.Context(), id)
 	if err != nil {
 		mapErr(w, err, msgNotFound)
-		return
+		return p, dbq.NicRegistration{}, false
 	}
-	if scope := auth.FindScope(p, capRead); scope != nil && !scope.OrganizationMatches(hdr.OrganizationID) {
+	if scope := auth.FindScope(p, capCode); scope != nil && !scope.OrganizationMatches(reg.OrganizationID) {
 		httpx.Error(w, http.StatusNotFound, msgNotFound)
+		return p, dbq.NicRegistration{}, false
+	}
+	return p, reg, true
+}
+
+// conflictOr409 maps the zero-rows result of an atomic check-and-flip UPDATE
+// (the row raced out of the expected status) to a 409 with msg; anything else
+// goes through the default error mapping.
+func conflictOr409(w http.ResponseWriter, err error, msg string) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(w, http.StatusConflict, msg)
 		return
 	}
-	detail, err := fetchDetail(r.Context(), h.Q, hdr.ID, hdr.TemplateType)
+	mapErr(w, err, msgNotFound)
+}
+
+func auditEvent(r *http.Request, h *Handler, action, id string, meta map[string]any) {
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: action, TargetType: "nic_registration", TargetID: id, Metadata: meta,
+	})
+}
+
+// ---- get (header + detail) ----
+
+func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
+	_, reg, ok := h.loadScoped(w, r, capRead)
+	if !ok {
+		return
+	}
+	detail, err := fetchDetail(r.Context(), h.Q, reg.ID, reg.TemplateType)
 	if err != nil {
 		mapErr(w, err, msgNotFound)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, registrationResponse{Registration: hdr, Detail: detail})
+	httpx.JSON(w, http.StatusOK, registrationResponse{Registration: reg, Detail: detail})
 }
 
 // ---- submit (draft -> submitted) ----
 
 func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
-	p, _ := auth.From(r.Context())
-	id, ok := parseUUIDParam(w, r, "id")
+	_, reg, ok := h.loadScoped(w, r, capUpdate)
 	if !ok {
 		return
 	}
-	existing, err := h.Q.GetNicRegistration(r.Context(), id)
+	out, err := h.Q.SubmitNicRegistration(r.Context(), reg.ID)
 	if err != nil {
-		mapErr(w, err, msgNotFound)
+		conflictOr409(w, err, "registration is not a draft; cannot submit")
 		return
 	}
-	if scope := auth.FindScope(p, capUpdate); scope != nil && !scope.OrganizationMatches(existing.OrganizationID) {
-		httpx.Error(w, http.StatusNotFound, msgNotFound)
-		return
-	}
-	out, err := h.Q.SubmitNicRegistration(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusConflict, "registration is not a draft; cannot submit")
-			return
-		}
-		mapErr(w, err, msgNotFound)
-		return
-	}
-	audit.Record(r.Context(), h.Audit, nil, audit.Event{
-		Action: "nicreg.submit", TargetType: "nic_registration", TargetID: out.ID.String(),
-	})
+	auditEvent(r, h, "nicreg.submit", out.ID.String(), nil)
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -253,36 +268,20 @@ type notesReq struct {
 }
 
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
-	p, _ := auth.From(r.Context())
-	id, ok := parseUUIDParam(w, r, "id")
+	_, reg, ok := h.loadScoped(w, r, capCancel)
 	if !ok {
-		return
-	}
-	existing, err := h.Q.GetNicRegistration(r.Context(), id)
-	if err != nil {
-		mapErr(w, err, msgNotFound)
-		return
-	}
-	if scope := auth.FindScope(p, capCancel); scope != nil && !scope.OrganizationMatches(existing.OrganizationID) {
-		httpx.Error(w, http.StatusNotFound, msgNotFound)
 		return
 	}
 	var body notesReq
 	if r.ContentLength > 0 && !decodeBody(w, r, &body) {
 		return
 	}
-	out, err := h.Q.CancelNicRegistration(r.Context(), dbq.CancelNicRegistrationParams{ID: id, Notes: body.Notes})
+	out, err := h.Q.CancelNicRegistration(r.Context(), dbq.CancelNicRegistrationParams{ID: reg.ID, Notes: body.Notes})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusConflict, "registration is already decided; cannot cancel")
-			return
-		}
-		mapErr(w, err, msgNotFound)
+		conflictOr409(w, err, "registration is already decided; cannot cancel")
 		return
 	}
-	audit.Record(r.Context(), h.Audit, nil, audit.Event{
-		Action: "nicreg.cancel", TargetType: "nic_registration", TargetID: out.ID.String(),
-	})
+	auditEvent(r, h, "nicreg.cancel", out.ID.String(), nil)
 	httpx.JSON(w, http.StatusOK, out)
 }
 
@@ -294,18 +293,8 @@ type approveReq struct {
 }
 
 func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
-	p, _ := auth.From(r.Context())
-	id, ok := parseUUIDParam(w, r, "id")
+	p, reg, ok := h.loadScoped(w, r, capApprove)
 	if !ok {
-		return
-	}
-	existing, err := h.Q.GetNicRegistration(r.Context(), id)
-	if err != nil {
-		mapErr(w, err, msgNotFound)
-		return
-	}
-	if scope := auth.FindScope(p, capApprove); scope != nil && !scope.OrganizationMatches(existing.OrganizationID) {
-		httpx.Error(w, http.StatusNotFound, msgNotFound)
 		return
 	}
 	var body approveReq
@@ -315,45 +304,28 @@ func (h *Handler) approve(w http.ResponseWriter, r *http.Request) {
 	// push_to_arin=true only makes sense for ARIN-eligible templates
 	// (network, asn). Guard so a reviewer can't flag a domain/user/etc.
 	if body.PushToArin != nil && *body.PushToArin {
-		if ts, known := Template(existing.TemplateType); !known || !ts.ArinEligible {
+		if ts, known := Template(reg.TemplateType); !known || !ts.ArinEligible {
 			httpx.Error(w, http.StatusUnprocessableEntity,
 				"push_to_arin applies only to network and asn registrations")
 			return
 		}
 	}
 	out, err := h.Q.ApproveNicRegistration(r.Context(), dbq.ApproveNicRegistrationParams{
-		ID: id, PushToArin: body.PushToArin, DecidedBy: p.Subject, Notes: body.Notes,
+		ID: reg.ID, PushToArin: body.PushToArin, DecidedBy: p.Subject, Notes: body.Notes,
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusConflict, "registration is not submitted; cannot approve")
-			return
-		}
-		mapErr(w, err, msgNotFound)
+		conflictOr409(w, err, "registration is not submitted; cannot approve")
 		return
 	}
-	audit.Record(r.Context(), h.Audit, nil, audit.Event{
-		Action: "nicreg.approve", TargetType: "nic_registration", TargetID: out.ID.String(),
-		Metadata: map[string]any{"push_to_arin": body.PushToArin},
-	})
+	auditEvent(r, h, "nicreg.approve", out.ID.String(), map[string]any{"push_to_arin": body.PushToArin})
 	httpx.JSON(w, http.StatusOK, out)
 }
 
 // ---- reject (submitted -> rejected) ----
 
 func (h *Handler) reject(w http.ResponseWriter, r *http.Request) {
-	p, _ := auth.From(r.Context())
-	id, ok := parseUUIDParam(w, r, "id")
+	p, reg, ok := h.loadScoped(w, r, capReject)
 	if !ok {
-		return
-	}
-	existing, err := h.Q.GetNicRegistration(r.Context(), id)
-	if err != nil {
-		mapErr(w, err, msgNotFound)
-		return
-	}
-	if scope := auth.FindScope(p, capReject); scope != nil && !scope.OrganizationMatches(existing.OrganizationID) {
-		httpx.Error(w, http.StatusNotFound, msgNotFound)
 		return
 	}
 	var body notesReq
@@ -361,18 +333,12 @@ func (h *Handler) reject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := h.Q.RejectNicRegistration(r.Context(), dbq.RejectNicRegistrationParams{
-		ID: id, DecidedBy: p.Subject, Notes: body.Notes,
+		ID: reg.ID, DecidedBy: p.Subject, Notes: body.Notes,
 	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusConflict, "registration is not submitted; cannot reject")
-			return
-		}
-		mapErr(w, err, msgNotFound)
+		conflictOr409(w, err, "registration is not submitted; cannot reject")
 		return
 	}
-	audit.Record(r.Context(), h.Audit, nil, audit.Event{
-		Action: "nicreg.reject", TargetType: "nic_registration", TargetID: out.ID.String(),
-	})
+	auditEvent(r, h, "nicreg.reject", out.ID.String(), nil)
 	httpx.JSON(w, http.StatusOK, out)
 }
