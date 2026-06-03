@@ -54,9 +54,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
+	"github.com/usg-dcim/packages/otter-go/internal/notifications"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpageout"
 	"github.com/usg-dcim/packages/otter-go/internal/scheduler/jobs/dhcpbundle"
@@ -143,6 +145,16 @@ func main() {
 	// Emits dcim_ipam_subnet_free_percent + _supernet_free_percent
 	// gauges to the /metrics endpoint below.
 	ipamUtilizationCron := env.String("DCIM_IPAM_UTILIZATION_CRON", "3-58/5 * * * *")
+	// Default spec "*/5 * * * * *" (every 5 seconds via the 6-field
+	// extension robfig/cron supports) mirrors Python's
+	// cron(notify_bridge, second=set(range(0, 60, 5))). Operators can
+	// throttle for a burst control via the env var; the queue's
+	// 500-per-tick cap absorbs short spikes either way.
+	notifyBridgeCron := env.String("DCIM_NOTIFY_BRIDGE_CRON", "*/5 * * * * *")
+	// DCIM_REDIS_DSN — same env Python's worker reads. Required for
+	// the notify_bridge job; empty → the bridge is skipped at startup
+	// and logged.
+	redisDSN := env.String("DCIM_REDIS_DSN", "")
 	healthAddr := env.String("SCHEDULER_HEALTH_ADDR", ":8080")
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -193,6 +205,26 @@ func main() {
 	// /metrics below.
 	ipamGauges := ipamutilization.NewGauges(prometheus.DefaultRegisterer)
 	mustRegister(ipamUtilizationCron, &ipamutilization.Job{Q: q, Gauges: ipamGauges})
+
+	// notify_bridge — drains dcim:notify:bridge every 5s. Requires a
+	// Redis client; without a configured DSN the bridge is skipped at
+	// startup (loud-warning log so operators see the gap). Other
+	// scheduler jobs don't need Redis so they still register and run
+	// fine without it.
+	if redisDSN != "" {
+		opts, err := redis.ParseURL(redisDSN)
+		if err != nil {
+			log.Error("notify_bridge_redis_parse_failed", "err", err,
+				"msg", "notify_bridge will not run; other scheduler jobs continue")
+		} else {
+			mustRegister(notifyBridgeCron, &notifications.BridgeJob{
+				Q: q, Redis: redis.NewClient(opts), Log: log,
+			})
+		}
+	} else {
+		log.Warn("notify_bridge_redis_unset",
+			"msg", "DCIM_REDIS_DSN empty; notify_bridge is disabled (other scheduler jobs continue)")
+	}
 
 	// /healthz + /readyz mirror the otter-go-worker shape so k8s
 	// probes can target either binary without per-pod config

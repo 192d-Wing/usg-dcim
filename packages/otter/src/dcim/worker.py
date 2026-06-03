@@ -22,7 +22,6 @@ from typing import ClassVar
 from uuid import UUID
 
 import structlog
-from arq import cron
 from arq.connections import RedisSettings
 from redis.asyncio import from_url as redis_from_url
 from sqlalchemy import select
@@ -540,16 +539,13 @@ class WorkerSettings:
         run_region_deploy,
     ]
     cron_jobs: ClassVar[list] = [
-        # Drain notification events the Go alerts service pushes onto
-        # dcim:notify:bridge. Runs every 5s; each tick pulls up to
-        # _NOTIFY_BRIDGE_BATCH entries so a notification burst clears
-        # quickly without holding the worker for long.
-        # Still on Python — Go scheduler has no Redis pubsub reader yet.
-        cron(notify_bridge, second=set(range(0, 60, 5))),
+        # No active cron entries — every former cron moved to
+        # otter-go-scheduler. The function symbols stay registered in
+        # `functions:` above so operators can `arq` enqueue ad-hoc for
+        # rollback / one-shot runs without re-instating cron entries.
         # RETIRED — Go scheduler (otter-go-scheduler subchart) owns
-        # these now. Function names stay registered in `functions:`
-        # above so operators can `arq` enqueue ad-hoc for rollback /
-        # one-shot runs without re-instating the cron entries.
+        # these now:
+        #   notify_bridge                → internal/notifications.BridgeJob
         #   freshness_sweep              → internal/scheduler/jobs/freshness
         #   dhcp_sync                    → internal/scheduler/jobs/dhcpsync
         #   dhcp_age_out                 → internal/scheduler/jobs/dhcpageout
