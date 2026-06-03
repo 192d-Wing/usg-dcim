@@ -420,7 +420,7 @@ ingress:
           backend: otter
         - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/abort
           pathType: ImplementationSpecific
-          backend: otter
+          backend: otter-go
         - path: /api/v1/region-deployments/[0-9A-Fa-f-]+/kubeconfig/callback
           pathType: ImplementationSpecific
           backend: otter

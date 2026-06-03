@@ -230,3 +230,35 @@ func (q *Queries) ListRegionDeploymentEvents(ctx context.Context, arg ListRegion
 	}
 	return items, rows.Err()
 }
+
+const abortRegionDeployment = `-- name: AbortRegionDeployment :one
+WITH cur AS (
+    SELECT status::text AS prior_status
+    FROM region_deployments
+    WHERE id = $1
+), upd AS (
+    UPDATE region_deployments
+    SET status = 'aborted'::region_deployment_status, updated_at = NOW()
+    WHERE id = $1
+      AND status NOT IN ('ready'::region_deployment_status,
+                         'aborted'::region_deployment_status)
+    RETURNING 1
+)
+SELECT cur.prior_status, (SELECT count(*) FROM upd)::bigint AS updated
+FROM cur
+`
+
+// AbortRegionDeploymentRow distinguishes the three cases the handler
+// must surface: row missing (pgx.ErrNoRows from QueryRow.Scan when cur
+// is empty), terminal-state refusal (Updated == 0), and success.
+type AbortRegionDeploymentRow struct {
+	PriorStatus string `json:"prior_status"`
+	Updated     int64  `json:"updated"`
+}
+
+func (q *Queries) AbortRegionDeployment(ctx context.Context, id uuid.UUID) (AbortRegionDeploymentRow, error) {
+	row := q.db.QueryRow(ctx, abortRegionDeployment, id)
+	var r AbortRegionDeploymentRow
+	err := row.Scan(&r.PriorStatus, &r.Updated)
+	return r, err
+}

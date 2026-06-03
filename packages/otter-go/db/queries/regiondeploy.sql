@@ -62,3 +62,27 @@ WHERE deployment_id = $1
   AND id > $2
 ORDER BY id ASC
 LIMIT $3;
+
+-- name: AbortRegionDeployment :one
+-- Conditional UPDATE: only flips to 'aborted' when the current
+-- status is not already terminal. The CTE returns the prior status
+-- regardless so the handler can distinguish 404 (no row), 422
+-- (terminal — ready/aborted), and the success path with a single
+-- round-trip. When the deployment id is missing, `cur` is empty so
+-- the outer `SELECT ... FROM cur` returns 0 rows and pgx's
+-- QueryRow.Scan reports pgx.ErrNoRows; the handler treats that as
+-- 404 (caller raced a delete).
+WITH cur AS (
+    SELECT status::text AS prior_status
+    FROM region_deployments
+    WHERE id = $1
+), upd AS (
+    UPDATE region_deployments
+    SET status = 'aborted'::region_deployment_status, updated_at = NOW()
+    WHERE id = $1
+      AND status NOT IN ('ready'::region_deployment_status,
+                         'aborted'::region_deployment_status)
+    RETURNING 1
+)
+SELECT cur.prior_status, (SELECT count(*) FROM upd)::bigint AS updated
+FROM cur;

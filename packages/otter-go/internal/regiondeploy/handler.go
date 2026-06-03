@@ -1,8 +1,7 @@
 // Package regiondeploy holds the otter-go handlers for
-// /api/v1/region-deployments. Read-only slice in this PR
-// (list/get/events). Lifecycle (POST/PATCH/start/abort) and the SSE
-// stream are separate follow-ups — they need the Go scheduler / arq
-// equivalent before they can move.
+// /api/v1/region-deployments. Reads (list/get/events) + abort
+// landed. Create/preflight/start/kubeconfig-callback/SSE follow in
+// later PRs — start still needs the arq → Go scheduler equivalent.
 package regiondeploy
 
 import (
@@ -25,7 +24,9 @@ import (
 
 const (
 	capRead  = "infrastructure:region-deployments:read"
+	capAbort = "infrastructure:region-deployments:abort"
 	notFound = "region deployment not found"
+	badIDMsg = "id is not a uuid"
 )
 
 type Querier interface {
@@ -35,6 +36,7 @@ type Querier interface {
 	ListRegionDeploymentNodes(ctx context.Context, deploymentID uuid.UUID) ([]dbq.RegionDeploymentNode, error)
 	ListRegionDeploymentServices(ctx context.Context, deploymentID uuid.UUID) ([]dbq.RegionDeploymentService, error)
 	ListRegionDeploymentEvents(ctx context.Context, arg dbq.ListRegionDeploymentEventsParams) ([]dbq.RegionDeploymentEvent, error)
+	AbortRegionDeployment(ctx context.Context, id uuid.UUID) (dbq.AbortRegionDeploymentRow, error)
 	// Site-scope expansion for the list filter + per-row ABAC.
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
@@ -44,7 +46,7 @@ type Querier interface {
 
 type Handler struct {
 	Q     Querier
-	Audit audit.Recorder // unused on reads; carried for symmetry with other handlers
+	Audit audit.Recorder // used by abort (and forthcoming start/create); list/get/events are reads-only
 }
 
 func (h *Handler) Mount(r chi.Router) {
@@ -53,6 +55,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments", h.list)
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}", h.get)
 	r.With(auth.RequireCapability(capRead)).Get("/region-deployments/{id}/events", h.listEvents)
+	r.With(auth.RequireCapability(capAbort)).Post("/region-deployments/{id}/abort", h.abort)
 }
 
 // detailOut mirrors Python's RegionDeploymentOut: the row plus nodes
@@ -134,7 +137,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		httpx.Error(w, http.StatusBadRequest, badIDMsg)
 		return
 	}
 	row, err := h.Q.GetRegionDeployment(r.Context(), id)
@@ -176,7 +179,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		httpx.Error(w, http.StatusBadRequest, badIDMsg)
 		return
 	}
 	// Scope-check existence + ownership BEFORE returning events — an
@@ -218,6 +221,92 @@ func (h *Handler) listEvents(w http.ResponseWriter, r *http.Request) {
 		items = []dbq.RegionDeploymentEvent{}
 	}
 	httpx.JSON(w, http.StatusOK, items)
+}
+
+// abort mirrors Python's POST /{id}/abort: refuse the transition if
+// the deployment already finished (`ready`) or is already aborted,
+// otherwise flip status to `aborted` and return the reloaded detail
+// row. Power-off of in-flight nodes via Rufio happens inside the
+// orchestrator's abort-handling stage — the API only sets the flag.
+func (h *Handler) abort(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, badIDMsg)
+		return
+	}
+	// Scope-check before the conditional UPDATE: an out-of-scope
+	// principal must not be able to mutate (or even confirm existence
+	// of) a deployment outside their fabric/site grants.
+	pre, err := h.Q.GetRegionDeployment(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, notFound)
+			return
+		}
+		writeMapped(w, err)
+		return
+	}
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, pre.SiteID, capAbort); serr != nil {
+		writeMapped(w, serr)
+		return
+	}
+	res, err := h.Q.AbortRegionDeployment(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Race: row was deleted between the scope-check and the
+			// conditional update. Surface as 404 to match the read paths.
+			httpx.Error(w, http.StatusNotFound, notFound)
+			return
+		}
+		writeMapped(w, err)
+		return
+	}
+	if res.Updated == 0 {
+		httpx.Error(w, http.StatusUnprocessableEntity,
+			"deployment is "+res.PriorStatus+"; cannot abort")
+		return
+	}
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "region_deployment.abort", TargetType: "region_deployment",
+		TargetID: id.String(), SiteID: &pre.SiteID,
+	})
+	// Reload to return the same shape as GET /{id} — handler.get's
+	// pattern, factored out into reloadDetail so abort/start/create
+	// later can share it.
+	out, err := h.reloadDetail(r.Context(), id)
+	if err != nil {
+		writeMapped(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// reloadDetail rebuilds the detailOut for a deployment after a
+// mutation. Mirrors the read path in handler.get; kept as a method
+// so create/start (later PRs) can reuse the same projection.
+func (h *Handler) reloadDetail(ctx context.Context, id uuid.UUID) (detailOut, error) {
+	row, err := h.Q.GetRegionDeployment(ctx, id)
+	if err != nil {
+		return detailOut{}, err
+	}
+	nodes, err := h.Q.ListRegionDeploymentNodes(ctx, id)
+	if err != nil {
+		return detailOut{}, err
+	}
+	services, err := h.Q.ListRegionDeploymentServices(ctx, id)
+	if err != nil {
+		return detailOut{}, err
+	}
+	return detailOut{
+		ID: row.ID, SiteID: row.SiteID, Name: row.Name, Status: row.Status,
+		CurrentStage: row.CurrentStage, LastError: row.LastError,
+		Config: defaultConfig(row.Config), KubeconfigSecretRef: row.KubeconfigSecretRef,
+		CreatedBy: row.CreatedBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		StartedAt: row.StartedAt, FinishedAt: row.FinishedAt,
+		Nodes:    toNodeOuts(nodes),
+		Services: toServiceOuts(services),
+	}, nil
 }
 
 func toNodeOuts(in []dbq.RegionDeploymentNode) []nodeOut {
