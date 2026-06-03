@@ -262,3 +262,68 @@ func (q *Queries) AbortRegionDeployment(ctx context.Context, id uuid.UUID) (Abor
 	err := row.Scan(&r.PriorStatus, &r.Updated)
 	return r, err
 }
+
+const createRegionDeployment = `-- name: CreateRegionDeployment :one
+INSERT INTO region_deployments (site_id, name, config)
+VALUES ($1, $2, $3::jsonb)
+RETURNING id, site_id, name, status::text AS status, current_stage,
+          last_error, config, kubeconfig_secret_ref, created_by,
+          created_at, updated_at, started_at, finished_at
+`
+
+type CreateRegionDeploymentParams struct {
+	SiteID uuid.UUID       `json:"site_id"`
+	Name   string          `json:"name"`
+	Config json.RawMessage `json:"config"`
+}
+
+func (q *Queries) CreateRegionDeployment(ctx context.Context, arg CreateRegionDeploymentParams) (RegionDeployment, error) {
+	row := q.db.QueryRow(ctx, createRegionDeployment, arg.SiteID, arg.Name, arg.Config)
+	var d RegionDeployment
+	err := row.Scan(&d.ID, &d.SiteID, &d.Name, &d.Status, &d.CurrentStage,
+		&d.LastError, &d.Config, &d.KubeconfigSecretRef, &d.CreatedBy,
+		&d.CreatedAt, &d.UpdatedAt, &d.StartedAt, &d.FinishedAt)
+	return d, err
+}
+
+const createRegionDeploymentNode = `-- name: CreateRegionDeploymentNode :one
+INSERT INTO region_deployment_nodes (
+    deployment_id, hostname, mac, bmc_address, role,
+    primary_ip_v6, provisioning_ip_v6, bmc_creds_secret_ref
+)
+VALUES (
+    $1, $2, $3::macaddr, $4::inet,
+    $5::region_deployment_node_role,
+    NULLIF($6, '')::inet, NULLIF($7, '')::inet, $8
+)
+RETURNING id, deployment_id, hostname,
+          mac::text AS mac,
+          host(primary_ip_v6)      AS primary_ip_v6,
+          host(provisioning_ip_v6) AS provisioning_ip_v6,
+          host(bmc_address)        AS bmc_address,
+          role::text AS role,
+          status::text AS status,
+          last_event, joined_at
+`
+
+type CreateRegionDeploymentNodeParams struct {
+	DeploymentID      uuid.UUID `json:"deployment_id"`
+	Hostname          string    `json:"hostname"`
+	Mac               string    `json:"mac"`
+	BmcAddress        string    `json:"bmc_address"`
+	Role              string    `json:"role"`
+	PrimaryIpV6       string    `json:"primary_ip_v6"`
+	ProvisioningIpV6  string    `json:"provisioning_ip_v6"`
+	BmcCredsSecretRef *string   `json:"bmc_creds_secret_ref"`
+}
+
+func (q *Queries) CreateRegionDeploymentNode(ctx context.Context, arg CreateRegionDeploymentNodeParams) (RegionDeploymentNode, error) {
+	row := q.db.QueryRow(ctx, createRegionDeploymentNode,
+		arg.DeploymentID, arg.Hostname, arg.Mac, arg.BmcAddress, arg.Role,
+		arg.PrimaryIpV6, arg.ProvisioningIpV6, arg.BmcCredsSecretRef)
+	var n RegionDeploymentNode
+	err := row.Scan(&n.ID, &n.DeploymentID, &n.Hostname,
+		&n.Mac, &n.PrimaryIpV6, &n.ProvisioningIpV6, &n.BmcAddress,
+		&n.Role, &n.Status, &n.LastEvent, &n.JoinedAt)
+	return n, err
+}

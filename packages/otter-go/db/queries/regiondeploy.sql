@@ -86,3 +86,40 @@ WITH cur AS (
 )
 SELECT cur.prior_status, (SELECT count(*) FROM upd)::bigint AS updated
 FROM cur;
+
+-- name: CreateRegionDeployment :one
+-- Mirrors Python POST /region-deployments. Status defaults to
+-- 'pending' via the DDL (region_deployments.status DEFAULT 'pending').
+-- created_by is left NULL on insert — matches Python, which never
+-- populates it; the authenticated principal is captured in the audit
+-- log instead. config is validated as non-null at the handler layer
+-- (see createReq.validate); we leave the column NOT NULL DEFAULT '{}'
+-- enforcement to the DDL.
+INSERT INTO region_deployments (site_id, name, config)
+VALUES ($1, $2, $3::jsonb)
+RETURNING id, site_id, name, status::text AS status, current_stage,
+          last_error, config, kubeconfig_secret_ref, created_by,
+          created_at, updated_at, started_at, finished_at;
+
+-- name: CreateRegionDeploymentNode :one
+-- Per-node INSERT called once per `nodes[]` entry inside the same tx
+-- as CreateRegionDeployment. NULL primary_ip_v6/provisioning_ip_v6
+-- are valid — they get filled in by the joining stage. mac is INET-
+-- adjacent (macaddr type) so $4::macaddr keeps the cast explicit.
+INSERT INTO region_deployment_nodes (
+    deployment_id, hostname, mac, bmc_address, role,
+    primary_ip_v6, provisioning_ip_v6, bmc_creds_secret_ref
+)
+VALUES (
+    $1, $2, $3::macaddr, $4::inet,
+    $5::region_deployment_node_role,
+    NULLIF($6, '')::inet, NULLIF($7, '')::inet, $8
+)
+RETURNING id, deployment_id, hostname,
+          mac::text AS mac,
+          host(primary_ip_v6)      AS primary_ip_v6,
+          host(provisioning_ip_v6) AS provisioning_ip_v6,
+          host(bmc_address)        AS bmc_address,
+          role::text AS role,
+          status::text AS status,
+          last_event, joined_at;
