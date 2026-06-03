@@ -5,6 +5,8 @@ package dbq
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -73,6 +75,101 @@ func (q *Queries) CountDnsZones(ctx context.Context, arg CountDnsZonesParams) (i
 	var n int64
 	err := row.Scan(&n)
 	return n, err
+}
+
+// ---- Bundle assembly bulk reads (PR 29) ----
+
+const listDnsZonesByFabric = `SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
+       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+FROM dns_zones
+WHERE fabric_id = $1 AND frozen = false
+ORDER BY name`
+
+func (q *Queries) ListDnsZonesByFabric(ctx context.Context, fabricID uuid.UUID) ([]DnsZone, error) {
+	rows, err := q.db.Query(ctx, listDnsZonesByFabric, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DnsZone
+	for rows.Next() {
+		var z DnsZone
+		if err := scanDnsZone(rows, &z); err != nil {
+			return nil, err
+		}
+		out = append(out, z)
+	}
+	return out, rows.Err()
+}
+
+// DnsRecordForBundle carries the columns the bundle assembler needs
+// to filter by health-check status and split-horizon view — wider
+// than DnsRecordForRender (which serves the preview endpoint).
+type DnsRecordForBundle struct {
+	ID            uuid.UUID       `json:"id"`
+	ZoneID        uuid.UUID       `json:"zone_id"`
+	Name          string          `json:"name"`
+	Type          string          `json:"type"`
+	TTL           *int32          `json:"ttl"`
+	Data          json.RawMessage `json:"data"`
+	Source        string          `json:"source"`
+	IpamAddressID *uuid.UUID      `json:"ipam_address_id"`
+	HealthCheckID *uuid.UUID      `json:"health_check_id"`
+	ViewID        *uuid.UUID      `json:"view_id"`
+	CreatedAt     time.Time       `json:"created_at"`
+	UpdatedAt     time.Time       `json:"updated_at"`
+}
+
+const listDnsRecordsByZoneIDs = `SELECT id, zone_id, name, type::text AS type, ttl, data,
+       source::text AS source, ipam_address_id,
+       health_check_id, view_id,
+       created_at, updated_at
+FROM dns_records
+WHERE zone_id = ANY($1::uuid[])
+ORDER BY zone_id, name, type`
+
+func (q *Queries) ListDnsRecordsByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]DnsRecordForBundle, error) {
+	rows, err := q.db.Query(ctx, listDnsRecordsByZoneIDs, zoneIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DnsRecordForBundle
+	for rows.Next() {
+		var r DnsRecordForBundle
+		if err := rows.Scan(&r.ID, &r.ZoneID, &r.Name, &r.Type, &r.TTL, &r.Data,
+			&r.Source, &r.IpamAddressID,
+			&r.HealthCheckID, &r.ViewID,
+			&r.CreatedAt, &r.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+const listUnhealthyEnabledHealthChecksByFabric = `SELECT id FROM dns_health_checks
+WHERE fabric_id = $1
+  AND status = 'unhealthy'::dns_health_check_status
+  AND enabled = true`
+
+func (q *Queries) ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, fabricID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnhealthyEnabledHealthChecksByFabric, fabricID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 const getDnsZone = `-- name: GetDnsZone :one

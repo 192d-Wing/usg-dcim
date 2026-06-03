@@ -36,6 +36,41 @@ WHERE id = $1;
 -- ===== DNS Records =====
 -- 2-hop scope: record → zone → fabric. Subquery on dns_zones keeps the
 -- planner happy when scope_fabric_ids is NULL.
+-- name: ListDnsRecordsByZoneIDs :many
+-- Bulk-fetch every record across a set of zones. The bundle
+-- assembler uses this to load records for an entire fabric in a
+-- single round-trip rather than per-zone. Ordered (zone_id, name,
+-- type) so per-zone slicing in Go is a single contiguous scan.
+SELECT id, zone_id, name, type::text AS type, ttl, data,
+       source::text AS source, ipam_address_id,
+       health_check_id, view_id,
+       created_at, updated_at
+FROM dns_records
+WHERE zone_id = ANY($1::uuid[])
+ORDER BY zone_id, name, type;
+
+-- name: ListUnhealthyEnabledHealthChecksByFabric :many
+-- IDs only — the bundle assembler uses the set to skip records
+-- whose health_check_id is unhealthy. The renderer's `unhealthy`
+-- input is a set[uuid], so we return the raw IDs.
+SELECT id FROM dns_health_checks
+WHERE fabric_id = $1
+  AND status = 'unhealthy'::dns_health_check_status
+  AND enabled = true;
+
+-- name: ListDnsZonesByFabric :many
+-- Every non-frozen zone in a fabric, for the auth bundle. Excludes
+-- frozen zones (operators freeze a zone to take it off the air
+-- without deleting it).
+SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
+       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
+       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
+       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+FROM dns_zones
+WHERE fabric_id = $1
+  AND frozen = false
+ORDER BY name;
+
 -- name: ListDnsRecords :many
 SELECT id, zone_id, name, type::text AS type, ttl, data,
        source::text AS source, ipam_address_id, created_at, updated_at
