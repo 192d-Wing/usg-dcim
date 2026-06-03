@@ -1,7 +1,5 @@
-# otter-go-scheduler subchart values. Disabled by default — see
-# Chart.yaml. Operators flip this to true once they're ready to run
-# the Go scheduler alongside the Python arq worker (jobs are
-# idempotent so a brief overlap is safe).
+# otter-go-scheduler subchart values. The umbrella enables this by
+# default — the Python arq worker it replaced has been retired.
 enabled: false
 
 # Single replica: robfig/cron fires on every replica's own wall

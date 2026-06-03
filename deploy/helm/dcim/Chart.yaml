@@ -2,9 +2,9 @@ apiVersion: v2
 name: dcim
 description: |
   USG DCIM enterprise platform. Umbrella chart bundling per-animal
-  subcharts (otter-go, otter-go-scheduler, otter-worker, finch, heron,
-  magpie, beagle, badger) plus shared ingress, network policy, secrets,
-  and Alembic migrations.
+  subcharts (otter-go, otter-go-scheduler, finch, heron, magpie,
+  beagle, badger) plus shared ingress, network policy, secrets, and
+  schema migrations.
 type: application
 version: 0.2.0
 appVersion: "0.1.0"
@@ -15,14 +15,8 @@ keywords: [dcim, datacenter, infrastructure, monitoring]
 # Subcharts under charts/ — declared so `helm lint` recognizes them.
 # Each subchart's enabled flag is set in values.yaml (per-animal block).
 dependencies:
-  # The Python `otter` API service (FastAPI) was retired after the full
-  # Go cutover — every route lives on otter-go now. The packages/otter
-  # source stays alive only as the build base for otter-worker (the arq
-  # orchestrator + cron worker), which ships the same dcim-otter image
-  # with the arq CMD override.
   - { name: otter-go,           version: 0.1.0, condition: otter-go.enabled }
   - { name: otter-go-scheduler, version: 0.1.0, condition: otter-go-scheduler.enabled }
-  - { name: otter-worker,       version: 0.1.0, condition: otter-worker.enabled }
   - { name: finch,        version: 0.1.0, condition: finch.enabled }
   - { name: heron,        version: 0.1.0, condition: heron.enabled }
   - { name: magpie,       version: 0.1.0, condition: magpie.enabled }

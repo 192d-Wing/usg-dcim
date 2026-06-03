@@ -17,57 +17,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  otter:
-    # The Python `otter` API service was retired after the full Go
-    # cutover; this job stays because packages/otter still owns the
-    # arq orchestrator + cron worker (otter-worker subchart) which
-    # ship from the same Python tree.
-    name: otter-worker (ruff + pytest)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/otter
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install Python + project deps
-        run: |
-          uv python install 3.12
-          uv sync --extra dev
-
-      - name: Lint (ruff)
-        run: uv run ruff check src tests
-
-      - name: Tests (pytest)
-        run: uv run pytest -q
-
-  mole:
-    name: mole (ruff, deprecated)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/mole
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install Python + project deps
-        run: |
-          uv python install 3.12
-          uv sync --extra dev || uv sync
-
-      - name: Lint (ruff)
-        run: uv run ruff check . || echo "::warning::ruff check skipped — no rules configured"
-
   finch:
     name: finch (tsc + vitest + build)
     runs-on: ubuntu-latest
@@ -207,19 +156,20 @@ jobs:
   container-build:
     name: Container images build (Podman/Buildah)
     runs-on: ubuntu-latest
-    needs: [otter, finch, go]
+    needs: [finch, go]
     strategy:
       fail-fast: false
       matrix:
         include:
           # Self-contained services (build context = the package dir).
-          - { image: dcim-otter,  context: packages/otter,  containerfile: packages/otter/Containerfile }
           - { image: dcim-finch,  context: packages/finch,  containerfile: packages/finch/Containerfile }
-          - { image: dcim-mole,   context: packages/mole,   containerfile: packages/mole/Containerfile }
           - { image: dcim-badger, context: packages/badger, containerfile: packages/badger/Containerfile }
           # Go services that import packages/shared-go via an in-tree
           # replace directive — build context must be repo root so the
-          # COPY of packages/shared-go resolves.
+          # COPY of packages/shared-go resolves. The dcim-otter-go image
+          # is multi-binary (otter-go HTTP server + scheduler + worker
+          # + migrate); helm chooses the entrypoint per pod, so a Helm
+          # release pins a single image tag for every otter-go deployment.
           - { image: dcim-heron,  context: .,               containerfile: packages/heron/Containerfile }
           - { image: dcim-magpie, context: .,               containerfile: packages/magpie/Containerfile }
           - { image: dcim-beagle, context: .,               containerfile: packages/beagle/Containerfile }
@@ -297,49 +247,3 @@ jobs:
           tar -xzf /tmp/kc.tar.gz -C /usr/local/bin kubeconform
           kubeconform -summary -strict -kubernetes-version 1.30.0 /tmp/dcim-default.yaml
           kubeconform -summary -strict -kubernetes-version 1.30.0 /tmp/dcim-k3d.yaml
-
-  migrations:
-    name: Alembic up / down / up
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        # TimescaleDB-enabled Postgres so migrations that
-        # CREATE EXTENSION timescaledb (e.g. the raw_samples hypertable)
-        # don't fail in CI.
-        image: timescale/timescaledb-ha:pg16
-        env:
-          POSTGRES_USER: dcim
-          POSTGRES_PASSWORD: dcim
-          POSTGRES_DB: dcim
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U dcim -d dcim"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    defaults:
-      run:
-        working-directory: packages/otter
-    env:
-      # asyncpg driver, points at the service container.
-      DCIM_POSTGRES_DSN: postgresql+asyncpg://dcim:dcim@localhost:5432/dcim
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-
-      - name: Install Python + project deps
-        run: |
-          uv python install 3.12
-          uv sync
-
-      - name: Apply all migrations from a clean DB
-        run: uv run alembic upgrade head
-
-      - name: Step back one revision
-        run: uv run alembic downgrade -1
-
-      - name: Re-apply head — confirms downgrade is reversible
-        run: uv run alembic upgrade head
