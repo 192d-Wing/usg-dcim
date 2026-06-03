@@ -25,16 +25,19 @@ import (
 // invalidate the bundle. corefile is the auth+recursive Corefile;
 // zones maps filename → text; keyFiles maps filename → text (split
 // into a separate map so an empty-keys catalog still differs from
-// "no DNSSEC at all"); gobgp is the GoBGP YAML AS a parsed
-// generic-JSON value (or nil); anycastPrefixes are emitted as a
-// separate hash bucket so flipping anycast_ipv4 re-keys even when
-// the GoBGP YAML didn't change.
+// "no DNSSEC at all"); anycastPrefixes are emitted as a separate
+// hash bucket so flipping anycast_ipv4 re-keys the bundle.
+//
+// PR 36: dropped the Gobgp field (PR #257 deprecated GoBGP across
+// the stack — Cilium BGP owns route advertisement; the in-pod
+// gobgpd is gone). Stripping Gobgp from the etag means the next
+// poll after this lands re-keys every bundle once and badger
+// re-applies as a no-op; subsequent renders are stable again.
 type EtagInput struct {
-	Corefile         string
-	Zones            map[string]string
-	KeyFiles         map[string]string
-	Gobgp            any
-	AnycastPrefixes  []string
+	Corefile        string
+	Zones           map[string]string
+	KeyFiles        map[string]string
+	AnycastPrefixes []string
 }
 
 // BundleEtag computes the same 32-hex-char etag Python's
@@ -51,15 +54,6 @@ func BundleEtag(in EtagInput) string {
 		h.Write([]byte{0x00})
 		h.Write([]byte(in.Zones[k]))
 		h.Write([]byte{0x00})
-	}
-
-	// GoBGP JSON canonical encoding. Python's json.dumps with
-	// sort_keys=True sorts dict keys lexicographically — match that.
-	if in.Gobgp != nil {
-		buf, err := canonicalJSON(in.Gobgp)
-		if err == nil {
-			h.Write(buf)
-		}
 	}
 
 	// 0x01 discriminator separates key-file stream from zone-name
