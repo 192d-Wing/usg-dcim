@@ -113,6 +113,8 @@ ingress:
         - { path: /api/v1/stencils,      pathType: Prefix, backend: otter-go }
         # PR 20 cutover: /api/v1/power on otter-go.
         - { path: /api/v1/power,         pathType: Prefix, backend: otter-go }
+        # PR 21 cutover: /api/v1/collectors on otter-go.
+        - { path: /api/v1/collectors,    pathType: Prefix, backend: otter-go }
         - { path: /api,              pathType: Prefix, backend: otter    }
         - { path: /,                 pathType: Prefix, backend: finch    }
   tls: []
