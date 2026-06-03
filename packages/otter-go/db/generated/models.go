@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AuditLog struct {
@@ -263,12 +264,12 @@ type PowerConnection struct {
 }
 
 type Fabric struct {
-	ID                    uuid.UUID       `json:"id"`
-	Name                  string          `json:"name"`
-	Slug                  string          `json:"slug"`
-	Description           *string         `json:"description"`
-	Enclave               *string         `json:"enclave"`
-	Classification        *string         `json:"classification"`
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	Slug           string    `json:"slug"`
+	Description    *string   `json:"description"`
+	Enclave        *string   `json:"enclave"`
+	Classification *string   `json:"classification"`
 	// JSON array of "ip" or "ip:port" strings — nullable.
 	DnsRecursiveUpstreams json.RawMessage `json:"dns_recursive_upstreams"`
 	DnsDenyNetworks       json.RawMessage `json:"dns_deny_networks"`
@@ -368,24 +369,24 @@ type SupernetLirAttachRow struct {
 // and non-NULL on approved/rejected/failed (enforced by
 // ck_lir_request_decision_consistency).
 type LirRequest struct {
-	ID                uuid.UUID  `json:"id"`
-	OrganizationID    uuid.UUID  `json:"organization_id"`
-	RequesterUserID   uuid.UUID  `json:"requester_user_id"`
-	PoolID            *uuid.UUID `json:"pool_id"`
-	SiteID            *uuid.UUID `json:"site_id"`
-	IpFamily          int16      `json:"ip_family"`
-	PrefixLength      int16      `json:"prefix_length"`
-	Purpose           *string    `json:"purpose"`
-	Classification    *string    `json:"classification"`
-	Justification     string     `json:"justification"`
-	Status            string     `json:"status"`
-	SubmittedAt       time.Time  `json:"submitted_at"`
-	DecidedAt         *time.Time `json:"decided_at"`
-	DecidedByUserID   *uuid.UUID `json:"decided_by_user_id"`
-	DecisionNotes     *string    `json:"decision_notes"`
-	ApprovedPoolID    *uuid.UUID `json:"approved_pool_id"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID              uuid.UUID  `json:"id"`
+	OrganizationID  uuid.UUID  `json:"organization_id"`
+	RequesterUserID uuid.UUID  `json:"requester_user_id"`
+	PoolID          *uuid.UUID `json:"pool_id"`
+	SiteID          *uuid.UUID `json:"site_id"`
+	IpFamily        int16      `json:"ip_family"`
+	PrefixLength    int16      `json:"prefix_length"`
+	Purpose         *string    `json:"purpose"`
+	Classification  *string    `json:"classification"`
+	Justification   string     `json:"justification"`
+	Status          string     `json:"status"`
+	SubmittedAt     time.Time  `json:"submitted_at"`
+	DecidedAt       *time.Time `json:"decided_at"`
+	DecidedByUserID *uuid.UUID `json:"decided_by_user_id"`
+	DecisionNotes   *string    `json:"decision_notes"`
+	ApprovedPoolID  *uuid.UUID `json:"approved_pool_id"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // LirAllocation — the issued allocation tied 1:1 to an approved
@@ -393,28 +394,28 @@ type LirRequest struct {
 // (phase 5); the worker reads rows where arin_status ∈ ('pending',
 // 'failed', 'removing') to find work.
 type LirAllocation struct {
-	ID                       uuid.UUID  `json:"id"`
-	RequestID                uuid.UUID  `json:"request_id"`
-	OrganizationID           uuid.UUID  `json:"organization_id"`
-	PoolID                   uuid.UUID  `json:"pool_id"`
-	PoolSupernetID           uuid.UUID  `json:"pool_supernet_id"`
-	TenantSupernetID         uuid.UUID  `json:"tenant_supernet_id"`
-	Prefix                   string     `json:"prefix"`
-	AllocatedAt              time.Time  `json:"allocated_at"`
-	AllocatedByUserID        uuid.UUID  `json:"allocated_by_user_id"`
-	Status                   string     `json:"status"`
-	ReturnRequestedAt        *time.Time `json:"return_requested_at"`
-	ReturnRequestedByUserID  *uuid.UUID `json:"return_requested_by_user_id"`
-	ReturnReason             *string    `json:"return_reason"`
-	ReturnedAt               *time.Time `json:"returned_at"`
-	ReturnedByUserID         *uuid.UUID `json:"returned_by_user_id"`
-	ArinStatus               string     `json:"arin_status"`
-	ArinNetHandle            *string    `json:"arin_net_handle"`
-	ArinLastAttemptAt        *time.Time `json:"arin_last_attempt_at"`
-	ArinLastError            *string    `json:"arin_last_error"`
-	ArinAttempts             int32      `json:"arin_attempts"`
-	CreatedAt                time.Time  `json:"created_at"`
-	UpdatedAt                time.Time  `json:"updated_at"`
+	ID                      uuid.UUID  `json:"id"`
+	RequestID               uuid.UUID  `json:"request_id"`
+	OrganizationID          uuid.UUID  `json:"organization_id"`
+	PoolID                  uuid.UUID  `json:"pool_id"`
+	PoolSupernetID          uuid.UUID  `json:"pool_supernet_id"`
+	TenantSupernetID        uuid.UUID  `json:"tenant_supernet_id"`
+	Prefix                  string     `json:"prefix"`
+	AllocatedAt             time.Time  `json:"allocated_at"`
+	AllocatedByUserID       uuid.UUID  `json:"allocated_by_user_id"`
+	Status                  string     `json:"status"`
+	ReturnRequestedAt       *time.Time `json:"return_requested_at"`
+	ReturnRequestedByUserID *uuid.UUID `json:"return_requested_by_user_id"`
+	ReturnReason            *string    `json:"return_reason"`
+	ReturnedAt              *time.Time `json:"returned_at"`
+	ReturnedByUserID        *uuid.UUID `json:"returned_by_user_id"`
+	ArinStatus              string     `json:"arin_status"`
+	ArinNetHandle           *string    `json:"arin_net_handle"`
+	ArinLastAttemptAt       *time.Time `json:"arin_last_attempt_at"`
+	ArinLastError           *string    `json:"arin_last_error"`
+	ArinAttempts            int32      `json:"arin_attempts"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }
 
 // LandingFabricRow — the (fabric_id, default_vrf_id) tuple the
@@ -469,12 +470,12 @@ type SystemSetting struct {
 // slug literal which forced the landing-fabric name to live in
 // three places.
 type SupernetForMoveRow struct {
-	ID                     uuid.UUID  `json:"id"`
-	CurrentFabricID        uuid.UUID  `json:"current_fabric_id"`
-	CurrentVrfID           uuid.UUID  `json:"current_vrf_id"`
-	OwnerOrganizationID    *uuid.UUID `json:"owner_organization_id"`
-	Prefix                 string     `json:"prefix"`
-	CurrentFabricIsSystem  bool       `json:"current_fabric_is_system"`
+	ID                    uuid.UUID  `json:"id"`
+	CurrentFabricID       uuid.UUID  `json:"current_fabric_id"`
+	CurrentVrfID          uuid.UUID  `json:"current_vrf_id"`
+	OwnerOrganizationID   *uuid.UUID `json:"owner_organization_id"`
+	Prefix                string     `json:"prefix"`
+	CurrentFabricIsSystem bool       `json:"current_fabric_is_system"`
 }
 
 // VrfForMoveRow — minimal (id, fabric_id) projection used to verify
@@ -503,29 +504,29 @@ type ArinRemoveJobRow struct {
 // every Organization POC + address field needed to build a Reg-RWS
 // reassign-detailed payload in one round-trip.
 type ArinSubmitJobRow struct {
-	AllocationID     uuid.UUID `json:"allocation_id"`
-	ArinStatus       string    `json:"arin_status"`
-	ArinAttempts     int32     `json:"arin_attempts"`
-	Prefix           string    `json:"prefix"`
-	OrganizationID   uuid.UUID `json:"organization_id"`
-	ParentNetHandle  string    `json:"parent_net_handle"`
-	OrgName          string    `json:"org_name"`
-	OrgArinHandle    *string   `json:"org_arin_handle"`
-	AddressLine1     string    `json:"address_line1"`
-	AddressLine2     *string   `json:"address_line2"`
-	City             string    `json:"city"`
-	StateProvince    *string   `json:"state_province"`
-	PostalCode       *string   `json:"postal_code"`
-	Country          string    `json:"country"`
-	AdminPocName     string    `json:"admin_poc_name"`
-	AdminPocEmail    string    `json:"admin_poc_email"`
-	AdminPocPhone    *string   `json:"admin_poc_phone"`
-	TechPocName      string    `json:"tech_poc_name"`
-	TechPocEmail     string    `json:"tech_poc_email"`
-	TechPocPhone     *string   `json:"tech_poc_phone"`
-	AbusePocName     string    `json:"abuse_poc_name"`
-	AbusePocEmail    string    `json:"abuse_poc_email"`
-	AbusePocPhone    *string   `json:"abuse_poc_phone"`
+	AllocationID    uuid.UUID `json:"allocation_id"`
+	ArinStatus      string    `json:"arin_status"`
+	ArinAttempts    int32     `json:"arin_attempts"`
+	Prefix          string    `json:"prefix"`
+	OrganizationID  uuid.UUID `json:"organization_id"`
+	ParentNetHandle string    `json:"parent_net_handle"`
+	OrgName         string    `json:"org_name"`
+	OrgArinHandle   *string   `json:"org_arin_handle"`
+	AddressLine1    string    `json:"address_line1"`
+	AddressLine2    *string   `json:"address_line2"`
+	City            string    `json:"city"`
+	StateProvince   *string   `json:"state_province"`
+	PostalCode      *string   `json:"postal_code"`
+	Country         string    `json:"country"`
+	AdminPocName    string    `json:"admin_poc_name"`
+	AdminPocEmail   string    `json:"admin_poc_email"`
+	AdminPocPhone   *string   `json:"admin_poc_phone"`
+	TechPocName     string    `json:"tech_poc_name"`
+	TechPocEmail    string    `json:"tech_poc_email"`
+	TechPocPhone    *string   `json:"tech_poc_phone"`
+	AbusePocName    string    `json:"abuse_poc_name"`
+	AbusePocEmail   string    `json:"abuse_poc_email"`
+	AbusePocPhone   *string   `json:"abuse_poc_phone"`
 }
 
 type Subnet struct {
@@ -578,34 +579,34 @@ type Cable struct {
 }
 
 type Asset struct {
-	ID                 uuid.UUID  `json:"id"`
-	SiteID             uuid.UUID  `json:"site_id"`
-	RackID             *uuid.UUID `json:"rack_id"`
-	ParentAssetID      *uuid.UUID `json:"parent_asset_id"`
-	Name               string     `json:"name"`
-	Hostname           *string    `json:"hostname"`
-	Kind               string     `json:"kind"`
-	Manufacturer       *string    `json:"manufacturer"`
-	Model              *string    `json:"model"`
-	Serial             *string    `json:"serial"`
-	Firmware           *string    `json:"firmware"`
-	RackPositionU      *int32     `json:"rack_position_u"`
-	RackUnits          *int32     `json:"rack_units"`
-	Face               string     `json:"face"`
-	Mount              string     `json:"mount"`
-	PduSide            *string    `json:"pdu_side"`
-	PsuCount           *int32     `json:"psu_count"`
-	PortCount          *int32     `json:"port_count"`
-	MgmtIP             *string    `json:"mgmt_ip"`
-	MgmtProtocol       *string    `json:"mgmt_protocol"`
-	MgmtPort           *int32     `json:"mgmt_port"`
-	MgmtCredentialsRef *string    `json:"mgmt_credentials_ref"`
-	LifecycleState     string     `json:"lifecycle_state"`
-	InstallDate        *string    `json:"install_date"`
-	WarrantyExpires    *string    `json:"warranty_expires"`
+	ID                 uuid.UUID       `json:"id"`
+	SiteID             uuid.UUID       `json:"site_id"`
+	RackID             *uuid.UUID      `json:"rack_id"`
+	ParentAssetID      *uuid.UUID      `json:"parent_asset_id"`
+	Name               string          `json:"name"`
+	Hostname           *string         `json:"hostname"`
+	Kind               string          `json:"kind"`
+	Manufacturer       *string         `json:"manufacturer"`
+	Model              *string         `json:"model"`
+	Serial             *string         `json:"serial"`
+	Firmware           *string         `json:"firmware"`
+	RackPositionU      *int32          `json:"rack_position_u"`
+	RackUnits          *int32          `json:"rack_units"`
+	Face               string          `json:"face"`
+	Mount              string          `json:"mount"`
+	PduSide            *string         `json:"pdu_side"`
+	PsuCount           *int32          `json:"psu_count"`
+	PortCount          *int32          `json:"port_count"`
+	MgmtIP             *string         `json:"mgmt_ip"`
+	MgmtProtocol       *string         `json:"mgmt_protocol"`
+	MgmtPort           *int32          `json:"mgmt_port"`
+	MgmtCredentialsRef *string         `json:"mgmt_credentials_ref"`
+	LifecycleState     string          `json:"lifecycle_state"`
+	InstallDate        *string         `json:"install_date"`
+	WarrantyExpires    *string         `json:"warranty_expires"`
 	MetadataJson       json.RawMessage `json:"metadata_json"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
 }
 
 type Building struct {
@@ -660,23 +661,23 @@ type Region struct {
 }
 
 type Site struct {
-	ID              uuid.UUID `json:"id"`
-	RegionID        uuid.UUID `json:"region_id"`
-	Name            string    `json:"name"`
-	Code            string    `json:"code"`
-	Address         *string   `json:"address"`
-	Latitude        *string   `json:"latitude"`
-	Longitude       *string   `json:"longitude"`
-	Timezone        *string   `json:"timezone"`
-	Majcom          *string   `json:"majcom"`
-	OrganizationID  *uuid.UUID `json:"organization_id"`
-	MissionOwner    *string   `json:"mission_owner"`
-	Enclave         *string   `json:"enclave"`
-	Classification  *string   `json:"classification"`
-	LifecycleState  string    `json:"lifecycle_state"`
-	MetadataJson    json.RawMessage `json:"metadata_json"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	ID             uuid.UUID       `json:"id"`
+	RegionID       uuid.UUID       `json:"region_id"`
+	Name           string          `json:"name"`
+	Code           string          `json:"code"`
+	Address        *string         `json:"address"`
+	Latitude       *string         `json:"latitude"`
+	Longitude      *string         `json:"longitude"`
+	Timezone       *string         `json:"timezone"`
+	Majcom         *string         `json:"majcom"`
+	OrganizationID *uuid.UUID      `json:"organization_id"`
+	MissionOwner   *string         `json:"mission_owner"`
+	Enclave        *string         `json:"enclave"`
+	Classification *string         `json:"classification"`
+	LifecycleState string          `json:"lifecycle_state"`
+	MetadataJson   json.RawMessage `json:"metadata_json"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 type Overlay struct {
@@ -866,17 +867,17 @@ type DnsHealthCheck struct {
 }
 
 type BgpPeer struct {
-	ID                uuid.UUID  `json:"id"`
-	Name              string     `json:"name"`
-	SiteID            uuid.UUID  `json:"site_id"`
-	LocalAsnID        uuid.UUID  `json:"local_asn_id"`
-	PeerAsnID         uuid.UUID  `json:"peer_asn_id"`
-	PeerIP            string     `json:"peer_ip"`
-	PeerDescription   *string    `json:"peer_description"`
-	TcpAoKeyChainID   *uuid.UUID `json:"tcp_ao_key_chain_id"`
-	Enabled           bool       `json:"enabled"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID              uuid.UUID  `json:"id"`
+	Name            string     `json:"name"`
+	SiteID          uuid.UUID  `json:"site_id"`
+	LocalAsnID      uuid.UUID  `json:"local_asn_id"`
+	PeerAsnID       uuid.UUID  `json:"peer_asn_id"`
+	PeerIP          string     `json:"peer_ip"`
+	PeerDescription *string    `json:"peer_description"`
+	TcpAoKeyChainID *uuid.UUID `json:"tcp_ao_key_chain_id"`
+	Enabled         bool       `json:"enabled"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 type AnycastBgpBinding struct {
@@ -905,32 +906,32 @@ type Collector struct {
 }
 
 type Organization struct {
-	ID             uuid.UUID `json:"id"`
-	Name           string    `json:"name"`
-	ArinOrgID      *string   `json:"arin_org_id"`
-	AddressLine1   string    `json:"address_line1"`
-	AddressLine2   *string   `json:"address_line2"`
-	City           string    `json:"city"`
-	StateProvince  *string   `json:"state_province"`
-	PostalCode     *string   `json:"postal_code"`
-	Country        string    `json:"country"`
-	Phone          *string   `json:"phone"`
-	Email          *string   `json:"email"`
-	AdminPocName   string    `json:"admin_poc_name"`
-	AdminPocEmail  string    `json:"admin_poc_email"`
-	AdminPocPhone  *string   `json:"admin_poc_phone"`
-	TechPocName    string    `json:"tech_poc_name"`
-	TechPocEmail   string    `json:"tech_poc_email"`
-	TechPocPhone   *string   `json:"tech_poc_phone"`
-	AbusePocName   string    `json:"abuse_poc_name"`
-	AbusePocEmail  string    `json:"abuse_poc_email"`
-	AbusePocPhone  *string   `json:"abuse_poc_phone"`
-	NocPocName     *string   `json:"noc_poc_name"`
-	NocPocEmail    *string   `json:"noc_poc_email"`
-	NocPocPhone    *string   `json:"noc_poc_phone"`
-	Description    *string   `json:"description"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID            uuid.UUID `json:"id"`
+	Name          string    `json:"name"`
+	ArinOrgID     *string   `json:"arin_org_id"`
+	AddressLine1  string    `json:"address_line1"`
+	AddressLine2  *string   `json:"address_line2"`
+	City          string    `json:"city"`
+	StateProvince *string   `json:"state_province"`
+	PostalCode    *string   `json:"postal_code"`
+	Country       string    `json:"country"`
+	Phone         *string   `json:"phone"`
+	Email         *string   `json:"email"`
+	AdminPocName  string    `json:"admin_poc_name"`
+	AdminPocEmail string    `json:"admin_poc_email"`
+	AdminPocPhone *string   `json:"admin_poc_phone"`
+	TechPocName   string    `json:"tech_poc_name"`
+	TechPocEmail  string    `json:"tech_poc_email"`
+	TechPocPhone  *string   `json:"tech_poc_phone"`
+	AbusePocName  string    `json:"abuse_poc_name"`
+	AbusePocEmail string    `json:"abuse_poc_email"`
+	AbusePocPhone *string   `json:"abuse_poc_phone"`
+	NocPocName    *string   `json:"noc_poc_name"`
+	NocPocEmail   *string   `json:"noc_poc_email"`
+	NocPocPhone   *string   `json:"noc_poc_phone"`
+	Description   *string   `json:"description"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 type VrfBgpPeer struct {
@@ -945,11 +946,11 @@ type VrfBgpPeer struct {
 }
 
 type DhcpServer struct {
-	ID                 uuid.UUID  `json:"id"`
-	Name               string     `json:"name"`
-	FabricID           uuid.UUID  `json:"fabric_id"`
-	KeaURL             string     `json:"kea_url"`
-	AuthUsername       *string    `json:"auth_username"`
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	FabricID     uuid.UUID `json:"fabric_id"`
+	KeaURL       string    `json:"kea_url"`
+	AuthUsername *string   `json:"auth_username"`
 	// auth_password intentionally not exposed in API responses.
 	Enabled            bool       `json:"enabled"`
 	LastSyncAt         *time.Time `json:"last_sync_at"`
@@ -1032,4 +1033,162 @@ type DhcpScopeTemplate struct {
 	Description              *string         `json:"description"`
 	CreatedAt                time.Time       `json:"created_at"`
 	UpdatedAt                time.Time       `json:"updated_at"`
+}
+
+type NicRegAsn struct {
+	RegistrationID    uuid.UUID `json:"registration_id"`
+	Agency            *string   `json:"agency"`
+	OrgHandle         string    `json:"org_handle"`
+	TechPocHandle     string    `json:"tech_poc_handle"`
+	AdminPocHandle    string    `json:"admin_poc_handle"`
+	AsNumber          *int64    `json:"as_number"`
+	NetworkAggregator string    `json:"network_aggregator"`
+	Classification    string    `json:"classification"`
+	CustomerAsnName   string    `json:"customer_asn_name"`
+	Igp               *string   `json:"igp"`
+	Egp               *string   `json:"egp"`
+	SitePremiseRouter *string   `json:"site_premise_router"`
+	HubRouter         *string   `json:"hub_router"`
+	NumRouters        *int32    `json:"num_routers"`
+	RouterIps         *string   `json:"router_ips"`
+	NumNetworks       *int32    `json:"num_networks"`
+	NetworkIps        *string   `json:"network_ips"`
+	Justification     string    `json:"justification"`
+	UserComments      string    `json:"user_comments"`
+}
+
+type NicRegDnskey struct {
+	RegistrationID uuid.UUID `json:"registration_id"`
+	DomainHandle   string    `json:"domain_handle"`
+	StartDate      time.Time `json:"start_date"`
+	EndDate        time.Time `json:"end_date"`
+	KskValue       *string   `json:"ksk_value"`
+	UserComments   *string   `json:"user_comments"`
+}
+
+type NicRegDomain struct {
+	RegistrationID        uuid.UUID `json:"registration_id"`
+	Agency                *string   `json:"agency"`
+	OrgHandle             string    `json:"org_handle"`
+	TechPocHandle         string    `json:"tech_poc_handle"`
+	AdminPocHandle        string    `json:"admin_poc_handle"`
+	ZoneAdmin1            *string   `json:"zone_admin1"`
+	ZoneAdmin2            *string   `json:"zone_admin2"`
+	DomainName            string    `json:"domain_name"`
+	RoleMailbox           *string   `json:"role_mailbox"`
+	DnsServerHostnames    []string  `json:"dns_server_hostnames"`
+	MxServerHostname      *string   `json:"mx_server_hostname"`
+	ReqCharter            bool      `json:"req_charter"`
+	ReqFirewalled         bool      `json:"req_firewalled"`
+	ReqNoSourceRoute      bool      `json:"req_no_source_route"`
+	ReqDnsExclusive       bool      `json:"req_dns_exclusive"`
+	ReqUps                bool      `json:"req_ups"`
+	ReqSubordinateProtect bool      `json:"req_subordinate_protect"`
+	ReqDiversePaths       bool      `json:"req_diverse_paths"`
+	ReqWhoisRegistered    bool      `json:"req_whois_registered"`
+	Justification         *string   `json:"justification"`
+	UserComments          *string   `json:"user_comments"`
+}
+
+type NicRegHost struct {
+	RegistrationID     uuid.UUID `json:"registration_id"`
+	Agency             *string   `json:"agency"`
+	OrgHandle          string    `json:"org_handle"`
+	PrimaryPocHandle   string    `json:"primary_poc_handle"`
+	SecondaryPocHandle string    `json:"secondary_poc_handle"`
+	Hostname           string    `json:"hostname"`
+	RoleMailbox        *string   `json:"role_mailbox"`
+	IpAddresses        []string  `json:"ip_addresses"`
+	UserComments       *string   `json:"user_comments"`
+}
+
+type NicRegNetwork struct {
+	RegistrationID       uuid.UUID `json:"registration_id"`
+	Agency               *string   `json:"agency"`
+	OrgHandle            string    `json:"org_handle"`
+	TechPocHandle        string    `json:"tech_poc_handle"`
+	AdminPocHandle       string    `json:"admin_poc_handle"`
+	ZoneAdmin            *string   `json:"zone_admin"`
+	IpVersion            string    `json:"ip_version"`
+	NetworkAggregator    string    `json:"network_aggregator"`
+	Classification       string    `json:"classification"`
+	CustomerNetworkName  string    `json:"customer_network_name"`
+	TacticalNetwork      *string   `json:"tactical_network"`
+	Ccsd                 *string   `json:"ccsd"`
+	NiprnetHubIdentifier *string   `json:"niprnet_hub_identifier"`
+	CcsPlatform          *string   `json:"ccs_platform"`
+	CcsProvider          *string   `json:"ccs_provider"`
+	CcsRegion            *string   `json:"ccs_region"`
+	NetworkNumber        *string   `json:"network_number"`
+	Cidr                 *int16    `json:"cidr"`
+	HostsInitial         *int32    `json:"hosts_initial"`
+	Hosts6mo             *int32    `json:"hosts_6mo"`
+	HostsMax             *int32    `json:"hosts_max"`
+	DisnTransport        *string   `json:"disn_transport"`
+	GeophysicalLocation  *string   `json:"geophysical_location"`
+	Num48Requested       *int32    `json:"num_48_requested"`
+	InaddrHostname1      *string   `json:"inaddr_hostname1"`
+	InaddrIp1            *string   `json:"inaddr_ip1"`
+	InaddrHostname2      *string   `json:"inaddr_hostname2"`
+	InaddrIp2            *string   `json:"inaddr_ip2"`
+	Justification        *string   `json:"justification"`
+	UserComments         *string   `json:"user_comments"`
+}
+
+type NicRegOrganization struct {
+	RegistrationID   uuid.UUID `json:"registration_id"`
+	Agency           string    `json:"agency"`
+	PrimaryOrgPoc    *string   `json:"primary_org_poc"`
+	SecondaryOrgPoc  *string   `json:"secondary_org_poc"`
+	OrganizationName string    `json:"organization_name"`
+	AddressLine1     string    `json:"address_line1"`
+	AddressLine2     *string   `json:"address_line2"`
+	AddressLine3     *string   `json:"address_line3"`
+	AddressLine4     *string   `json:"address_line4"`
+	City             string    `json:"city"`
+	StateCode        string    `json:"state_code"`
+	ZipCode          *string   `json:"zip_code"`
+	OrgMailbox       *string   `json:"org_mailbox"`
+	UserComments     *string   `json:"user_comments"`
+}
+
+type NicRegUser struct {
+	RegistrationID     uuid.UUID `json:"registration_id"`
+	LastName           string    `json:"last_name"`
+	FirstName          string    `json:"first_name"`
+	MiddleInitial      *string   `json:"middle_initial"`
+	NameSuffix         *string   `json:"name_suffix"`
+	TitleRank          *string   `json:"title_rank"`
+	AddressLine1       string    `json:"address_line1"`
+	AddressLine2       *string   `json:"address_line2"`
+	AddressLine3       *string   `json:"address_line3"`
+	AddressLine4       *string   `json:"address_line4"`
+	City               string    `json:"city"`
+	StateCode          string    `json:"state_code"`
+	ZipCode            string    `json:"zip_code"`
+	Email              string    `json:"email"`
+	EmailSecondary     *string   `json:"email_secondary"`
+	CommercialPhone    string    `json:"commercial_phone"`
+	CommercialPhoneExt *string   `json:"commercial_phone_ext"`
+	DsnPhone           *string   `json:"dsn_phone"`
+	DsnPhoneExt        *string   `json:"dsn_phone_ext"`
+	Fax                *string   `json:"fax"`
+	Tld                *string   `json:"tld"`
+	UserComments       *string   `json:"user_comments"`
+}
+
+type NicRegistration struct {
+	ID              uuid.UUID          `json:"id"`
+	TemplateType    string             `json:"template_type"`
+	ActionType      string             `json:"action_type"`
+	OrganizationID  uuid.UUID          `json:"organization_id"`
+	RequesterUserID uuid.UUID          `json:"requester_user_id"`
+	Status          string             `json:"status"`
+	PushToArin      *bool              `json:"push_to_arin"`
+	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+	DecidedByUserID pgtype.UUID        `json:"decided_by_user_id"`
+	DecisionNotes   *string            `json:"decision_notes"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
