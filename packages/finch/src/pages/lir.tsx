@@ -23,7 +23,6 @@ import { toast } from 'sonner';
 
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
-import BreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
 import Button from '@cloudscape-design/components/button';
 import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
@@ -160,12 +159,6 @@ export function LirPage() {
 
   return (
     <ContentLayout
-      breadcrumbs={
-        <BreadcrumbGroup items={[
-          { text: 'Home', href: '/' },
-          { text: 'LIR', href: '/lir' },
-        ]} />
-      }
       header={
         <Header
           variant="h1"

@@ -18,7 +18,6 @@ import { toast } from 'sonner';
 
 import Badge from '@cloudscape-design/components/badge';
 import Box from '@cloudscape-design/components/box';
-import BreadcrumbGroup from '@cloudscape-design/components/breadcrumb-group';
 import Button from '@cloudscape-design/components/button';
 import Checkbox from '@cloudscape-design/components/checkbox';
 import Container from '@cloudscape-design/components/container';
@@ -86,7 +85,6 @@ export function RegistrationsPage() {
 
   return (
     <ContentLayout
-      breadcrumbs={<BreadcrumbGroup items={[{ text: 'Home', href: '/' }, { text: 'Registrations', href: '/registrations' }]} />}
       header={
         <Header variant="h1" description="Submit DoD NIC registration templates for internal customers and track approvals.">
           NIC Registrations
