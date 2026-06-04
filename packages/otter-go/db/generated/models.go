@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AuditLog struct {
@@ -1032,4 +1033,162 @@ type DhcpScopeTemplate struct {
 	Description              *string         `json:"description"`
 	CreatedAt                time.Time       `json:"created_at"`
 	UpdatedAt                time.Time       `json:"updated_at"`
+}
+
+type NicRegAsn struct {
+	RegistrationID    uuid.UUID `json:"registration_id"`
+	Agency            *string   `json:"agency"`
+	OrgHandle         string    `json:"org_handle"`
+	TechPocHandle     string    `json:"tech_poc_handle"`
+	AdminPocHandle    string    `json:"admin_poc_handle"`
+	AsNumber          *int64    `json:"as_number"`
+	NetworkAggregator string    `json:"network_aggregator"`
+	Classification    string    `json:"classification"`
+	CustomerAsnName   string    `json:"customer_asn_name"`
+	Igp               *string   `json:"igp"`
+	Egp               *string   `json:"egp"`
+	SitePremiseRouter *string   `json:"site_premise_router"`
+	HubRouter         *string   `json:"hub_router"`
+	NumRouters        *int32    `json:"num_routers"`
+	RouterIps         *string   `json:"router_ips"`
+	NumNetworks       *int32    `json:"num_networks"`
+	NetworkIps        *string   `json:"network_ips"`
+	Justification     string    `json:"justification"`
+	UserComments      string    `json:"user_comments"`
+}
+
+type NicRegDnskey struct {
+	RegistrationID uuid.UUID `json:"registration_id"`
+	DomainHandle   string    `json:"domain_handle"`
+	StartDate      time.Time `json:"start_date"`
+	EndDate        time.Time `json:"end_date"`
+	KskValue       *string   `json:"ksk_value"`
+	UserComments   *string   `json:"user_comments"`
+}
+
+type NicRegDomain struct {
+	RegistrationID        uuid.UUID `json:"registration_id"`
+	Agency                *string   `json:"agency"`
+	OrgHandle             string    `json:"org_handle"`
+	TechPocHandle         string    `json:"tech_poc_handle"`
+	AdminPocHandle        string    `json:"admin_poc_handle"`
+	ZoneAdmin1            *string   `json:"zone_admin1"`
+	ZoneAdmin2            *string   `json:"zone_admin2"`
+	DomainName            string    `json:"domain_name"`
+	RoleMailbox           *string   `json:"role_mailbox"`
+	DnsServerHostnames    []string  `json:"dns_server_hostnames"`
+	MxServerHostname      *string   `json:"mx_server_hostname"`
+	ReqCharter            bool      `json:"req_charter"`
+	ReqFirewalled         bool      `json:"req_firewalled"`
+	ReqNoSourceRoute      bool      `json:"req_no_source_route"`
+	ReqDnsExclusive       bool      `json:"req_dns_exclusive"`
+	ReqUps                bool      `json:"req_ups"`
+	ReqSubordinateProtect bool      `json:"req_subordinate_protect"`
+	ReqDiversePaths       bool      `json:"req_diverse_paths"`
+	ReqWhoisRegistered    bool      `json:"req_whois_registered"`
+	Justification         *string   `json:"justification"`
+	UserComments          *string   `json:"user_comments"`
+}
+
+type NicRegHost struct {
+	RegistrationID     uuid.UUID `json:"registration_id"`
+	Agency             *string   `json:"agency"`
+	OrgHandle          string    `json:"org_handle"`
+	PrimaryPocHandle   string    `json:"primary_poc_handle"`
+	SecondaryPocHandle string    `json:"secondary_poc_handle"`
+	Hostname           string    `json:"hostname"`
+	RoleMailbox        *string   `json:"role_mailbox"`
+	IpAddresses        []string  `json:"ip_addresses"`
+	UserComments       *string   `json:"user_comments"`
+}
+
+type NicRegNetwork struct {
+	RegistrationID       uuid.UUID `json:"registration_id"`
+	Agency               *string   `json:"agency"`
+	OrgHandle            string    `json:"org_handle"`
+	TechPocHandle        string    `json:"tech_poc_handle"`
+	AdminPocHandle       string    `json:"admin_poc_handle"`
+	ZoneAdmin            *string   `json:"zone_admin"`
+	IpVersion            string    `json:"ip_version"`
+	NetworkAggregator    string    `json:"network_aggregator"`
+	Classification       string    `json:"classification"`
+	CustomerNetworkName  string    `json:"customer_network_name"`
+	TacticalNetwork      *string   `json:"tactical_network"`
+	Ccsd                 *string   `json:"ccsd"`
+	NiprnetHubIdentifier *string   `json:"niprnet_hub_identifier"`
+	CcsPlatform          *string   `json:"ccs_platform"`
+	CcsProvider          *string   `json:"ccs_provider"`
+	CcsRegion            *string   `json:"ccs_region"`
+	NetworkNumber        *string   `json:"network_number"`
+	Cidr                 *int16    `json:"cidr"`
+	HostsInitial         *int32    `json:"hosts_initial"`
+	Hosts6mo             *int32    `json:"hosts_6mo"`
+	HostsMax             *int32    `json:"hosts_max"`
+	DisnTransport        *string   `json:"disn_transport"`
+	GeophysicalLocation  *string   `json:"geophysical_location"`
+	Num48Requested       *int32    `json:"num_48_requested"`
+	InaddrHostname1      *string   `json:"inaddr_hostname1"`
+	InaddrIp1            *string   `json:"inaddr_ip1"`
+	InaddrHostname2      *string   `json:"inaddr_hostname2"`
+	InaddrIp2            *string   `json:"inaddr_ip2"`
+	Justification        *string   `json:"justification"`
+	UserComments         *string   `json:"user_comments"`
+}
+
+type NicRegOrganization struct {
+	RegistrationID   uuid.UUID `json:"registration_id"`
+	Agency           string    `json:"agency"`
+	PrimaryOrgPoc    *string   `json:"primary_org_poc"`
+	SecondaryOrgPoc  *string   `json:"secondary_org_poc"`
+	OrganizationName string    `json:"organization_name"`
+	AddressLine1     string    `json:"address_line1"`
+	AddressLine2     *string   `json:"address_line2"`
+	AddressLine3     *string   `json:"address_line3"`
+	AddressLine4     *string   `json:"address_line4"`
+	City             string    `json:"city"`
+	StateCode        string    `json:"state_code"`
+	ZipCode          *string   `json:"zip_code"`
+	OrgMailbox       *string   `json:"org_mailbox"`
+	UserComments     *string   `json:"user_comments"`
+}
+
+type NicRegUser struct {
+	RegistrationID     uuid.UUID `json:"registration_id"`
+	LastName           string    `json:"last_name"`
+	FirstName          string    `json:"first_name"`
+	MiddleInitial      *string   `json:"middle_initial"`
+	NameSuffix         *string   `json:"name_suffix"`
+	TitleRank          *string   `json:"title_rank"`
+	AddressLine1       string    `json:"address_line1"`
+	AddressLine2       *string   `json:"address_line2"`
+	AddressLine3       *string   `json:"address_line3"`
+	AddressLine4       *string   `json:"address_line4"`
+	City               string    `json:"city"`
+	StateCode          string    `json:"state_code"`
+	ZipCode            string    `json:"zip_code"`
+	Email              string    `json:"email"`
+	EmailSecondary     *string   `json:"email_secondary"`
+	CommercialPhone    string    `json:"commercial_phone"`
+	CommercialPhoneExt *string   `json:"commercial_phone_ext"`
+	DsnPhone           *string   `json:"dsn_phone"`
+	DsnPhoneExt        *string   `json:"dsn_phone_ext"`
+	Fax                *string   `json:"fax"`
+	Tld                *string   `json:"tld"`
+	UserComments       *string   `json:"user_comments"`
+}
+
+type NicRegistration struct {
+	ID              uuid.UUID          `json:"id"`
+	TemplateType    string             `json:"template_type"`
+	ActionType      string             `json:"action_type"`
+	OrganizationID  uuid.UUID          `json:"organization_id"`
+	RequesterUserID uuid.UUID          `json:"requester_user_id"`
+	Status          string             `json:"status"`
+	PushToArin      *bool              `json:"push_to_arin"`
+	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+	DecidedByUserID pgtype.UUID        `json:"decided_by_user_id"`
+	DecisionNotes   *string            `json:"decision_notes"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }

@@ -1,0 +1,353 @@
+{
+  "version": 1,
+  "_comment": "CANONICAL source of truth for DoD NIC registration template field schemas. Embedded by the Go validator (internal/nicreg) and synced into finch (src/nic/templates.gen.json) by scripts/sync-nic-schema.mjs. Human-readable field help + the verbatim emit layout live in docs/nic-templates/. Edit HERE; never edit the finch copy by hand.",
+  "enums": {
+    "action": [
+      { "value": "N", "label": "New" },
+      { "value": "M", "label": "Modify" },
+      { "value": "D", "label": "Delete" },
+      { "value": "R", "label": "Reregister" }
+    ],
+    "network_aggregator": [
+      { "value": "niprnet", "label": "NIPRNET" },
+      { "value": "cloud", "label": "Cloud Service Offering" },
+      { "value": "dren", "label": "DREN" },
+      { "value": "internet", "label": "INTERNET" },
+      { "value": "dni-u", "label": "DNI-U" },
+      { "value": "other", "label": "OTHER" }
+    ],
+    "asn_aggregator": [
+      { "value": "niprnet", "label": "NIPRNET" },
+      { "value": "siprnet", "label": "SIPRNET" },
+      { "value": "dren", "label": "DREN" },
+      { "value": "internet", "label": "INTERNET" },
+      { "value": "dni-u", "label": "DNI-U" },
+      { "value": "other", "label": "OTHER" }
+    ],
+    "classification": [
+      { "value": "unclassified", "label": "NIPRNET: Unclassified" },
+      { "value": "secret", "label": "SIPRNET: Secret" }
+    ],
+    "apo_fpo_code": [
+      { "value": "AA", "label": "Armed Forces Americas (AA)" },
+      { "value": "AE", "label": "Armed Forces Europe (AE)" },
+      { "value": "AP", "label": "Armed Forces Pacific (AP)" }
+    ],
+    "yesno": [
+      { "value": "yes", "label": "Yes" },
+      { "value": "no", "label": "No" }
+    ]
+  },
+  "templates": {
+    "organization": {
+      "nicId": "NIC-ORGANIZATION",
+      "label": "Organization",
+      "table": "nic_reg_organization",
+      "actions": ["N", "M", "D", "R"],
+      "arinEligible": false,
+      "sections": [
+        {
+          "title": "Administrative",
+          "fields": [
+            { "key": "agency", "label": "Agency", "type": "string", "required": true, "maxLength": 64, "help": "Service/agency, e.g. ARMY, NAVY." },
+            { "key": "primary_org_poc", "label": "Primary Org POC", "type": "string", "required": false, "maxLength": 128, "help": "Handle of primary point of contact." },
+            { "key": "secondary_org_poc", "label": "Secondary Org POC", "type": "string", "required": false, "maxLength": 128, "help": "Handle of alternate point of contact." }
+          ]
+        },
+        {
+          "title": "Organization",
+          "fields": [
+            { "key": "organization_name", "label": "Organization Name", "type": "string", "required": true, "maxLength": 128, "help": "Name of your organization." },
+            { "key": "address_line1", "label": "Address Line 1", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "address_line2", "label": "Address Line 2", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "address_line3", "label": "Address Line 3", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "address_line4", "label": "Address Line 4", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "city", "label": "City or APO/FPO", "type": "string", "required": true, "maxLength": 128, "help": "City, or APO (Army/Air Force) / FPO (Navy/Marine) post office." },
+            { "key": "state_code", "label": "State or APO/FPO Code", "type": "string", "required": true, "maxLength": 16, "help": "State, or MPSA code AA/AE/AP." },
+            { "key": "zip_code", "label": "Zip Code", "type": "string", "required": false, "maxLength": 16 },
+            { "key": "org_mailbox", "label": "Organizational Mailbox", "type": "email", "required": false, "maxLength": 256, "help": "Organization email address." }
+          ]
+        },
+        {
+          "title": "Comments",
+          "fields": [
+            { "key": "user_comments", "label": "User Comments", "type": "text", "required": false, "help": "Free-form; notes to Approving Official / NIC." }
+          ]
+        }
+      ]
+    },
+    "user": {
+      "nicId": "NIC-USER",
+      "label": "User (POC)",
+      "table": "nic_reg_user",
+      "actions": ["N", "M", "D", "R"],
+      "arinEligible": false,
+      "sections": [
+        {
+          "title": "Name",
+          "fields": [
+            { "key": "last_name", "label": "Last Name", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "first_name", "label": "First Name", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "middle_initial", "label": "Middle Initial", "type": "string", "required": false, "maxLength": 8, "help": "Middle initial, or NMI (no middle initial)." },
+            { "key": "name_suffix", "label": "Name Suffix", "type": "string", "required": false, "maxLength": 32 },
+            { "key": "title_rank", "label": "Title/Rank", "type": "string", "required": false, "maxLength": 64 }
+          ]
+        },
+        {
+          "title": "Address",
+          "fields": [
+            { "key": "address_line1", "label": "Address Line 1", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "address_line2", "label": "Address Line 2", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "address_line3", "label": "Address Line 3", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "address_line4", "label": "Address Line 4", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "city", "label": "City or APO/FPO", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "state_code", "label": "State or APO/FPO Code", "type": "string", "required": true, "maxLength": 16 },
+            { "key": "zip_code", "label": "Zip Code", "type": "string", "required": true, "maxLength": 16 }
+          ]
+        },
+        {
+          "title": "Contact",
+          "fields": [
+            { "key": "email", "label": "E-mail Address", "type": "email", "required": true, "maxLength": 256 },
+            { "key": "email_secondary", "label": "Secondary E-mail", "type": "email", "required": false, "maxLength": 256, "help": "Secondary email, if applicable." },
+            { "key": "commercial_phone", "label": "Commercial Phone", "type": "phone", "required": true, "maxLength": 32, "help": "Phone by which you can be reached." },
+            { "key": "commercial_phone_ext", "label": "Commercial Phone Ext", "type": "string", "required": false, "maxLength": 16 },
+            { "key": "dsn_phone", "label": "DSN Phone", "type": "phone", "required": false, "maxLength": 32 },
+            { "key": "dsn_phone_ext", "label": "DSN Phone Ext", "type": "string", "required": false, "maxLength": 16 },
+            { "key": "fax", "label": "Fax", "type": "phone", "required": false, "maxLength": 32 },
+            { "key": "tld", "label": "Top Level Domain", "type": "string", "required": false, "maxLength": 64, "help": "Top-level .mil domain of your chain of command, e.g. ARMY, NAVY." }
+          ]
+        },
+        {
+          "title": "Comments",
+          "fields": [
+            { "key": "user_comments", "label": "User Comments", "type": "text", "required": false }
+          ]
+        }
+      ]
+    },
+    "host": {
+      "nicId": "NIC-HOST",
+      "label": "Host",
+      "table": "nic_reg_host",
+      "actions": ["N", "M", "D", "R"],
+      "arinEligible": false,
+      "sections": [
+        {
+          "title": "Administrative",
+          "fields": [
+            { "key": "agency", "label": "Agency", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "org_handle", "label": "Organization Handle", "type": "string", "required": true, "maxLength": 128, "help": "Handle of your preregistered Organization." },
+            { "key": "primary_poc_handle", "label": "Primary POC Handle", "type": "string", "required": true, "maxLength": 128, "help": "Preregistered primary POC (gov/mil/contractor)." },
+            { "key": "secondary_poc_handle", "label": "Secondary POC Handle", "type": "string", "required": true, "maxLength": 128, "help": "Preregistered secondary POC." }
+          ]
+        },
+        {
+          "title": "Host",
+          "fields": [
+            { "key": "hostname", "label": "Hostname", "type": "string", "required": true, "maxLength": 256, "help": "Fully-qualified host name, e.g. ns1.abc.mil." },
+            { "key": "role_mailbox", "label": "Role Mailbox", "type": "email", "required": false, "maxLength": 256, "help": "Optional contact email for this host." },
+            { "key": "ip_addresses", "label": "IP Addresses", "type": "ip", "required": true, "repeat": { "min": 1, "max": 6 }, "help": "At least one IP address is required; up to 6." }
+          ]
+        },
+        {
+          "title": "Comments",
+          "fields": [
+            { "key": "user_comments", "label": "User Comments", "type": "text", "required": false }
+          ]
+        }
+      ]
+    },
+    "domain": {
+      "nicId": "NIC-DOMAIN",
+      "label": "Domain",
+      "table": "nic_reg_domain",
+      "actions": ["N", "M", "D", "R"],
+      "arinEligible": false,
+      "sections": [
+        {
+          "title": "Administrative",
+          "fields": [
+            { "key": "agency", "label": "Agency", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "org_handle", "label": "Organization Handle", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "tech_poc_handle", "label": "Technical POC Handle", "type": "string", "required": true, "maxLength": 128, "help": "Tech POC (gov/mil/contractor)." },
+            { "key": "admin_poc_handle", "label": "Administrative POC Handle", "type": "string", "required": true, "maxLength": 128, "help": "Admin POC (gov/mil only)." },
+            { "key": "zone_admin1", "label": "Zone Administrator #1", "type": "string", "required": false, "maxLength": 128, "help": "Optional; approves DNSSEC key templates." },
+            { "key": "zone_admin2", "label": "Zone Administrator #2", "type": "string", "required": false, "maxLength": 128 }
+          ]
+        },
+        {
+          "title": "Domain",
+          "fields": [
+            { "key": "domain_name", "label": "Domain Name", "type": "string", "required": true, "maxLength": 256, "help": "Cannot start with www. or www2.; use vendor name for cloud." },
+            { "key": "role_mailbox", "label": "Role Mailbox", "type": "email", "required": false, "maxLength": 256 },
+            { "key": "dns_server_hostnames", "label": "DNS Server Hostnames", "type": "string", "required": true, "repeat": { "min": 1, "max": 6 }, "help": "Preregistered forward DNS servers. Min two (2) recommended." },
+            { "key": "mx_server_hostname", "label": "MX Server Hostname", "type": "string", "required": false, "maxLength": 256 }
+          ]
+        },
+        {
+          "title": "Domain Requirements",
+          "help": "Administrative POC must attest the following are TRUE.",
+          "fields": [
+            { "key": "req_charter", "label": "Org charter / Provisional Authorization submitted to DoD NIC", "type": "bool", "required": true },
+            { "key": "req_firewalled", "label": "DNS servers located behind filter routers/firewalls", "type": "bool", "required": true },
+            { "key": "req_no_source_route", "label": "All routers have IP SOURCE ROUTE turned off", "type": "bool", "required": true },
+            { "key": "req_dns_exclusive", "label": "DNS service runs exclusively on the servers", "type": "bool", "required": true },
+            { "key": "req_ups", "label": "Servers protected by UPS and backup power", "type": "bool", "required": true },
+            { "key": "req_subordinate_protect", "label": "Admin POC acknowledges protecting subordinate DNS servers", "type": "bool", "required": true },
+            { "key": "req_diverse_paths", "label": "Two registered DNS servers on different circuit paths (no SPOF)", "type": "bool", "required": true },
+            { "key": "req_whois_registered", "label": "Admin (gov/mil) and Tech POC registered in DoD NIC/SSC Whois", "type": "bool", "required": true }
+          ]
+        },
+        {
+          "title": "Justification",
+          "fields": [
+            { "key": "justification", "label": "Justification", "type": "text", "requiredForActions": ["N"], "help": "Required for all New domain requests." },
+            { "key": "user_comments", "label": "User Comments", "type": "text", "required": false }
+          ]
+        }
+      ]
+    },
+    "network": {
+      "nicId": "NIC-Network",
+      "label": "Network (IPv4/IPv6)",
+      "table": "nic_reg_network",
+      "actions": ["N", "M", "D", "R"],
+      "arinEligible": true,
+      "sections": [
+        {
+          "title": "Administrative",
+          "fields": [
+            { "key": "agency", "label": "Agency", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "org_handle", "label": "Assigned Org Handle", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "tech_poc_handle", "label": "Technical POC Handle", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "admin_poc_handle", "label": "Administrative POC Handle", "type": "string", "required": true, "maxLength": 128, "help": "Admin POC (gov/mil only)." },
+            { "key": "zone_admin", "label": "Zone Administrator", "type": "string", "required": false, "maxLength": 128 }
+          ]
+        },
+        {
+          "title": "Network",
+          "fields": [
+            { "key": "ip_version", "label": "IP Version", "type": "enum", "required": true, "options": [ { "value": "ipv4", "label": "IPv4" }, { "value": "ipv6", "label": "IPv6" } ] },
+            { "key": "network_aggregator", "label": "Network Aggregator", "type": "enum", "required": true, "enumRef": "network_aggregator", "help": "Non-changeable when maintaining." },
+            { "key": "classification", "label": "Network Classification", "type": "enum", "required": true, "enumRef": "classification" },
+            { "key": "customer_network_name", "label": "Customer Network Name", "type": "string", "required": true, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$", "help": "Begins alphanumeric; [A-Z0-9-]. Auto-generated for Cloud: CCSNET-<Agency>-<Type>-<Provider>." },
+            { "key": "tactical_network", "label": "Tactical Network", "type": "enum", "required": false, "enumRef": "yesno" },
+            { "key": "ccsd", "label": "CCSD", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "niprnet_hub_identifier", "label": "NIPRNET Hub Identifier", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "ccs_platform", "label": "CCS Platform", "type": "string", "required": true, "maxLength": 64, "visibleWhen": { "field": "network_aggregator", "equals": "cloud" }, "help": "Data type hosted (Cloud only)." },
+            { "key": "ccs_provider", "label": "CCS Provider/Platform", "type": "string", "required": true, "maxLength": 64, "visibleWhen": { "field": "network_aggregator", "equals": "cloud" } },
+            { "key": "ccs_region", "label": "CCS Region", "type": "string", "required": true, "maxLength": 64, "visibleWhen": { "field": "network_aggregator", "equals": "cloud" } }
+          ]
+        },
+        {
+          "title": "IPv4 Registration Data",
+          "visibleWhen": { "field": "ip_version", "equals": "ipv4" },
+          "fields": [
+            { "key": "network_number", "label": "Network Number", "type": "string", "required": false, "maxLength": 64, "help": "Required for modify, reregistration, or reassignment." },
+            { "key": "cidr", "label": "CIDR", "type": "int", "required": true, "min": 0, "max": 32, "help": "Prefix length. /20 and shorter require an addressing plan + topology diagram." },
+            { "key": "hosts_initial", "label": "No. of Hosts (Initially)", "type": "int", "required": true, "min": 0 },
+            { "key": "hosts_6mo", "label": "No. of Hosts (6 months)", "type": "int", "required": true, "min": 0 },
+            { "key": "hosts_max", "label": "Max No. of Hosts", "type": "int", "required": true, "min": 0 }
+          ]
+        },
+        {
+          "title": "IPv6 Registration Data",
+          "visibleWhen": { "field": "ip_version", "equals": "ipv6" },
+          "fields": [
+            { "key": "disn_transport", "label": "DISN Transport", "type": "enum", "required": true, "enumRef": "yesno", "help": "Do you use DISN transport to reach the internet?" },
+            { "key": "geophysical_location", "label": "Geophysical Location", "type": "string", "required": true, "maxLength": 128, "help": "US state or world country; all addresses must be within this location." },
+            { "key": "num_48_requested", "label": "No. of /48 Requested", "type": "int", "required": true, "min": 1, "max": 16, "help": "DISN: only 1. Own backbone: 1,2,4,8,16 → /48,/47,/46,/45,/44." }
+          ]
+        },
+        {
+          "title": "IN-ADDR DNS Servers",
+          "fields": [
+            { "key": "inaddr_hostname1", "label": "Hostname 1", "type": "string", "required": false, "maxLength": 256 },
+            { "key": "inaddr_ip1", "label": "Hostname 1 IP Address", "type": "ip", "required": false },
+            { "key": "inaddr_hostname2", "label": "Hostname 2", "type": "string", "required": false, "maxLength": 256 },
+            { "key": "inaddr_ip2", "label": "Hostname 2 IP Address", "type": "ip", "required": false }
+          ]
+        },
+        {
+          "title": "Justification",
+          "fields": [
+            { "key": "justification", "label": "Justification", "type": "text", "requiredForActions": ["N"], "help": "Required for all New network requests." },
+            { "key": "user_comments", "label": "User Comments", "type": "text", "required": false }
+          ]
+        }
+      ]
+    },
+    "asn": {
+      "nicId": "NIC-ASN",
+      "label": "ASN",
+      "table": "nic_reg_asn",
+      "actions": ["N", "M", "D", "R"],
+      "arinEligible": true,
+      "sections": [
+        {
+          "title": "Administrative",
+          "fields": [
+            { "key": "agency", "label": "Agency", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "org_handle", "label": "Assigned Org Handle", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "tech_poc_handle", "label": "Technical POC Handle", "type": "string", "required": true, "maxLength": 128 },
+            { "key": "admin_poc_handle", "label": "Administrative POC Handle", "type": "string", "required": true, "maxLength": 128, "help": "Admin POC (gov/mil only)." }
+          ]
+        },
+        {
+          "title": "Autonomous System",
+          "fields": [
+            { "key": "as_number", "label": "AS Number", "type": "int", "required": false, "min": 0, "help": "Not required for New (assigned on grant)." },
+            { "key": "network_aggregator", "label": "Network Aggregator", "type": "enum", "required": true, "enumRef": "asn_aggregator" },
+            { "key": "classification", "label": "Network Classification", "type": "enum", "required": true, "enumRef": "classification" },
+            { "key": "customer_asn_name", "label": "Customer ASN Name", "type": "string", "required": true, "maxLength": 128, "pattern": "^[A-Za-z0-9][A-Za-z0-9-]*$" }
+          ]
+        },
+        {
+          "title": "Protocol & Composition",
+          "fields": [
+            { "key": "igp", "label": "IGP used in AS", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "egp", "label": "EGP used in AS", "type": "string", "required": false, "maxLength": 64 },
+            { "key": "site_premise_router", "label": "Site Premise Router Address", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "hub_router", "label": "Hub Router Address", "type": "string", "required": false, "maxLength": 128 },
+            { "key": "num_routers", "label": "Number of Routers", "type": "int", "required": false, "min": 0 },
+            { "key": "router_ips", "label": "IP Addresses of Routers", "type": "text", "required": false },
+            { "key": "num_networks", "label": "Number of Networks", "type": "int", "required": false, "min": 0 },
+            { "key": "network_ips", "label": "IP Addresses of Networks", "type": "text", "required": false }
+          ]
+        },
+        {
+          "title": "Justification",
+          "fields": [
+            { "key": "justification", "label": "Justification", "type": "text", "required": true },
+            { "key": "user_comments", "label": "User Comments", "type": "text", "required": true, "help": "Also note any existing registered ASN(s) on NIPRNET/SIPRNET." }
+          ]
+        }
+      ]
+    },
+    "dnskey": {
+      "nicId": "NIC-DNSKEY",
+      "label": "DNSKEY",
+      "table": "nic_reg_dnskey",
+      "actions": ["N", "M", "D"],
+      "arinEligible": false,
+      "sections": [
+        {
+          "title": "Key",
+          "fields": [
+            { "key": "domain_handle", "label": "Domain Handle / Name", "type": "string", "required": true, "maxLength": 256 },
+            { "key": "start_date", "label": "Start Date", "type": "date", "required": true, "help": "Effective date NIC includes the key in the .MIL zone." },
+            { "key": "end_date", "label": "End Date", "type": "date", "required": true, "help": "Last day NIC includes the KSK; validity cannot exceed 2 years." },
+            { "key": "ksk_value", "label": "KSK Value", "type": "text", "requiredForActions": ["N"], "help": "Record contents from the KSK public key file." }
+          ]
+        },
+        {
+          "title": "Comments",
+          "fields": [
+            { "key": "user_comments", "label": "User Comments", "type": "text", "required": false }
+          ]
+        }
+      ]
+    }
+  }
+}

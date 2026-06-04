@@ -41,6 +41,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/collectors', text: 'Collectors' },
   { href: '/ipam',       text: 'IPAM',       cap: 'ipam:subnets:read' },
   { href: '/lir',        text: 'LIR',        cap: ['lir:requests:create', 'lir:requests:read', 'lir:allocations:read'] },
+  { href: '/registrations', text: 'Registrations', cap: ['nicreg:requests:create', 'nicreg:requests:read'] },
   { href: '/dns',        text: 'DNS',        cap: 'dns:servers:read' },
   { href: '/import',     text: 'Import',     cap: 'inventory:bulk:execute' },
   { href: '/audit',      text: 'Audit log',  cap: 'audit:events:read' },
@@ -73,8 +74,15 @@ function breadcrumbsFor(path: string): { text: string; href: string }[] {
   const items: { text: string; href: string }[] = [{ text: 'Home', href: '/' }];
   segments.forEach((seg, i) => {
     const href = '/' + segments.slice(0, i + 1).join('/');
+    // Prefer the nav label for known routes (e.g. /lir → "LIR",
+    // /registrations → "Registrations") so the crumb isn't a raw
+    // lowercase path segment; abbreviate UUID leaves; otherwise
+    // title-case the segment.
+    const navLabel = NAV_ITEMS.find((it) => it.href === href)?.text;
     const isUuid = /^[0-9a-f-]{8,}$/i.test(seg);
-    items.push({ text: isUuid ? `${seg.slice(0, 8)}…` : seg, href });
+    const text = navLabel
+      ?? (isUuid ? `${seg.slice(0, 8)}…` : seg.charAt(0).toUpperCase() + seg.slice(1));
+    items.push({ text, href });
   });
   return items;
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/ipam"
 	"github.com/usg-dcim/packages/otter-go/internal/lir"
 	"github.com/usg-dcim/packages/otter-go/internal/locations"
+	"github.com/usg-dcim/packages/otter-go/internal/nicreg"
 	"github.com/usg-dcim/packages/otter-go/internal/notifications"
 	"github.com/usg-dcim/packages/otter-go/internal/organization"
 	"github.com/usg-dcim/packages/otter-go/internal/power"
@@ -84,6 +85,9 @@ func main() {
 	nh := &notifications.Handler{Q: q, Audit: q}
 	coh := &collectors.Handler{Q: q, Audit: q}
 	oh := &organization.Handler{Q: q, Audit: q}
+	// Pool is wired so the registration create path inserts the header
+	// + typed detail row in one pgx.Tx.
+	nrh := nicreg.NewHandler(q, pool, q)
 	sth := &stencils.Handler{}
 	th := &telemetry.Handler{Q: q}
 	// JSON telemetry-ingest fallback. heron is the canonical mTLS
@@ -238,6 +242,7 @@ func main() {
 			coh.Mount(r)
 			igh.Mount(r)
 			oh.Mount(r)
+			nrh.Mount(r)
 			sth.Mount(r)
 			th.Mount(r)
 			adh.Mount(r)

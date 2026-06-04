@@ -42,6 +42,7 @@ const AdminPage       = lazy(() => import('@/pages/admin').then((m) => ({ defaul
 const NotificationsPage = lazy(() => import('@/pages/notifications').then((m) => ({ default: m.NotificationsPage })));
 const IpamPage          = lazy(() => import('@/pages/ipam').then((m) => ({ default: m.IpamPage })));
 const LirPage           = lazy(() => import('@/pages/lir').then((m) => ({ default: m.LirPage })));
+const RegistrationsPage = lazy(() => import('@/pages/registrations').then((m) => ({ default: m.RegistrationsPage })));
 const VrfShowPage       = lazy(() => import('@/pages/vrf-show').then((m) => ({ default: m.VrfShowPage })));
 const DnsDashboardPage  = lazy(() => import('@/pages/dns-dashboard').then((m) => ({ default: m.DnsDashboardPage })));
 
@@ -112,6 +113,7 @@ export function App() {
               <Route path="/ipam" element={<IpamPage />} />
               <Route path="/ipam/vrfs/:id" element={<VrfShowPage />} />
               <Route path="/lir" element={<LirPage />} />
+              <Route path="/registrations" element={<RegistrationsPage />} />
               <Route path="/dns" element={<DnsDashboardPage />} />
             </Route>
           </Route>
