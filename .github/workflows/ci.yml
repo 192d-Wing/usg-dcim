@@ -148,7 +148,7 @@ jobs:
 
       - name: Build ${{ matrix.image }}
         id: build
-        uses: redhat-actions/buildah-build@v2
+        uses: redhat-actions/buildah-build@v3
         with:
           image: ${{ matrix.image }}
           # On main: tag the commit SHA and `latest` so deploys can pin.
