@@ -32,19 +32,21 @@ jobs:
           cache: 'npm'
           cache-dependency-path: packages/finch/package-lock.json
 
-      - name: Install (npm ci if lockfile, else npm install)
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install --no-audit --no-fund
-          fi
+      # package-lock.json is committed, so the old "npm ci if lockfile,
+      # else npm install" fallback could only ever take the npm ci branch.
+      # The dead branch was an unlocked install (S8543) and both branches
+      # ran dependency lifecycle scripts (S6505).
+      - name: Install
+        run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Typecheck
         # Held to a "report only" status while the codebase finishes Phase-1
         # cleanup; tests + build are the real gate.
         continue-on-error: true
-        run: npx tsc --noEmit -p tsconfig.json
+        # Not `npx`: on a miss npx silently fetches a package from the
+        # registry and runs it. This binary comes from the locked install
+        # above or the step fails.
+        run: ./node_modules/.bin/tsc --noEmit -p tsconfig.json
 
       - name: Tests (vitest)
         run: npm test
@@ -211,8 +213,13 @@ jobs:
           # Replaces the old `kubectl apply --dry-run=client` step,
           # which still tries to hit the API server for discovery in
           # modern kubectl versions even with --validate=false.
-          curl -sSL -o /tmp/kc.tar.gz \
+          # --proto '=https' keeps -L from being talked down to plain HTTP
+          # by a redirect; the checksum then pins what we actually got.
+          curl -sSL --proto '=https' --tlsv1.2 -o /tmp/kc.tar.gz \
             https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          # From the release's own CHECKSUMS file. Bump both together.
+          echo '95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73  /tmp/kc.tar.gz' \
+            | sha256sum -c -
           tar -xzf /tmp/kc.tar.gz -C /usr/local/bin kubeconform
           kubeconform -summary -strict -kubernetes-version 1.30.0 /tmp/dcim-default.yaml
           kubeconform -summary -strict -kubernetes-version 1.30.0 /tmp/dcim-k3d.yaml
