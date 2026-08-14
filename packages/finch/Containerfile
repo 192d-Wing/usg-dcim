@@ -1,7 +1,12 @@
 FROM node:20-alpine AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+# Copy the lockfile and use `npm ci`, not `npm install`. Without the
+# lockfile npm re-resolves every range against the registry at build
+# time, so the image ships a dependency tree nobody tested and the build
+# breaks on upstream releases unrelated to the commit being built. `npm
+# ci` installs exactly what CI installed.
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
