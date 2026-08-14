@@ -26,7 +26,7 @@
     "@refinedev/react-hook-form": "^5.0.4",
     "@refinedev/react-router": "^2.0.4",
     "@refinedev/simple-rest": "^6.0.1",
-    "@tanstack/react-query": "^5.100.14",
+    "@tanstack/react-query": "^5.101.4",
     "axios": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
