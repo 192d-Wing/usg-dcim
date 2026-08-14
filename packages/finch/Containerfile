@@ -1,4 +1,7 @@
-FROM node:20-alpine AS build
+# Node 24 is the active LTS. Keep this in lockstep with node-version in
+# .github/workflows/ci.yml — CI is what actually runs the tests, so if
+# the two drift we ship an image built on a runtime nothing tested.
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json ./
 RUN npm install --no-audit --no-fund
