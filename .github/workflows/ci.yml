@@ -28,7 +28,9 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          # Active LTS. Must match the builder stage in
+          # packages/finch/Containerfile.
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: packages/finch/package-lock.json
 
