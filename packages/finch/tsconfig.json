@@ -13,9 +13,11 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] },
-    "ignoreDeprecations": "6.0"
+    // No baseUrl: TS 7 removed it, and `paths` targets are resolved
+    // relative to this file, so "./src/*" is what "src/*" meant under
+    // baseUrl ".". The runtime half of this alias lives in
+    // vite.config.ts (resolve.alias) and is unaffected.
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src"],
   "exclude": ["src.old"]
