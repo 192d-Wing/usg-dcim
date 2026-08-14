@@ -1,0 +1,10 @@
+# Keep `COPY . .` from pasting a developer's local tree over the one
+# `npm ci` just installed — without this, a local node_modules silently
+# replaces the locked dependency tree and defeats the point of npm ci.
+node_modules
+dist
+
+# Build/test scratch that has no business in the image.
+.vite
+coverage
+*.log
