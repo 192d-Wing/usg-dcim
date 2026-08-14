@@ -150,7 +150,7 @@ jobs:
 
       - name: Build ${{ matrix.image }}
         id: build
-        uses: redhat-actions/buildah-build@v2
+        uses: redhat-actions/buildah-build@3a51aade9afa17e5c78256bcbe2e1ee08c7b995b # v3.0.2
         with:
           image: ${{ matrix.image }}
           # On main: tag the commit SHA and `latest` so deploys can pin.
@@ -161,12 +161,17 @@ jobs:
                 || 'ci' }}
           context: ./${{ matrix.context }}
           containerfiles: ./${{ matrix.containerfile }}
+          # v3 flipped this default to true. Squashing collapses the base
+          # image into the app layer, so our six images would stop sharing
+          # the distroless/alpine/nginx layers they pull from ghcr.io.
+          # Keep v2's behaviour.
+          squash: false
 
       # Push happens only on pushes to main. PRs from forks won't have
       # packages:write anyway, so the conditional double-protects.
       - name: Log in to ghcr.io
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: redhat-actions/podman-login@v1
+        uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -174,7 +179,7 @@ jobs:
 
       - name: Push ${{ matrix.image }} to ghcr.io
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: redhat-actions/push-to-registry@v2
+        uses: redhat-actions/push-to-registry@94ade333c38ecc0e60e94785125d9a52ca423b37 # v3.0.0
         with:
           image: ${{ steps.build.outputs.image }}
           tags: ${{ steps.build.outputs.tags }}
@@ -187,7 +192,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install Helm
-        uses: azure/setup-helm@v5
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: v3.15.0
 
