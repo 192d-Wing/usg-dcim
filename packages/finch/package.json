@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@cloudscape-design/components": "^3.0.1306",
-    "@cloudscape-design/design-tokens": "^3.0.89",
+    "@cloudscape-design/design-tokens": "^3.0.105",
     "@cloudscape-design/global-styles": "^1.0.59",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/utilities": "^3.2.2",
