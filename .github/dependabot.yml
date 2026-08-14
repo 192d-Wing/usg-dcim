@@ -15,6 +15,25 @@ updates:
         patterns: ["@radix-ui/*"]
       tooling:
         dependency-type: "development"
+    ignore:
+      # Hold react-router at v7 until @refinedev/react-router supports v8.
+      #
+      # refine declares react-router as a hard *dependency* at ^7.0.2, not
+      # a peer, so a major bump does not upgrade it in place — npm nests a
+      # second copy. #328 produced exactly that: react-router 8.3.0 at the
+      # root and 7.18.1 under @refinedev/react-router.
+      #
+      # React Router's context is module-scoped. App.tsx renders
+      # <BrowserRouter> from the v8 copy while refine's routerProvider,
+      # NavigateToResource and CatchAllNavigate resolve against the v7 copy,
+      # so refine reads a context nothing populated and navigation breaks at
+      # runtime. tsc, vitest and vite build all stay green — the finch job
+      # never mounts the refine provider tree — so CI will not catch this.
+      #
+      # @refinedev/react-router is 2.0.4 at time of writing, still ^7.0.2.
+      # Drop this entry once a release moves to react-router 8.
+      - dependency-name: "react-router"
+        update-types: ["version-update:semver-major"]
 
   # ----- Go modules -----
   # Each animal package is its own module. Grouping pgx/redis/prom bumps
