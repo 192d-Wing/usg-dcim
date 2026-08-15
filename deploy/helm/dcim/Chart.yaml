@@ -6,8 +6,8 @@ description: |
   beagle, badger) plus shared ingress, network policy, secrets, and
   schema migrations.
 type: application
-version: 0.2.0
-appVersion: "0.1.0"
+version: 0.3.0
+appVersion: "0.3.0"
 maintainers:
   - name: USG DCIM Team
 keywords: [dcim, datacenter, infrastructure, monitoring]
