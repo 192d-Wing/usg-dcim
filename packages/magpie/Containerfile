@@ -8,7 +8,12 @@ WORKDIR /src/packages/magpie
 RUN go mod download
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/magpie .
 
-FROM gcr.io/distroless/static-debian12
+# Iron Bank UBI. distroless shipped a `nonroot` user at uid/gid 65532;
+# UBI does not, and the Helm charts pin runAsUser/fsGroup to 65532, so
+# recreate it at the same ids.
+FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+RUN groupadd -g 65532 nonroot \
+ && useradd -r -u 65532 -g nonroot -s /sbin/nologin -M nonroot
 COPY --from=build /out/magpie /magpie
 EXPOSE 8101
 USER nonroot:nonroot

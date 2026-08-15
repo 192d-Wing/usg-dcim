@@ -62,12 +62,22 @@ RUN go mod edit -require=github.com/192d-wing/coredns-nsec3sign@v0.0.0-000101010
 
 # ---------- runtime stage -----------------------------------------------------
 
-# Match the stock coredns image: distroless, non-root, statically
-# linked. Operators can swap image references without revisiting
-# anything else in the compose / k8s manifests.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Iron Bank UBI, non-root, statically linked. Operators can swap image
+# references without revisiting anything else in the compose / k8s
+# manifests.
+#
+# The `:nonroot` distroless tag carried BOTH the 65532 user and the
+# USER directive. UBI has neither, so both are restated here — without
+# the explicit USER this image would silently start running as root.
+# Binding :53 as non-root still needs CAP_NET_BIND_SERVICE from the
+# pod spec, exactly as it did on distroless.
+FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+
+RUN groupadd -g 65532 nonroot \
+ && useradd -r -u 65532 -g nonroot -s /sbin/nologin -M nonroot
 
 COPY --from=builder /out/coredns /coredns
 
 EXPOSE 53 53/udp
+USER nonroot:nonroot
 ENTRYPOINT ["/coredns"]
