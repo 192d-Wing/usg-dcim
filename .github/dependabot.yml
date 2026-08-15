@@ -14,7 +14,25 @@ updates:
       radix:
         patterns: ["@radix-ui/*"]
       tooling:
+        # minor+patch only. Without this a compiler major rides along with
+        # six routine bumps: #315 carried TypeScript 6 -> 7, which removed
+        # `baseUrl` and broke the build, and read as a seven-package
+        # failure instead of the one-line tsconfig fix it actually was.
+        # Majors now arrive alone, where they can be reviewed as majors.
         dependency-type: "development"
+        update-types: ["minor", "patch"]
+      # Catch-all for everything else in production. Dependabot assigns a
+      # dependency to the first group it matches, so react/refine/radix
+      # still win above; this sweeps up axios, qs, form-data, postcss,
+      # cloudscape, react-hook-form, react-query and friends.
+      #
+      # Without it each of those is its own PR against one shared
+      # package-lock.json, so merging any one of them makes the rest
+      # conflict — we hit eleven of these at once. One grouped PR instead.
+      npm-prod:
+        dependency-type: "production"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
       # Hold react-router at v7 until @refinedev/react-router supports v8.
       #
@@ -108,6 +126,17 @@ updates:
   - package-ecosystem: "docker"
     directory: "/packages/finch"
     schedule: { interval: "monthly" }
+    ignore:
+      # Node majors only after they reach Active LTS, never on release.
+      # Odd lines never become LTS at all (#335 proposed node 25), and
+      # even lines ship in April but do not go Active LTS until that
+      # October — #345 proposed node 26 in August, four months early.
+      # We are on node 24, LTS until it hands over to 26.
+      #
+      # REVISIT OCTOBER 2026, when 26 becomes Active LTS: drop this
+      # entry, take the bump, then put it back.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "docker"
     directory: "/packages/badger"
     schedule: { interval: "monthly" }
