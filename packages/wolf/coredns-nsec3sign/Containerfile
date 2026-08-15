@@ -17,7 +17,7 @@ ARG COREDNS_VERSION=v1.14.2
 # transitive deps that require Go 1.25 minimum. Track that as the
 # image's build toolchain so the resolved go.mod stays buildable
 # without forcing the operator to override on the command line.
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.26
 
 # ---------- builder stage -----------------------------------------------------
 

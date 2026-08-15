@@ -71,9 +71,11 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          # Matches the toolchain in go.work; setup-go v6 defaults
-          # GOTOOLCHAIN=local, so this must satisfy go.work's go directive.
-          go-version: '1.25.7'
+          # Matches the golang:1.26-alpine builder in every Containerfile —
+          # test on what we ship on. go.work's go directive is the floor,
+          # not this value; setup-go v6 defaults GOTOOLCHAIN=local, so this
+          # only has to satisfy it, and 1.26.5 >= go.work's 1.25.7.
+          go-version: '1.26.5'
           # Cache derived from the per-package go.sum so each matrix shard
           # gets its own warm cache without cross-contamination.
           cache-dependency-path: packages/${{ matrix.pkg }}/go.sum
@@ -117,7 +119,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.25.7'
+          go-version: '1.26.5'
           cache-dependency-path: packages/wolf/coredns-nsec3sign/go.sum
 
       - name: go build
