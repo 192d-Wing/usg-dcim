@@ -32,7 +32,7 @@ jobs:
       # CodeQL extractor can resolve module dependencies. The version
       # tracks the go.mod's `go` directive in packages/wolf/coredns-nsec3sign.
       - if: matrix.language == 'go'
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: packages/wolf/coredns-nsec3sign/go.mod
 
