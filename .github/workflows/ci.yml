@@ -24,7 +24,7 @@ jobs:
       run:
         working-directory: packages/finch
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v6
         with:
@@ -67,7 +67,7 @@ jobs:
       run:
         working-directory: packages/${{ matrix.pkg }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:
@@ -115,7 +115,7 @@ jobs:
     env:
       GOWORK: "off"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-go@v6
         with:
@@ -150,7 +150,7 @@ jobs:
           - { image: dcim-beagle, context: .,               containerfile: packages/beagle/Containerfile }
           - { image: dcim-otter-go, context: .,             containerfile: packages/otter-go/Containerfile }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Build ${{ matrix.image }}
         id: build
@@ -193,7 +193,7 @@ jobs:
     name: Helm chart lint + template
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install Helm
         uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
