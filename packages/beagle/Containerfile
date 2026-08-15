@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/beagle .
 
 # Use a small Alpine image (not distroless) so ICMP works without raw sockets
 # via the unprivileged SOCK_DGRAM path, which still needs a real /proc.
-FROM alpine:3.20
+FROM alpine:3.24
 RUN adduser -D -u 65532 probe
 COPY --from=build /out/beagle /beagle
 EXPOSE 8102
