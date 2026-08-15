@@ -149,6 +149,22 @@ jobs:
           - { image: dcim-magpie, context: .,               containerfile: packages/magpie/Containerfile }
           - { image: dcim-beagle, context: .,               containerfile: packages/beagle/Containerfile }
           - { image: dcim-otter-go, context: .,             containerfile: packages/otter-go/Containerfile }
+          # wolf DNS images — BUILD ONLY, never pushed from here.
+          #
+          # These already ship on a different release track:
+          # ghcr.io/192d-wing/coredns-nsec3sign:v1.14.2-1 and
+          # hickory-prom:v0.26.0-2 — <upstream-version>-<build>, cut by
+          # hand and pinned by deploy/k8s/site42, deploy/docker/site-dns
+          # and the DNS guides. Publishing them on the dcim-* latest+SHA
+          # scheme would fork that convention and start overwriting the
+          # hickory-prom:latest that docker-compose.hickory.yml falls
+          # back to. So `publish: no` — we only want the compile checked.
+          #
+          # Both clone and compile their upstream (CoreDNS, hickory-dns)
+          # from a pinned ARG default, so they are by far the slowest
+          # shards; hickory-prom builds Rust from source.
+          - { image: coredns-nsec3sign, context: packages/wolf/coredns-nsec3sign, containerfile: packages/wolf/coredns-nsec3sign/Containerfile, publish: 'no' }
+          - { image: hickory-prom,      context: packages/wolf/hickory-prom,      containerfile: packages/wolf/hickory-prom/Containerfile,      publish: 'no' }
     steps:
       - uses: actions/checkout@v7
 
@@ -174,7 +190,7 @@ jobs:
       # Push happens only on pushes to main. PRs from forks won't have
       # packages:write anyway, so the conditional double-protects.
       - name: Log in to ghcr.io
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.publish != 'no'
         uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2.0
         with:
           registry: ghcr.io
@@ -182,7 +198,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push ${{ matrix.image }} to ghcr.io
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && matrix.publish != 'no'
         uses: redhat-actions/push-to-registry@94ade333c38ecc0e60e94785125d9a52ca423b37 # v3.0.0
         with:
           image: ${{ steps.build.outputs.image }}
