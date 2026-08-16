@@ -55,13 +55,21 @@ RUN cargo build --release --bin hickory-dns \
 
 # ---------- runtime stage -----------------------------------------------------
 
-# Distroless so the image surface matches the upstream `hickorydns/`
-# build — operators can swap image references without revisiting
-# anything else in the compose / k8s manifests. Non-root user is
-# baked into the distroless image (uid 65532).
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Iron Bank UBI. This was distroless/cc rather than /static because the
+# Rust binary links against glibc; UBI provides it, so this is the one
+# image where the base swap is a straight substitution.
+#
+# The `:nonroot` tag carried BOTH the 65532 user and the USER directive.
+# UBI has neither, so both are restated here — without the explicit USER
+# this image would silently start running as root. Binding :53 as
+# non-root still needs CAP_NET_BIND_SERVICE from the pod spec.
+FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+
+RUN groupadd -g 65532 nonroot \
+ && useradd -r -u 65532 -g nonroot -s /sbin/nologin -M nonroot
 
 COPY --from=builder /src/hickory-dns/target/release/hickory-dns /hickory-dns
 
 EXPOSE 53 53/udp
+USER nonroot:nonroot
 ENTRYPOINT ["/hickory-dns"]

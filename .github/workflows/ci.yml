@@ -168,6 +168,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Iron Bank requires auth even to PULL, and every runtime stage now
+      # has a FROM against registry1. So unlike the ghcr.io login further
+      # down — which only gates the push on main — this has to run before
+      # the build and on pull_request too.
+      #
+      # Consequence worth knowing: Actions secrets are not exposed to
+      # dependabot-triggered runs or to fork PRs. REPO1/REPO1_USER must
+      # also exist under Settings > Secrets > Dependabot or every
+      # dependabot PR fails here.
+      - name: Log in to registry1.dso.mil (Iron Bank)
+        uses: redhat-actions/podman-login@50c2d9a331bb67c8fdab99b86455fad05e2e3252 # v2.0
+        with:
+          registry: registry1.dso.mil
+          username: ${{ secrets.REPO1_USER }}
+          password: ${{ secrets.REPO1 }}
+
       - name: Build ${{ matrix.image }}
         id: build
         uses: redhat-actions/buildah-build@3a51aade9afa17e5c78256bcbe2e1ee08c7b995b # v3.0.2

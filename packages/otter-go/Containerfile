@@ -21,7 +21,13 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-scheduler
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-worker    ./cmd/otter-go-worker
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-migrate   ./cmd/otter-go-migrate
 
-FROM gcr.io/distroless/static-debian12
+# Iron Bank UBI. distroless shipped a `nonroot` user at uid/gid 65532;
+# UBI does not. otter-go's chart pins runAsUser/runAsGroup/fsGroup to
+# 65532 AND sets readOnlyRootFilesystem: true, so the user must exist at
+# those exact ids and nothing may write outside a mounted volume.
+FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+RUN groupadd -g 65532 nonroot \
+ && useradd -r -u 65532 -g nonroot -s /sbin/nologin -M nonroot
 COPY --from=build /out/otter-go           /otter-go
 COPY --from=build /out/otter-go-scheduler /otter-go-scheduler
 COPY --from=build /out/otter-go-worker    /otter-go-worker

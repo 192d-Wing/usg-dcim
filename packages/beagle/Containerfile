@@ -8,10 +8,15 @@ WORKDIR /src/packages/beagle
 RUN go mod download
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/beagle .
 
-# Use a small Alpine image (not distroless) so ICMP works without raw sockets
-# via the unprivileged SOCK_DGRAM path, which still needs a real /proc.
-FROM alpine:3.24
-RUN adduser -D -u 65532 probe
+# Iron Bank UBI. Same reason we were on Alpine rather than distroless:
+# ICMP works without raw sockets via the unprivileged SOCK_DGRAM path,
+# which still needs a real /proc.
+#
+# `adduser -D` was busybox; UBI has shadow-utils, so this is useradd.
+# uid 65532 is kept — beagle's deployment pins runAsUser to it.
+FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+RUN groupadd -g 65532 probe \
+ && useradd -r -u 65532 -g probe -s /sbin/nologin -M probe
 COPY --from=build /out/beagle /beagle
 EXPOSE 8102
 USER probe
