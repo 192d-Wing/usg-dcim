@@ -137,18 +137,24 @@ jobs:
       matrix:
         include:
           # Self-contained services (build context = the package dir).
-          - { image: dcim-finch,  context: packages/finch,  containerfile: packages/finch/Containerfile }
-          - { image: dcim-badger, context: packages/badger, containerfile: packages/badger/Containerfile }
+          #
+          # The dcim-* images publish amd64 + arm64 manifest lists (the
+          # windep dev cluster runs arm64 nodes). Their Containerfiles
+          # cross-compile on the native runner arch via $BUILDPLATFORM,
+          # so qemu only executes the small final-stage RUNs
+          # (groupadd/useradd), never the Go or npm builds.
+          - { image: dcim-finch,  context: packages/finch,  containerfile: packages/finch/Containerfile,  archs: 'amd64, arm64' }
+          - { image: dcim-badger, context: packages/badger, containerfile: packages/badger/Containerfile, archs: 'amd64, arm64' }
           # Go services that import packages/shared-go via an in-tree
           # replace directive — build context must be repo root so the
           # COPY of packages/shared-go resolves. The dcim-otter-go image
           # is multi-binary (otter-go HTTP server + scheduler + worker
           # + migrate); helm chooses the entrypoint per pod, so a Helm
           # release pins a single image tag for every otter-go deployment.
-          - { image: dcim-heron,  context: .,               containerfile: packages/heron/Containerfile }
-          - { image: dcim-magpie, context: .,               containerfile: packages/magpie/Containerfile }
-          - { image: dcim-beagle, context: .,               containerfile: packages/beagle/Containerfile }
-          - { image: dcim-otter-go, context: .,             containerfile: packages/otter-go/Containerfile }
+          - { image: dcim-heron,  context: .,               containerfile: packages/heron/Containerfile,  archs: 'amd64, arm64' }
+          - { image: dcim-magpie, context: .,               containerfile: packages/magpie/Containerfile, archs: 'amd64, arm64' }
+          - { image: dcim-beagle, context: .,               containerfile: packages/beagle/Containerfile, archs: 'amd64, arm64' }
+          - { image: dcim-otter-go, context: .,             containerfile: packages/otter-go/Containerfile, archs: 'amd64, arm64' }
           # wolf DNS images — BUILD ONLY, never pushed from here.
           #
           # These already ship on a different release track:
@@ -184,11 +190,21 @@ jobs:
           username: ${{ secrets.REPO1_USER }}
           password: ${{ secrets.REPO1 }}
 
+      # arm64 shards need binfmt handlers for the final-stage RUNs.
+      # qemu-user-static registers them kernel-wide with the F flag via
+      # systemd-binfmt, which buildah picks up without further setup.
+      - name: Enable qemu for arm64 stages
+        if: contains(matrix.archs || '', 'arm64')
+        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user-static
+
       - name: Build ${{ matrix.image }}
         id: build
         uses: redhat-actions/buildah-build@3a51aade9afa17e5c78256bcbe2e1ee08c7b995b # v3.0.2
         with:
           image: ${{ matrix.image }}
+          # Unset for the wolf build-only shards — buildah then defaults
+          # to the runner's native amd64, exactly the prior behavior.
+          archs: ${{ matrix.archs || 'amd64' }}
           # On main: tag the commit SHA and `latest` so deploys can pin.
           # On PRs: tag only `ci` for build-only validation.
           tags: >-

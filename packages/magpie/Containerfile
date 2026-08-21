@@ -1,12 +1,16 @@
 # Build context: REPO ROOT — magpie depends on packages/shared-go via
 # an in-tree replace directive.
-FROM golang:1.26-alpine AS build
+# Native build stage + GOOS/GOARCH cross-compile so multi-arch builds
+# don't run the Go compiler under qemu; empty TARGETOS/TARGETARCH on
+# single-arch builds fall back to host defaults.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY packages/shared-go ./packages/shared-go
 COPY packages/magpie    ./packages/magpie
 WORKDIR /src/packages/magpie
 RUN go mod download
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/magpie .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/magpie .
 
 # Iron Bank UBI. distroless shipped a `nonroot` user at uid/gid 65532;
 # UBI does not, and the Helm charts pin runAsUser/fsGroup to 65532, so
