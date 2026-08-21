@@ -1,9 +1,13 @@
-FROM golang:1.26-alpine AS build
+# Native build stage + GOOS/GOARCH cross-compile so multi-arch builds
+# don't run the Go compiler under qemu; empty TARGETOS/TARGETARCH on
+# single-arch builds fall back to host defaults.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/badger .
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/badger .
 
 # Iron Bank UBI. Same reason we were on Alpine rather than distroless:
 # a real filesystem, so /var/lib is writable for the SQLite buffer when

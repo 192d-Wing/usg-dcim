@@ -10,16 +10,23 @@
 # so a Helm release pins a single image tag for everything.
 # cmd/otter-go-worker (the ARIN drain) is built too; it stays dark
 # from k8s until its own sub-chart lands.
-FROM golang:1.26-alpine AS build
+# Build stage runs on the build host's native arch ($BUILDPLATFORM)
+# and Go cross-compiles via GOOS/GOARCH, so multi-arch builds never
+# run the compiler under qemu — only the final stage's small RUNs
+# emulate. TARGETOS/TARGETARCH are empty on single-arch builds and Go
+# falls back to the host defaults, so plain `podman build` behaves
+# exactly as before.
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY packages/shared-go ./packages/shared-go
 COPY packages/otter-go  ./packages/otter-go
 WORKDIR /src/packages/otter-go
 RUN go mod download
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go           ./cmd/otter-go
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-scheduler ./cmd/otter-go-scheduler
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-worker    ./cmd/otter-go-worker
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/otter-go-migrate   ./cmd/otter-go-migrate
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/otter-go           ./cmd/otter-go
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/otter-go-scheduler ./cmd/otter-go-scheduler
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/otter-go-worker    ./cmd/otter-go-worker
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/otter-go-migrate   ./cmd/otter-go-migrate
 
 # Iron Bank UBI. distroless shipped a `nonroot` user at uid/gid 65532;
 # UBI does not. otter-go's chart pins runAsUser/runAsGroup/fsGroup to

@@ -1,7 +1,10 @@
 # Node 24 is the active LTS. Keep this in lockstep with node-version in
 # .github/workflows/ci.yml — CI is what actually runs the tests, so if
 # the two drift we ship an image built on a runtime nothing tested.
-FROM node:24-alpine AS build
+# Build stage on the native arch ($BUILDPLATFORM) — the dist/ output is
+# architecture-independent, and the nginx stage is pure COPY, so
+# multi-arch builds never run npm under qemu.
+FROM --platform=$BUILDPLATFORM node:24-alpine AS build
 WORKDIR /app
 # Copy the lockfile and use `npm ci`, not `npm install`. Without the
 # lockfile npm re-resolves every range against the registry at build
