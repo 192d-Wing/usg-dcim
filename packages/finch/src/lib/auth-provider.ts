@@ -24,7 +24,15 @@ export const authProvider: AuthProvider = {
       localStorage.setItem(IDENTITY_KEY, JSON.stringify(identity));
       return { success: true, redirectTo: '/' };
     } catch (err: any) {
-      return { success: false, error: { name: 'LoginError', message: err?.message ?? 'login failed' } };
+      // The API 401s with {"detail": "invalid credentials"}, which is
+      // not the {error:{...}} envelope http.ts normalizes — so the
+      // status lives on the raw axios error for that path.
+      const status = err?.statusCode ?? err?.response?.status;
+      const message =
+        status === 401
+          ? 'Invalid email or password.'
+          : err?.response?.data?.detail ?? err?.message ?? 'Sign-in failed.';
+      return { success: false, error: { name: 'LoginError', message } };
     }
   },
 
