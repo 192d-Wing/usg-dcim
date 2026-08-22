@@ -34,6 +34,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { href: '/',           text: 'Enterprise' },
   { href: '/sites',      text: 'Sites' },
+  { href: '/buildings',  text: 'Buildings' },
   { href: '/racks',      text: 'Racks' },
   { href: '/capacity',   text: 'Capacity' },
   { href: '/alerts',     text: 'Alerts' },

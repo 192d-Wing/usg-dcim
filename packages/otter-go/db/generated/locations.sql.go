@@ -67,6 +67,9 @@ func (q *Queries) CountBuildings(ctx context.Context, arg CountBuildingsParams) 
 
 const listRooms = `-- name: ListRooms :many
 SELECT r.id, r.building_id, r.name, r.code, r.floor_area_sqft,
+       r.design_kw::text AS design_kw,
+       r.design_cooling_tons::text AS design_cooling_tons,
+       r.grid_cols, r.grid_rows,
        r.created_at, r.updated_at
 FROM rooms r
 JOIN buildings b ON b.id = r.building_id
@@ -97,7 +100,11 @@ func (q *Queries) ListRooms(ctx context.Context, arg ListRoomsParams) ([]Room, e
 	var items []Room
 	for rows.Next() {
 		var r Room
-		if err := rows.Scan(&r.ID, &r.BuildingID, &r.Name, &r.Code, &r.FloorAreaSqft, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(
+			&r.ID, &r.BuildingID, &r.Name, &r.Code, &r.FloorAreaSqft,
+			&r.DesignKw, &r.DesignCoolingTons, &r.GridCols, &r.GridRows,
+			&r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, r)

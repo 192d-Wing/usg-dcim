@@ -624,8 +624,15 @@ type Room struct {
 	Name          string    `json:"name"`
 	Code          string    `json:"code"`
 	FloorAreaSqft *int32    `json:"floor_area_sqft"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	// DesignKw / DesignCoolingTons carry NUMERIC textual form
+	// (matches the racks.max_kw *string convention).
+	DesignKw          *string   `json:"design_kw"`
+	DesignCoolingTons *string   `json:"design_cooling_tons"`
+	// Floor-plan tile grid dimensions; NULL = not configured.
+	GridCols          *int32    `json:"grid_cols"`
+	GridRows          *int32    `json:"grid_rows"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type Row struct {
@@ -647,6 +654,11 @@ type Rack struct {
 	MaxKw        *string   `json:"max_kw"`
 	MaxWeightLbs *int32    `json:"max_weight_lbs"`
 	Serial       *string   `json:"serial"`
+	// Floor-plan tile placement — NULL grid_x/grid_y = unplaced.
+	// grid_rotation in {0,90,180,270}, degrees clockwise.
+	GridX        *int32    `json:"grid_x"`
+	GridY        *int32    `json:"grid_y"`
+	GridRotation int16     `json:"grid_rotation"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

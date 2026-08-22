@@ -17,8 +17,9 @@ import (
 )
 
 type fakeQ struct {
-	list func(ctx context.Context, a dbq.ListRacksParams) ([]dbq.Rack, error)
-	get  func(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
+	list   func(ctx context.Context, a dbq.ListRacksParams) ([]dbq.Rack, error)
+	get    func(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
+	update func(ctx context.Context, a dbq.UpdateRackParams) (dbq.Rack, error)
 }
 
 func (f *fakeQ) ListRacks(ctx context.Context, a dbq.ListRacksParams) ([]dbq.Rack, error) {
@@ -37,7 +38,10 @@ func (f *fakeQ) GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error) {
 func (f *fakeQ) CreateRack(_ context.Context, a dbq.CreateRackParams) (dbq.Rack, error) {
 	return dbq.Rack{ID: uuid.New(), SiteID: a.SiteID, RowID: a.RowID, Name: a.Name, Code: a.Code, UHeight: a.UHeight}, nil
 }
-func (f *fakeQ) UpdateRack(_ context.Context, a dbq.UpdateRackParams) (dbq.Rack, error) {
+func (f *fakeQ) UpdateRack(ctx context.Context, a dbq.UpdateRackParams) (dbq.Rack, error) {
+	if f.update != nil {
+		return f.update(ctx, a)
+	}
 	return dbq.Rack{ID: a.ID}, nil
 }
 func (f *fakeQ) GetRackAssetsForShrinkCheck(_ context.Context, _ uuid.UUID) ([]dbq.RackPlacedAsset, error) {

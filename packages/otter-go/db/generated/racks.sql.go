@@ -11,7 +11,8 @@ import (
 
 const listRacks = `-- name: ListRacks :many
 SELECT id, site_id, row_id, name, code, u_height,
-       max_kw, max_weight_lbs, serial, created_at, updated_at
+       max_kw, max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
 FROM racks
 WHERE ($3::uuid IS NULL OR site_id = $3)
   AND ($4::uuid IS NULL OR row_id  = $4)
@@ -38,7 +39,7 @@ func (q *Queries) ListRacks(ctx context.Context, arg ListRacksParams) ([]Rack, e
 	for rows.Next() {
 		var r Rack
 		if err := rows.Scan(&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
-			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.GridX, &r.GridY, &r.GridRotation, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, r)
@@ -69,7 +70,8 @@ func (q *Queries) CountRacks(ctx context.Context, arg CountRacksParams) (int64, 
 
 const getRack = `-- name: GetRack :one
 SELECT id, site_id, row_id, name, code, u_height,
-       max_kw, max_weight_lbs, serial, created_at, updated_at
+       max_kw, max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
 FROM racks
 WHERE id = $1
 `
@@ -78,6 +80,6 @@ func (q *Queries) GetRack(ctx context.Context, id uuid.UUID) (Rack, error) {
 	row := q.db.QueryRow(ctx, getRack, id)
 	var r Rack
 	err := row.Scan(&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
-		&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt)
+		&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.GridX, &r.GridY, &r.GridRotation, &r.CreatedAt, &r.UpdatedAt)
 	return r, err
 }

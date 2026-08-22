@@ -176,22 +176,38 @@ func (q *Queries) CreateBuilding(ctx context.Context, arg CreateBuildingParams) 
 }
 
 const createRoom = `-- name: CreateRoom :one
-INSERT INTO rooms (id, building_id, name, code, floor_area_sqft, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())
-RETURNING id, building_id, name, code, floor_area_sqft, created_at, updated_at
+INSERT INTO rooms (id, building_id, name, code, floor_area_sqft,
+                   design_kw, design_cooling_tons, grid_cols, grid_rows,
+                   created_at, updated_at)
+VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+RETURNING id, building_id, name, code, floor_area_sqft,
+          design_kw::text AS design_kw,
+          design_cooling_tons::text AS design_cooling_tons,
+          grid_cols, grid_rows,
+          created_at, updated_at
 `
 
 type CreateRoomParams struct {
-	BuildingID    uuid.UUID `json:"building_id"`
-	Name          string    `json:"name"`
-	Code          string    `json:"code"`
-	FloorAreaSqft *int32    `json:"floor_area_sqft"`
+	BuildingID        uuid.UUID `json:"building_id"`
+	Name              string    `json:"name"`
+	Code              string    `json:"code"`
+	FloorAreaSqft     *int32    `json:"floor_area_sqft"`
+	DesignKw          *string   `json:"design_kw"`
+	DesignCoolingTons *string   `json:"design_cooling_tons"`
+	GridCols          *int32    `json:"grid_cols"`
+	GridRows          *int32    `json:"grid_rows"`
 }
 
 func (q *Queries) CreateRoom(ctx context.Context, arg CreateRoomParams) (Room, error) {
-	row := q.db.QueryRow(ctx, createRoom, arg.BuildingID, arg.Name, arg.Code, arg.FloorAreaSqft)
+	row := q.db.QueryRow(ctx, createRoom,
+		arg.BuildingID, arg.Name, arg.Code, arg.FloorAreaSqft,
+		arg.DesignKw, arg.DesignCoolingTons, arg.GridCols, arg.GridRows)
 	var rm Room
-	err := row.Scan(&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft, &rm.CreatedAt, &rm.UpdatedAt)
+	err := row.Scan(
+		&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft,
+		&rm.DesignKw, &rm.DesignCoolingTons, &rm.GridCols, &rm.GridRows,
+		&rm.CreatedAt, &rm.UpdatedAt,
+	)
 	return rm, err
 }
 
@@ -229,14 +245,22 @@ func (q *Queries) GetBuilding(ctx context.Context, id uuid.UUID) (Building, erro
 }
 
 const getRoom = `-- name: GetRoom :one
-SELECT id, building_id, name, code, floor_area_sqft, created_at, updated_at
+SELECT id, building_id, name, code, floor_area_sqft,
+       design_kw::text AS design_kw,
+       design_cooling_tons::text AS design_cooling_tons,
+       grid_cols, grid_rows,
+       created_at, updated_at
 FROM rooms WHERE id = $1
 `
 
 func (q *Queries) GetRoom(ctx context.Context, id uuid.UUID) (Room, error) {
 	row := q.db.QueryRow(ctx, getRoom, id)
 	var rm Room
-	err := row.Scan(&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft, &rm.CreatedAt, &rm.UpdatedAt)
+	err := row.Scan(
+		&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft,
+		&rm.DesignKw, &rm.DesignCoolingTons, &rm.GridCols, &rm.GridRows,
+		&rm.CreatedAt, &rm.UpdatedAt,
+	)
 	return rm, err
 }
 
@@ -301,23 +325,46 @@ UPDATE rooms
 SET name            = COALESCE($2::text, name),
     code            = COALESCE($3::text, code),
     floor_area_sqft = CASE WHEN $4::bool THEN $5::int ELSE floor_area_sqft END,
+    design_kw       = CASE WHEN $6::bool THEN $7::numeric ELSE design_kw END,
+    design_cooling_tons = CASE WHEN $8::bool THEN $9::numeric ELSE design_cooling_tons END,
+    grid_cols       = CASE WHEN $10::bool THEN $11::int ELSE grid_cols END,
+    grid_rows       = CASE WHEN $12::bool THEN $13::int ELSE grid_rows END,
     updated_at      = NOW()
 WHERE id = $1
-RETURNING id, building_id, name, code, floor_area_sqft, created_at, updated_at
+RETURNING id, building_id, name, code, floor_area_sqft,
+          design_kw::text AS design_kw,
+          design_cooling_tons::text AS design_cooling_tons,
+          grid_cols, grid_rows,
+          created_at, updated_at
 `
 
 type UpdateRoomParams struct {
-	ID                uuid.UUID `json:"id"`
-	Name              *string   `json:"name"`
-	Code              *string   `json:"code"`
-	FloorAreaSqftSet  bool      `json:"floor_area_sqft_set"`
-	FloorAreaSqft     *int32    `json:"floor_area_sqft"`
+	ID                   uuid.UUID `json:"id"`
+	Name                 *string   `json:"name"`
+	Code                 *string   `json:"code"`
+	FloorAreaSqftSet     bool      `json:"floor_area_sqft_set"`
+	FloorAreaSqft        *int32    `json:"floor_area_sqft"`
+	DesignKwSet          bool      `json:"design_kw_set"`
+	DesignKw             *string   `json:"design_kw"`
+	DesignCoolingTonsSet bool      `json:"design_cooling_tons_set"`
+	DesignCoolingTons    *string   `json:"design_cooling_tons"`
+	GridColsSet          bool      `json:"grid_cols_set"`
+	GridCols             *int32    `json:"grid_cols"`
+	GridRowsSet          bool      `json:"grid_rows_set"`
+	GridRows             *int32    `json:"grid_rows"`
 }
 
 func (q *Queries) UpdateRoom(ctx context.Context, arg UpdateRoomParams) (Room, error) {
-	row := q.db.QueryRow(ctx, updateRoom, arg.ID, arg.Name, arg.Code, arg.FloorAreaSqftSet, arg.FloorAreaSqft)
+	row := q.db.QueryRow(ctx, updateRoom,
+		arg.ID, arg.Name, arg.Code, arg.FloorAreaSqftSet, arg.FloorAreaSqft,
+		arg.DesignKwSet, arg.DesignKw, arg.DesignCoolingTonsSet, arg.DesignCoolingTons,
+		arg.GridColsSet, arg.GridCols, arg.GridRowsSet, arg.GridRows)
 	var rm Room
-	err := row.Scan(&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft, &rm.CreatedAt, &rm.UpdatedAt)
+	err := row.Scan(
+		&rm.ID, &rm.BuildingID, &rm.Name, &rm.Code, &rm.FloorAreaSqft,
+		&rm.DesignKw, &rm.DesignCoolingTons, &rm.GridCols, &rm.GridRows,
+		&rm.CreatedAt, &rm.UpdatedAt,
+	)
 	return rm, err
 }
 
@@ -367,11 +414,13 @@ func (q *Queries) DeleteRow(ctx context.Context, id uuid.UUID) error {
 // ---- Racks ----
 
 const rackRetCols = `id, site_id, row_id, name, code, u_height, max_kw,
-          max_weight_lbs, serial, created_at, updated_at`
+          max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+          created_at, updated_at`
 
 func scanRack(row interface{ Scan(...any) error }, r *Rack) error {
 	return row.Scan(&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight, &r.MaxKw,
-		&r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt)
+		&r.MaxWeightLbs, &r.Serial, &r.GridX, &r.GridY, &r.GridRotation,
+		&r.CreatedAt, &r.UpdatedAt)
 }
 
 const createRack = `-- name: CreateRack :one
@@ -406,6 +455,9 @@ SET name      = COALESCE($2::text, name),
     u_height  = COALESCE($3::int, u_height),
     max_kw    = CASE WHEN $4::bool THEN $5::numeric ELSE max_kw END,
     serial    = CASE WHEN $6::bool THEN $7::text   ELSE serial END,
+    grid_x    = CASE WHEN $8::bool THEN $9::int ELSE grid_x END,
+    grid_y    = CASE WHEN $10::bool THEN $11::int ELSE grid_y END,
+    grid_rotation = COALESCE($12::smallint, grid_rotation),
     updated_at = NOW()
 WHERE id = $1
 RETURNING ` + rackRetCols
@@ -418,11 +470,18 @@ type UpdateRackParams struct {
 	MaxKw     *string   `json:"max_kw"`
 	SerialSet bool      `json:"serial_set"`
 	Serial    *string   `json:"serial"`
+	GridXSet  bool      `json:"grid_x_set"`
+	GridX     *int32    `json:"grid_x"`
+	GridYSet  bool      `json:"grid_y_set"`
+	GridY     *int32    `json:"grid_y"`
+	// nil = leave rotation unchanged (column is NOT NULL).
+	GridRotation *int16 `json:"grid_rotation"`
 }
 
 func (q *Queries) UpdateRack(ctx context.Context, arg UpdateRackParams) (Rack, error) {
 	row := q.db.QueryRow(ctx, updateRack,
-		arg.ID, arg.Name, arg.UHeight, arg.MaxKwSet, arg.MaxKw, arg.SerialSet, arg.Serial)
+		arg.ID, arg.Name, arg.UHeight, arg.MaxKwSet, arg.MaxKw, arg.SerialSet, arg.Serial,
+		arg.GridXSet, arg.GridX, arg.GridYSet, arg.GridY, arg.GridRotation)
 	var r Rack
 	err := scanRack(row, &r)
 	return r, err

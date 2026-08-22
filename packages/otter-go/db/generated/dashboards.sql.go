@@ -66,7 +66,8 @@ func (q *Queries) CountStaleTelemetrySources(ctx context.Context) (int64, error)
 
 const listRacksForForecast = `-- name: ListRacksForForecast :many
 SELECT id, site_id, row_id, name, code, u_height, max_kw,
-       max_weight_lbs, serial, created_at, updated_at
+       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
 FROM racks
 WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
 LIMIT $2
@@ -89,7 +90,8 @@ func (q *Queries) ListRacksForForecast(ctx context.Context, arg ListRacksForFore
 		var r Rack
 		if err := rows.Scan(
 			&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
-			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt,
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.GridX, &r.GridY, &r.GridRotation,
+			&r.CreatedAt, &r.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -325,20 +327,28 @@ func (q *Queries) ListBuildingsBySite(ctx context.Context, siteID uuid.UUID) ([]
 }
 
 const listRoomsByBuildingIDs = `-- name: ListRoomsByBuildingIDs :many
-SELECT id, building_id, name, code, design_kw::text AS design_kw
+SELECT id, building_id, name, code, design_kw::text AS design_kw,
+       floor_area_sqft,
+       design_cooling_tons::text AS design_cooling_tons,
+       grid_cols, grid_rows
 FROM rooms
 WHERE building_id = ANY($1::uuid[])
 ORDER BY code
 `
 
-// SiteRoomRow — design_kw scans as *string (NUMERIC textual form);
-// caller parses to float at the response boundary.
+// SiteRoomRow — design_kw / design_cooling_tons scan as *string
+// (NUMERIC textual form); caller parses to float at the response
+// boundary.
 type SiteRoomRow struct {
-	ID         uuid.UUID `json:"id"`
-	BuildingID uuid.UUID `json:"building_id"`
-	Name       string    `json:"name"`
-	Code       string    `json:"code"`
-	DesignKw   *string   `json:"design_kw"`
+	ID                uuid.UUID `json:"id"`
+	BuildingID        uuid.UUID `json:"building_id"`
+	Name              string    `json:"name"`
+	Code              string    `json:"code"`
+	DesignKw          *string   `json:"design_kw"`
+	FloorAreaSqft     *int32    `json:"floor_area_sqft"`
+	DesignCoolingTons *string   `json:"design_cooling_tons"`
+	GridCols          *int32    `json:"grid_cols"`
+	GridRows          *int32    `json:"grid_rows"`
 }
 
 func (q *Queries) ListRoomsByBuildingIDs(ctx context.Context, ids []uuid.UUID) ([]SiteRoomRow, error) {
@@ -350,7 +360,10 @@ func (q *Queries) ListRoomsByBuildingIDs(ctx context.Context, ids []uuid.UUID) (
 	var items []SiteRoomRow
 	for rows.Next() {
 		var r SiteRoomRow
-		if err := rows.Scan(&r.ID, &r.BuildingID, &r.Name, &r.Code, &r.DesignKw); err != nil {
+		if err := rows.Scan(
+			&r.ID, &r.BuildingID, &r.Name, &r.Code, &r.DesignKw,
+			&r.FloorAreaSqft, &r.DesignCoolingTons, &r.GridCols, &r.GridRows,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, r)
@@ -388,9 +401,40 @@ func (q *Queries) ListRowsByRoomIDs(ctx context.Context, ids []uuid.UUID) ([]Sit
 	return items, rows.Err()
 }
 
+const listRacksByRowIDs = `-- name: ListRacksByRowIDs :many
+SELECT id, site_id, row_id, name, code, u_height, max_kw,
+       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
+FROM racks
+WHERE row_id = ANY($1::uuid[])
+ORDER BY code
+`
+
+func (q *Queries) ListRacksByRowIDs(ctx context.Context, rowIDs []uuid.UUID) ([]Rack, error) {
+	rows, err := q.db.Query(ctx, listRacksByRowIDs, rowIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Rack
+	for rows.Next() {
+		var r Rack
+		if err := rows.Scan(
+			&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.GridX, &r.GridY, &r.GridRotation,
+			&r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, r)
+	}
+	return items, rows.Err()
+}
+
 const listRacksBySite = `-- name: ListRacksBySite :many
 SELECT id, site_id, row_id, name, code, u_height, max_kw,
-       max_weight_lbs, serial, created_at, updated_at
+       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
 FROM racks
 WHERE site_id = $1
 ORDER BY code
@@ -407,7 +451,8 @@ func (q *Queries) ListRacksBySite(ctx context.Context, siteID uuid.UUID) ([]Rack
 		var r Rack
 		if err := rows.Scan(
 			&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
-			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt,
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.GridX, &r.GridY, &r.GridRotation,
+			&r.CreatedAt, &r.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -524,7 +569,7 @@ func (q *Queries) ListSiteCollectors(ctx context.Context, siteID uuid.UUID) ([]S
 // ---- /dashboards/free-space (Phase 2) — rack capacity rollup ----
 
 const listRacksForFreeSpace = `-- name: ListRacksForFreeSpace :many
-SELECT id, site_id, row_id, name, code, u_height, max_kw, max_weight_lbs, serial, created_at, updated_at
+SELECT id, site_id, row_id, name, code, u_height, max_kw, max_weight_lbs, serial, grid_x, grid_y, grid_rotation, created_at, updated_at
 FROM racks
 WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
   AND ($2::uuid IS NULL OR site_id IN (SELECT id FROM sites WHERE region_id = $2::uuid))
@@ -549,7 +594,8 @@ func (q *Queries) ListRacksForFreeSpace(ctx context.Context, arg ListRacksForFre
 		var r Rack
 		if err := rows.Scan(
 			&r.ID, &r.SiteID, &r.RowID, &r.Name, &r.Code, &r.UHeight,
-			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.CreatedAt, &r.UpdatedAt,
+			&r.MaxKw, &r.MaxWeightLbs, &r.Serial, &r.GridX, &r.GridY, &r.GridRotation,
+			&r.CreatedAt, &r.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
