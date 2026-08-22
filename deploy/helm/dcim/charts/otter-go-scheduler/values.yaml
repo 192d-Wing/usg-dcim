@@ -88,13 +88,16 @@ ipamUtilization:
   cron: "3-58/5 * * * *"
 
 # DCIM_NOTIFY_BRIDGE_CRON — schedule for notify_bridge. Default
-# "*/5 * * * * *" uses robfig/cron's 6-field extension to fire every
-# 5 seconds (matching Python's cron(notify_bridge, second=range(0,60,5))).
+# "@every 5s" fires every 5 seconds (matching Python's
+# cron(notify_bridge, second=range(0,60,5))). The scheduler's
+# registrar parses the standard 5-field grammar plus @-shorthands
+# only — a 6-field seconds spec fails registration and crash-loops
+# the pod at startup, so sub-minute cadence must use @every.
 # Each tick RPOP's up to 500 entries off dcim:notify:bridge and fans
 # them across enabled NotificationChannels. Requires DCIM_REDIS_DSN
 # to be set; the umbrella's global.redis.dsn populates this.
 notifyBridge:
-  cron: "*/5 * * * * *"
+  cron: "@every 5s"
 
 resources:
   requests: { cpu: 50m,  memory: 64Mi }
