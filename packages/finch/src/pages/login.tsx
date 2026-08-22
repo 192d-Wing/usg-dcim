@@ -47,6 +47,7 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [emailErr, setEmailErr] = useState<string | undefined>();
   const [passwordErr, setPasswordErr] = useState<string | undefined>();
+  const [formErr, setFormErr] = useState<string | undefined>();
   // Local form is always visible when SSO is off; hidden by default when SSO is on.
   const [showLocalForm, setShowLocalForm] = useState(!loginBranding.sso.enabled);
 
@@ -65,7 +66,23 @@ export function LoginPage() {
     const passwordOk = password.length > 0;
     setEmailErr(emailOk ? undefined : 'Enter a valid email');
     setPasswordErr(passwordOk ? undefined : 'Password required');
-    if (emailOk && passwordOk) login({ email, password });
+    setFormErr(undefined);
+    if (emailOk && passwordOk) {
+      // A rejected login RESOLVES with success:false (Refine surfaces
+      // auth errors only via a notificationProvider, which this app
+      // doesn't mount) — so failures must be read here or they render
+      // nowhere and the form fails silently.
+      login(
+        { email, password },
+        {
+          onSuccess: (result) => {
+            if (!result.success) {
+              setFormErr(result.error?.message ?? 'Sign-in failed.');
+            }
+          },
+        },
+      );
+    }
   }
 
   const c = loginBranding.colors;
@@ -117,6 +134,7 @@ export function LoginPage() {
           {showLocalForm && (
             <form onSubmit={onSubmit} style={loginBranding.sso.enabled ? { marginTop: '1.5rem' } : undefined}>
               <Form
+                errorText={formErr}
                 actions={
                   <Button
                     variant="primary"
