@@ -237,6 +237,14 @@ jobs:
           containerfiles: ./${{ matrix.containerfile }}
           squash: false
 
+      # --pull=always on the per-platform steps: buildah's default
+      # --pull=missing resolves FROM by NAME against local storage, so
+      # the arm64 step happily reused the amd64 nginx/ubi10 the amd64
+      # step had already pulled under the same name — the arm64-labeled
+      # images shipped amd64 filesystems (finch crashed on the nodes;
+      # the Go images hid it behind their static arm64 entrypoints).
+      # always re-resolves each FROM against the registry with the
+      # requested platform.
       - name: Build ${{ matrix.image }} (amd64)
         if: ${{ matrix.platforms }}
         uses: redhat-actions/buildah-build@3a51aade9afa17e5c78256bcbe2e1ee08c7b995b # v3.0.2
@@ -247,6 +255,8 @@ jobs:
           context: ./${{ matrix.context }}
           containerfiles: ./${{ matrix.containerfile }}
           squash: false
+          extra-args: |
+            --pull=always
 
       - name: Build ${{ matrix.image }} (arm64)
         if: ${{ matrix.platforms }}
@@ -258,6 +268,20 @@ jobs:
           context: ./${{ matrix.context }}
           containerfiles: ./${{ matrix.containerfile }}
           squash: false
+          extra-args: |
+            --pull=always
+
+      # Config metadata can claim arm64 while the layers carry amd64
+      # content (that is exactly what the --pull bug produced), so the
+      # guard executes a binary FROM THE IMAGE under qemu: uname must
+      # report aarch64 or the payload is not really arm64. Runs before
+      # manifest assembly so a bad variant fails the shard.
+      - name: Verify ${{ matrix.image }} arm64 payload
+        if: ${{ matrix.platforms }}
+        run: |
+          got=$(podman run --rm --platform linux/arm64 --entrypoint uname "localhost/${{ matrix.image }}-arm64:build" -m)
+          echo "arm64 variant reports: $got"
+          test "$got" = "aarch64"
 
       - name: Assemble ${{ matrix.image }} manifest list
         if: ${{ matrix.platforms }}
