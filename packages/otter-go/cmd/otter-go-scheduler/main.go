@@ -145,12 +145,16 @@ func main() {
 	// Emits dcim_ipam_subnet_free_percent + _supernet_free_percent
 	// gauges to the /metrics endpoint below.
 	ipamUtilizationCron := env.String("DCIM_IPAM_UTILIZATION_CRON", "3-58/5 * * * *")
-	// Default spec "*/5 * * * * *" (every 5 seconds via the 6-field
-	// extension robfig/cron supports) mirrors Python's
-	// cron(notify_bridge, second=set(range(0, 60, 5))). Operators can
-	// throttle for a burst control via the env var; the queue's
-	// 500-per-tick cap absorbs short spikes either way.
-	notifyBridgeCron := env.String("DCIM_NOTIFY_BRIDGE_CRON", "*/5 * * * * *")
+	// Default "@every 5s" mirrors Python's
+	// cron(notify_bridge, second=set(range(0, 60, 5))). The registrar
+	// parses the standard 5-field grammar only (internal/scheduler
+	// deliberately does not enable robfig's 6-field seconds
+	// extension), so the sub-minute cadence has to use the @every
+	// shorthand — a 6-field spec fails registration and exits the
+	// process at startup. Operators can throttle for burst control
+	// via the env var; the queue's 500-per-tick cap absorbs short
+	// spikes either way.
+	notifyBridgeCron := env.String("DCIM_NOTIFY_BRIDGE_CRON", "@every 5s")
 	// DCIM_REDIS_DSN — same env Python's worker reads. Required for
 	// the notify_bridge job; empty → the bridge is skipped at startup
 	// and logged.
