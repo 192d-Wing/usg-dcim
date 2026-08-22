@@ -49,6 +49,11 @@ type roomReq struct {
 	Name          string    `json:"name"`
 	Code          string    `json:"code"`
 	FloorAreaSqft *int32    `json:"floor_area_sqft"`
+	// NUMERIC fields ride as JSON strings (racks.max_kw convention).
+	DesignKw          *string `json:"design_kw"`
+	DesignCoolingTons *string `json:"design_cooling_tons"`
+	GridCols          *int32  `json:"grid_cols"`
+	GridRows          *int32  `json:"grid_rows"`
 }
 
 func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +64,8 @@ func (h *Handler) createRoom(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := h.Q.CreateRoom(r.Context(), dbq.CreateRoomParams{
 		BuildingID: req.BuildingID, Name: req.Name, Code: req.Code, FloorAreaSqft: req.FloorAreaSqft,
+		DesignKw: req.DesignKw, DesignCoolingTons: req.DesignCoolingTons,
+		GridCols: req.GridCols, GridRows: req.GridRows,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -107,10 +114,18 @@ type buildingUpdateReq struct {
 }
 
 type roomUpdateReq struct {
-	Name             *string `json:"name"`
-	Code             *string `json:"code"`
-	FloorAreaSqftSet bool    `json:"-"`
-	FloorAreaSqft    *int32  `json:"floor_area_sqft"`
+	Name                 *string `json:"name"`
+	Code                 *string `json:"code"`
+	FloorAreaSqftSet     bool    `json:"-"`
+	FloorAreaSqft        *int32  `json:"floor_area_sqft"`
+	DesignKwSet          bool    `json:"-"`
+	DesignKw             *string `json:"design_kw"`
+	DesignCoolingTonsSet bool    `json:"-"`
+	DesignCoolingTons    *string `json:"design_cooling_tons"`
+	GridColsSet          bool    `json:"-"`
+	GridCols             *int32  `json:"grid_cols"`
+	GridRowsSet          bool    `json:"-"`
+	GridRows             *int32  `json:"grid_rows"`
 }
 
 func (u *roomUpdateReq) UnmarshalJSON(data []byte) error {
@@ -131,6 +146,30 @@ func (u *roomUpdateReq) UnmarshalJSON(data []byte) error {
 	if v, ok := raw["floor_area_sqft"]; ok {
 		u.FloorAreaSqftSet = true
 		if err := json.Unmarshal(v, &u.FloorAreaSqft); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["design_kw"]; ok {
+		u.DesignKwSet = true
+		if err := json.Unmarshal(v, &u.DesignKw); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["design_cooling_tons"]; ok {
+		u.DesignCoolingTonsSet = true
+		if err := json.Unmarshal(v, &u.DesignCoolingTons); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["grid_cols"]; ok {
+		u.GridColsSet = true
+		if err := json.Unmarshal(v, &u.GridCols); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["grid_rows"]; ok {
+		u.GridRowsSet = true
+		if err := json.Unmarshal(v, &u.GridRows); err != nil {
 			return err
 		}
 	}
@@ -256,6 +295,10 @@ func (h *Handler) updateRoom(w http.ResponseWriter, r *http.Request) {
 	out, err := h.Q.UpdateRoom(r.Context(), dbq.UpdateRoomParams{
 		ID: id, Name: req.Name, Code: req.Code,
 		FloorAreaSqftSet: req.FloorAreaSqftSet, FloorAreaSqft: req.FloorAreaSqft,
+		DesignKwSet: req.DesignKwSet, DesignKw: req.DesignKw,
+		DesignCoolingTonsSet: req.DesignCoolingTonsSet, DesignCoolingTons: req.DesignCoolingTons,
+		GridColsSet: req.GridColsSet, GridCols: req.GridCols,
+		GridRowsSet: req.GridRowsSet, GridRows: req.GridRows,
 	})
 	if err != nil {
 		writeMapped(w, err)
@@ -395,6 +438,18 @@ func roomDiff(req roomUpdateReq) map[string]any {
 	}
 	if req.FloorAreaSqftSet {
 		d["floor_area_sqft"] = req.FloorAreaSqft
+	}
+	if req.DesignKwSet {
+		d["design_kw"] = req.DesignKw
+	}
+	if req.DesignCoolingTonsSet {
+		d["design_cooling_tons"] = req.DesignCoolingTons
+	}
+	if req.GridColsSet {
+		d["grid_cols"] = req.GridCols
+	}
+	if req.GridRowsSet {
+		d["grid_rows"] = req.GridRows
 	}
 	return d
 }

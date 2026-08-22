@@ -21,6 +21,9 @@ WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id))
 -- empty page when scope can't reach any site, or the concrete
 -- ABAC-expanded site_id set otherwise (same shape as buildings).
 SELECT r.id, r.building_id, r.name, r.code, r.floor_area_sqft,
+       r.design_kw::text AS design_kw,
+       r.design_cooling_tons::text AS design_cooling_tons,
+       r.grid_cols, r.grid_rows,
        r.created_at, r.updated_at
 FROM rooms r
 JOIN buildings b ON b.id = r.building_id

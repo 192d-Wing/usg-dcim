@@ -26,6 +26,8 @@ import { DashboardPage } from '@/pages/dashboard';
 // initial JS payload only carries the shell + dashboard.
 const SitesListPage   = lazy(() => import('@/pages/sites').then((m) => ({ default: m.SitesListPage })));
 const SiteShowPage    = lazy(() => import('@/pages/site-show').then((m) => ({ default: m.SiteShowPage })));
+const BuildingsListPage = lazy(() => import('@/pages/buildings-list').then((m) => ({ default: m.BuildingsListPage })));
+const BuildingShowPage  = lazy(() => import('@/pages/building-show').then((m) => ({ default: m.BuildingShowPage })));
 const RacksListPage   = lazy(() => import('@/pages/racks-list').then((m) => ({ default: m.RacksListPage })));
 const RackShowPage    = lazy(() => import('@/pages/rack-show').then((m) => ({ default: m.RackShowPage })));
 const RackCreatePage  = lazy(() => import('@/pages/rack-create').then((m) => ({ default: m.RackCreatePage })));
@@ -74,6 +76,7 @@ export function App() {
         }}
         resources={[
           { name: 'inventory/sites', list: '/sites', show: '/sites/:id', meta: { label: 'Sites' } },
+          { name: 'inventory/buildings', list: '/buildings', show: '/buildings/:id', meta: { label: 'Buildings' } },
           { name: 'inventory/racks', list: '/racks', show: '/racks/:id', create: '/racks/new', meta: { label: 'Racks' } },
           { name: 'inventory/assets', show: '/assets/:id' },
           { name: 'alerts', list: '/alerts' },
@@ -96,6 +99,8 @@ export function App() {
             <Route element={<Suspense fallback={<PageFallback />}><Outlet /></Suspense>}>
               <Route path="/sites" element={<SitesListPage />} />
               <Route path="/sites/:id" element={<SiteShowPage />} />
+              <Route path="/buildings" element={<BuildingsListPage />} />
+              <Route path="/buildings/:id" element={<BuildingShowPage />} />
               <Route path="/racks" element={<RacksListPage />} />
               <Route path="/racks/new" element={<RackCreatePage />} />
               <Route path="/racks/:id" element={<RackShowPage />} />

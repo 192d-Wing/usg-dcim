@@ -66,6 +66,13 @@ type updateReq struct {
 	maxKwSet  bool
 	Serial    *string
 	serialSet bool
+	// Floor-plan placement. Set flags distinguish "clear placement"
+	// (explicit null) from "leave alone" (absent).
+	GridX        *int32
+	gridXSet     bool
+	GridY        *int32
+	gridYSet     bool
+	GridRotation *int16
 }
 
 func (u *updateReq) UnmarshalJSON(data []byte) error {
@@ -95,6 +102,23 @@ func (u *updateReq) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
+	if v, ok := raw["grid_x"]; ok {
+		u.gridXSet = true
+		if err := json.Unmarshal(v, &u.GridX); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["grid_y"]; ok {
+		u.gridYSet = true
+		if err := json.Unmarshal(v, &u.GridY); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["grid_rotation"]; ok {
+		if err := json.Unmarshal(v, &u.GridRotation); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -112,6 +136,18 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if req.UHeight != nil && (*req.UHeight < 1 || *req.UHeight > 60) {
 		httpx.Error(w, http.StatusBadRequest, "u_height must be between 1 and 60")
 		return
+	}
+	if (req.GridX != nil && *req.GridX < 0) || (req.GridY != nil && *req.GridY < 0) {
+		httpx.Error(w, http.StatusBadRequest, "grid_x and grid_y must be >= 0")
+		return
+	}
+	if req.GridRotation != nil {
+		switch *req.GridRotation {
+		case 0, 90, 180, 270:
+		default:
+			httpx.Error(w, http.StatusBadRequest, "grid_rotation must be one of 0, 90, 180, 270")
+			return
+		}
 	}
 	// PR 54 ABAC: look up the rack's site and enforce before any work.
 	currentRack, err := h.Q.GetRack(r.Context(), id)
@@ -160,6 +196,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		ID: id, Name: req.Name, UHeight: req.UHeight,
 		MaxKwSet: req.maxKwSet, MaxKw: req.MaxKw,
 		SerialSet: req.serialSet, Serial: req.Serial,
+		GridXSet: req.gridXSet, GridX: req.GridX,
+		GridYSet: req.gridYSet, GridY: req.GridY,
+		GridRotation: req.GridRotation,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

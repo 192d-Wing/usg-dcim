@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 
 import Box from '@cloudscape-design/components/box';
+import Button from '@cloudscape-design/components/button';
 import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
@@ -23,13 +24,8 @@ import {
 
 import { http } from '@/lib/http';
 import { CapacityBar } from '@/components/capacity-bar';
+import { RackTile, type RackNode } from '@/components/rack-tile';
 
-type RackNode = {
-  id: string; name: string; code: string;
-  u_height: number; u_used: number; u_pct: number;
-  kw_max: number | null; kw_current: number | null;
-  asset_count: number;
-};
 type RowNode = { id: string; name: string; code: string; racks: RackNode[] };
 type RoomNode = {
   id: string; name: string; code: string;
@@ -200,7 +196,12 @@ export function SiteShowPage() {
           )}
           <SpaceBetween size="s">
             {hierarchy.map((b) => (
-              <BuildingSection key={b.id} building={b} onRackClick={(rackId) => nav(`/racks/${rackId}`)} />
+              <BuildingSection
+                key={b.id}
+                building={b}
+                onRackClick={(rackId) => nav(`/racks/${rackId}`)}
+                onOpen={() => nav(`/buildings/${b.id}`)}
+              />
             ))}
             {orphan_racks.length > 0 && (
               <Container
@@ -292,10 +293,11 @@ function formatCollectorSummary(
 }
 
 function BuildingSection({
-  building, onRackClick,
+  building, onRackClick, onOpen,
 }: Readonly<{
   building: BuildingNode;
   onRackClick: (rackId: string) => void;
+  onOpen: () => void;
 }>) {
   const rackCount = building.rooms.reduce(
     (n, rm) => n + rm.rows.reduce((m, rw) => m + rw.racks.length, 0),
@@ -307,6 +309,7 @@ function BuildingSection({
       variant="container"
       headerText={`${building.code} · ${building.name}`}
       headerCounter={`(${building.rooms.length} room${building.rooms.length === 1 ? '' : 's'} · ${rackCount} rack${rackCount === 1 ? '' : 's'})`}
+      headerActions={<Button onClick={onOpen}>Floor view</Button>}
     >
       <SpaceBetween size="s">
         {building.rooms.length === 0 && (
@@ -368,55 +371,4 @@ function RoomBlock({
   );
 }
 
-function RackTile({
-  rack, onClick,
-}: Readonly<{ rack: RackNode; onClick: () => void }>) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'flex', flexDirection: 'column', gap: 6,
-        padding: 10, borderRadius: 8,
-        textAlign: 'left',
-        border: `1px solid ${colorBorderDividerDefault}`,
-        background: colorBackgroundContainerContent,
-        cursor: 'pointer',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, fontWeight: 500 }}>{rack.code}</span>
-          <span style={{
-            fontSize: 12, color: colorTextStatusInactive,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {rack.name}
-          </span>
-        </div>
-        <span style={{ fontSize: 11, color: colorTextStatusInactive }}>
-          {rack.asset_count}d
-        </span>
-      </div>
-      <CapacityBar
-        used={rack.u_used} total={rack.u_height}
-        leftLabel={`${rack.u_used}/${rack.u_height} U`}
-        compact
-      />
-      {rack.kw_max !== null && (
-        <CapacityBar
-          used={rack.kw_current ?? 0}
-          total={rack.kw_max}
-          unknown={rack.kw_current === null}
-          leftLabel={
-            rack.kw_current === null
-              ? `—/${rack.kw_max} kW`
-              : `${rack.kw_current.toFixed(1)}/${rack.kw_max} kW`
-          }
-          compact
-        />
-      )}
-    </button>
-  );
-}
 

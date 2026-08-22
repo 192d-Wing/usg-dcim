@@ -46,7 +46,8 @@ SELECT COUNT(id) FROM telemetry_sources WHERE freshness = 'stale';
 -- Optional site_id filter; limit caps result count. Caller iterates
 -- the batch with compute_rack_forecast (no DB calls beyond this).
 SELECT id, site_id, row_id, name, code, u_height, max_kw,
-       max_weight_lbs, serial, created_at, updated_at
+       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
 FROM racks
 WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
 LIMIT $2;
@@ -128,10 +129,13 @@ WHERE site_id = $1
 ORDER BY code;
 
 -- name: ListRoomsByBuildingIDs :many
--- design_kw projects as text so pgx scans cleanly into *string;
--- caller parses to float at the response boundary (matches the
--- max_kw NUMERIC pattern in racks).
-SELECT id, building_id, name, code, design_kw::text AS design_kw
+-- design_kw / design_cooling_tons project as text so pgx scans
+-- cleanly into *string; caller parses to float at the response
+-- boundary (matches the max_kw NUMERIC pattern in racks).
+SELECT id, building_id, name, code, design_kw::text AS design_kw,
+       floor_area_sqft,
+       design_cooling_tons::text AS design_cooling_tons,
+       grid_cols, grid_rows
 FROM rooms
 WHERE building_id = ANY($1::uuid[])
 ORDER BY code;
@@ -141,9 +145,21 @@ SELECT id, room_id, name, code FROM rows
 WHERE room_id = ANY($1::uuid[])
 ORDER BY code;
 
+-- name: ListRacksByRowIDs :many
+-- Rack anchor for /dashboards/buildings/{building_id} — same
+-- projection as ListRacksBySite but keyed on the building's rows so
+-- the fan-out stays scoped to one building.
+SELECT id, site_id, row_id, name, code, u_height, max_kw,
+       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
+FROM racks
+WHERE row_id = ANY($1::uuid[])
+ORDER BY code;
+
 -- name: ListRacksBySite :many
 SELECT id, site_id, row_id, name, code, u_height, max_kw,
-       max_weight_lbs, serial, created_at, updated_at
+       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
+       created_at, updated_at
 FROM racks
 WHERE site_id = $1
 ORDER BY code;
@@ -190,7 +206,7 @@ WHERE site_id = $1;
 -- name: ListRacksForFreeSpace :many
 -- Filter parameters can be NULL (don't filter). When both are set
 -- Python ANDs them — match that.
-SELECT id, site_id, row_id, name, code, u_height, max_kw, max_weight_lbs, serial, created_at, updated_at
+SELECT id, site_id, row_id, name, code, u_height, max_kw, max_weight_lbs, serial, grid_x, grid_y, grid_rotation, created_at, updated_at
 FROM racks
 WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
   AND ($2::uuid IS NULL OR site_id IN (SELECT id FROM sites WHERE region_id = $2::uuid));

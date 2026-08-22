@@ -104,8 +104,8 @@ func TestExpectedAlembicHeadIsLatest(t *testing.T) {
 	last := versions[len(versions)-1]
 	// Highest embedded goose version_id. Bump this when a migration is
 	// added so the guard keeps catching an accidental/forgotten add.
-	// 68 = 00068_nicreg_module.sql (the NIC registration intake module).
-	if last != 68 {
+	// 69 = 00069_rack_grid_placement.sql (floor-plan tile placement).
+	if last != 69 {
 		t.Errorf("embedded migrations changed (last version_id=%d); bump the expected version in this test", last)
 	}
 	if expectedAlembicHead == "" {

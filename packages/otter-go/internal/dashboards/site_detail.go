@@ -121,6 +121,10 @@ type rackNode struct {
 	KwMax      *float64 `json:"kw_max"`
 	KwCurrent  *float64 `json:"kw_current"`
 	AssetCount int      `json:"asset_count"`
+	// Floor-plan tile placement (null grid_x/grid_y = unplaced).
+	GridX        *int32 `json:"grid_x"`
+	GridY        *int32 `json:"grid_y"`
+	GridRotation int16  `json:"grid_rotation"`
 }
 
 func (h *Handler) siteDetail(w http.ResponseWriter, r *http.Request) {
@@ -468,15 +472,18 @@ func buildRowNodes(
 func makeRackNode(rk dbq.Rack, caps map[uuid.UUID]capacity.RackCapacity, assetsByRack map[uuid.UUID][]dbq.Asset) rackNode {
 	cap := caps[rk.ID]
 	return rackNode{
-		ID:         rk.ID.String(),
-		Name:       rk.Name,
-		Code:       rk.Code,
-		UHeight:    rk.UHeight,
-		UUsed:      cap.UUsed,
-		UPct:       cap.UPct,
-		KwMax:      cap.KwMax,
-		KwCurrent:  cap.KwCurrent,
-		AssetCount: len(assetsByRack[rk.ID]),
+		ID:           rk.ID.String(),
+		Name:         rk.Name,
+		Code:         rk.Code,
+		UHeight:      rk.UHeight,
+		UUsed:        cap.UUsed,
+		UPct:         cap.UPct,
+		KwMax:        cap.KwMax,
+		KwCurrent:    cap.KwCurrent,
+		AssetCount:   len(assetsByRack[rk.ID]),
+		GridX:        rk.GridX,
+		GridY:        rk.GridY,
+		GridRotation: rk.GridRotation,
 	}
 }
 
