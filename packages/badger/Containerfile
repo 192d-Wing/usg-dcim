@@ -15,7 +15,11 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 #
 # `adduser -D` was busybox; UBI has shadow-utils, so this is useradd.
 # uid 65532 is kept — the Helm charts pin runAsUser to it.
-FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+#
+# --platform=$TARGETPLATFORM is explicit because the build stage's
+# --platform=$BUILDPLATFORM otherwise leaks into this FROM on CI's
+# buildah — cross-built arm64 images silently got an amd64 base.
+FROM --platform=$TARGETPLATFORM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
 RUN groupadd -g 65532 collector \
  && useradd -r -u 65532 -g collector -s /sbin/nologin -M collector \
  && mkdir -p /var/lib/dcim-collector \

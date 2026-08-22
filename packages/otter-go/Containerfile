@@ -32,7 +32,11 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 # UBI does not. otter-go's chart pins runAsUser/runAsGroup/fsGroup to
 # 65532 AND sets readOnlyRootFilesystem: true, so the user must exist at
 # those exact ids and nothing may write outside a mounted volume.
-FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+#
+# --platform=$TARGETPLATFORM is explicit because the build stage's
+# --platform=$BUILDPLATFORM otherwise leaks into this FROM on CI's
+# buildah — cross-built arm64 images silently got an amd64 base.
+FROM --platform=$TARGETPLATFORM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
 RUN groupadd -g 65532 nonroot \
  && useradd -r -u 65532 -g nonroot -s /sbin/nologin -M nonroot
 COPY --from=build /out/otter-go           /otter-go
