@@ -237,39 +237,26 @@ jobs:
           containerfiles: ./${{ matrix.containerfile }}
           squash: false
 
-      # --pull=always on the per-platform steps: buildah's default
-      # --pull=missing resolves FROM by NAME against local storage, so
-      # the arm64 step happily reused the amd64 nginx/ubi10 the amd64
-      # step had already pulled under the same name — the arm64-labeled
-      # images shipped amd64 filesystems (finch crashed on the nodes;
-      # the Go images hid it behind their static arm64 entrypoints).
-      # always re-resolves each FROM against the registry with the
-      # requested platform.
-      - name: Build ${{ matrix.image }} (amd64)
+      # Multi-arch shards build with PODMAN, not the buildah action:
+      # the runner's apt buildah silently ignores --platform when
+      # resolving stages (its STEP log echoes `FROM nginx:1.31-alpine`
+      # with the platform stripped, and even an explicit
+      # `FROM --platform=$TARGETPLATFORM` came out amd64), so every
+      # "arm64" image it produced carried an amd64 filesystem under
+      # arm64 config metadata. The runner's podman (5.8+) resolves
+      # per-stage platforms correctly — same engine that produces
+      # verified-aarch64 images in local builds. --pull=always keeps
+      # a base pulled by the amd64 pass from being reused by name in
+      # the arm64 pass.
+      - name: Build ${{ matrix.image }} (amd64 + arm64, podman)
         if: ${{ matrix.platforms }}
-        uses: redhat-actions/buildah-build@3a51aade9afa17e5c78256bcbe2e1ee08c7b995b # v3.0.2
-        with:
-          image: ${{ matrix.image }}-amd64
-          platform: linux/amd64
-          tags: build
-          context: ./${{ matrix.context }}
-          containerfiles: ./${{ matrix.containerfile }}
-          squash: false
-          extra-args: |
-            --pull=always
-
-      - name: Build ${{ matrix.image }} (arm64)
-        if: ${{ matrix.platforms }}
-        uses: redhat-actions/buildah-build@3a51aade9afa17e5c78256bcbe2e1ee08c7b995b # v3.0.2
-        with:
-          image: ${{ matrix.image }}-arm64
-          platform: linux/arm64
-          tags: build
-          context: ./${{ matrix.context }}
-          containerfiles: ./${{ matrix.containerfile }}
-          squash: false
-          extra-args: |
-            --pull=always
+        run: |
+          for arch in amd64 arm64; do
+            podman build --platform "linux/$arch" --pull=always --format docker \
+              -f "./${{ matrix.containerfile }}" \
+              -t "localhost/${{ matrix.image }}-$arch:build" \
+              "./${{ matrix.context }}"
+          done
 
       # Config metadata can claim arm64 while the layers carry amd64
       # content (that is exactly what the --pull bug produced), so the
@@ -287,10 +274,10 @@ jobs:
         if: ${{ matrix.platforms }}
         run: |
           for t in $IMAGE_TAGS; do
-            buildah manifest create "localhost/${{ matrix.image }}:$t"
-            buildah manifest add "localhost/${{ matrix.image }}:$t" "containers-storage:localhost/${{ matrix.image }}-amd64:build"
-            buildah manifest add "localhost/${{ matrix.image }}:$t" "containers-storage:localhost/${{ matrix.image }}-arm64:build"
-            buildah manifest inspect "localhost/${{ matrix.image }}:$t"
+            podman manifest create "localhost/${{ matrix.image }}:$t"
+            podman manifest add "localhost/${{ matrix.image }}:$t" "containers-storage:localhost/${{ matrix.image }}-amd64:build"
+            podman manifest add "localhost/${{ matrix.image }}:$t" "containers-storage:localhost/${{ matrix.image }}-arm64:build"
+            podman manifest inspect "localhost/${{ matrix.image }}:$t"
           done
 
       # Push happens only on pushes to main. PRs from forks won't have
