@@ -15,7 +15,11 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags=
 # Iron Bank UBI. distroless shipped a `nonroot` user at uid/gid 65532;
 # UBI does not, and the Helm charts pin runAsUser/fsGroup to 65532, so
 # recreate it at the same ids.
-FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
+#
+# --platform=$TARGETPLATFORM is explicit because the build stage's
+# --platform=$BUILDPLATFORM otherwise leaks into this FROM on CI's
+# buildah — cross-built arm64 images silently got an amd64 base.
+FROM --platform=$TARGETPLATFORM registry1.dso.mil/ironbank/redhat/ubi/ubi10:10.2
 RUN groupadd -g 65532 nonroot \
  && useradd -r -u 65532 -g nonroot -s /sbin/nologin -M nonroot
 COPY --from=build /out/magpie /magpie

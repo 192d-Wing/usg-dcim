@@ -16,7 +16,10 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 
-FROM nginx:1.31-alpine
+# --platform=$TARGETPLATFORM is explicit because the build stage's
+# --platform=$BUILDPLATFORM otherwise leaks into this FROM on CI's
+# buildah — cross-built arm64 images silently got the amd64 nginx.
+FROM --platform=$TARGETPLATFORM nginx:1.31-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
