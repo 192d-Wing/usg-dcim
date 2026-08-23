@@ -19,7 +19,9 @@ SET name           = COALESCE(sqlc.narg(name)::text, name),
     dns_recursive_upstreams = CASE WHEN sqlc.arg(dns_recursive_upstreams_set)::bool THEN sqlc.narg(dns_recursive_upstreams)::jsonb ELSE dns_recursive_upstreams END,
     dns_deny_networks       = CASE WHEN sqlc.arg(dns_deny_networks_set)::bool       THEN sqlc.narg(dns_deny_networks)::jsonb       ELSE dns_deny_networks END,
     catalog_transfer_acl    = CASE WHEN sqlc.arg(catalog_transfer_acl_set)::bool    THEN sqlc.narg(catalog_transfer_acl)::jsonb    ELSE catalog_transfer_acl END,
-    recursive_engine        = COALESCE(sqlc.narg(recursive_engine)::text, recursive_engine),
+    -- ::recursive_dns_engine, not ::text: the column is an enum and
+    -- COALESCE cannot mix text with it — fails at plan time.
+    recursive_engine        = COALESCE(sqlc.narg(recursive_engine)::recursive_dns_engine, recursive_engine),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING id, name, slug, description, enclave, classification,
