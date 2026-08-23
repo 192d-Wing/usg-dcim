@@ -82,7 +82,9 @@ test('edit the record target (json-cast regression)', async ({ page }) => {
   await modal.getByRole('button', { name: 'Save', exact: true }).click();
 
   await expect(page.getByText('Record updated')).toBeVisible();
-  await expect(page.getByText('10.0.111.51')).toBeVisible();
+  // .first(): the value can render in more than one place (cell +
+  // activity feed) depending on prior suite state.
+  await expect(page.getByText('10.0.111.51').first()).toBeVisible();
 });
 
 test('delete the record, then the zone via type-to-confirm', async ({ page }) => {
