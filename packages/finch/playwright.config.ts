@@ -1,6 +1,8 @@
-// Playwright E2E suite. Runs against a deployed environment (default:
-// the windep dev cluster) with the local break-glass admin — override
-// via E2E_BASE_URL / E2E_EMAIL / E2E_PASSWORD.
+// Playwright E2E suite. Runs against a deployed environment named by
+// E2E_BASE_URL (e.g. the windep dev cluster's dcim host) with the
+// local break-glass admin — E2E_EMAIL / E2E_PASSWORD to override.
+// The URL is env-only on purpose: dev ingresses are plain http and a
+// hardcoded http default would (rightly) trip security scanning.
 //
 // Projects:
 //   auth   — unauthenticated login-page specs
@@ -9,6 +11,11 @@
 //
 // Serial (workers: 1): the inventory specs share mutable server state.
 import { defineConfig, devices } from '@playwright/test';
+
+const baseURL = process.env.E2E_BASE_URL;
+if (!baseURL) {
+  throw new Error('Set E2E_BASE_URL to the deployed environment to test, e.g. the dev cluster dcim host.');
+}
 
 export default defineConfig({
   testDir: './e2e',
@@ -19,7 +26,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   reporter: [['list']],
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? 'http://dcim.oopl.dev.mil',
+    baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

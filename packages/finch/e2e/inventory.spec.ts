@@ -16,8 +16,9 @@ test('site create modal — with region quick-create when needed', async ({ page
   await expect(page.locator('h1').first()).toContainText('Sites');
   // Idempotent across runs: only exercise create when the fixture
   // site is absent (sites cannot be deleted).
+  await expect(page.getByText('Loading sites…')).toBeHidden();
+  await expect(page.getByRole('table')).toBeVisible();
   const existing = page.getByRole('link', { name: FIXTURES.siteCode });
-  await page.waitForLoadState('networkidle');
   if (await existing.count()) {
     test.info().annotations.push({ type: 'note', description: 'fixture site already present — create path previously verified' });
     return;

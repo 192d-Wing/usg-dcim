@@ -89,13 +89,18 @@ test('floor plan: drag places a tray rack onto a free tile', async ({ page, requ
   );
   await page.mouse.move(chipBox.x + chipBox.width / 2, chipBox.y + chipBox.height / 2);
   await page.mouse.down();
-  // Let React commit the sensor before moving (see file header).
-  await page.waitForTimeout(150);
-  // Cross the 5px activation distance, then pause for the DragOverlay.
+  // Let React commit the sensor before moving (see file header) —
+  // sensor readiness has no DOM-observable signal to wait on.
+  await page.waitForTimeout(150); // NOSONAR typescript:S2925 gesture pacing, unobservable condition
+  // Cross the 5px activation distance; the DragOverlay ghost mounting
+  // (a second element bearing the rack code) is the observable proof
+  // that the sensor engaged.
   await page.mouse.move(chipBox.x + chipBox.width / 2 + 10, chipBox.y + chipBox.height / 2 - 10, { steps: 5 });
-  await page.waitForTimeout(150);
+  await expect(page.getByText(dragRackCode, { exact: false })).toHaveCount(2);
   await page.mouse.move(target.x, target.y, { steps: 25 });
-  await page.waitForTimeout(150);
+  // Let the droppable's isOver state commit before dropping — also
+  // internal to dnd-kit with no stable DOM signal.
+  await page.waitForTimeout(150); // NOSONAR typescript:S2925 gesture pacing, unobservable condition
   await page.mouse.up();
 
   // Placement persists through the PATCH — verify against a reload,
