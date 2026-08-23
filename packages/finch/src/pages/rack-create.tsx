@@ -3,8 +3,7 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useList } from '@refinedev/core';
-import { useQueryClient } from '@tanstack/react-query';
+import { useInvalidate, useList } from '@refinedev/core';
 import { toast } from 'sonner';
 
 import Button from '@cloudscape-design/components/button';
@@ -26,7 +25,7 @@ type HierarchyItem = { id: string; code: string; name: string };
 
 export function RackCreatePage() {
   const nav = useNavigate();
-  const qc = useQueryClient();
+  const invalidate = useInvalidate();
 
   const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
   const [buildingOpt, setBuildingOpt] = useState<SelectProps.Option | null>(null);
@@ -78,15 +77,15 @@ export function RackCreatePage() {
       const opt = { value: r.data.id, label: `${label} · ${label}` };
       toast.success(`${kind} created`);
       if (kind === 'building') {
-        await qc.invalidateQueries({ queryKey: ['data', 'inventory/buildings'] });
+        await invalidate({ resource: 'inventory/buildings', invalidates: ['list'] });
         setBuildingOpt(opt);
         setRoomOpt(null); setRowOpt(null);
       } else if (kind === 'room') {
-        await qc.invalidateQueries({ queryKey: ['data', 'inventory/rooms'] });
+        await invalidate({ resource: 'inventory/rooms', invalidates: ['list'] });
         setRoomOpt(opt);
         setRowOpt(null);
       } else {
-        await qc.invalidateQueries({ queryKey: ['data', 'inventory/rows'] });
+        await invalidate({ resource: 'inventory/rows', invalidates: ['list'] });
         setRowOpt(opt);
       }
     } catch (err: any) {
