@@ -2,7 +2,7 @@
 -- name: CreateRegion :one
 INSERT INTO regions (id, name, code, description, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
-RETURNING id, name, code, description, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateRegion :one
 UPDATE regions
@@ -10,7 +10,7 @@ SET name        = COALESCE(sqlc.narg(name)::text, name),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, name, code, description, created_at, updated_at;
+RETURNING *;
 
 -- ===== Sites =====
 -- PR 92 retired the legacy `organization` string column; new and
@@ -21,14 +21,11 @@ INSERT INTO sites (id, region_id, name, code, address, latitude, longitude,
                    timezone, majcom, organization_id, mission_owner,
                    enclave, classification, lifecycle_state, metadata_json,
                    created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6,
-        $7, $8, $9, $10,
-        $11, $12, $13::lifecycle_state, COALESCE($14::jsonb, '{}'::jsonb),
+VALUES (gen_random_uuid(), sqlc.arg(region_id), sqlc.arg(name), sqlc.arg(code), sqlc.arg(address), sqlc.arg(latitude), sqlc.arg(longitude),
+        sqlc.arg(timezone), sqlc.arg(majcom), sqlc.arg(organization_id), sqlc.arg(mission_owner),
+        sqlc.arg(enclave), sqlc.arg(classification), sqlc.arg(lifecycle_state)::lifecycle_state, COALESCE(sqlc.narg(metadata_json)::jsonb, '{}'::jsonb),
         NOW(), NOW())
-RETURNING id, region_id, name, code, address, latitude, longitude,
-          timezone, majcom, organization_id, mission_owner,
-          enclave, classification, lifecycle_state, metadata_json,
-          created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateSite :one
 UPDATE sites
@@ -44,47 +41,36 @@ SET name           = COALESCE(sqlc.narg(name)::text, name),
     metadata_json  = COALESCE(sqlc.narg(metadata_json)::json, metadata_json),
     updated_at     = NOW()
 WHERE id = $1
-RETURNING id, region_id, name, code, address, latitude, longitude,
-          timezone, majcom, organization_id, mission_owner,
-          enclave, classification, lifecycle_state, metadata_json,
-          created_at, updated_at;
+RETURNING *;
 
 -- ===== Buildings / Rooms / Rows =====
 -- name: CreateBuilding :one
 INSERT INTO buildings (id, site_id, name, code, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
-RETURNING id, site_id, name, code, created_at, updated_at;
+RETURNING *;
 
 -- name: CreateRoom :one
 INSERT INTO rooms (id, building_id, name, code, floor_area_sqft,
                    design_kw, design_cooling_tons, grid_cols, grid_rows,
                    created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-RETURNING id, building_id, name, code, floor_area_sqft,
-          design_kw::text AS design_kw,
-          design_cooling_tons::text AS design_cooling_tons,
-          grid_cols, grid_rows,
-          created_at, updated_at;
+RETURNING *;
 
 -- name: CreateRow :one
 INSERT INTO rows (id, room_id, name, code, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
-RETURNING id, room_id, name, code, created_at, updated_at;
+RETURNING *;
 
 -- name: GetBuilding :one
-SELECT id, site_id, name, code, created_at, updated_at
+SELECT *
 FROM buildings WHERE id = $1;
 
 -- name: GetRoom :one
-SELECT id, building_id, name, code, floor_area_sqft,
-       design_kw::text AS design_kw,
-       design_cooling_tons::text AS design_cooling_tons,
-       grid_cols, grid_rows,
-       created_at, updated_at
+SELECT *
 FROM rooms WHERE id = $1;
 
 -- name: GetRow :one
-SELECT id, room_id, name, code, created_at, updated_at
+SELECT *
 FROM rows WHERE id = $1;
 
 -- Site-id walkers for ABAC. Room → building → site, row → room →
@@ -109,7 +95,7 @@ SET name       = COALESCE(sqlc.narg(name)::text, name),
     code       = COALESCE(sqlc.narg(code)::text, code),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, site_id, name, code, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateRoom :one
 UPDATE rooms
@@ -122,11 +108,7 @@ SET name            = COALESCE(sqlc.narg(name)::text, name),
     grid_rows       = CASE WHEN sqlc.arg(grid_rows_set)::bool THEN sqlc.narg(grid_rows)::int ELSE grid_rows END,
     updated_at      = NOW()
 WHERE id = $1
-RETURNING id, building_id, name, code, floor_area_sqft,
-          design_kw::text AS design_kw,
-          design_cooling_tons::text AS design_cooling_tons,
-          grid_cols, grid_rows,
-          created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateRow :one
 UPDATE rows
@@ -134,7 +116,7 @@ SET name       = COALESCE(sqlc.narg(name)::text, name),
     code       = COALESCE(sqlc.narg(code)::text, code),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, room_id, name, code, created_at, updated_at;
+RETURNING *;
 
 -- Deletes rely on FK constraints to refuse when downstream rows
 -- (rooms in a building, rows in a room, racks in a row) still exist.
@@ -152,9 +134,7 @@ DELETE FROM rows WHERE id = $1;
 INSERT INTO racks (id, site_id, row_id, name, code, u_height, max_kw,
                    max_weight_lbs, serial, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-RETURNING id, site_id, row_id, name, code, u_height, max_kw,
-          max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
-          created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateRack :one
 UPDATE racks
@@ -167,14 +147,12 @@ SET name      = COALESCE(sqlc.narg(name)::text, name),
     grid_rotation = COALESCE(sqlc.narg(grid_rotation)::smallint, grid_rotation),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, site_id, row_id, name, code, u_height, max_kw,
-          max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
-          created_at, updated_at;
+RETURNING *;
 
 -- name: GetRackAssetsForShrinkCheck :many
 -- Used by the rack PATCH handler to refuse shrinking u_height below
 -- the lowest top-of-asset position.
 SELECT name, rack_position_u, rack_units
 FROM assets
-WHERE rack_id = $1
+WHERE rack_id = sqlc.arg(rack_id)::uuid
   AND rack_position_u IS NOT NULL;

@@ -17,7 +17,7 @@ import (
 )
 
 type fakeQ struct {
-	asset       dbq.AssetKindRow
+	asset       dbq.GetPduAssetRow
 	assetErr    error
 	outlets     []dbq.Outlet
 	conns       []dbq.PowerConnection
@@ -26,9 +26,9 @@ type fakeQ struct {
 	connByO     *dbq.PowerConnection
 }
 
-func (f *fakeQ) GetPduAsset(_ context.Context, id uuid.UUID) (dbq.AssetKindRow, error) {
+func (f *fakeQ) GetPduAsset(_ context.Context, id uuid.UUID) (dbq.GetPduAssetRow, error) {
 	if f.assetErr != nil {
-		return dbq.AssetKindRow{}, f.assetErr
+		return dbq.GetPduAssetRow{}, f.assetErr
 	}
 	f.asset.ID = id
 	return f.asset, nil
@@ -93,7 +93,7 @@ func TestRouteCapabilityCodes(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
 			ctx := auth.WithPrincipal(req.Context(), auth.Principal{Subject: uuid.New(), Capabilities: []string{"unrelated:cap"}})
-			mount(&fakeQ{asset: dbq.AssetKindRow{Kind: "pdu"}}).ServeHTTP(rec, req.WithContext(ctx))
+			mount(&fakeQ{asset: dbq.GetPduAssetRow{Kind: "pdu"}}).ServeHTTP(rec, req.WithContext(ctx))
 			if rec.Code != http.StatusForbidden {
 				t.Fatalf("%s %s without %s: got %d (want 403)", tc.method, tc.path, tc.requiredCap, rec.Code)
 			}
@@ -102,7 +102,7 @@ func TestRouteCapabilityCodes(t *testing.T) {
 			rec = httptest.NewRecorder()
 			req = httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
 			ctx = auth.WithPrincipal(req.Context(), auth.Principal{Subject: uuid.New(), Capabilities: []string{tc.requiredCap}})
-			mount(&fakeQ{asset: dbq.AssetKindRow{Kind: "pdu"}}).ServeHTTP(rec, req.WithContext(ctx))
+			mount(&fakeQ{asset: dbq.GetPduAssetRow{Kind: "pdu"}}).ServeHTTP(rec, req.WithContext(ctx))
 			if rec.Code == http.StatusForbidden {
 				t.Fatalf("%s %s with %s: got 403 (cap gate should pass)", tc.method, tc.path, tc.requiredCap)
 			}
@@ -118,7 +118,7 @@ func TestListOutlets_PduNotFound(t *testing.T) {
 }
 
 func TestListOutlets_NotAPdu(t *testing.T) {
-	rec := do(t, mount(&fakeQ{asset: dbq.AssetKindRow{Kind: "server"}}), "/power/pdus/"+uuid.New().String()+"/outlets")
+	rec := do(t, mount(&fakeQ{asset: dbq.GetPduAssetRow{Kind: "server"}}), "/power/pdus/"+uuid.New().String()+"/outlets")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("got %d, want 404 (non-PDU asset)", rec.Code)
 	}
@@ -132,7 +132,7 @@ func TestListOutlets_BadPduID(t *testing.T) {
 }
 
 func TestListOutlets_EmptyReturnsEmptyArray(t *testing.T) {
-	rec := do(t, mount(&fakeQ{asset: dbq.AssetKindRow{Kind: "pdu"}}), "/power/pdus/"+uuid.New().String()+"/outlets")
+	rec := do(t, mount(&fakeQ{asset: dbq.GetPduAssetRow{Kind: "pdu"}}), "/power/pdus/"+uuid.New().String()+"/outlets")
 	if rec.Code != 200 {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
@@ -215,7 +215,7 @@ func TestListOutlets_ConnectionMergedIntoOutlet(t *testing.T) {
 	aid := uuid.New()
 	cordColor := "blue"
 	f := &fakeQ{
-		asset: dbq.AssetKindRow{Kind: "pdu"},
+		asset: dbq.GetPduAssetRow{Kind: "pdu"},
 		outlets: []dbq.Outlet{
 			{ID: oid, PduAssetID: pid, Position: 1},
 			{ID: uuid.New(), PduAssetID: pid, Position: 2}, // unconnected

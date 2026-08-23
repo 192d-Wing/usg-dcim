@@ -21,10 +21,10 @@ type fakeLifecycleQ struct {
 	fakeQ
 	zone        dbq.DnsZone
 	zoneErr     error
-	activeByRole map[string][]dbq.DnsKeyRow
-	keyByID     map[uuid.UUID]dbq.DnsKeyRow
+	activeByRole map[string][]dbq.DnsKey
+	keyByID     map[uuid.UUID]dbq.DnsKey
 	keyByIDErr  error
-	allKeys     []dbq.DnsKeyRow
+	allKeys     []dbq.DnsKey
 	gotRetires  []uuid.UUID
 	gotCreates  []dbq.CreateDnsKeyParams
 	gotSigned   *bool
@@ -49,13 +49,13 @@ func (f *fakeLifecycleQ) SetDnsCatalogZoneSigned(_ context.Context, _ dbq.SetDns
 	return nil
 }
 
-func (f *fakeLifecycleQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, _ uuid.UUID, role string) ([]dbq.DnsKeyRow, error) {
-	return f.activeByRole[role], nil
+func (f *fakeLifecycleQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, a dbq.ListActiveDnsKeysForZoneAndRoleParams) ([]dbq.DnsKey, error) {
+	return f.activeByRole[a.Role], nil
 }
 
-func (f *fakeLifecycleQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error) {
+func (f *fakeLifecycleQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKey, error) {
 	f.gotCreates = append(f.gotCreates, a)
-	return dbq.DnsKeyRow{ID: uuid.New(), ZoneID: a.ZoneID, Role: a.Role,
+	return dbq.DnsKey{ID: uuid.New(), ZoneID: a.ZoneID, Role: a.Role,
 		Algorithm: a.Algorithm, KeyTag: a.KeyTag}, nil
 }
 
@@ -69,29 +69,30 @@ func (f *fakeLifecycleQ) TouchDnsZone(_ context.Context, _ uuid.UUID) (int64, er
 	return 1, nil
 }
 
-func (f *fakeLifecycleQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeLifecycleQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKey, error) {
 	return f.allKeys, nil
 }
 
-func (f *fakeLifecycleQ) SetDnsZoneSigned(_ context.Context, _ uuid.UUID, signed bool) (int64, error) {
+func (f *fakeLifecycleQ) SetDnsZoneSigned(_ context.Context, a dbq.SetDnsZoneSignedParams) (int64, error) {
+	signed := a.Signed
 	f.gotSigned = &signed
 	return 1, nil
 }
 
-func (f *fakeLifecycleQ) DeleteAllDnsKeysForZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeLifecycleQ) DeleteAllDnsKeysForZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKey, error) {
 	return f.allKeys, nil
 }
 
-func (f *fakeLifecycleQ) GetDnsKey(_ context.Context, id uuid.UUID) (dbq.DnsKeyRow, error) {
+func (f *fakeLifecycleQ) GetDnsKey(_ context.Context, id uuid.UUID) (dbq.DnsKey, error) {
 	if f.keyByIDErr != nil {
-		return dbq.DnsKeyRow{}, f.keyByIDErr
+		return dbq.DnsKey{}, f.keyByIDErr
 	}
 	if f.keyByID != nil {
 		if k, ok := f.keyByID[id]; ok {
 			return k, nil
 		}
 	}
-	return dbq.DnsKeyRow{}, pgx.ErrNoRows
+	return dbq.DnsKey{}, pgx.ErrNoRows
 }
 
 func (f *fakeLifecycleQ) DeleteDnsKey(_ context.Context, id uuid.UUID) (int64, error) {
@@ -109,10 +110,10 @@ func mountLifecycle(f *fakeLifecycleQ) http.Handler {
 
 func TestRotateKey_HappyPath(t *testing.T) {
 	id := uuid.New()
-	prevKey := dbq.DnsKeyRow{ID: uuid.New(), Role: "ksk", Algorithm: "ecdsap256sha256"}
+	prevKey := dbq.DnsKey{ID: uuid.New(), Role: "ksk", Algorithm: "ecdsap256sha256"}
 	f := &fakeLifecycleQ{
 		zone:         dbq.DnsZone{ID: id, FabricID: uuid.New(), Signed: true},
-		activeByRole: map[string][]dbq.DnsKeyRow{"ksk": {prevKey}},
+		activeByRole: map[string][]dbq.DnsKey{"ksk": {prevKey}},
 	}
 	rec := authed(t, mountLifecycle(f), "POST", "/dns/zones/"+id.String()+"/rotate-key/ksk", nil)
 	if rec.Code != http.StatusOK {
@@ -154,7 +155,7 @@ func TestRotateKey_InheritsExistingAlgorithm(t *testing.T) {
 	id := uuid.New()
 	f := &fakeLifecycleQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Signed: true},
-		activeByRole: map[string][]dbq.DnsKeyRow{
+		activeByRole: map[string][]dbq.DnsKey{
 			"ksk": {{ID: uuid.New(), Algorithm: "ed25519"}},
 		},
 	}
@@ -211,7 +212,7 @@ func TestRotateKey_RetiresMultipleActiveKeys(t *testing.T) {
 	k2 := uuid.New()
 	f := &fakeLifecycleQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Signed: true},
-		activeByRole: map[string][]dbq.DnsKeyRow{
+		activeByRole: map[string][]dbq.DnsKey{
 			"zsk": {{ID: k1, Algorithm: "ecdsap256sha256"}, {ID: k2, Algorithm: "ecdsap256sha256"}},
 		},
 	}
@@ -230,7 +231,7 @@ func TestDisableDnssec_HappyPath(t *testing.T) {
 	id := uuid.New()
 	f := &fakeLifecycleQ{
 		zone:    dbq.DnsZone{ID: id, FabricID: uuid.New(), Signed: true},
-		allKeys: []dbq.DnsKeyRow{{KeyTag: 1}, {KeyTag: 2}},
+		allKeys: []dbq.DnsKey{{KeyTag: 1}, {KeyTag: 2}},
 	}
 	rec := authed(t, mountLifecycle(f), "POST", "/dns/zones/"+id.String()+"/disable-dnssec", nil)
 	if rec.Code != http.StatusNoContent {
@@ -283,7 +284,7 @@ func TestDeleteDnsKey_HappyPath(t *testing.T) {
 	now := time.Now().UTC()
 	f := &fakeLifecycleQ{
 		zone: dbq.DnsZone{ID: zoneID, FabricID: uuid.New()},
-		keyByID: map[uuid.UUID]dbq.DnsKeyRow{
+		keyByID: map[uuid.UUID]dbq.DnsKey{
 			keyID: {ID: keyID, ZoneID: &zoneID, RetiredAt: &now},
 		},
 	}
@@ -302,7 +303,7 @@ func TestDeleteDnsKey_ActiveKeyIs422(t *testing.T) {
 	zoneID := uuid.New()
 	f := &fakeLifecycleQ{
 		zone: dbq.DnsZone{ID: zoneID, FabricID: uuid.New()},
-		keyByID: map[uuid.UUID]dbq.DnsKeyRow{
+		keyByID: map[uuid.UUID]dbq.DnsKey{
 			keyID: {ID: keyID, ZoneID: &zoneID, RetiredAt: nil},
 		},
 	}
@@ -318,7 +319,7 @@ func TestDeleteDnsKey_FrozenZoneIs422(t *testing.T) {
 	now := time.Now().UTC()
 	f := &fakeLifecycleQ{
 		zone: dbq.DnsZone{ID: zoneID, FabricID: uuid.New(), Frozen: true},
-		keyByID: map[uuid.UUID]dbq.DnsKeyRow{
+		keyByID: map[uuid.UUID]dbq.DnsKey{
 			keyID: {ID: keyID, ZoneID: &zoneID, RetiredAt: &now},
 		},
 	}
@@ -363,7 +364,7 @@ func TestRotateKey_ResponseIncludesFullRoster(t *testing.T) {
 	newID := uuid.New()
 	f := &fakeLifecycleQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Signed: true},
-		allKeys: []dbq.DnsKeyRow{
+		allKeys: []dbq.DnsKey{
 			{ID: newID, Role: "ksk", KeyTag: 100},
 			{ID: uuid.New(), Role: "ksk", KeyTag: 99, RetiredAt: ptrTime(time.Now())},
 		},
@@ -372,7 +373,7 @@ func TestRotateKey_ResponseIncludesFullRoster(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	var out []dbq.DnsKeyRow
+	var out []dbq.DnsKey
 	_ = json.NewDecoder(rec.Body).Decode(&out)
 	if len(out) != 2 {
 		t.Errorf("response should include both active and retired keys, got %d", len(out))

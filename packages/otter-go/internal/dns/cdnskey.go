@@ -22,7 +22,7 @@ import (
 //
 // Returns an empty slice when no KSK qualifies (no active KSKs,
 // or all KSKs retired).
-func RenderCdnskeyCdsLines(zoneName string, keys []dbq.DnsKeyRow) []string {
+func RenderCdnskeyCdsLines(zoneName string, keys []dbq.DnsKey) []string {
 	fqdn := strings.TrimRight(zoneName, ".") + "."
 	nameWire := dnsWireName(fqdn)
 

@@ -17,9 +17,9 @@ import (
 // AssetDetailQuerier is the dbq slice /assets/{asset_id} needs.
 type AssetDetailQuerier interface {
 	GetAsset(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
-	ListAssetTelemetrySources(ctx context.Context, assetID uuid.UUID) ([]dbq.AssetTelemetrySourceRow, error)
-	ListAssetIPAddresses(ctx context.Context, assetID uuid.UUID) ([]dbq.AssetIPAddressRow, error)
-	ListRecentAssetAlerts(ctx context.Context, assetID uuid.UUID) ([]dbq.RecentAssetAlertRow, error)
+	ListAssetTelemetrySources(ctx context.Context, assetID uuid.UUID) ([]dbq.ListAssetTelemetrySourcesRow, error)
+	ListAssetIPAddresses(ctx context.Context, assetID uuid.UUID) ([]dbq.ListAssetIPAddressesRow, error)
+	ListRecentAssetAlerts(ctx context.Context, assetID uuid.UUID) ([]dbq.ListRecentAssetAlertsRow, error)
 }
 
 // notFoundResponse mirrors Python's `{"error": "not_found"}` body on
@@ -139,9 +139,9 @@ func (h *Handler) assetDetail(w http.ResponseWriter, r *http.Request) {
 // and the SonarLint cognitive-complexity gate is happy.
 func assembleAssetDetail(
 	asset dbq.Asset,
-	sources []dbq.AssetTelemetrySourceRow,
-	ips []dbq.AssetIPAddressRow,
-	alerts []dbq.RecentAssetAlertRow,
+	sources []dbq.ListAssetTelemetrySourcesRow,
+	ips []dbq.ListAssetIPAddressesRow,
+	alerts []dbq.ListRecentAssetAlertsRow,
 ) assetDetailResponse {
 	return assetDetailResponse{
 		Asset:            buildAssetIdentity(asset),
@@ -177,7 +177,7 @@ func buildAssetIdentity(a dbq.Asset) assetIdentity {
 	return ai
 }
 
-func buildTelemetrySources(rows []dbq.AssetTelemetrySourceRow) []telemetrySource {
+func buildTelemetrySources(rows []dbq.ListAssetTelemetrySourcesRow) []telemetrySource {
 	out := make([]telemetrySource, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, telemetrySource{
@@ -194,7 +194,7 @@ func buildTelemetrySources(rows []dbq.AssetTelemetrySourceRow) []telemetrySource
 	return out
 }
 
-func buildIPAddressRows(rows []dbq.AssetIPAddressRow) []ipAddressRow {
+func buildIPAddressRows(rows []dbq.ListAssetIPAddressesRow) []ipAddressRow {
 	out := make([]ipAddressRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, ipAddressRow{
@@ -212,7 +212,7 @@ func buildIPAddressRows(rows []dbq.AssetIPAddressRow) []ipAddressRow {
 	return out
 }
 
-func buildRecentAlertRows(rows []dbq.RecentAssetAlertRow) []recentAlertRow {
+func buildRecentAlertRows(rows []dbq.ListRecentAssetAlertsRow) []recentAlertRow {
 	out := make([]recentAlertRow, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, recentAlertRow{

@@ -18,7 +18,7 @@ import (
 )
 
 type Querier interface {
-	GetTelemetrySeries(ctx context.Context, arg dbq.GetTelemetrySeriesParams) ([]dbq.TelemetryPoint, error)
+	GetTelemetrySeries(ctx context.Context, arg dbq.GetTelemetrySeriesParams) ([]dbq.GetTelemetrySeriesRow, error)
 }
 
 type Handler struct{ Q Querier }

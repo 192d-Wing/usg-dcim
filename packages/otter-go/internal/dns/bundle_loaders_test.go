@@ -21,14 +21,14 @@ import (
 type catalogFakeQ struct {
 	cat        dbq.DnsCatalogZone
 	catErr     error
-	servers    []dbq.AuthDnsServerForCatalog
+	servers    []dbq.ListEnabledAuthDnsServersByFabricRow
 	serversErr error
 }
 
 func (f *catalogFakeQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return f.cat, f.catErr
 }
-func (f *catalogFakeQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *catalogFakeQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return f.servers, f.serversErr
 }
 
@@ -44,11 +44,10 @@ func TestLoadCatalogForBundle_NoCatalog(t *testing.T) {
 }
 
 func TestLoadCatalogForBundle_ServerCIDRStripped(t *testing.T) {
-	v := "10.0.0.1/32"
 	q := &catalogFakeQ{
 		cat: dbq.DnsCatalogZone{Name: "catalog.example."},
-		servers: []dbq.AuthDnsServerForCatalog{
-			{UnicastIP: &v},
+		servers: []dbq.ListEnabledAuthDnsServersByFabricRow{
+			{UnicastIP: "10.0.0.1/32"},
 		},
 	}
 	name, _, primaries, err := loadCatalogForBundle(context.Background(), q, uuid.New(), nil)
@@ -77,11 +76,11 @@ func TestLoadCatalogForBundle_NoServersEmptyPrimaries(t *testing.T) {
 // ===== loadDnssecArtifacts =====
 
 type dnssecFakeQ struct {
-	keys    []dbq.DnsKeyRow
+	keys    []dbq.DnsKey
 	keysErr error
 }
 
-func (f *dnssecFakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *dnssecFakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return f.keys, f.keysErr
 }
 
@@ -115,7 +114,7 @@ func TestLoadDnssecArtifacts_SignedZoneEmitsKeyFiles(t *testing.T) {
 	zoneID := uuid.New()
 	pem := generateEd25519PEM(t)
 	zones := []dbq.DnsZone{{ID: zoneID, Name: "z.example.", Signed: true}}
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{ZoneID: &zoneID, Role: "ksk", Algorithm: "ed25519", KeyTag: 12345, PublicKeyB64: "AAAA", PrivatePem: pem},
 	}
 	out, err := loadDnssecArtifacts(context.Background(), &dnssecFakeQ{keys: keys}, zones, nil)
@@ -140,7 +139,7 @@ func TestLoadDnssecArtifacts_NSEC3PopulatedFromZoneColumns(t *testing.T) {
 		ID: zoneID, Name: "z.example.", Signed: true,
 		Nsec3Salt: &salt, Nsec3Iterations: 5, Nsec3OptOut: true,
 	}}
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{ZoneID: &zoneID, Role: "ksk", Algorithm: "ed25519", KeyTag: 1, PublicKeyB64: "AAAA", PrivatePem: pem},
 	}
 	out, _ := loadDnssecArtifacts(context.Background(), &dnssecFakeQ{keys: keys}, zones, nil)
@@ -157,7 +156,7 @@ func TestLoadDnssecArtifacts_DecryptHookCalled(t *testing.T) {
 	zoneID := uuid.New()
 	pem := generateEd25519PEM(t)
 	zones := []dbq.DnsZone{{ID: zoneID, Name: "z.example.", Signed: true}}
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{ZoneID: &zoneID, Role: "ksk", Algorithm: "ed25519", KeyTag: 1, PublicKeyB64: "AAAA", PrivatePem: "enc:" + pem},
 	}
 	decryptCalled := false
@@ -192,7 +191,7 @@ func TestLoadZoneExtraLines_CdsForSignedPublishCds(t *testing.T) {
 	zones := []dbq.DnsZone{
 		{ID: zoneID, Name: "z.example.", Signed: true, PublishCds: true},
 	}
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{ZoneID: &zoneID, Role: "ksk", Algorithm: "ed25519", KeyTag: 1, PublicKeyB64: "AAAA"},
 	}
 	out, _ := loadZoneExtraLines(context.Background(), &dnssecFakeQ{keys: keys}, zones)
@@ -210,7 +209,7 @@ func TestLoadZoneExtraLines_SkipsWhenPublishCdsFalse(t *testing.T) {
 	zones := []dbq.DnsZone{
 		{ID: zoneID, Name: "z.example.", Signed: true, PublishCds: false},
 	}
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{ZoneID: &zoneID, Role: "ksk", Algorithm: "ed25519", KeyTag: 1, PublicKeyB64: "AAAA"},
 	}
 	out, _ := loadZoneExtraLines(context.Background(), &dnssecFakeQ{keys: keys}, zones)
@@ -227,7 +226,7 @@ func TestLoadZoneExtraLines_ChildDSAppendedToParent(t *testing.T) {
 		{ID: parentID, Name: "example.", Signed: false, UpdatedAt: now},
 		{ID: childID, Name: "site.example.", Signed: true, PublishCds: false, UpdatedAt: now},
 	}
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{ZoneID: &childID, Role: "ksk", Algorithm: "ed25519", KeyTag: 1, PublicKeyB64: "AAAA"},
 	}
 	out, _ := loadZoneExtraLines(context.Background(), &dnssecFakeQ{keys: keys}, zones)
@@ -246,7 +245,7 @@ func TestLoadZoneExtraLines_NoChildIfParentMissing(t *testing.T) {
 	zones := []dbq.DnsZone{
 		{ID: childID, Name: "site.example.", Signed: true},
 	}
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{ZoneID: &childID, Role: "ksk", Algorithm: "ed25519", KeyTag: 1, PublicKeyB64: "AAAA"},
 	}
 	out, _ := loadZoneExtraLines(context.Background(), &dnssecFakeQ{keys: keys}, zones)

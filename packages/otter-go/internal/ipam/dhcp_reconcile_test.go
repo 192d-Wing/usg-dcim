@@ -34,20 +34,20 @@ type reconcileFakeQ struct {
 	fakeQ
 	scopeFabricID  uuid.UUID
 	scopeFabricErr error
-	scope          dbq.DhcpScope
+	scope          dbq.GetDhcpScopeRow
 	scopeErr       error
 
-	ipRows     []dbq.DhcpReconcileIPRow
+	ipRows     []dbq.ListIPAddressesInSubnetForReconcileRow
 	ipRowsCall int
 }
 
 func (f *reconcileFakeQ) GetDhcpScopeFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return f.scopeFabricID, f.scopeFabricErr
 }
-func (f *reconcileFakeQ) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
+func (f *reconcileFakeQ) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeRow, error) {
 	return f.scope, f.scopeErr
 }
-func (f *reconcileFakeQ) ListIPAddressesInSubnetForReconcile(_ context.Context, _ uuid.UUID) ([]dbq.DhcpReconcileIPRow, error) {
+func (f *reconcileFakeQ) ListIPAddressesInSubnetForReconcile(_ context.Context, _ uuid.UUID) ([]dbq.ListIPAddressesInSubnetForReconcileRow, error) {
 	f.ipRowsCall++
 	return f.ipRows, nil
 }
@@ -92,7 +92,7 @@ func TestReconcileDhcpScope_NoSubnetSkipsIPLoad(t *testing.T) {
 	scopeID := uuid.New()
 	f := &reconcileFakeQ{
 		scopeFabricID: uuid.New(),
-		scope: dbq.DhcpScope{
+		scope: dbq.GetDhcpScopeRow{
 			ID: scopeID, IPFamily: 4, Prefix: "10.0.0.0/24",
 			SubnetID: nil, // no linked subnet
 			ReservationsJSON: json.RawMessage(`[]`),
@@ -131,7 +131,7 @@ func TestReconcileDhcpScope_CollisionThreadedThrough(t *testing.T) {
 	ipID := uuid.New()
 	f := &reconcileFakeQ{
 		scopeFabricID: uuid.New(),
-		scope: dbq.DhcpScope{
+		scope: dbq.GetDhcpScopeRow{
 			ID: scopeID, IPFamily: 4, Prefix: "10.0.0.0/24",
 			SubnetID: &subnetID,
 			ReservationsJSON: json.RawMessage(`[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.5"}]`),
@@ -139,7 +139,7 @@ func TestReconcileDhcpScope_CollisionThreadedThrough(t *testing.T) {
 		},
 		// Same IP, source=static → reservation collides with an
 		// operator-allocated address.
-		ipRows: []dbq.DhcpReconcileIPRow{
+		ipRows: []dbq.ListIPAddressesInSubnetForReconcileRow{
 			{ID: ipID, Address: "10.0.0.5", Source: "static"},
 		},
 	}
@@ -198,7 +198,7 @@ func TestReconcileSyncDhcpScope_HappyPath_InsertsAndAudits(t *testing.T) {
 	f := &reconcileSyncFakeQ{
 		reconcileFakeQ: reconcileFakeQ{
 			scopeFabricID: uuid.New(),
-			scope: dbq.DhcpScope{
+			scope: dbq.GetDhcpScopeRow{
 				ID: scopeID, IPFamily: 4, Prefix: "10.0.0.0/24",
 				SubnetID: &subnetID,
 				ReservationsJSON: json.RawMessage(`[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.5"}]`),
@@ -248,12 +248,12 @@ func TestReconcileSyncDhcpScope_DhcpToReservationPromotion(t *testing.T) {
 	f := &reconcileSyncFakeQ{
 		reconcileFakeQ: reconcileFakeQ{
 			scopeFabricID: uuid.New(),
-			scope: dbq.DhcpScope{
+			scope: dbq.GetDhcpScopeRow{
 				ID: scopeID, SubnetID: &subnetID,
 				ReservationsJSON: json.RawMessage(`[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.5"}]`),
 				CreatedAt: time.Now(), UpdatedAt: time.Now(),
 			},
-			ipRows: []dbq.DhcpReconcileIPRow{
+			ipRows: []dbq.ListIPAddressesInSubnetForReconcileRow{
 				{ID: ipID, Address: "10.0.0.5", Source: "dhcp", DhcpMac: &mac},
 			},
 		},
@@ -278,7 +278,7 @@ func TestReconcileSyncDhcpScope_NoSubnetSkipsEverything(t *testing.T) {
 	f := &reconcileSyncFakeQ{
 		reconcileFakeQ: reconcileFakeQ{
 			scopeFabricID: uuid.New(),
-			scope: dbq.DhcpScope{
+			scope: dbq.GetDhcpScopeRow{
 				ID: scopeID, SubnetID: nil,
 				ReservationsJSON: json.RawMessage(`[{"mac":"aa:bb:cc:dd:ee:01","ip":"10.0.0.5"}]`),
 				CreatedAt: time.Now(), UpdatedAt: time.Now(),
@@ -325,7 +325,7 @@ func TestReconcileDhcpScope_WireShapeMatchesPython(t *testing.T) {
 	scopeID := uuid.New()
 	f := &reconcileFakeQ{
 		scopeFabricID: uuid.New(),
-		scope: dbq.DhcpScope{
+		scope: dbq.GetDhcpScopeRow{
 			ID: scopeID, ReservationsJSON: json.RawMessage(`[]`),
 			CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		},

@@ -5,9 +5,7 @@ INSERT INTO fabrics (id, name, slug, description, enclave, classification,
                      dns_recursive_upstreams, dns_deny_networks,
                      catalog_transfer_acl, recursive_engine, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-RETURNING id, name, slug, description, enclave, classification,
-          dns_recursive_upstreams, dns_deny_networks,
-          catalog_transfer_acl, recursive_engine, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateFabric :one
 UPDATE fabrics
@@ -24,9 +22,7 @@ SET name           = COALESCE(sqlc.narg(name)::text, name),
     recursive_engine        = COALESCE(sqlc.narg(recursive_engine)::recursive_dns_engine, recursive_engine),
     updated_at     = NOW()
 WHERE id = $1
-RETURNING id, name, slug, description, enclave, classification,
-          dns_recursive_upstreams, dns_deny_networks,
-          catalog_transfer_acl, recursive_engine, created_at, updated_at;
+RETURNING *;
 
 -- name: CountVrfsInFabric :one
 SELECT count(*)::bigint FROM vrfs WHERE fabric_id = $1;
@@ -38,7 +34,7 @@ DELETE FROM fabrics WHERE id = $1;
 -- name: CreateVrf :one
 INSERT INTO vrfs (id, fabric_id, name, route_target, description, is_default, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW(), NOW())
-RETURNING id, fabric_id, name, route_target, description, is_default, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateVrf :one
 UPDATE vrfs
@@ -48,7 +44,7 @@ SET name         = COALESCE(sqlc.narg(name)::text, name),
     is_default   = COALESCE(sqlc.narg(is_default)::bool, is_default),
     updated_at   = NOW()
 WHERE id = $1
-RETURNING id, fabric_id, name, route_target, description, is_default, created_at, updated_at;
+RETURNING *;
 
 -- name: CountSupernetsInVrf :one
 SELECT count(*)::bigint FROM supernets WHERE vrf_id = $1;
@@ -59,7 +55,7 @@ DELETE FROM vrfs WHERE id = $1;
 -- ===== VrfBgpPeers =====
 -- name: CreateVrfBgpPeer :one
 INSERT INTO vrf_bgp_peers (id, vrf_id, bgp_peer_id, address_family, rd, enabled, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::bgp_address_family, $4, $5, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(vrf_id), sqlc.arg(bgp_peer_id), sqlc.arg(address_family)::bgp_address_family, sqlc.arg(rd), sqlc.arg(enabled), NOW(), NOW())
 RETURNING id, vrf_id, bgp_peer_id, address_family::text AS address_family, rd, enabled, created_at, updated_at;
 
 -- name: UpdateVrfBgpPeer :one
@@ -78,9 +74,10 @@ DELETE FROM vrf_bgp_peers WHERE id = $1;
 -- name: CreateSupernet :one
 INSERT INTO supernets (id, fabric_id, vrf_id, parent_supernet_id, site_id, prefix,
                        name, description, purpose, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::cidr, $6, $7, $8, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(fabric_id), sqlc.arg(vrf_id), sqlc.arg(parent_supernet_id), sqlc.arg(site_id), sqlc.arg(prefix)::cidr,
+        sqlc.arg(name), sqlc.arg(description), sqlc.arg(purpose), NOW(), NOW())
 RETURNING id, fabric_id, vrf_id, parent_supernet_id, site_id,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
           name, description, purpose, created_at, updated_at;
 
 -- name: UpdateSupernet :one
@@ -93,7 +90,7 @@ SET parent_supernet_id = CASE WHEN sqlc.arg(parent_set)::bool THEN sqlc.narg(par
     updated_at  = NOW()
 WHERE id = $1
 RETURNING id, fabric_id, vrf_id, parent_supernet_id, site_id,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
           name, description, purpose, created_at, updated_at;
 
 -- name: CountSubnetsInSupernet :one
@@ -107,10 +104,11 @@ DELETE FROM supernets WHERE id = $1;
 -- fabric_id + vrf_id are pulled from the parent supernet by the handler before this query runs.
 INSERT INTO subnets (id, supernet_id, fabric_id, vrf_id, site_id, vni_id, prefix,
                      name, description, purpose, vlan_id, gateway, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6::cidr, $7, $8, $9, $10, $11::inet, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(supernet_id), sqlc.arg(fabric_id), sqlc.arg(vrf_id), sqlc.arg(site_id), sqlc.arg(vni_id), sqlc.arg(prefix)::cidr,
+        sqlc.arg(name), sqlc.arg(description), sqlc.arg(purpose), sqlc.arg(vlan_id), sqlc.narg(gateway)::inet, NOW(), NOW())
 RETURNING id, supernet_id, fabric_id, vrf_id, site_id, vni_id,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
-          name, description, purpose, vlan_id, host(gateway) AS gateway,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
+          name, description, purpose, vlan_id, CASE WHEN gateway IS NULL THEN NULL ELSE host(gateway) END AS gateway,
           created_at, updated_at;
 
 -- name: UpdateSubnet :one
@@ -126,8 +124,8 @@ SET supernet_id = COALESCE(sqlc.narg(supernet_id)::uuid, supernet_id),
     updated_at  = NOW()
 WHERE id = $1
 RETURNING id, supernet_id, fabric_id, vrf_id, site_id, vni_id,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
-          name, description, purpose, vlan_id, host(gateway) AS gateway,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
+          name, description, purpose, vlan_id, CASE WHEN gateway IS NULL THEN NULL ELSE host(gateway) END AS gateway,
           created_at, updated_at;
 
 -- name: CountAddressesInSubnet :one
@@ -144,22 +142,23 @@ SELECT vrf_id, fabric_id FROM supernets WHERE id = $1;
 INSERT INTO ip_addresses (id, subnet_id, asset_id, address, role, status, source,
                           dns_name, description, dhcp_lease_expires_at, dhcp_mac,
                           created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::inet, $4::ip_address_role, $5::ip_address_status, $6::ip_address_source,
-        $7, $8, $9, $10, NOW(), NOW())
-RETURNING id, subnet_id, asset_id, host(address) || '/' || masklen(address) AS address,
+VALUES (gen_random_uuid(), sqlc.arg(subnet_id), sqlc.arg(asset_id), sqlc.arg(address)::inet,
+        sqlc.arg(role)::ip_role, sqlc.arg(status)::ip_status, sqlc.arg(source)::ip_source,
+        sqlc.arg(dns_name), sqlc.arg(description), sqlc.arg(dhcp_lease_expires_at), sqlc.arg(dhcp_mac), NOW(), NOW())
+RETURNING id, subnet_id, asset_id, (host(address) || '/' || masklen(address))::text AS address,
           role::text AS role, status::text AS status, source::text AS source,
           dns_name, description, dhcp_lease_expires_at, dhcp_mac, created_at, updated_at;
 
 -- name: UpdateIPAddress :one
 UPDATE ip_addresses
 SET asset_id    = CASE WHEN sqlc.arg(asset_set)::bool       THEN sqlc.narg(asset_id)::uuid    ELSE asset_id END,
-    role        = COALESCE(sqlc.narg(role)::ip_address_role, role),
-    status      = COALESCE(sqlc.narg(status)::ip_address_status, status),
+    role        = COALESCE(sqlc.narg(role)::ip_role, role),
+    status      = COALESCE(sqlc.narg(status)::ip_status, status),
     dns_name    = CASE WHEN sqlc.arg(dns_set)::bool         THEN sqlc.narg(dns_name)::text    ELSE dns_name END,
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, subnet_id, asset_id, host(address) || '/' || masklen(address) AS address,
+RETURNING id, subnet_id, asset_id, (host(address) || '/' || masklen(address))::text AS address,
           role::text AS role, status::text AS status, source::text AS source,
           dns_name, description, dhcp_lease_expires_at, dhcp_mac, created_at, updated_at;
 
@@ -170,9 +169,9 @@ DELETE FROM ip_addresses WHERE id = $1;
 -- name: CreateOverlay :one
 INSERT INTO overlays (id, fabric_id, name, kind, udp_port, mtu, underlay_vrf_id,
                       description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::overlay_kind, $4, $5, $6, $7, NOW(), NOW())
-RETURNING id, fabric_id, name, kind::text AS kind, udp_port, mtu, underlay_vrf_id,
-          description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(fabric_id), sqlc.arg(name), sqlc.arg(kind)::overlay_kind, sqlc.arg(udp_port),
+        sqlc.arg(mtu), sqlc.arg(underlay_vrf_id), sqlc.arg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateOverlay :one
 UPDATE overlays
@@ -184,8 +183,7 @@ SET name        = COALESCE(sqlc.narg(name)::text, name),
     description = CASE WHEN sqlc.arg(description_set)::bool     THEN sqlc.narg(description)::text       ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, fabric_id, name, kind::text AS kind, udp_port, mtu, underlay_vrf_id,
-          description, created_at, updated_at;
+RETURNING *;
 
 -- name: CountVnisInOverlay :one
 SELECT count(*)::bigint FROM vnis WHERE overlay_id = $1;
@@ -197,9 +195,9 @@ DELETE FROM overlays WHERE id = $1;
 -- name: CreateVni :one
 INSERT INTO vnis (id, overlay_id, vni, kind, name, description, vlan_id,
                   evpn_route_target, vrf_id, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::vni_kind, $4, $5, $6, $7, $8, NOW(), NOW())
-RETURNING id, overlay_id, vni, kind::text AS kind, name, description, vlan_id,
-          evpn_route_target, vrf_id, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(overlay_id), sqlc.arg(vni), sqlc.arg(kind)::vni_kind, sqlc.arg(name),
+        sqlc.arg(description), sqlc.arg(vlan_id), sqlc.arg(evpn_route_target), sqlc.arg(vrf_id), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateVni :one
 UPDATE vnis
@@ -211,8 +209,7 @@ SET name             = CASE WHEN sqlc.arg(name_set)::bool        THEN sqlc.narg(
     vrf_id           = CASE WHEN sqlc.arg(vrf_set)::bool         THEN sqlc.narg(vrf_id)::uuid      ELSE vrf_id END,
     updated_at       = NOW()
 WHERE id = $1
-RETURNING id, overlay_id, vni, kind::text AS kind, name, description, vlan_id,
-          evpn_route_target, vrf_id, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteVni :exec
 DELETE FROM vnis WHERE id = $1;
@@ -220,8 +217,9 @@ DELETE FROM vnis WHERE id = $1;
 -- ===== VTEPs =====
 -- name: CreateVtep :one
 INSERT INTO vteps (id, overlay_id, asset_id, loopback_ip, role, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::inet, $4::vtep_role, $5, NOW(), NOW())
-RETURNING id, overlay_id, asset_id, host(loopback_ip) AS loopback_ip,
+VALUES (gen_random_uuid(), sqlc.arg(overlay_id), sqlc.arg(asset_id), sqlc.narg(loopback_ip)::inet,
+        sqlc.arg(role)::vtep_role, sqlc.arg(description), NOW(), NOW())
+RETURNING id, overlay_id, asset_id, CASE WHEN loopback_ip IS NULL THEN NULL ELSE host(loopback_ip) END AS loopback_ip,
           role::text AS role, description, created_at, updated_at;
 
 -- name: UpdateVtep :one
@@ -231,7 +229,7 @@ SET loopback_ip = CASE WHEN sqlc.arg(loopback_set)::bool    THEN sqlc.narg(loopb
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, overlay_id, asset_id, host(loopback_ip) AS loopback_ip,
+RETURNING id, overlay_id, asset_id, CASE WHEN loopback_ip IS NULL THEN NULL ELSE host(loopback_ip) END AS loopback_ip,
           role::text AS role, description, created_at, updated_at;
 
 -- name: DeleteVtep :exec
@@ -343,9 +341,12 @@ INSERT INTO dhcp_scopes (
     preferred_lifetime_seconds, enabled, description, auto_push_override,
     created_at, updated_at
 )
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6::cidr,
-        $7, $8, $9, $10,
-        $11, $12, $13, $14, $15, $16, $17, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(dhcp_server_id), sqlc.arg(subnet_id), sqlc.arg(template_id),
+        sqlc.arg(name), sqlc.arg(ip_family), sqlc.arg(prefix)::cidr,
+        sqlc.arg(pools_json), sqlc.arg(pd_pools_json), sqlc.arg(options_json), sqlc.arg(reservations_json),
+        sqlc.arg(valid_lifetime_seconds), sqlc.arg(renew_timer_seconds), sqlc.arg(rebind_timer_seconds),
+        sqlc.arg(preferred_lifetime_seconds), sqlc.arg(enabled), sqlc.arg(description), sqlc.arg(auto_push_override),
+        NOW(), NOW())
 RETURNING id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix,
           pools_json, pd_pools_json, options_json, reservations_json,
           valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,
@@ -361,22 +362,22 @@ RETURNING id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix
 -- default columns; writes NULL for pd_pools). The Go handler
 -- resolves the null-vs-omitted distinction before this query runs.
 UPDATE dhcp_scopes
-SET name                       = COALESCE($2::text, name),
-    subnet_id                  = CASE WHEN $3::bool  THEN $4::uuid  ELSE subnet_id END,
-    template_id                = CASE WHEN $5::bool  THEN $6::uuid  ELSE template_id END,
-    pools_json                 = CASE WHEN $7::bool  THEN $8::jsonb ELSE pools_json END,
-    pd_pools_json              = CASE WHEN $9::bool  THEN $10::jsonb ELSE pd_pools_json END,
-    options_json               = CASE WHEN $11::bool THEN $12::jsonb ELSE options_json END,
-    reservations_json          = CASE WHEN $13::bool THEN $14::jsonb ELSE reservations_json END,
-    valid_lifetime_seconds     = CASE WHEN $15::bool THEN $16::int  ELSE valid_lifetime_seconds END,
-    renew_timer_seconds        = CASE WHEN $17::bool THEN $18::int  ELSE renew_timer_seconds END,
-    rebind_timer_seconds       = CASE WHEN $19::bool THEN $20::int  ELSE rebind_timer_seconds END,
-    preferred_lifetime_seconds = CASE WHEN $21::bool THEN $22::int  ELSE preferred_lifetime_seconds END,
-    enabled                    = COALESCE($23::bool, enabled),
-    description                = CASE WHEN $24::bool THEN $25::text ELSE description END,
-    auto_push_override         = CASE WHEN $26::bool THEN $27::bool ELSE auto_push_override END,
+SET name                       = COALESCE(sqlc.narg(name)::text, name),
+    subnet_id                  = CASE WHEN sqlc.arg(subnet_id_set)::bool  THEN sqlc.narg(subnet_id)::uuid  ELSE subnet_id END,
+    template_id                = CASE WHEN sqlc.arg(template_id_set)::bool  THEN sqlc.narg(template_id)::uuid  ELSE template_id END,
+    pools_json                 = CASE WHEN sqlc.arg(pools_set)::bool  THEN sqlc.narg(pools_json)::jsonb ELSE pools_json END,
+    pd_pools_json              = CASE WHEN sqlc.arg(pd_pools_set)::bool  THEN sqlc.narg(pd_pools_json)::jsonb ELSE pd_pools_json END,
+    options_json               = CASE WHEN sqlc.arg(options_set)::bool THEN sqlc.narg(options_json)::jsonb ELSE options_json END,
+    reservations_json          = CASE WHEN sqlc.arg(reservations_set)::bool THEN sqlc.narg(reservations_json)::jsonb ELSE reservations_json END,
+    valid_lifetime_seconds     = CASE WHEN sqlc.arg(valid_lifetime_set)::bool THEN sqlc.narg(valid_lifetime_seconds)::int  ELSE valid_lifetime_seconds END,
+    renew_timer_seconds        = CASE WHEN sqlc.arg(renew_timer_set)::bool THEN sqlc.narg(renew_timer_seconds)::int  ELSE renew_timer_seconds END,
+    rebind_timer_seconds       = CASE WHEN sqlc.arg(rebind_timer_set)::bool THEN sqlc.narg(rebind_timer_seconds)::int  ELSE rebind_timer_seconds END,
+    preferred_lifetime_seconds = CASE WHEN sqlc.arg(preferred_lifetime_set)::bool THEN sqlc.narg(preferred_lifetime_seconds)::int  ELSE preferred_lifetime_seconds END,
+    enabled                    = COALESCE(sqlc.narg(enabled)::bool, enabled),
+    description                = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
+    auto_push_override         = CASE WHEN sqlc.arg(auto_push_override_set)::bool THEN sqlc.narg(auto_push_override)::bool ELSE auto_push_override END,
     updated_at                 = NOW()
-WHERE id = $1
+WHERE id = sqlc.arg(id)
 RETURNING id, dhcp_server_id, subnet_id, name, ip_family, prefix::text AS prefix,
           pools_json, pd_pools_json, options_json, reservations_json,
           valid_lifetime_seconds, renew_timer_seconds, rebind_timer_seconds,

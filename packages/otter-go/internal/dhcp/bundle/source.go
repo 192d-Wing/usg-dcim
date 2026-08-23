@@ -24,7 +24,7 @@ import (
 // *dbq.Queries (the real implementation produced by sqlc) satisfies
 // it; callers compose it with their own larger interfaces.
 type SourceQuerier interface {
-	ListDhcpScopesForBundle(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.DhcpScope, error)
+	ListDhcpScopesForBundle(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.ListDhcpScopesForBundleRow, error)
 	ListDhcpScopeTemplatesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.DhcpScopeTemplate, error)
 }
 
@@ -33,7 +33,7 @@ type SourceQuerier interface {
 // returns the rendered KeaBundle. Errors are wrapped with the step
 // that failed so the caller's log line points at the right SQL on
 // debug.
-func BuildForServer(ctx context.Context, q SourceQuerier, srv dbq.DhcpServerBundleRow) (KeaBundle, error) {
+func BuildForServer(ctx context.Context, q SourceQuerier, srv dbq.GetDhcpServerBundleRowRow) (KeaBundle, error) {
 	scopes, err := q.ListDhcpScopesForBundle(ctx, srv.ID)
 	if err != nil {
 		return KeaBundle{}, fmt.Errorf("list scopes: %w", err)
@@ -61,7 +61,7 @@ func BuildForServer(ctx context.Context, q SourceQuerier, srv dbq.DhcpServerBund
 // same UUID twice doesn't fault, but keeping the slice tight avoids
 // shipping an outsize parameter on a server with many scopes that
 // all share one template.
-func CollectTemplateIDs(scopes []dbq.DhcpScope) []uuid.UUID {
+func CollectTemplateIDs(scopes []dbq.ListDhcpScopesForBundleRow) []uuid.UUID {
 	seen := map[uuid.UUID]struct{}{}
 	out := make([]uuid.UUID, 0, len(scopes))
 	for _, s := range scopes {

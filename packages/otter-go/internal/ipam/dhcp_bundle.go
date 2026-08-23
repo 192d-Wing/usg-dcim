@@ -121,7 +121,7 @@ func (h *Handler) getDhcpServerBundle(w http.ResponseWriter, r *http.Request) {
 // via the shared bundle.BuildForServer helper — same call shape
 // the rerender cron uses, so there's exactly one place that
 // orchestrates the read-and-render dance.
-func liveRenderBundle(r *http.Request, q Querier, srv dbq.DhcpServerBundleRow) (bundle.KeaBundle, error) {
+func liveRenderBundle(r *http.Request, q Querier, srv dbq.GetDhcpServerBundleRowRow) (bundle.KeaBundle, error) {
 	return bundle.BuildForServer(r.Context(), q, srv)
 }
 

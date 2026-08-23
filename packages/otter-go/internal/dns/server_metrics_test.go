@@ -22,21 +22,21 @@ type fakeMetricsQ struct {
 	fakeQ
 	serverErr   error
 	gotCreate   dbq.CreateDnsServerMetricsSampleParams
-	listOut     []dbq.DnsMetricsSampleRow
+	listOut     []dbq.DnsServerMetricsSample
 	gotListID   uuid.UUID
 	gotCutoff   time.Time
 }
 
-func (f *fakeMetricsQ) GetDnsServer(_ context.Context, id uuid.UUID) (dbq.DnsServer, error) {
+func (f *fakeMetricsQ) GetDnsServer(_ context.Context, id uuid.UUID) (dbq.GetDnsServerRow, error) {
 	if f.serverErr != nil {
-		return dbq.DnsServer{}, f.serverErr
+		return dbq.GetDnsServerRow{}, f.serverErr
 	}
-	return dbq.DnsServer{ID: id}, nil
+	return dbq.GetDnsServerRow{ID: id}, nil
 }
 
-func (f *fakeMetricsQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsMetricsSampleRow, error) {
+func (f *fakeMetricsQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsServerMetricsSample, error) {
 	f.gotCreate = a
-	return dbq.DnsMetricsSampleRow{
+	return dbq.DnsServerMetricsSample{
 		ID: uuid.New(), ServerID: a.ServerID,
 		IntervalSeconds: a.IntervalSeconds,
 		Queries:         a.Queries,
@@ -44,9 +44,9 @@ func (f *fakeMetricsQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.Cre
 	}, nil
 }
 
-func (f *fakeMetricsQ) ListDnsServerMetricsSamples(_ context.Context, id uuid.UUID, cutoff time.Time) ([]dbq.DnsMetricsSampleRow, error) {
-	f.gotListID = id
-	f.gotCutoff = cutoff
+func (f *fakeMetricsQ) ListDnsServerMetricsSamples(_ context.Context, a dbq.ListDnsServerMetricsSamplesParams) ([]dbq.DnsServerMetricsSample, error) {
+	f.gotListID = a.ServerID
+	f.gotCutoff = a.Cutoff
 	return f.listOut, nil
 }
 
@@ -235,7 +235,7 @@ func TestPostServerMetrics_RequiresUpdateCap(t *testing.T) {
 func TestListServerMetrics_HappyPath(t *testing.T) {
 	id := uuid.New()
 	f := &fakeMetricsQ{
-		listOut: []dbq.DnsMetricsSampleRow{
+		listOut: []dbq.DnsServerMetricsSample{
 			{ID: uuid.New(), ServerID: id, Queries: 100},
 		},
 	}
@@ -245,7 +245,7 @@ func TestListServerMetrics_HappyPath(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	var out []dbq.DnsMetricsSampleRow
+	var out []dbq.DnsServerMetricsSample
 	_ = json.NewDecoder(rec.Body).Decode(&out)
 	if len(out) != 1 || out[0].Queries != 100 {
 		t.Errorf("got %+v", out)

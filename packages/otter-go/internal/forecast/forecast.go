@@ -254,13 +254,10 @@ func ProjectKw(samples []TimedValue, maxKw *float64, days int32, now time.Time) 
 // SamplesFromRows folds the (day, metric, avg_v) hypertable rows into
 // one (day, total_kW) pair per day. W → kW conversion for metrics
 // in powerMetricW. Sorted ascending by day.
-func SamplesFromRows(rows []dbq.KwHistoryRow) []TimedValue {
+func SamplesFromRows(rows []dbq.ListKwHistorySamplesRow) []TimedValue {
 	totals := map[time.Time]float64{}
 	for _, r := range rows {
-		if r.AvgV == nil {
-			continue
-		}
-		v := *r.AvgV
+		v := r.AvgV
 		if _, isW := powerMetricW[r.Metric]; isW {
 			v /= 1000.0
 		}
@@ -328,14 +325,14 @@ type TimedValue struct {
 func FetchKwHistory(
 	ctx context.Context, q KwHistoryQuerier,
 	pduIDs []uuid.UUID, start, end time.Time,
-) ([]dbq.KwHistoryRow, error) {
+) ([]dbq.ListKwHistorySamplesRow, error) {
 	return q.ListKwHistorySamples(ctx, dbq.ListKwHistorySamplesParams{
 		AssetIDs: pduIDs, Metrics: PowerMetrics(), Start: start, End: end,
 	})
 }
 
 type KwHistoryQuerier interface {
-	ListKwHistorySamples(ctx context.Context, arg dbq.ListKwHistorySamplesParams) ([]dbq.KwHistoryRow, error)
+	ListKwHistorySamples(ctx context.Context, arg dbq.ListKwHistorySamplesParams) ([]dbq.ListKwHistorySamplesRow, error)
 }
 
 // ---- pure helpers ----

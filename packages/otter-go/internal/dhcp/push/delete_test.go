@@ -79,7 +79,7 @@ func TestDeleteScopeFromKea_ServerDisabled_RefusesWithoutCallingKea(t *testing.T
 	scope.KeaSubnetID = &id
 	q := &fakeQ{
 		scope:  scope,
-		server: dbq.DhcpServerForPushRow{ID: scope.DhcpServerID, KeaURL: "x", Enabled: false},
+		server: dbq.GetDhcpServerForPushRow{ID: scope.DhcpServerID, KeaURL: "x", Enabled: false},
 	}
 	fk := &fakeKea{}
 	r, _ := DeleteScopeFromKea(context.Background(), q, builderReturning(fk), scope.ID)

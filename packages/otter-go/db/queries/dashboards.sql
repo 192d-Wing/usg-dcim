@@ -29,7 +29,7 @@ SELECT COUNT(id) FROM collectors WHERE status = 'healthy';
 SELECT COUNT(id)
 FROM collectors
 WHERE enabled = TRUE
-  AND (last_seen_at IS NULL OR last_seen_at < $1);
+  AND (last_seen_at IS NULL OR last_seen_at < sqlc.arg(last_seen_at)::timestamptz);
 
 -- name: CountStaleTelemetrySources :one
 -- Telemetry sources whose freshness state is 'stale'. The freshness
@@ -45,12 +45,10 @@ SELECT COUNT(id) FROM telemetry_sources WHERE freshness = 'stale';
 -- name: ListRacksForForecast :many
 -- Optional site_id filter; limit caps result count. Caller iterates
 -- the batch with compute_rack_forecast (no DB calls beyond this).
-SELECT id, site_id, row_id, name, code, u_height, max_kw,
-       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
-       created_at, updated_at
+SELECT *
 FROM racks
-WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
-LIMIT $2;
+WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id)::uuid)
+LIMIT sqlc.arg(result_limit);
 
 -- name: ListKwHistorySamples :many
 -- TimescaleDB time_bucket — daily AVG(value) per (day, metric) for the
@@ -62,10 +60,10 @@ SELECT
     metric,
     AVG(value)::double precision AS avg_v
 FROM telemetry_samples
-WHERE asset_id = ANY($1::uuid[])
-  AND metric = ANY($2::text[])
-  AND ts >= $3
-  AND ts <= $4
+WHERE asset_id = ANY(sqlc.arg(asset_ids)::uuid[])
+  AND metric = ANY(sqlc.arg(metrics)::text[])
+  AND ts >= sqlc.arg(start_ts)
+  AND ts <= sqlc.arg(end_ts)
 GROUP BY day, metric
 ORDER BY day;
 
@@ -77,15 +75,7 @@ ORDER BY day;
 -- name: ListAssetsByRackOrdered :many
 -- Order by rack_position_u asc nulls last (Python parity for the rack
 -- visualization). ENUMs cast to ::text per convention.
-SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
-       kind::text AS kind, manufacturer, model, serial, firmware,
-       rack_position_u, rack_units,
-       face::text AS face, mount::text AS mount,
-       pdu_side, psu_count, port_count,
-       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-       lifecycle_state::text AS lifecycle_state,
-       install_date, warranty_expires, metadata_json,
-       created_at, updated_at
+SELECT *
 FROM assets
 WHERE rack_id = $1
 ORDER BY rack_position_u ASC NULLS LAST;
@@ -129,12 +119,13 @@ WHERE site_id = $1
 ORDER BY code;
 
 -- name: ListRoomsByBuildingIDs :many
--- design_kw / design_cooling_tons project as text so pgx scans
--- cleanly into *string; caller parses to float at the response
--- boundary (matches the max_kw NUMERIC pattern in racks).
-SELECT id, building_id, name, code, design_kw::text AS design_kw,
+-- design_kw / design_cooling_tons are NUMERIC → *string via the
+-- sqlc override (a ::text cast would erase nullability); caller
+-- parses to float at the response boundary (matches the max_kw
+-- NUMERIC pattern in racks).
+SELECT id, building_id, name, code, design_kw,
        floor_area_sqft,
-       design_cooling_tons::text AS design_cooling_tons,
+       design_cooling_tons,
        grid_cols, grid_rows
 FROM rooms
 WHERE building_id = ANY($1::uuid[])
@@ -149,17 +140,13 @@ ORDER BY code;
 -- Rack anchor for /dashboards/buildings/{building_id} — same
 -- projection as ListRacksBySite but keyed on the building's rows so
 -- the fan-out stays scoped to one building.
-SELECT id, site_id, row_id, name, code, u_height, max_kw,
-       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
-       created_at, updated_at
+SELECT *
 FROM racks
 WHERE row_id = ANY($1::uuid[])
 ORDER BY code;
 
 -- name: ListRacksBySite :many
-SELECT id, site_id, row_id, name, code, u_height, max_kw,
-       max_weight_lbs, serial, grid_x, grid_y, grid_rotation,
-       created_at, updated_at
+SELECT *
 FROM racks
 WHERE site_id = $1
 ORDER BY code;
@@ -167,15 +154,7 @@ ORDER BY code;
 -- name: ListAssetsBySite :many
 -- Same projection as ListAssetsByRackIDs but anchored to a single
 -- site. ENUMs cast to ::text matching the codebase convention.
-SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
-       kind::text AS kind, manufacturer, model, serial, firmware,
-       rack_position_u, rack_units,
-       face::text AS face, mount::text AS mount,
-       pdu_side, psu_count, port_count,
-       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-       lifecycle_state::text AS lifecycle_state,
-       install_date, warranty_expires, metadata_json,
-       created_at, updated_at
+SELECT *
 FROM assets
 WHERE site_id = $1;
 
@@ -206,23 +185,16 @@ WHERE site_id = $1;
 -- name: ListRacksForFreeSpace :many
 -- Filter parameters can be NULL (don't filter). When both are set
 -- Python ANDs them — match that.
-SELECT id, site_id, row_id, name, code, u_height, max_kw, max_weight_lbs, serial, grid_x, grid_y, grid_rotation, created_at, updated_at
+SELECT *
 FROM racks
-WHERE ($1::uuid IS NULL OR site_id = $1::uuid)
-  AND ($2::uuid IS NULL OR site_id IN (SELECT id FROM sites WHERE region_id = $2::uuid));
+WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id)::uuid)
+  AND (sqlc.narg(region_id)::uuid IS NULL
+       OR site_id IN (SELECT id FROM sites WHERE region_id = sqlc.narg(region_id)::uuid));
 
 -- name: ListAssetsByRackIDs :many
 -- Bulk asset fetch for many racks — Python iterates rack-by-rack and
 -- runs one SELECT each; one round-trip is cheaper.
-SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
-       kind::text AS kind, manufacturer, model, serial, firmware,
-       rack_position_u, rack_units,
-       face::text AS face, mount::text AS mount,
-       pdu_side, psu_count, port_count,
-       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-       lifecycle_state::text AS lifecycle_state,
-       install_date, warranty_expires, metadata_json,
-       created_at, updated_at
+SELECT *
 FROM assets
 WHERE rack_id = ANY($1::uuid[]);
 

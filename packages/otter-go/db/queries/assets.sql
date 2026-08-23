@@ -1,13 +1,5 @@
 -- name: ListAssets :many
-SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
-       kind::text AS kind, manufacturer, model, serial, firmware,
-       rack_position_u, rack_units, face::text AS face,
-       mount::text AS mount, pdu_side::text AS pdu_side,
-       psu_count, port_count,
-       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-       lifecycle_state::text AS lifecycle_state,
-       install_date, warranty_expires, metadata_json,
-       created_at, updated_at
+SELECT *
 FROM assets
 WHERE (sqlc.narg(site_id)::uuid          IS NULL OR site_id        = sqlc.narg(site_id))
   AND (sqlc.narg(rack_id)::uuid          IS NULL OR rack_id        = sqlc.narg(rack_id))
@@ -31,14 +23,6 @@ WHERE (sqlc.narg(site_id)::uuid          IS NULL OR site_id        = sqlc.narg(s
   AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id        = ANY(sqlc.narg(scope_site_ids)::uuid[]));
 
 -- name: GetAsset :one
-SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
-       kind::text AS kind, manufacturer, model, serial, firmware,
-       rack_position_u, rack_units, face::text AS face,
-       mount::text AS mount, pdu_side::text AS pdu_side,
-       psu_count, port_count,
-       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-       lifecycle_state::text AS lifecycle_state,
-       install_date, warranty_expires, metadata_json,
-       created_at, updated_at
+SELECT *
 FROM assets
 WHERE id = $1;

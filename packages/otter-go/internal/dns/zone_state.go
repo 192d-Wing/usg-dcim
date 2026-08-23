@@ -57,7 +57,7 @@ func (h *Handler) setFrozen(
 	if !h.enforceFabric(w, r, fid, "dns:zones:update") {
 		return
 	}
-	out, err := h.Q.SetDnsZoneFrozen(r.Context(), id, frozen)
+	out, err := h.Q.SetDnsZoneFrozen(r.Context(), dbq.SetDnsZoneFrozenParams{ID: id, Frozen: frozen})
 	if err != nil {
 		mapErr(w, err, "zone not found")
 		return

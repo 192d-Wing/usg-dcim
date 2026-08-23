@@ -97,7 +97,7 @@ func formatRdata(rtype string, data json.RawMessage) (string, error) {
 
 // formatRecordLine emits one BIND RR line. Leading name uses '@'
 // for the apex (matches Python: bare label is "" in DB).
-func formatRecordLine(r dbq.DnsRecordForRender, zoneDefault int32) (string, error) {
+func formatRecordLine(r dbq.ListAllRecordsInZoneRow, zoneDefault int32) (string, error) {
 	name := r.Name
 	if name == "" {
 		name = "@"
@@ -114,8 +114,8 @@ func formatRecordLine(r dbq.DnsRecordForRender, zoneDefault int32) (string, erro
 // endpoint. Sort order is (name, type) for diffable output.
 // Records with malformed data fail the whole render — preview
 // surfaces the problem rather than silently dropping the bad row.
-func renderZoneFile(zone dbq.DnsZone, records []dbq.DnsRecordForRender) (string, error) {
-	sorted := make([]dbq.DnsRecordForRender, len(records))
+func renderZoneFile(zone dbq.DnsZone, records []dbq.ListAllRecordsInZoneRow) (string, error) {
+	sorted := make([]dbq.ListAllRecordsInZoneRow, len(records))
 	copy(sorted, records)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Name != sorted[j].Name {

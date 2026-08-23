@@ -25,14 +25,14 @@ type fakeSdQ struct {
 	siteErr         error
 	region          dbq.Region
 	regionErr       error
-	buildings       []dbq.SiteBuildingRow
-	rooms           []dbq.SiteRoomRow
-	rows            []dbq.SiteRowRow
+	buildings       []dbq.ListBuildingsBySiteRow
+	rooms           []dbq.ListRoomsByBuildingIDsRow
+	rows            []dbq.ListRowsByRoomIDsRow
 	racks           []dbq.Rack
 	assets          []dbq.Asset
-	alerts          []dbq.SiteAlertSeverityRow
-	collectors      []dbq.SiteCollectorRow
-	pduTelemetry    []dbq.PduKwTelemetryRow
+	alerts          []dbq.ListSiteAlertsBySeverityRow
+	collectors      []dbq.ListSiteCollectorsRow
+	pduTelemetry    []dbq.ListPduKwTelemetryRow
 	collectorsCallN int
 }
 
@@ -42,13 +42,13 @@ func (f *fakeSdQ) GetSite(_ context.Context, _ uuid.UUID) (dbq.Site, error) {
 func (f *fakeSdQ) GetRegion(_ context.Context, _ uuid.UUID) (dbq.Region, error) {
 	return f.region, f.regionErr
 }
-func (f *fakeSdQ) ListBuildingsBySite(_ context.Context, _ uuid.UUID) ([]dbq.SiteBuildingRow, error) {
+func (f *fakeSdQ) ListBuildingsBySite(_ context.Context, _ uuid.UUID) ([]dbq.ListBuildingsBySiteRow, error) {
 	return f.buildings, nil
 }
-func (f *fakeSdQ) ListRoomsByBuildingIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SiteRoomRow, error) {
+func (f *fakeSdQ) ListRoomsByBuildingIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListRoomsByBuildingIDsRow, error) {
 	return f.rooms, nil
 }
-func (f *fakeSdQ) ListRowsByRoomIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SiteRowRow, error) {
+func (f *fakeSdQ) ListRowsByRoomIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListRowsByRoomIDsRow, error) {
 	return f.rows, nil
 }
 func (f *fakeSdQ) ListRacksBySite(_ context.Context, _ uuid.UUID) ([]dbq.Rack, error) {
@@ -57,14 +57,14 @@ func (f *fakeSdQ) ListRacksBySite(_ context.Context, _ uuid.UUID) ([]dbq.Rack, e
 func (f *fakeSdQ) ListAssetsBySite(_ context.Context, _ uuid.UUID) ([]dbq.Asset, error) {
 	return f.assets, nil
 }
-func (f *fakeSdQ) ListSiteAlertsBySeverity(_ context.Context, _ uuid.UUID) ([]dbq.SiteAlertSeverityRow, error) {
+func (f *fakeSdQ) ListSiteAlertsBySeverity(_ context.Context, _ uuid.UUID) ([]dbq.ListSiteAlertsBySeverityRow, error) {
 	return f.alerts, nil
 }
-func (f *fakeSdQ) ListSiteCollectors(_ context.Context, _ uuid.UUID) ([]dbq.SiteCollectorRow, error) {
+func (f *fakeSdQ) ListSiteCollectors(_ context.Context, _ uuid.UUID) ([]dbq.ListSiteCollectorsRow, error) {
 	f.collectorsCallN++
 	return f.collectors, nil
 }
-func (f *fakeSdQ) ListPduKwTelemetry(_ context.Context, _ []uuid.UUID) ([]dbq.PduKwTelemetryRow, error) {
+func (f *fakeSdQ) ListPduKwTelemetry(_ context.Context, _ []uuid.UUID) ([]dbq.ListPduKwTelemetryRow, error) {
 	return f.pduTelemetry, nil
 }
 
@@ -110,9 +110,9 @@ func TestSiteDetail_HappyPath(t *testing.T) {
 			Address: &addr, LifecycleState: "active",
 		},
 		region:    dbq.Region{ID: rid, Name: "Region 1", Code: "R1"},
-		buildings: []dbq.SiteBuildingRow{{ID: bid, Name: "Bldg A", Code: "BA"}},
-		rooms:     []dbq.SiteRoomRow{{ID: rmid, BuildingID: bid, Name: "Room 1", Code: "RM1", DesignKw: &dkw}},
-		rows:      []dbq.SiteRowRow{{ID: rwid, RoomID: rmid, Name: "Row 1", Code: "RW1"}},
+		buildings: []dbq.ListBuildingsBySiteRow{{ID: bid, Name: "Bldg A", Code: "BA"}},
+		rooms:     []dbq.ListRoomsByBuildingIDsRow{{ID: rmid, BuildingID: bid, Name: "Room 1", Code: "RM1", DesignKw: &dkw}},
+		rows:      []dbq.ListRowsByRoomIDsRow{{ID: rwid, RoomID: rmid, Name: "Row 1", Code: "RW1"}},
 		racks: []dbq.Rack{
 			{ID: rkid, SiteID: sid, RowID: rwid, Name: "Rack 1", Code: "RK1", UHeight: 42},
 		},
@@ -121,10 +121,10 @@ func TestSiteDetail_HappyPath(t *testing.T) {
 				RackPositionU: intPtrLocal(1), RackUnits: intPtrLocal(2)},
 			{ID: uuid.New(), SiteID: sid, RackID: &rkid, Kind: "server", LifecycleState: "decommissioned"},
 		},
-		alerts: []dbq.SiteAlertSeverityRow{
+		alerts: []dbq.ListSiteAlertsBySeverityRow{
 			{Severity: "critical", N: 1}, {Severity: "warning", N: 3},
 		},
-		collectors: []dbq.SiteCollectorRow{
+		collectors: []dbq.ListSiteCollectorsRow{
 			{ID: uuid.New(), Status: "healthy", Enabled: true, LastSeenAt: nowPtr()},
 		},
 	}
@@ -202,7 +202,7 @@ func TestSiteDetail_StaleCollectorCounted(t *testing.T) {
 	f := &fakeSdQ{
 		site:      dbq.Site{ID: sid, Name: "S", Code: "S", LifecycleState: "active", RegionID: uuid.New()},
 		regionErr: pgx.ErrNoRows,
-		collectors: []dbq.SiteCollectorRow{
+		collectors: []dbq.ListSiteCollectorsRow{
 			{Status: "healthy", Enabled: true, LastSeenAt: nil},      // stale (never reported)
 			{Status: "healthy", Enabled: true, LastSeenAt: &long},    // stale (last seen 2020)
 			{Status: "healthy", Enabled: false, LastSeenAt: nil},     // NOT stale (disabled)
@@ -233,7 +233,7 @@ func TestSiteDetail_StaleStatusDoubleCounted(t *testing.T) {
 	f := &fakeSdQ{
 		site:      dbq.Site{ID: sid, Name: "S", Code: "S", LifecycleState: "active", RegionID: uuid.New()},
 		regionErr: pgx.ErrNoRows,
-		collectors: []dbq.SiteCollectorRow{
+		collectors: []dbq.ListSiteCollectorsRow{
 			// status=stale (+1 to "stale") AND enabled+old (+1 to "stale") = 2
 			{Status: "stale", Enabled: true, LastSeenAt: &long},
 		},
@@ -285,9 +285,9 @@ func TestSiteDetail_CapacityRollupSums(t *testing.T) {
 			{ID: pdu1, RackID: &r1, Kind: "pdu"},
 			{ID: pdu2, RackID: &r2, Kind: "pdu"},
 		},
-		pduTelemetry: []dbq.PduKwTelemetryRow{
-			{AssetID: pdu1, Metric: "pdu.input.kw", LastValue: strPtrLocal("3.0")},
-			{AssetID: pdu2, Metric: "pdu.input.kw", LastValue: strPtrLocal("2.0")},
+		pduTelemetry: []dbq.ListPduKwTelemetryRow{
+			{AssetID: pdu1, Metric: "pdu.input.kw", LastValue: floatPtrLocal(3.0)},
+			{AssetID: pdu2, Metric: "pdu.input.kw", LastValue: floatPtrLocal(2.0)},
 		},
 	}
 	code, body := doSd(t, mountSd(f, 600), "/dashboards/sites/"+sid.String())

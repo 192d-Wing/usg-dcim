@@ -88,7 +88,7 @@ func DeleteScopeFromKea(ctx context.Context, q Querier, build KeaClientBuilder, 
 // InterpretResponse passes through verbatim. config_write fires
 // only after a successful delete — persisting a half-rolled
 // removal would leave Kea in a state we couldn't reason about.
-func callKeaDelete(ctx context.Context, client KeaClient, scope dbq.DhcpScopeForPushRow) ([]byte, kea.Status, string) {
+func callKeaDelete(ctx context.Context, client KeaClient, scope dbq.GetDhcpScopeForPushRow) ([]byte, kea.Status, string) {
 	keaID := int64(*scope.KeaSubnetID)
 	var resp []byte
 	var rpcErr error
@@ -120,7 +120,7 @@ func callKeaDelete(ctx context.Context, client KeaClient, scope dbq.DhcpScopeFor
 // dhcp_scopes.last_diff_* (the scope row is on its way out).
 func recordDeleteHistory(
 	ctx context.Context, q Querier,
-	scope dbq.DhcpScopeForPushRow, server dbq.DhcpServerForPushRow,
+	scope dbq.GetDhcpScopeForPushRow, server dbq.GetDhcpServerForPushRow,
 	status kea.Status, errStr string, durationMs int32,
 ) error {
 	errPtr := maybeErrorPtr(errStr)

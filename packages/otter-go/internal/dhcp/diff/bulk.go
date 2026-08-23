@@ -31,7 +31,7 @@ var diffStatuses = []Status{
 // before WriteDhcpScopeDiffState overwrites last_diff_status.
 type BulkQuerier interface {
 	Querier
-	ListAllScopeIDsAndPriorDriftForServer(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.DhcpScopeIDAndPriorDriftRow, error)
+	ListAllScopeIDsAndPriorDriftForServer(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.ListAllScopeIDsAndPriorDriftForServerRow, error)
 }
 
 // Transition captures one scope's status change. Empty list on cold

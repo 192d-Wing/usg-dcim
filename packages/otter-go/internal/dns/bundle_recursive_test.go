@@ -94,18 +94,18 @@ func TestAssembleRecursive_DeterministicEtag(t *testing.T) {
 // ===== loadRecursiveBundleInput =====
 
 type recursiveLoaderFakeQ struct {
-	fabric     dbq.FabricForRecursiveBundle
+	fabric     dbq.GetFabricForRecursiveBundleRow
 	fabricErr  error
 	apexes     []string
 	authIP     string
 	authIPErr  error
-	fwd        []dbq.DnsForwarderRow
-	bl         []dbq.BlocklistForBundleRow
+	fwd        []dbq.ListDnsForwardersForBundleRow
+	bl         []dbq.ListEnabledBlocklistsWithPatternsByFabricRow
 	systemRow  dbq.SystemSetting
 	systemErr  error
 }
 
-func (f *recursiveLoaderFakeQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
+func (f *recursiveLoaderFakeQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
 	return f.fabric, f.fabricErr
 }
 func (f *recursiveLoaderFakeQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID) ([]string, error) {
@@ -117,10 +117,10 @@ func (f *recursiveLoaderFakeQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uui
 	}
 	return f.authIP, nil
 }
-func (f *recursiveLoaderFakeQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *recursiveLoaderFakeQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return f.fwd, nil
 }
-func (f *recursiveLoaderFakeQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *recursiveLoaderFakeQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return f.bl, nil
 }
 func (f *recursiveLoaderFakeQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
@@ -133,7 +133,7 @@ func (f *recursiveLoaderFakeQ) GetSystemSetting(_ context.Context, _ string) (db
 // SiteID populated → loader queries the local auth IP.
 func TestLoadRecursiveBundleInput_AuthIPThreaded(t *testing.T) {
 	q := &recursiveLoaderFakeQ{
-		fabric:    dbq.FabricForRecursiveBundle{RecursiveEngine: "coredns"},
+		fabric:    dbq.GetFabricForRecursiveBundleRow{RecursiveEngine: "coredns"},
 		authIP:    "10.0.0.1",
 		systemErr: pgx.ErrNoRows,
 	}
@@ -152,7 +152,7 @@ func TestLoadRecursiveBundleInput_AuthIPThreaded(t *testing.T) {
 // Server has no site → local auth lookup is skipped.
 func TestLoadRecursiveBundleInput_NoSiteSkipsAuthLookup(t *testing.T) {
 	q := &recursiveLoaderFakeQ{
-		fabric:    dbq.FabricForRecursiveBundle{RecursiveEngine: "coredns"},
+		fabric:    dbq.GetFabricForRecursiveBundleRow{RecursiveEngine: "coredns"},
 		systemErr: pgx.ErrNoRows,
 	}
 	in, err := loadRecursiveBundleInput(context.Background(), q,
@@ -171,7 +171,7 @@ func TestLoadRecursiveBundleInput_NoSiteSkipsAuthLookup(t *testing.T) {
 // it just won't forward the apex back).
 func TestLoadRecursiveBundleInput_AuthLookupNoRowsBenign(t *testing.T) {
 	q := &recursiveLoaderFakeQ{
-		fabric:    dbq.FabricForRecursiveBundle{RecursiveEngine: "coredns"},
+		fabric:    dbq.GetFabricForRecursiveBundleRow{RecursiveEngine: "coredns"},
 		authIPErr: pgx.ErrNoRows,
 		systemErr: pgx.ErrNoRows,
 	}
@@ -190,7 +190,7 @@ func TestLoadRecursiveBundleInput_AuthLookupNoRowsBenign(t *testing.T) {
 // Engine selection comes from the fabric column.
 func TestLoadRecursiveBundleInput_EngineFromFabric(t *testing.T) {
 	q := &recursiveLoaderFakeQ{
-		fabric:    dbq.FabricForRecursiveBundle{RecursiveEngine: "hickory"},
+		fabric:    dbq.GetFabricForRecursiveBundleRow{RecursiveEngine: "hickory"},
 		systemErr: pgx.ErrNoRows,
 	}
 	in, _ := loadRecursiveBundleInput(context.Background(), q,
@@ -205,7 +205,7 @@ func TestLoadRecursiveBundleInput_EngineFromFabric(t *testing.T) {
 // Empty engine column → coredns default.
 func TestLoadRecursiveBundleInput_EngineEmptyDefaultsCoreDNS(t *testing.T) {
 	q := &recursiveLoaderFakeQ{
-		fabric:    dbq.FabricForRecursiveBundle{},
+		fabric:    dbq.GetFabricForRecursiveBundleRow{},
 		systemErr: pgx.ErrNoRows,
 	}
 	in, _ := loadRecursiveBundleInput(context.Background(), q,
@@ -222,7 +222,7 @@ func TestLoadRecursiveBundleInput_EngineEmptyDefaultsCoreDNS(t *testing.T) {
 func TestResolveUpstreams_FabricOverrideWins(t *testing.T) {
 	q := &recursiveLoaderFakeQ{}
 	got, err := resolveRecursiveUpstreams(context.Background(), q,
-		dbq.FabricForRecursiveBundle{DnsRecursiveUpstreams: []byte(`["1.2.3.4"]`)},
+		dbq.GetFabricForRecursiveBundleRow{DnsRecursiveUpstreams: []byte(`["1.2.3.4"]`)},
 		[]string{"99.99.99.99"},
 	)
 	if err != nil {
@@ -238,7 +238,7 @@ func TestResolveUpstreams_SystemSettingBeatsDefault(t *testing.T) {
 		systemRow: dbq.SystemSetting{Value: []byte(`["8.8.8.8"]`)},
 	}
 	got, err := resolveRecursiveUpstreams(context.Background(), q,
-		dbq.FabricForRecursiveBundle{},
+		dbq.GetFabricForRecursiveBundleRow{},
 		[]string{"99.99.99.99"},
 	)
 	if err != nil {
@@ -252,7 +252,7 @@ func TestResolveUpstreams_SystemSettingBeatsDefault(t *testing.T) {
 func TestResolveUpstreams_DefaultsOnNoOverride(t *testing.T) {
 	q := &recursiveLoaderFakeQ{systemErr: pgx.ErrNoRows}
 	got, err := resolveRecursiveUpstreams(context.Background(), q,
-		dbq.FabricForRecursiveBundle{},
+		dbq.GetFabricForRecursiveBundleRow{},
 		[]string{"99.99.99.99"},
 	)
 	if err != nil {

@@ -37,10 +37,12 @@ INSERT INTO lir_pools (
     enabled, created_at, updated_at
 )
 VALUES (
-    gen_random_uuid(), $1, $2, $3, $4::smallint, $5,
-    $6, $7::smallint, $8::smallint,
-    $9, $10,
-    COALESCE($11::bool, TRUE), NOW(), NOW()
+    gen_random_uuid(), sqlc.arg(name), sqlc.arg(slug), sqlc.narg(description),
+    sqlc.arg(ip_family)::smallint, sqlc.narg(fabric_id),
+    sqlc.narg(classification), sqlc.arg(min_prefix_length)::smallint,
+    sqlc.arg(max_prefix_length)::smallint,
+    sqlc.narg(default_supernet_purpose), sqlc.narg(arin_parent_net_handle),
+    COALESCE(sqlc.narg(enabled)::bool, TRUE), NOW(), NOW()
 )
 RETURNING id, name, slug, description, ip_family, fabric_id,
           classification, min_prefix_length, max_prefix_length,
@@ -97,24 +99,24 @@ SELECT count(*)::bigint FROM lir_allocations WHERE pool_id = $1;
 -- host/masklen so the wire type stays a plain string (the existing
 -- IPAM queries use the same pattern).
 SELECT id, fabric_id, vrf_id, site_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix,
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix,
        name, description, purpose,
        lir_pool_id, owner_organization_id,
        created_at, updated_at
 FROM supernets
-WHERE lir_pool_id = $1
+WHERE lir_pool_id = sqlc.arg(pool_id)::uuid
 ORDER BY prefix
-LIMIT $2 OFFSET $3;
+LIMIT sqlc.arg(result_limit) OFFSET sqlc.arg(result_offset);
 
 -- name: CountPoolSourceSupernets :one
-SELECT count(*)::bigint FROM supernets WHERE lir_pool_id = $1;
+SELECT count(*)::bigint FROM supernets WHERE lir_pool_id = sqlc.arg(pool_id)::uuid;
 
 -- name: GetSupernetForLirAttach :one
 -- Compact projection used by the attach handler: current pool, owner
 -- (for the tenant-exclusion check), and prefix (for the family-match
 -- check, derived from ":" in the host form).
 SELECT id, lir_pool_id, owner_organization_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix
 FROM supernets
 WHERE id = $1;
 
@@ -124,13 +126,13 @@ WHERE id = $1;
 -- pre-checks via GetSupernetForLirAttach so the user gets a 409 with
 -- a clear message instead of an opaque constraint-violation 500.
 UPDATE supernets
-SET lir_pool_id = $2, updated_at = NOW()
-WHERE id = $1;
+SET lir_pool_id = sqlc.arg(pool_id)::uuid, updated_at = NOW()
+WHERE id = sqlc.arg(id);
 
 -- name: DetachSupernetFromPool :exec
 UPDATE supernets
 SET lir_pool_id = NULL, updated_at = NOW()
-WHERE id = $1 AND lir_pool_id = $2;
+WHERE id = sqlc.arg(id) AND lir_pool_id = sqlc.arg(pool_id)::uuid;
 
 -- name: DetachAllPoolSupernets :exec
 -- Used by DeleteLirPool: clears lir_pool_id on every source supernet
@@ -139,7 +141,7 @@ WHERE id = $1 AND lir_pool_id = $2;
 -- for the cascade).
 UPDATE supernets
 SET lir_pool_id = NULL, updated_at = NOW()
-WHERE lir_pool_id = $1;
+WHERE lir_pool_id = sqlc.arg(pool_id)::uuid;
 
 -- name: CountAllocationsForPoolSupernet :one
 -- Refuses detach while LIVE allocations still trace back to this

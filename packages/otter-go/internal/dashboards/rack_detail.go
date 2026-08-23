@@ -19,8 +19,8 @@ import (
 type RackDetailQuerier interface {
 	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
 	ListAssetsByRackOrdered(ctx context.Context, rackID uuid.UUID) ([]dbq.Asset, error)
-	ListOpenAlertsByAssetIDs(ctx context.Context, assetIDs []uuid.UUID) ([]dbq.AssetOpenAlertsRow, error)
-	ListAssetFreshnessByIDs(ctx context.Context, assetIDs []uuid.UUID) ([]dbq.AssetFreshnessRow, error)
+	ListOpenAlertsByAssetIDs(ctx context.Context, assetIDs []uuid.UUID) ([]dbq.ListOpenAlertsByAssetIDsRow, error)
+	ListAssetFreshnessByIDs(ctx context.Context, assetIDs []uuid.UUID) ([]dbq.ListAssetFreshnessByIDsRow, error)
 	capacity.Querier
 	powerchain.Querier
 }
@@ -145,7 +145,12 @@ func loadAssetKpis(ctx context.Context, q RackDetailQuerier, ids []uuid.UUID) (
 		return nil, nil, err
 	}
 	for _, r := range alerts {
-		openAlerts[r.AssetID] = r.N
+		// asset_id can't be NULL here — the query filters on
+		// asset_id = ANY($1) — but the column is nullable so the
+		// generated field is a pointer.
+		if r.AssetID != nil {
+			openAlerts[*r.AssetID] = r.N
+		}
 	}
 	freshRows, err := q.ListAssetFreshnessByIDs(ctx, ids)
 	if err != nil {

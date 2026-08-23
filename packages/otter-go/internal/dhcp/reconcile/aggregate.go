@@ -91,7 +91,7 @@ const staticSourceLiteral = "static"
 // `subnetID` is the scope's subnet_id (nil when the scope has no
 // subnet — every reservation is then bucketed as unbacked with an
 // explanatory note, matching Python's behavior at line 148-150).
-func Reconcile(scopeID uuid.UUID, subnetID *uuid.UUID, reservationsJSON json.RawMessage, ipRows []dbq.DhcpReconcileIPRow) Report {
+func Reconcile(scopeID uuid.UUID, subnetID *uuid.UUID, reservationsJSON json.RawMessage, ipRows []dbq.ListIPAddressesInSubnetForReconcileRow) Report {
 	report := Report{
 		ScopeID: scopeID.String(),
 		Counts:  emptyCounts(),
@@ -118,8 +118,8 @@ func Reconcile(scopeID uuid.UUID, subnetID *uuid.UUID, reservationsJSON json.Raw
 // normalized — Postgres inet stores 10.0.0.5 / 10.0.0.5/32 / etc.;
 // netip.ParseAddr collapses the host-form variants into the same
 // string for comparison.
-func indexIPRowsByAddress(rows []dbq.DhcpReconcileIPRow) map[string]dbq.DhcpReconcileIPRow {
-	out := make(map[string]dbq.DhcpReconcileIPRow, len(rows))
+func indexIPRowsByAddress(rows []dbq.ListIPAddressesInSubnetForReconcileRow) map[string]dbq.ListIPAddressesInSubnetForReconcileRow {
+	out := make(map[string]dbq.ListIPAddressesInSubnetForReconcileRow, len(rows))
 	for _, row := range rows {
 		// inet text form may carry "/PREFIX"; trim before parsing.
 		addr := stripPrefix(row.Address)
@@ -151,7 +151,7 @@ func decodeReservations(raw json.RawMessage) []map[string]any {
 // classifyOne walks the per-reservation matcher Python runs at
 // services/dhcp_reconcile.py:131-202. Split out of Reconcile so the
 // orchestrator stays under SonarCloud's cognitive-complexity ceiling.
-func classifyOne(r map[string]any, ipIndex map[string]dbq.DhcpReconcileIPRow, hasSubnet bool) Entry {
+func classifyOne(r map[string]any, ipIndex map[string]dbq.ListIPAddressesInSubnetForReconcileRow, hasSubnet bool) Entry {
 	identifier := firstNonEmpty(stringField(r, "mac"), stringField(r, "duid"))
 	rawIP := stringField(r, "ip")
 	norm, parsable := normalizeIP(rawIP)
@@ -207,7 +207,7 @@ func classifyOne(r map[string]any, ipIndex map[string]dbq.DhcpReconcileIPRow, ha
 // DUID on the reservation diverges from the lease's. Either-side-nil
 // → skip (don't false-alarm on missing data). Mirrors Python at
 // lines 163-194.
-func checkBindingMismatch(r map[string]any, match dbq.DhcpReconcileIPRow) (string, bool) {
+func checkBindingMismatch(r map[string]any, match dbq.ListIPAddressesInSubnetForReconcileRow) (string, bool) {
 	if resMac, rowMac := normalizeMac(stringField(r, "mac")), normalizeMac(deref(match.DhcpMac)); resMac != "" && rowMac != "" && resMac != rowMac {
 		return fmt.Sprintf("reservation expects mac=%s but IPAddress has mac=%s", resMac, rowMac), false
 	}

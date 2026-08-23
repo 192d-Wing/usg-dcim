@@ -30,21 +30,21 @@ import (
 // missing, parse error) belong in diff_test.go where the per-scope
 // fakeQ already covers them.
 type bulkFakeQ struct {
-	all      []dbq.DhcpScopeIDAndPriorDriftRow
+	all      []dbq.ListAllScopeIDsAndPriorDriftForServerRow
 	allErr   error
-	scopes   map[uuid.UUID]dbq.DhcpScopeForPushRow
+	scopes   map[uuid.UUID]dbq.GetDhcpScopeForPushRow
 	writes   map[uuid.UUID]dbq.WriteDhcpScopeDiffStateParams
 	allCalls int
 }
 
-func (f *bulkFakeQ) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.DhcpScopeIDAndPriorDriftRow, error) {
+func (f *bulkFakeQ) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.ListAllScopeIDsAndPriorDriftForServerRow, error) {
 	f.allCalls++
 	return f.all, f.allErr
 }
-func (f *bulkFakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
+func (f *bulkFakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
 	r, ok := f.scopes[id]
 	if !ok {
-		return dbq.DhcpScopeForPushRow{}, pgx.ErrNoRows
+		return dbq.GetDhcpScopeForPushRow{}, pgx.ErrNoRows
 	}
 	return r, nil
 }
@@ -55,8 +55,8 @@ func (f *bulkFakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.Dh
 // circuit (Kea-side is unreachable before either lookup fires). They
 // return ErrNoRows so any future test reaching the full diff path
 // fails loudly rather than silently navigating into a nil row.
-func (f *bulkFakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
-	return dbq.DhcpServerForPushRow{}, pgx.ErrNoRows
+func (f *bulkFakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
+	return dbq.GetDhcpServerForPushRow{}, pgx.ErrNoRows
 }
 func (f *bulkFakeQ) GetDhcpScopeTemplateForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeTemplate, error) {
 	return dbq.DhcpScopeTemplate{}, pgx.ErrNoRows
@@ -68,14 +68,14 @@ func (f *bulkFakeQ) WriteDhcpScopeDiffState(_ context.Context, arg dbq.WriteDhcp
 
 func newBulkDiffFake(_ uuid.UUID) *bulkFakeQ {
 	return &bulkFakeQ{
-		scopes: map[uuid.UUID]dbq.DhcpScopeForPushRow{},
+		scopes: map[uuid.UUID]dbq.GetDhcpScopeForPushRow{},
 		writes: map[uuid.UUID]dbq.WriteDhcpScopeDiffStateParams{},
 	}
 }
 
 func seedNeverPushedScope(f *bulkFakeQ, serverID uuid.UUID, prefix string) uuid.UUID {
 	id := uuid.New()
-	f.scopes[id] = dbq.DhcpScopeForPushRow{
+	f.scopes[id] = dbq.GetDhcpScopeForPushRow{
 		ID: id, DhcpServerID: serverID, IPFamily: 4, Prefix: prefix,
 		PoolsJSON: json.RawMessage(`[]`), PdPoolsJSON: json.RawMessage(`[]`),
 		OptionsJSON: json.RawMessage(`[]`), ReservationsJSON: json.RawMessage(`[]`),
@@ -86,7 +86,7 @@ func seedNeverPushedScope(f *bulkFakeQ, serverID uuid.UUID, prefix string) uuid.
 }
 
 func builderForBulk() KeaClientBuilder {
-	return func(_ dbq.DhcpServerForPushRow) KeaClient {
+	return func(_ dbq.GetDhcpServerForPushRow) KeaClient {
 		// never_pushed scopes never reach the Kea RPC, so the stub
 		// methods can panic — calling them is a test bug.
 		return panicKea{}
@@ -141,7 +141,7 @@ func TestDiffAllScopes_ColdStart_EveryResultIsATransition(t *testing.T) {
 	f := newBulkDiffFake(serverID)
 	id1 := seedNeverPushedScope(f, serverID, "10.0.0.0/24")
 	id2 := seedNeverPushedScope(f, serverID, "10.0.1.0/24")
-	f.all = []dbq.DhcpScopeIDAndPriorDriftRow{
+	f.all = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{
 		{ID: id1, Prefix: "10.0.0.0/24", LastDiffStatus: nil},
 		{ID: id2, Prefix: "10.0.1.0/24", LastDiffStatus: nil},
 	}
@@ -187,7 +187,7 @@ func TestDiffAllScopes_MixedPrior_OnlyChangedEmitTransitions(t *testing.T) {
 	id3 := seedNeverPushedScope(f, serverID, "10.0.2.0/24") // prior=in_sync → transition to never_pushed
 	priorMatching := string(StatusNeverPushed)
 	priorOther := string(StatusInSync)
-	f.all = []dbq.DhcpScopeIDAndPriorDriftRow{
+	f.all = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{
 		{ID: id1, Prefix: "10.0.0.0/24", LastDiffStatus: nil},
 		{ID: id2, Prefix: "10.0.1.0/24", LastDiffStatus: &priorMatching},
 		{ID: id3, Prefix: "10.0.2.0/24", LastDiffStatus: &priorOther},
@@ -221,7 +221,7 @@ func TestDiffAllScopes_NoChange_EmitsNoTransitions(t *testing.T) {
 	f := newBulkDiffFake(serverID)
 	id := seedNeverPushedScope(f, serverID, "10.0.0.0/24")
 	prior := string(StatusNeverPushed)
-	f.all = []dbq.DhcpScopeIDAndPriorDriftRow{{ID: id, LastDiffStatus: &prior}}
+	f.all = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{{ID: id, LastDiffStatus: &prior}}
 	r, err := DiffAllScopes(context.Background(), f, builderForBulk(), serverID)
 	if err != nil {
 		t.Fatal(err)
@@ -236,7 +236,7 @@ func TestDiffAllScopes_PersistDiffStateCalledPerScope(t *testing.T) {
 	f := newBulkDiffFake(serverID)
 	id1 := seedNeverPushedScope(f, serverID, "10.0.0.0/24")
 	id2 := seedNeverPushedScope(f, serverID, "10.0.1.0/24")
-	f.all = []dbq.DhcpScopeIDAndPriorDriftRow{{ID: id1}, {ID: id2}}
+	f.all = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{{ID: id1}, {ID: id2}}
 	_, err := DiffAllScopes(context.Background(), f, builderForBulk(), serverID)
 	if err != nil {
 		t.Fatal(err)
@@ -245,8 +245,12 @@ func TestDiffAllScopes_PersistDiffStateCalledPerScope(t *testing.T) {
 		t.Fatalf("persist writes = %d, want 2", len(f.writes))
 	}
 	for id, w := range f.writes {
-		if w.LastDiffStatus != string(StatusNeverPushed) {
-			t.Errorf("write[%s].status = %q, want never_pushed", id, w.LastDiffStatus)
+		if w.LastDiffStatus == nil || *w.LastDiffStatus != string(StatusNeverPushed) {
+			var got string
+			if w.LastDiffStatus != nil {
+				got = *w.LastDiffStatus
+			}
+			t.Errorf("write[%s].status = %q, want never_pushed", id, got)
 		}
 	}
 }
@@ -255,7 +259,7 @@ func TestDiffAllScopes_TotalAndServerIDMatchPython(t *testing.T) {
 	serverID := uuid.New()
 	f := newBulkDiffFake(serverID)
 	id := seedNeverPushedScope(f, serverID, "10.0.0.0/24")
-	f.all = []dbq.DhcpScopeIDAndPriorDriftRow{{ID: id}}
+	f.all = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{{ID: id}}
 	r, err := DiffAllScopes(context.Background(), f, builderForBulk(), serverID)
 	if err != nil {
 		t.Fatal(err)

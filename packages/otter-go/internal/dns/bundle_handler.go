@@ -40,21 +40,21 @@ import (
 // needs. Declared narrow so the test fake doesn't have to implement
 // the full Querier surface.
 type bundleQuerier interface {
-	GetDnsServer(ctx context.Context, id uuid.UUID) (dbq.DnsServer, error)
+	GetDnsServer(ctx context.Context, id uuid.UUID) (dbq.GetDnsServerRow, error)
 	ListDnsZonesByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsZone, error)
-	ListDnsRecordsByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsRecordForBundle, error)
+	ListDnsRecordsByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error)
 	ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, fabricID uuid.UUID) ([]uuid.UUID, error)
 	GetEnabledDnsCatalogZoneByFabric(ctx context.Context, fabricID uuid.UUID) (dbq.DnsCatalogZone, error)
-	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error)
-	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKeyRow, error)
+	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error)
+	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKey, error)
 	ListDnsViewsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsView, error)
 
 	// Recursive bundle (PR 35).
 	ListApexZoneNamesByFabric(ctx context.Context, fabricID uuid.UUID) ([]string, error)
 	GetSameSiteAuthUnicastIP(ctx context.Context, siteID uuid.UUID) (string, error)
-	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsForwarderRow, error)
-	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.BlocklistForBundleRow, error)
-	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.FabricForRecursiveBundle, error)
+	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error)
+	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error)
+	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error)
 	GetSystemSetting(ctx context.Context, key string) (dbq.SystemSetting, error)
 }
 
@@ -108,7 +108,7 @@ func loadAuthBundleInput(ctx context.Context, q bundleQuerier, server dbq.DnsSer
 	if err != nil {
 		return in, err
 	}
-	byZone := make(map[uuid.UUID][]dbq.DnsRecordForBundle, len(zones))
+	byZone := make(map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow, len(zones))
 	for _, r := range records {
 		byZone[r.ZoneID] = append(byZone[r.ZoneID], r)
 	}
@@ -197,7 +197,7 @@ func (h *Handler) bundleHandlerWith(w http.ResponseWriter, r *http.Request, q bu
 		mapErr(w, err, "dns server not found")
 		return
 	}
-	bundle, err := h.buildBundleForRole(r, q, server)
+	bundle, err := h.buildBundleForRole(r, q, dbq.DnsServer(server))
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

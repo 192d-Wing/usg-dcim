@@ -1,7 +1,6 @@
 -- ===== Overlays =====
 -- name: ListOverlays :many
-SELECT id, fabric_id, name, kind::text AS kind, udp_port, mtu,
-       underlay_vrf_id, description, created_at, updated_at
+SELECT *
 FROM overlays
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
@@ -19,8 +18,7 @@ WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
 -- so a single query covers the Python list_vnis branches. PR 56 adds
 -- the scope_fabric_ids subquery on the same join.
 -- name: ListVnis :many
-SELECT id, overlay_id, vni, kind::text AS kind, name, description,
-       vlan_id, evpn_route_target, vrf_id, created_at, updated_at
+SELECT *
 FROM vnis
 WHERE (sqlc.narg(overlay_id)::uuid IS NULL OR overlay_id = sqlc.narg(overlay_id))
   AND (sqlc.narg(fabric_id)::uuid  IS NULL OR overlay_id IN (
@@ -47,7 +45,7 @@ WHERE (sqlc.narg(overlay_id)::uuid IS NULL OR overlay_id = sqlc.narg(overlay_id)
 
 -- ===== VTEPs =====
 -- name: ListVteps :many
-SELECT id, overlay_id, asset_id, host(loopback_ip) AS loopback_ip,
+SELECT id, overlay_id, asset_id, CASE WHEN loopback_ip IS NULL THEN NULL ELSE host(loopback_ip) END AS loopback_ip,
        role::text AS role, description, created_at, updated_at
 FROM vteps
 WHERE (sqlc.narg(overlay_id)::uuid IS NULL OR overlay_id = sqlc.narg(overlay_id))

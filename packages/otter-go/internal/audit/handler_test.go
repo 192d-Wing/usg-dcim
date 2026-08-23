@@ -20,7 +20,7 @@ type fakeQ struct {
 	last      dbq.ListAuditLogParams
 	lastCount dbq.CountAuditLogParams
 	actions   []string
-	lastActs  dbq.ListAuditActionsParams
+	lastActs  []uuid.UUID
 	expandIDs []uuid.UUID // what ListSiteIDsForExpansion returns
 	expandErr error
 	expandArg dbq.ListSiteIDsForExpansionParams
@@ -44,9 +44,9 @@ func (f *fakeQ) CountAuditLog(_ context.Context, a dbq.CountAuditLogParams) (int
 	f.lastCount = a
 	return 0, nil
 }
-func (f *fakeQ) ListAuditActions(_ context.Context, a dbq.ListAuditActionsParams) ([]string, error) {
+func (f *fakeQ) ListAuditActions(_ context.Context, scopeSiteIds []uuid.UUID) ([]string, error) {
 	f.listActionsCalled = true
-	f.lastActs = a
+	f.lastActs = scopeSiteIds
 	return f.actions, nil
 }
 func (f *fakeQ) ListSiteIDsForExpansion(_ context.Context, a dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error) {
@@ -309,8 +309,8 @@ func TestListActions_ScopedThreadsSiteIDs(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)
 	}
-	if !uuidSetEqual(f.lastActs.ScopeSiteIds, []uuid.UUID{siteA}) {
-		t.Errorf("expected scope_site_ids=[siteA], got %v", f.lastActs.ScopeSiteIds)
+	if !uuidSetEqual(f.lastActs, []uuid.UUID{siteA}) {
+		t.Errorf("expected scope_site_ids=[siteA], got %v", f.lastActs)
 	}
 	if !uuidSetEqual(f.expandArg.DirectSiteIds, []uuid.UUID{siteA}) {
 		t.Errorf("expansion DirectSiteIds = %v, want [siteA]", f.expandArg.DirectSiteIds)

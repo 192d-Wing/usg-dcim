@@ -105,7 +105,7 @@ func (h *Handler) getFreeSpaceInSubnets(w http.ResponseWriter, r *http.Request) 
 	}
 	// Family pre-filter — done before the address fetch so we don't
 	// pull addresses for subnets we'll drop anyway.
-	filtered := make([]dbq.SubnetForFreeSpaceRow, 0, len(subnets))
+	filtered := make([]dbq.ListSubnetsForFreeSpaceRow, 0, len(subnets))
 	for _, s := range subnets {
 		if familyMatches(s.Prefix, family) {
 			filtered = append(filtered, s)
@@ -272,7 +272,7 @@ func (h *Handler) getFreeSpacePrefixes(w http.ResponseWriter, r *http.Request) {
 	}
 	// Family pre-filter before the bulk subnet fetch — skip
 	// children of supernets we'd drop anyway.
-	keep := make([]dbq.SupernetForCarverRow, 0, len(supernets))
+	keep := make([]dbq.ListSupernetsForCarverRow, 0, len(supernets))
 	for _, s := range supernets {
 		if familyMatches(s.Prefix, family) {
 			keep = append(keep, s)

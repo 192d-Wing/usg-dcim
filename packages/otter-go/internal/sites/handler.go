@@ -89,7 +89,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Majcom:         strPtr(q.Get("majcom")),
 		Enclave:        strPtr(q.Get("enclave")),
 		LifecycleState: strPtr(q.Get("lifecycle_state")),
-		SiteIds:        scopeSiteIds,
+		SiteIDs:        scopeSiteIds,
 	}
 	if rid := q.Get("region_id"); rid != "" {
 		u, err := uuid.Parse(rid)
@@ -120,7 +120,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		Enclave:        params.Enclave,
 		OrganizationID: params.OrganizationID,
 		LifecycleState: params.LifecycleState,
-		SiteIds:        scopeSiteIds,
+		SiteIDs:        scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)

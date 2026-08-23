@@ -45,7 +45,7 @@ type BundleResult struct {
 type AuthBundleInput struct {
 	Server            dbq.DnsServer
 	Zones             []dbq.DnsZone
-	RecordsByZone     map[uuid.UUID][]dbq.DnsRecordForBundle
+	RecordsByZone     map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow
 	UnhealthyCheckIDs map[uuid.UUID]struct{}
 	ExtraLinesByZone  map[uuid.UUID][]string
 	// DNSSEC: BIND key-file basenames per zone name (for Corefile
@@ -164,17 +164,17 @@ func AssembleAuthBundle(in AuthBundleInput) (BundleResult, error) {
 // render_zone_file L802), then converts the bundle-record shape
 // to the renderer-record shape the existing renderZoneFile accepts.
 func filterRecordsForBundle(
-	records []dbq.DnsRecordForBundle,
+	records []dbq.ListDnsRecordsByZoneIDsRow,
 	unhealthy map[uuid.UUID]struct{},
-) []dbq.DnsRecordForRender {
-	out := make([]dbq.DnsRecordForRender, 0, len(records))
+) []dbq.ListAllRecordsInZoneRow {
+	out := make([]dbq.ListAllRecordsInZoneRow, 0, len(records))
 	for _, r := range records {
 		if r.HealthCheckID != nil {
 			if _, hit := unhealthy[*r.HealthCheckID]; hit {
 				continue
 			}
 		}
-		out = append(out, dbq.DnsRecordForRender{
+		out = append(out, dbq.ListAllRecordsInZoneRow{
 			ID: r.ID, Name: r.Name, Type: r.Type, TTL: r.TTL, Data: r.Data,
 		})
 	}
@@ -188,7 +188,7 @@ func filterRecordsForBundle(
 // (services/dns.py L824-L827).
 func renderZoneFileWithExtras(
 	zone dbq.DnsZone,
-	records []dbq.DnsRecordForRender,
+	records []dbq.ListAllRecordsInZoneRow,
 	extraLines []string,
 ) (string, error) {
 	base, err := renderZoneFile(zone, records)

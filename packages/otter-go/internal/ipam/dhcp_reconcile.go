@@ -39,7 +39,7 @@ func (h *Handler) reconcileDhcpScope(w http.ResponseWriter, r *http.Request) {
 	// (every reservation falls into unbacked with an explanatory
 	// note), but skipping the SELECT keeps the cron-style polling
 	// pattern cheap on never-linked scopes.
-	var ipRows []dbq.DhcpReconcileIPRow
+	var ipRows []dbq.ListIPAddressesInSubnetForReconcileRow
 	if scope.SubnetID != nil {
 		rows, err := h.Q.ListIPAddressesInSubnetForReconcile(r.Context(), *scope.SubnetID)
 		if err != nil {
@@ -77,7 +77,7 @@ func (h *Handler) reconcileSyncDhcpScope(w http.ResponseWriter, r *http.Request)
 		mapErr(w, err, errDhcpScopeNotFoundCRUD)
 		return
 	}
-	var ipRows []dbq.DhcpReconcileIPRow
+	var ipRows []dbq.ListIPAddressesInSubnetForReconcileRow
 	if scope.SubnetID != nil {
 		rows, err := h.Q.ListIPAddressesInSubnetForReconcile(r.Context(), *scope.SubnetID)
 		if err != nil {

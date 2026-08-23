@@ -18,8 +18,8 @@ import (
 // were written and which were no-op'd.
 type fakeQ struct {
 	serverIDs []uuid.UUID
-	servers   map[uuid.UUID]dbq.DhcpServerBundleRow
-	scopes    map[uuid.UUID][]dbq.DhcpScope
+	servers   map[uuid.UUID]dbq.GetDhcpServerBundleRowRow
+	scopes    map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow
 	templates map[uuid.UUID]dbq.DhcpScopeTemplate
 
 	listErr      error
@@ -34,13 +34,13 @@ func (f *fakeQ) ListEnabledDhcpServerIDs(_ context.Context) ([]uuid.UUID, error)
 	}
 	return f.serverIDs, nil
 }
-func (f *fakeQ) GetDhcpServerBundleRow(_ context.Context, id uuid.UUID) (dbq.DhcpServerBundleRow, error) {
+func (f *fakeQ) GetDhcpServerBundleRow(_ context.Context, id uuid.UUID) (dbq.GetDhcpServerBundleRowRow, error) {
 	if err, ok := f.getErrFor[id]; ok {
-		return dbq.DhcpServerBundleRow{}, err
+		return dbq.GetDhcpServerBundleRowRow{}, err
 	}
 	return f.servers[id], nil
 }
-func (f *fakeQ) ListDhcpScopesForBundle(_ context.Context, id uuid.UUID) ([]dbq.DhcpScope, error) {
+func (f *fakeQ) ListDhcpScopesForBundle(_ context.Context, id uuid.UUID) ([]dbq.ListDhcpScopesForBundleRow, error) {
 	return f.scopes[id], nil
 }
 func (f *fakeQ) ListDhcpScopeTemplatesByIDs(_ context.Context, ids []uuid.UUID) ([]dbq.DhcpScopeTemplate, error) {
@@ -96,11 +96,11 @@ func TestRun_FreshlyRendersAndWrites(t *testing.T) {
 	srvID := uuid.New()
 	q := &fakeQ{
 		serverIDs: []uuid.UUID{srvID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			srvID: {ID: srvID, FabricID: uuid.New(),
 				BaseConfig: json.RawMessage(`{"dhcp4":{"interfaces-config":{"interfaces":["eth0"]}}}`)},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{srvID: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{srvID: nil},
 	}
 	j := &Job{Q: q}
 	out, err := j.Run(context.Background())
@@ -113,8 +113,8 @@ func TestRun_FreshlyRendersAndWrites(t *testing.T) {
 	if len(q.writes) != 1 || q.writes[0].ID != srvID {
 		t.Fatalf("expected one write for serverID=%s; got %+v", srvID, q.writes)
 	}
-	if q.writes[0].BundleCacheEtag == "" {
-		t.Errorf("etag should be populated; got %q", q.writes[0].BundleCacheEtag)
+	if q.writes[0].BundleCacheEtag == nil || *q.writes[0].BundleCacheEtag == "" {
+		t.Errorf("etag should be populated; got %v", q.writes[0].BundleCacheEtag)
 	}
 	if len(q.writes[0].BundleCacheJSON) == 0 {
 		t.Errorf("JSON should be populated; got empty")
@@ -139,19 +139,22 @@ func TestRun_NoChangeTick_SkipsWrite(t *testing.T) {
 	// zero writes.
 	q1 := &fakeQ{
 		serverIDs: []uuid.UUID{srvID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			srvID: {ID: srvID, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`)},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{srvID: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{srvID: nil},
 	}
 	if _, err := (&Job{Q: q1}).Run(context.Background()); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	stableEtag := q1.writes[0].BundleCacheEtag
+	if q1.writes[0].BundleCacheEtag == nil {
+		t.Fatal("first run wrote a nil etag")
+	}
+	stableEtag := *q1.writes[0].BundleCacheEtag
 	stableJSON := q1.writes[0].BundleCacheJSON
 	q2 := &fakeQ{
 		serverIDs: []uuid.UUID{srvID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			// Seed BOTH cache columns so the no-change optimization
 			// guard (etag-match AND json-non-empty) actually fires.
 			// Without the JSON seed, the guard would fall through and
@@ -160,7 +163,7 @@ func TestRun_NoChangeTick_SkipsWrite(t *testing.T) {
 				BundleCacheEtag: &stableEtag,
 				BundleCacheJSON: stableJSON},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{srvID: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{srvID: nil},
 	}
 	out, err := (&Job{Q: q2}).Run(context.Background())
 	if err != nil {
@@ -189,27 +192,30 @@ func TestRun_EtagMatchButJSONEmpty_ForcesRewrite(t *testing.T) {
 	// First, capture what the etag would be for an empty bundle.
 	q1 := &fakeQ{
 		serverIDs: []uuid.UUID{srvID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			srvID: {ID: srvID, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`)},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{srvID: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{srvID: nil},
 	}
 	if _, err := (&Job{Q: q1}).Run(context.Background()); err != nil {
 		t.Fatalf("first run: %v", err)
 	}
-	knownEtag := q1.writes[0].BundleCacheEtag
+	if q1.writes[0].BundleCacheEtag == nil {
+		t.Fatal("first run wrote a nil etag")
+	}
+	knownEtag := *q1.writes[0].BundleCacheEtag
 
 	// Now seed the row with that etag but no JSON, and confirm
 	// the cron re-writes anyway.
 	q2 := &fakeQ{
 		serverIDs: []uuid.UUID{srvID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			srvID: {ID: srvID, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`),
 				BundleCacheEtag: &knownEtag,
 				BundleCacheJSON: nil, // <-- half-baked state
 			},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{srvID: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{srvID: nil},
 	}
 	out, err := (&Job{Q: q2}).Run(context.Background())
 	if err != nil {
@@ -231,11 +237,11 @@ func TestRun_RespectsContextCancellation(t *testing.T) {
 	srvID1, srvID2 := uuid.New(), uuid.New()
 	q := &fakeQ{
 		serverIDs: []uuid.UUID{srvID1, srvID2},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			srvID1: {ID: srvID1, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`)},
 			srvID2: {ID: srvID2, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`)},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{srvID1: nil, srvID2: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{srvID1: nil, srvID2: nil},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before Run
@@ -261,10 +267,10 @@ func TestRun_PerServerErrorDoesNotStopLoop(t *testing.T) {
 	goodID := uuid.New()
 	q := &fakeQ{
 		serverIDs: []uuid.UUID{badID, goodID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			goodID: {ID: goodID, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`)},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{goodID: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{goodID: nil},
 		getErrFor: map[uuid.UUID]error{
 			badID: errors.New("simulated transient pgx error"),
 		},
@@ -293,10 +299,10 @@ func TestRun_WriteFailureLoggedAndContinues(t *testing.T) {
 	srvID := uuid.New()
 	q := &fakeQ{
 		serverIDs: []uuid.UUID{srvID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			srvID: {ID: srvID, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`)},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{srvID: nil},
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{srvID: nil},
 		writeErrFor: map[uuid.UUID]error{
 			srvID: errors.New("write conflict"),
 		},
@@ -321,10 +327,10 @@ func TestRun_TemplateBulkLoadDedupes(t *testing.T) {
 	kid1, kid2 := int32(1), int32(2)
 	q := &fakeQ{
 		serverIDs: []uuid.UUID{srvID},
-		servers: map[uuid.UUID]dbq.DhcpServerBundleRow{
+		servers: map[uuid.UUID]dbq.GetDhcpServerBundleRowRow{
 			srvID: {ID: srvID, FabricID: uuid.New(), BaseConfig: json.RawMessage(`{}`)},
 		},
-		scopes: map[uuid.UUID][]dbq.DhcpScope{
+		scopes: map[uuid.UUID][]dbq.ListDhcpScopesForBundleRow{
 			srvID: {
 				{ID: uuid.New(), DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24",
 					PoolsJSON: json.RawMessage(`[]`), KeaSubnetID: &kid1, TemplateID: &tplID, Enabled: true},

@@ -9,19 +9,13 @@ INSERT INTO assets (id, site_id, rack_id, parent_asset_id, name, hostname,
                     psu_count, port_count, mgmt_ip, mgmt_protocol, mgmt_port,
                     mgmt_credentials_ref, lifecycle_state, metadata_json,
                     created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5,
-        $6::asset_kind, $7, $8, $9, $10,
-        $11, COALESCE($12::int, 1), $13::asset_face, $14::asset_mount, $15::pdu_side,
-        $16, $17, $18, $19, $20,
-        $21, $22::lifecycle_state, COALESCE($23::jsonb, '{}'::jsonb),
+VALUES (gen_random_uuid(), sqlc.arg(site_id), sqlc.arg(rack_id), sqlc.arg(parent_asset_id), sqlc.arg(name), sqlc.arg(hostname),
+        sqlc.arg(kind)::asset_kind, sqlc.arg(manufacturer), sqlc.arg(model), sqlc.arg(serial), sqlc.arg(firmware),
+        sqlc.arg(rack_position_u), COALESCE(sqlc.narg(rack_units)::int, 1), sqlc.arg(face)::asset_face, sqlc.arg(mount)::asset_mount, sqlc.narg(pdu_side)::pdu_side,
+        sqlc.arg(psu_count), sqlc.arg(port_count), sqlc.arg(mgmt_ip), sqlc.arg(mgmt_protocol), sqlc.arg(mgmt_port),
+        sqlc.arg(mgmt_credentials_ref), sqlc.arg(lifecycle_state)::lifecycle_state, COALESCE(sqlc.narg(metadata_json)::jsonb, '{}'::jsonb),
         NOW(), NOW())
-RETURNING id, site_id, rack_id, parent_asset_id, name, hostname, kind::text AS kind,
-          manufacturer, model, serial, firmware,
-          rack_position_u, rack_units, face::text AS face, mount::text AS mount,
-          pdu_side::text AS pdu_side, psu_count, port_count,
-          mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-          lifecycle_state::text AS lifecycle_state, NULL::text AS install_date,
-          NULL::text AS warranty_expires, metadata_json, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateAsset :one
 -- Placement validation (u-grid fit, slot collision) is deferred — same
@@ -49,13 +43,7 @@ SET name           = COALESCE(sqlc.narg(name)::text, name),
     metadata_json  = COALESCE(sqlc.narg(metadata_json)::json, metadata_json),
     updated_at     = NOW()
 WHERE id = $1
-RETURNING id, site_id, rack_id, parent_asset_id, name, hostname, kind::text AS kind,
-          manufacturer, model, serial, firmware,
-          rack_position_u, rack_units, face::text AS face, mount::text AS mount,
-          pdu_side::text AS pdu_side, psu_count, port_count,
-          mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-          lifecycle_state::text AS lifecycle_state, NULL::text AS install_date,
-          NULL::text AS warranty_expires, metadata_json, created_at, updated_at;
+RETURNING *;
 
 -- ===== Decommission =====
 
@@ -90,13 +78,7 @@ UPDATE assets
 SET lifecycle_state = 'decommissioned'::lifecycle_state,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, site_id, rack_id, parent_asset_id, name, hostname, kind::text AS kind,
-          manufacturer, model, serial, firmware,
-          rack_position_u, rack_units, face::text AS face, mount::text AS mount,
-          pdu_side::text AS pdu_side, psu_count, port_count,
-          mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-          lifecycle_state::text AS lifecycle_state, NULL::text AS install_date,
-          NULL::text AS warranty_expires, metadata_json, created_at, updated_at;
+RETURNING *;
 
 -- ===== Cables =====
 -- name: CreateCable :one
@@ -107,8 +89,7 @@ INSERT INTO cables (id, site_id, a_asset_id, a_port, b_asset_id, b_port,
                     medium, color, length_m, label, face, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, $4, $5,
         $6, $7, $8, $9, $10, NOW(), NOW())
-RETURNING id, site_id, a_asset_id, a_port, b_asset_id, b_port,
-          medium, color, length_m, label, face, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteCable :exec
 DELETE FROM cables WHERE id = $1;
@@ -132,8 +113,7 @@ SET site_id    = COALESCE(sqlc.narg(site_id)::uuid,    site_id),
     face       = CASE WHEN sqlc.arg(face_set)::bool     THEN sqlc.narg(face)::text      ELSE face     END,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, site_id, a_asset_id, a_port, b_asset_id, b_port,
-          medium, color, length_m, label, face, created_at, updated_at;
+RETURNING *;
 
 -- name: GetAssetSiteID :one
 -- Lookup helper used by the cables handler to set site_id from the
@@ -145,13 +125,7 @@ SELECT site_id FROM assets WHERE id = $1;
 -- side means "no key, always insert" (matches Python: existing only
 -- when both fields are non-empty). Returns pgx.ErrNoRows on miss so
 -- the handler can branch into insert vs update.
-SELECT id, site_id, rack_id, parent_asset_id, name, hostname,
-       kind::text AS kind, manufacturer, model, serial, firmware,
-       rack_position_u, rack_units, face::text AS face, mount::text AS mount,
-       pdu_side::text AS pdu_side, psu_count, port_count,
-       mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref,
-       lifecycle_state::text AS lifecycle_state, install_date, warranty_expires,
-       metadata_json, created_at, updated_at
+SELECT *
 FROM assets
-WHERE manufacturer = $1 AND serial = $2
+WHERE manufacturer = sqlc.arg(manufacturer)::text AND serial = sqlc.arg(serial)::text
 LIMIT 1;

@@ -114,7 +114,7 @@ func pct(num, total int64) float64 {
 // weightedLatency computes the query-weighted average of a latency
 // field across samples. Samples with no queries contribute nothing.
 // extract returns the latency field; pass nil to skip the sample.
-func weightedLatency(samples []dbq.DnsMetricsSampleRow, extract func(dbq.DnsMetricsSampleRow) *float64) *float64 {
+func weightedLatency(samples []dbq.DnsServerMetricsSample, extract func(dbq.DnsServerMetricsSample) *float64) *float64 {
 	var num, den float64
 	for _, s := range samples {
 		v := extract(s)
@@ -131,7 +131,7 @@ func weightedLatency(samples []dbq.DnsMetricsSampleRow, extract func(dbq.DnsMetr
 	return &r
 }
 
-func qpsFromLastSample(s *dbq.DnsMetricsSampleRow) *float64 {
+func qpsFromLastSample(s *dbq.DnsServerMetricsSample) *float64 {
 	if s == nil || s.IntervalSeconds <= 0 {
 		return nil
 	}
@@ -139,13 +139,13 @@ func qpsFromLastSample(s *dbq.DnsMetricsSampleRow) *float64 {
 	return &q
 }
 
-func extractP50(s dbq.DnsMetricsSampleRow) *float64 { return s.P50Ms }
-func extractP95(s dbq.DnsMetricsSampleRow) *float64 { return s.P95Ms }
+func extractP50(s dbq.DnsServerMetricsSample) *float64 { return s.P50Ms }
+func extractP95(s dbq.DnsServerMetricsSample) *float64 { return s.P95Ms }
 
 // bucketSeries rolls per-server samples into `buckets` equal time
 // slices over the window. Each slice sums queries/error counts
 // across servers and averages p50/p95 weighted by query volume.
-func bucketSeries(samples []dbq.DnsMetricsSampleRow, minutes int, buckets int, now time.Time) []dashSeriesPoint {
+func bucketSeries(samples []dbq.DnsServerMetricsSample, minutes int, buckets int, now time.Time) []dashSeriesPoint {
 	if buckets <= 0 {
 		buckets = 24
 	}
@@ -162,7 +162,7 @@ func bucketSeries(samples []dbq.DnsMetricsSampleRow, minutes int, buckets int, n
 	for i := 0; i < buckets; i++ {
 		bStart := start.Add(time.Duration(sliceS*i) * time.Second)
 		bEnd := bStart.Add(time.Duration(sliceS) * time.Second)
-		var inSlice []dbq.DnsMetricsSampleRow
+		var inSlice []dbq.DnsServerMetricsSample
 		for _, s := range samples {
 			if !s.ObservedAt.Before(bStart) && s.ObservedAt.Before(bEnd) {
 				inSlice = append(inSlice, s)
@@ -255,7 +255,7 @@ func (h *Handler) dnsDashboard(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	samples, err := h.Q.ListDnsSamplesInWindow(r.Context(), cutoff, serverIDs)
+	samples, err := h.Q.ListDnsSamplesInWindow(r.Context(), dbq.ListDnsSamplesInWindowParams{Cutoff: cutoff, ServerIDs: serverIDs})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -264,7 +264,7 @@ func (h *Handler) dnsDashboard(w http.ResponseWriter, r *http.Request) {
 
 	// Latest sample per server — walking the sorted list once is
 	// cheaper than a per-server LIMIT 1 query.
-	latestPerServer := make(map[uuid.UUID]dbq.DnsMetricsSampleRow, len(servers))
+	latestPerServer := make(map[uuid.UUID]dbq.DnsServerMetricsSample, len(servers))
 	for _, s := range samples {
 		latestPerServer[s.ServerID] = s
 	}
@@ -293,9 +293,9 @@ func (h *Handler) dnsDashboard(w http.ResponseWriter, r *http.Request) {
 // ---- helpers split out for testability ----
 
 func buildGlobalKPIs(
-	samples []dbq.DnsMetricsSampleRow,
-	servers []dbq.DnsServerForDashboardRow,
-	zones []dbq.DnsZoneForDashboardRow,
+	samples []dbq.DnsServerMetricsSample,
+	servers []dbq.ListDnsServersForDashboardRow,
+	zones []dbq.ListDnsZonesForDashboardRow,
 	qpsNowPerServer map[uuid.UUID]*float64,
 	agCount int64,
 	minutes int,
@@ -325,9 +325,7 @@ func buildGlobalKPIs(
 	}
 	sitesActive := map[uuid.UUID]struct{}{}
 	for _, srv := range servers {
-		if srv.SiteID != nil {
-			sitesActive[*srv.SiteID] = struct{}{}
-		}
+		sitesActive[srv.SiteID] = struct{}{}
 	}
 	zonesSigned, zonesNsec3 := 0, 0
 	for _, z := range zones {
@@ -357,26 +355,21 @@ func buildGlobalKPIs(
 }
 
 func buildBySite(
-	samples []dbq.DnsMetricsSampleRow,
-	servers []dbq.DnsServerForDashboardRow,
+	samples []dbq.DnsServerMetricsSample,
+	servers []dbq.ListDnsServersForDashboardRow,
 	qpsNowPerServer map[uuid.UUID]*float64,
 ) []dashSitePanel {
 	// Group servers by site_id.
-	bySite := make(map[uuid.UUID][]dbq.DnsServerForDashboardRow)
+	bySite := make(map[uuid.UUID][]dbq.ListDnsServersForDashboardRow)
 	for _, srv := range servers {
-		if srv.SiteID == nil {
-			continue
-		}
-		bySite[*srv.SiteID] = append(bySite[*srv.SiteID], srv)
+		bySite[srv.SiteID] = append(bySite[srv.SiteID], srv)
 	}
 	// Group samples by server's site_id.
 	serverSite := make(map[uuid.UUID]uuid.UUID, len(servers))
 	for _, srv := range servers {
-		if srv.SiteID != nil {
-			serverSite[srv.ID] = *srv.SiteID
-		}
+		serverSite[srv.ID] = srv.SiteID
 	}
-	samplesPerSite := make(map[uuid.UUID][]dbq.DnsMetricsSampleRow)
+	samplesPerSite := make(map[uuid.UUID][]dbq.DnsServerMetricsSample)
 	for _, s := range samples {
 		if sid, ok := serverSite[s.ServerID]; ok {
 			samplesPerSite[sid] = append(samplesPerSite[sid], s)
@@ -412,7 +405,7 @@ func buildBySite(
 }
 
 func buildServerHealth(
-	servers []dbq.DnsServerForDashboardRow,
+	servers []dbq.ListDnsServersForDashboardRow,
 	qpsNowPerServer map[uuid.UUID]*float64,
 ) []dashServerHealth {
 	out := make([]dashServerHealth, 0, len(servers))
@@ -424,7 +417,7 @@ func buildServerHealth(
 			Name:             srv.Name,
 			Role:             srv.Role,
 			Engine:           engine,
-			SiteID:           srv.SiteID,
+			SiteID:           &srv.SiteID,
 			SiteName:         nil, // deferred (needs Site join)
 			LastRenderStatus: srv.LastRenderStatus,
 			LastRenderAt:     srv.LastRenderAt,

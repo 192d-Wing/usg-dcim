@@ -3,11 +3,7 @@
 -- (global caller); a non-NULL slice restricts the result to zones in the
 -- named fabrics. See auth.ScopedFabricFilter.
 -- name: ListDnsZones :many
-SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
-       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-       default_ttl, signed, zsk_rotation_days,
-       nsec3_salt, nsec3_iterations, nsec3_opt_out,
-       publish_cds, frozen, created_at, updated_at
+SELECT *
 FROM dns_zones
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(site_id)::uuid   IS NULL OR site_id   = sqlc.narg(site_id))
@@ -25,11 +21,7 @@ WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- name: GetDnsZone :one
-SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
-       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-       default_ttl, signed, zsk_rotation_days,
-       nsec3_salt, nsec3_iterations, nsec3_opt_out,
-       publish_cds, frozen, created_at, updated_at
+SELECT *
 FROM dns_zones
 WHERE id = $1;
 
@@ -46,7 +38,7 @@ SELECT id, zone_id, name, type::text AS type, ttl, data,
        health_check_id, view_id,
        created_at, updated_at
 FROM dns_records
-WHERE zone_id = ANY($1::uuid[])
+WHERE zone_id = ANY(sqlc.arg(zone_ids)::uuid[])
 ORDER BY zone_id, name, type;
 
 -- name: ListDnsViewsByFabric :many
@@ -54,7 +46,7 @@ ORDER BY zone_id, name, type;
 -- (narrowest first wins per CoreDNS view-plugin semantics). The
 -- bundle assembler iterates this list in order when emitting view-
 -- scoped server blocks.
-SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at
+SELECT *
 FROM dns_views
 WHERE fabric_id = $1
 ORDER BY priority ASC, name ASC;
@@ -93,14 +85,14 @@ WHERE fabric_id = $1;
 SELECT
     bl.id,
     bl.action::text AS action,
-    host(bl.sink_ipv4) AS sink_ipv4,
-    host(bl.sink_ipv6) AS sink_ipv6,
+    CASE WHEN bl.sink_ipv4 IS NULL THEN NULL ELSE host(bl.sink_ipv4) END AS sink_ipv4,
+    CASE WHEN bl.sink_ipv6 IS NULL THEN NULL ELSE host(bl.sink_ipv6) END AS sink_ipv6,
     COALESCE(
       (SELECT jsonb_agg(e.pattern ORDER BY e.pattern)
        FROM dns_blocklist_entries e
        WHERE e.blocklist_id = bl.id),
       '[]'::jsonb
-    ) AS patterns_json
+    )::jsonb AS patterns_json
 FROM dns_blocklists bl
 WHERE bl.fabric_id = $1
   AND bl.enabled = true;
@@ -124,7 +116,7 @@ WHERE id = $1;
 -- can have at most one catalog. Returns no-rows when the catalog
 -- is missing or disabled; bundle assembler skips catalog emission
 -- on either case.
-SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
+SELECT *
 FROM dns_catalog_zones
 WHERE fabric_id = $1 AND enabled = true;
 
@@ -143,11 +135,9 @@ WHERE fabric_id = $1
 -- uses this for both DNSSEC key-file emission and CDNSKEY/CDS
 -- appendix lines. Ordered (zone_id, role, key_tag) so per-zone
 -- slicing is contiguous.
-SELECT id, zone_id, catalog_id, role::text AS role,
-       algorithm::text AS algorithm, private_pem, public_key_b64,
-       key_tag, active_from, retired_at
+SELECT *
 FROM dns_keys
-WHERE zone_id = ANY($1::uuid[])
+WHERE zone_id = ANY(sqlc.arg(zone_ids)::uuid[])
 ORDER BY zone_id, role, key_tag;
 
 -- name: ListUnhealthyEnabledHealthChecksByFabric :many
@@ -163,18 +153,14 @@ WHERE fabric_id = $1
 -- Every non-frozen zone in a fabric, for the auth bundle. Excludes
 -- frozen zones (operators freeze a zone to take it off the air
 -- without deleting it).
-SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
-       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+SELECT *
 FROM dns_zones
 WHERE fabric_id = $1
   AND frozen = false
 ORDER BY name;
 
 -- name: ListDnsRecords :many
-SELECT id, zone_id, name, type::text AS type, ttl, data,
-       source::text AS source, ipam_address_id, created_at, updated_at
+SELECT *
 FROM dns_records
 WHERE (sqlc.narg(zone_id)::uuid IS NULL OR zone_id = sqlc.narg(zone_id))
   AND (sqlc.narg(type)::text    IS NULL OR type::text   = sqlc.narg(type))

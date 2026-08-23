@@ -13,8 +13,10 @@ INSERT INTO lir_requests (
     status, submitted_at, created_at, updated_at
 )
 VALUES (
-    gen_random_uuid(), $1, $2, $3, $4,
-    $5::smallint, $6::smallint, $7, $8, $9,
+    gen_random_uuid(), sqlc.arg(organization_id), sqlc.arg(requester_user_id),
+    sqlc.narg(pool_id), sqlc.narg(site_id),
+    sqlc.arg(ip_family)::smallint, sqlc.arg(prefix_length)::smallint,
+    sqlc.narg(purpose), sqlc.narg(classification), sqlc.arg(justification),
     'pending_approval', NOW(), NOW(), NOW()
 )
 RETURNING id, organization_id, requester_user_id, pool_id, site_id,

@@ -185,7 +185,7 @@ func classifyRemoveResponse(status int, body []byte) error {
 // assigned NetHandle on success. On failure the error is wrapped in
 // ErrTransient or ErrPermanent so the caller can choose retry vs
 // permanent-fail.
-func (c *Client) SubmitReassignDetailed(ctx context.Context, job dbq.ArinSubmitJobRow) (SubmitResult, error) {
+func (c *Client) SubmitReassignDetailed(ctx context.Context, job dbq.ClaimNextArinSubmitJobRow) (SubmitResult, error) {
 	if !c.cfg.Enabled {
 		return SubmitResult{}, fmt.Errorf("%w: arin integration disabled", ErrPermanent)
 	}
@@ -337,7 +337,7 @@ type pocXML struct {
 // ARIN rejects payloads without it.
 const netBlockNS = "http://www.arin.net/regrws/core/v1"
 
-func buildReassignDetailedXML(job dbq.ArinSubmitJobRow) ([]byte, error) {
+func buildReassignDetailedXML(job dbq.ClaimNextArinSubmitJobRow) ([]byte, error) {
 	// Derive start/end addresses + CIDR length from the prefix string.
 	start, end, cidr, err := parsePrefixRange(job.Prefix)
 	if err != nil {

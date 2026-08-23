@@ -38,7 +38,7 @@ func mkSplitZone(name string, fid uuid.UUID) dbq.DnsZone {
 func TestLoadSplitHorizon_NoViewBoundRecordsSkipsZone(t *testing.T) {
 	fid := uuid.New()
 	z := mkSplitZone("z.example.", fid)
-	recs := map[uuid.UUID][]dbq.DnsRecordForBundle{
+	recs := map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow{
 		z.ID: {{Name: "www", Type: "A", Data: []byte(`{"target":"10.0.0.1"}`)}},
 	}
 	q := &viewsFakeQ{byFabric: map[uuid.UUID][]dbq.DnsView{
@@ -57,7 +57,7 @@ func TestLoadSplitHorizon_EmitsDefaultAndPerViewFiles(t *testing.T) {
 	fid := uuid.New()
 	z := mkSplitZone("z.example.", fid)
 	viewID := uuid.New()
-	recs := map[uuid.UUID][]dbq.DnsRecordForBundle{
+	recs := map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow{
 		z.ID: {
 			{Name: "default-only", Type: "A", Data: []byte(`{"target":"10.0.0.1"}`)},
 			{Name: "internal-override", Type: "A", Data: []byte(`{"target":"10.0.0.2"}`), ViewID: &viewID},
@@ -105,7 +105,7 @@ func TestLoadSplitHorizon_NoViewsForFabricSkipsRender(t *testing.T) {
 	viewID := uuid.New()
 	// Record references a view but the fabric has no views configured
 	// (Python skips per-view rendering in this case).
-	recs := map[uuid.UUID][]dbq.DnsRecordForBundle{
+	recs := map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow{
 		z.ID: {{Name: "x", Type: "A", Data: []byte(`{"target":"10.0.0.1"}`), ViewID: &viewID}},
 	}
 	q := &viewsFakeQ{byFabric: map[uuid.UUID][]dbq.DnsView{}}
@@ -123,7 +123,7 @@ func TestLoadSplitHorizon_UnhealthyFilterApplies(t *testing.T) {
 	z := mkSplitZone("z.example.", fid)
 	viewID := uuid.New()
 	hcID := uuid.New()
-	recs := map[uuid.UUID][]dbq.DnsRecordForBundle{
+	recs := map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow{
 		z.ID: {
 			{Name: "ok", Type: "A", Data: []byte(`{"target":"10.0.0.1"}`), ViewID: &viewID},
 			{Name: "sick", Type: "A", Data: []byte(`{"target":"10.0.0.2"}`), ViewID: &viewID, HealthCheckID: &hcID},
@@ -147,7 +147,7 @@ func TestLoadSplitHorizon_UnhealthyFilterApplies(t *testing.T) {
 
 func TestFilterRecordsForView_NilKeepsNullViewOnly(t *testing.T) {
 	vid := uuid.New()
-	recs := []dbq.DnsRecordForBundle{
+	recs := []dbq.ListDnsRecordsByZoneIDsRow{
 		{Name: "null"},
 		{Name: "bound", ViewID: &vid},
 	}
@@ -160,7 +160,7 @@ func TestFilterRecordsForView_NilKeepsNullViewOnly(t *testing.T) {
 func TestFilterRecordsForView_ViewIDKeepsViewAndNull(t *testing.T) {
 	vid := uuid.New()
 	other := uuid.New()
-	recs := []dbq.DnsRecordForBundle{
+	recs := []dbq.ListDnsRecordsByZoneIDsRow{
 		{Name: "null"},
 		{Name: "this", ViewID: &vid},
 		{Name: "other", ViewID: &other},
@@ -205,7 +205,7 @@ func TestAssembleAuthBundle_SplitHorizonZoneSkipsDefaultRender(t *testing.T) {
 		Zones:  []dbq.DnsZone{z},
 		// View-bound records present so the assembler must skip the
 		// default render.
-		RecordsByZone: map[uuid.UUID][]dbq.DnsRecordForBundle{
+		RecordsByZone: map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow{
 			z.ID: {{Name: "x", Type: "A", Data: []byte(`{"target":"10.0.0.1"}`)}},
 		},
 		ViewsByZone: map[string][]ViewConfig{

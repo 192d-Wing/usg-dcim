@@ -30,7 +30,7 @@ type fakeFcQ struct {
 	siteAssets      []dbq.Asset
 	assetsByRackIDs []dbq.Asset
 	gotKwIDs        []uuid.UUID
-	kwRows          []dbq.KwHistoryRow
+	kwRows          []dbq.ListKwHistorySamplesRow
 	kwErr           error
 }
 
@@ -56,7 +56,7 @@ func (f *fakeFcQ) ListAssetsBySite(_ context.Context, _ uuid.UUID) ([]dbq.Asset,
 func (f *fakeFcQ) ListRacksBySite(_ context.Context, _ uuid.UUID) ([]dbq.Rack, error) {
 	return f.siteRacks, nil
 }
-func (f *fakeFcQ) ListKwHistorySamples(_ context.Context, arg dbq.ListKwHistorySamplesParams) ([]dbq.KwHistoryRow, error) {
+func (f *fakeFcQ) ListKwHistorySamples(_ context.Context, arg dbq.ListKwHistorySamplesParams) ([]dbq.ListKwHistorySamplesRow, error) {
 	f.gotKwIDs = arg.AssetIDs
 	return f.kwRows, f.kwErr
 }
@@ -181,10 +181,10 @@ func TestForecastRack_KwHappyPath(t *testing.T) {
 		rackAssets: []dbq.Asset{
 			{ID: pduID, RackID: &rkid, Kind: "pdu"},
 		},
-		kwRows: []dbq.KwHistoryRow{
-			{Day: now.Add(-4 * 24 * time.Hour), Metric: "pdu.input.kw", AvgV: floatPtrLocal(5.0)},
-			{Day: now.Add(-3 * 24 * time.Hour), Metric: "pdu.input.kw", AvgV: floatPtrLocal(6.0)},
-			{Day: now.Add(-2 * 24 * time.Hour), Metric: "pdu.input.kw", AvgV: floatPtrLocal(7.0)},
+		kwRows: []dbq.ListKwHistorySamplesRow{
+			{Day: now.Add(-4 * 24 * time.Hour), Metric: "pdu.input.kw", AvgV: 5.0},
+			{Day: now.Add(-3 * 24 * time.Hour), Metric: "pdu.input.kw", AvgV: 6.0},
+			{Day: now.Add(-2 * 24 * time.Hour), Metric: "pdu.input.kw", AvgV: 7.0},
 		},
 	}
 	code, body := doFc(t, mountFc(f), "/dashboards/forecast/racks/"+rkid.String())

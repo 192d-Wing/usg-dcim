@@ -21,9 +21,9 @@ func TestListUserAssignments_HappyPath(t *testing.T) {
 	roleID := uuid.New()
 	assignmentID := uuid.New()
 	f := &fakeQ{
-		assignments: []dbq.UserRoleRow{{ID: assignmentID, UserID: userID, RoleID: roleID}},
+		assignments: []dbq.UserRole{{ID: assignmentID, UserID: userID, RoleID: roleID}},
 		roleNamesByID: map[uuid.UUID]string{roleID: "viewer"},
-		scopesByAssignment: []dbq.RoleScopeRow{
+		scopesByAssignment: []dbq.RoleScope{
 			{ID: uuid.New(), AssignmentID: assignmentID, ScopeType: "site"},
 		},
 	}
@@ -48,7 +48,7 @@ func TestListUserAssignments_UnknownRoleFallback(t *testing.T) {
 	// Role row missing → role_name = "(unknown)" matches Python.
 	userID := uuid.New()
 	f := &fakeQ{
-		assignments:   []dbq.UserRoleRow{{ID: uuid.New(), UserID: userID, RoleID: uuid.New()}},
+		assignments:   []dbq.UserRole{{ID: uuid.New(), UserID: userID, RoleID: uuid.New()}},
 		roleNamesByID: map[uuid.UUID]string{},
 	}
 	rec := doReq(t, mount(f), "GET", "/admin/users/"+userID.String()+"/assignments", nil)
@@ -170,10 +170,10 @@ func TestCreateAssignment_RoleNotFoundIs404(t *testing.T) {
 
 func TestCreateAssignment_DuplicateIs409(t *testing.T) {
 	userID, roleID := uuid.New(), uuid.New()
-	existing := dbq.UserRoleRow{ID: uuid.New(), UserID: userID, RoleID: roleID}
+	existing := dbq.UserRole{ID: uuid.New(), UserID: userID, RoleID: roleID}
 	f := &fakeQ{
 		roleByID:      map[uuid.UUID]dbq.Role{roleID: {ID: roleID}},
-		dupAssignment: map[[2]uuid.UUID]dbq.UserRoleRow{{userID, roleID}: existing},
+		dupAssignment: map[[2]uuid.UUID]dbq.UserRole{{userID, roleID}: existing},
 	}
 	body, _ := json.Marshal(map[string]any{"user_id": userID, "role_id": roleID})
 	rec := doReq(t, mount(f), "POST", "/admin/assignments", body)
@@ -204,7 +204,7 @@ func TestCreateAssignment_RequiresUpdateCap(t *testing.T) {
 func TestDeleteAssignment_HappyPath(t *testing.T) {
 	id := uuid.New()
 	f := &fakeQ{
-		assignmentByID: map[uuid.UUID]dbq.UserRoleRow{id: {ID: id}},
+		assignmentByID: map[uuid.UUID]dbq.UserRole{id: {ID: id}},
 	}
 	rec := doReq(t, mount(f), "DELETE", "/admin/assignments/"+id.String(), nil)
 	if rec.Code != http.StatusNoContent {

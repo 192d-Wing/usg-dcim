@@ -157,7 +157,7 @@ type fakeSyncQ struct {
 	zone        dbq.DnsZone
 	zoneErr     error
 	revZones    []dbq.DnsZone
-	ips         []dbq.IPAddressForSyncRow
+	ips         []dbq.ListIPAddressesForSiteWithDnsNameRow
 	dropCount   int64
 	gotCreates  []dbq.CreateProjectedDnsRecordParams
 	gotDelete   bool
@@ -168,21 +168,21 @@ func (f *fakeSyncQ) GetDnsZone(_ context.Context, _ uuid.UUID) (dbq.DnsZone, err
 	return f.zone, f.zoneErr
 }
 
-func (f *fakeSyncQ) ListReverseZonesForSite(_ context.Context, _, _ uuid.UUID) ([]dbq.DnsZone, error) {
+func (f *fakeSyncQ) ListReverseZonesForSite(_ context.Context, _ dbq.ListReverseZonesForSiteParams) ([]dbq.DnsZone, error) {
 	return f.revZones, nil
 }
 
-func (f *fakeSyncQ) GetReverseZoneByName(_ context.Context, _, _ uuid.UUID, _ string) (dbq.DnsZone, error) {
+func (f *fakeSyncQ) GetReverseZoneByName(_ context.Context, _ dbq.GetReverseZoneByNameParams) (dbq.DnsZone, error) {
 	return dbq.DnsZone{}, pgx.ErrNoRows
 }
 
-func (f *fakeSyncQ) CreateReverseZone(_ context.Context, name string, _, _ uuid.UUID) (dbq.DnsZone, error) {
-	z := dbq.DnsZone{ID: uuid.New(), Name: name}
+func (f *fakeSyncQ) CreateReverseZone(_ context.Context, a dbq.CreateReverseZoneParams) (dbq.DnsZone, error) {
+	z := dbq.DnsZone{ID: uuid.New(), Name: a.Name}
 	f.revZones = append(f.revZones, z)
 	return z, nil
 }
 
-func (f *fakeSyncQ) ListIPAddressesForSiteWithDnsName(_ context.Context, _ uuid.UUID) ([]dbq.IPAddressForSyncRow, error) {
+func (f *fakeSyncQ) ListIPAddressesForSiteWithDnsName(_ context.Context, _ uuid.UUID) ([]dbq.ListIPAddressesForSiteWithDnsNameRow, error) {
 	return f.ips, nil
 }
 
@@ -219,7 +219,7 @@ func TestSyncFromIPAM_HappyPath(t *testing.T) {
 	f := &fakeSyncQ{
 		zone: dbq.DnsZone{ID: zoneID, FabricID: fabricID, SiteID: &siteID,
 			Kind: "site", Name: "example.com"},
-		ips: []dbq.IPAddressForSyncRow{
+		ips: []dbq.ListIPAddressesForSiteWithDnsNameRow{
 			{ID: uuid.New(), Address: "10.0.0.5", Source: "static", DnsName: &dnsName},
 		},
 		dropCount: 4,
@@ -257,7 +257,7 @@ func TestSyncFromIPAM_DhcpSourceBecomesDDNS(t *testing.T) {
 	f := &fakeSyncQ{
 		zone: dbq.DnsZone{ID: zoneID, FabricID: uuid.New(), SiteID: &siteID,
 			Kind: "site", Name: "example.com"},
-		ips: []dbq.IPAddressForSyncRow{
+		ips: []dbq.ListIPAddressesForSiteWithDnsNameRow{
 			{ID: uuid.New(), Address: "10.0.0.10", Source: "dhcp", DnsName: &dnsName},
 		},
 	}
@@ -278,7 +278,7 @@ func TestSyncFromIPAM_AutoCreatesReverseZone(t *testing.T) {
 	f := &fakeSyncQ{
 		zone: dbq.DnsZone{ID: zoneID, FabricID: uuid.New(), SiteID: &siteID,
 			Kind: "site", Name: "example.com"},
-		ips: []dbq.IPAddressForSyncRow{
+		ips: []dbq.ListIPAddressesForSiteWithDnsNameRow{
 			{ID: uuid.New(), Address: "10.0.0.5", Source: "static", DnsName: &dnsName},
 		},
 	}
@@ -367,7 +367,7 @@ func TestSyncFromIPAM_ReusesExistingReverseZone(t *testing.T) {
 		zone: dbq.DnsZone{ID: zoneID, FabricID: fabricID, SiteID: &siteID,
 			Kind: "site", Name: "example.com"},
 		revZones: []dbq.DnsZone{existingRev},
-		ips: []dbq.IPAddressForSyncRow{
+		ips: []dbq.ListIPAddressesForSiteWithDnsNameRow{
 			{ID: uuid.New(), Address: "10.0.0.5", Source: "static", DnsName: &dnsName},
 		},
 	}

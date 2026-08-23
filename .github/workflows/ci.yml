@@ -89,18 +89,73 @@ jobs:
       - name: go test
         run: go test -race -count=1 ./...
 
-  # sqlc-drift was retired here. The job's gate was waiting on an
-  # alembic schema dump (packages/otter-go/db/schema.sql) that never
-  # landed; after the alembic→goose cutover (PR #277) the dump path
-  # is gone entirely. The drop-in replacement is a Postgres service
-  # container that runs `go run ./cmd/otter-go-migrate -cmd up`,
-  # `pg_dump`s the schema, and runs `sqlc generate` against that —
-  # but locking that down requires also regenerating every committed
-  # db/generated/*.sql.go file with current sqlc, which produces a
-  # very large diff that wants its own focused PR. Tracked as a
-  # follow-up. Until that lands, sqlc validation lives in the dev
-  # workflow only (run `task otter-go:sqlc` before committing query
-  # changes); CI no longer pretends to catch drift.
+  # sqlc drift gate: migrate a throwaway Postgres, dump its schema,
+  # regenerate db/generated with pinned sqlc, and fail on any diff.
+  # This catches the whole class of silent query/schema drift the
+  # hand-maintained era shipped (INSERTs into missing tables, casts
+  # to nonexistent enum types, unbound params) at PR time. Local
+  # workflow: the regeneration recipe is documented in
+  # packages/otter-go/db/sqlc.yaml.
+  sqlc-drift:
+    name: otter-go (sqlc drift gate)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Timescale build of PG16 — migration 00046 CREATE EXTENSIONs
+        # timescaledb, which plain postgres images don't carry.
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: dcim
+          POSTGRES_PASSWORD: dcim
+          POSTGRES_DB: dcim
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U dcim"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: packages/otter-go
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.5'
+          cache-dependency-path: packages/otter-go/go.sum
+
+      - name: Install sqlc (pinned)
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+      - name: Migrate
+        env:
+          DCIM_POSTGRES_DSN: postgres://dcim:dcim@localhost:5432/dcim
+        run: go run ./cmd/otter-go-migrate -cmd up
+
+      - name: Dump schema for sqlc
+        # Statement-aware filter drops the TimescaleDB continuous-
+        # aggregate artifacts sqlc cannot parse (no query references
+        # them). Same recipe as db/sqlc.yaml documents for local runs.
+        env:
+          PGPASSWORD: dcim
+        run: |
+          pg_dump -h localhost -U dcim -d dcim -s -O -x -n public \
+            | awk 'BEGIN{buf="";drop=0} { buf = buf $0 "\n";
+                if ($0 ~ /_timescaledb_internal|timescaledb\.continuous/) drop=1;
+                if ($0 ~ /;[[:space:]]*$/) { if (!drop) printf "%s", buf; buf=""; drop=0 } }
+                END { if (!drop) printf "%s", buf }' > db/schema.sql
+
+      - name: sqlc generate
+        working-directory: packages/otter-go/db
+        run: sqlc generate
+
+      - name: Fail on drift
+        run: |
+          if ! git diff --exit-code -- db/generated; then
+            echo "::error::db/generated is stale — run the regeneration recipe in db/sqlc.yaml and commit the result"
+            exit 1
+          fi
 
   wolf-coredns-nsec3sign:
     name: wolf/coredns-nsec3sign (build + test)

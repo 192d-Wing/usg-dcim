@@ -135,12 +135,12 @@ func TestFreeRuns_TieBrokenByStartU(t *testing.T) {
 // ---- ComputeRackCapacity / ComputeManyRackCapacity ----
 
 type fakeQ struct {
-	pduRows []dbq.PduKwTelemetryRow
+	pduRows []dbq.ListPduKwTelemetryRow
 	gotIDs  []uuid.UUID
 	err     error
 }
 
-func (f *fakeQ) ListPduKwTelemetry(_ context.Context, ids []uuid.UUID) ([]dbq.PduKwTelemetryRow, error) {
+func (f *fakeQ) ListPduKwTelemetry(_ context.Context, ids []uuid.UUID) ([]dbq.ListPduKwTelemetryRow, error) {
 	f.gotIDs = ids
 	if f.err != nil {
 		return nil, f.err
@@ -150,7 +150,7 @@ func (f *fakeQ) ListPduKwTelemetry(_ context.Context, ids []uuid.UUID) ([]dbq.Pd
 	for _, id := range ids {
 		idSet[id] = struct{}{}
 	}
-	var out []dbq.PduKwTelemetryRow
+	var out []dbq.ListPduKwTelemetryRow
 	for _, r := range f.pduRows {
 		if _, ok := idSet[r.AssetID]; ok {
 			out = append(out, r)
@@ -194,10 +194,10 @@ func TestComputeRackCapacity_KwRollupCombinesUnits(t *testing.T) {
 		{ID: pduB, Kind: "pdu"},
 	}
 	q := &fakeQ{
-		pduRows: []dbq.PduKwTelemetryRow{
-			{AssetID: pduA, Metric: "pdu.input.kw", LastValue: strPtr("2.5")},
+		pduRows: []dbq.ListPduKwTelemetryRow{
+			{AssetID: pduA, Metric: "pdu.input.kw", LastValue: floatPtr(2.5)},
 			// 1500W → 1.5 kW; 1.5 + 2.5 = 4.0 kW total.
-			{AssetID: pduB, Metric: "pdu.input.w", LastValue: strPtr("1500")},
+			{AssetID: pduB, Metric: "pdu.input.w", LastValue: floatPtr(1500)},
 		},
 	}
 	cap, err := ComputeRackCapacity(context.Background(), q, rack, assets)
@@ -218,8 +218,8 @@ func TestComputeRackCapacity_KwRollupCombinesUnits(t *testing.T) {
 // kw_max = 0 doesn't divide-by-zero; kw_pct stays nil.
 func TestComputeRackCapacity_KwMaxZeroAvoidsDivByZero(t *testing.T) {
 	rack := dbq.Rack{UHeight: 42, MaxKw: strPtr("0")}
-	q := &fakeQ{pduRows: []dbq.PduKwTelemetryRow{
-		{Metric: "pdu.input.kw", LastValue: strPtr("1.5")},
+	q := &fakeQ{pduRows: []dbq.ListPduKwTelemetryRow{
+		{Metric: "pdu.input.kw", LastValue: floatPtr(1.5)},
 	}}
 	cap, err := ComputeRackCapacity(context.Background(), q, rack, nil)
 	if err != nil {
@@ -258,9 +258,9 @@ func TestComputeManyRackCapacity_SingleTelemetryCall(t *testing.T) {
 		rA.ID: {{ID: pduA, Kind: "pdu"}},
 		rB.ID: {{ID: pduB, Kind: "pdu"}},
 	}
-	q := &fakeQ{pduRows: []dbq.PduKwTelemetryRow{
-		{AssetID: pduA, Metric: "pdu.input.kw", LastValue: strPtr("3.0")},
-		{AssetID: pduB, Metric: "pdu.input.kw", LastValue: strPtr("5.0")},
+	q := &fakeQ{pduRows: []dbq.ListPduKwTelemetryRow{
+		{AssetID: pduA, Metric: "pdu.input.kw", LastValue: floatPtr(3.0)},
+		{AssetID: pduB, Metric: "pdu.input.kw", LastValue: floatPtr(5.0)},
 	}}
 	out, err := ComputeManyRackCapacity(context.Background(), q, []dbq.Rack{rA, rB}, assetsByRack)
 	if err != nil {

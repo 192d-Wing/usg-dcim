@@ -44,7 +44,7 @@ func (f *fakeQ) UpdateRack(ctx context.Context, a dbq.UpdateRackParams) (dbq.Rac
 	}
 	return dbq.Rack{ID: a.ID}, nil
 }
-func (f *fakeQ) GetRackAssetsForShrinkCheck(_ context.Context, _ uuid.UUID) ([]dbq.RackPlacedAsset, error) {
+func (f *fakeQ) GetRackAssetsForShrinkCheck(_ context.Context, _ uuid.UUID) ([]dbq.GetRackAssetsForShrinkCheckRow, error) {
 	return nil, nil
 }
 func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {

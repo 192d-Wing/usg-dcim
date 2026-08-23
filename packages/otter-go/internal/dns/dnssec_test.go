@@ -107,7 +107,7 @@ func TestComputeDSRecord_ECDSAFixedVector(t *testing.T) {
 		pub[i] = byte(i + 1)
 	}
 	pubB64 := base64.StdEncoding.EncodeToString(pub)
-	key := dbq.DnsKeyRow{
+	key := dbq.DnsKey{
 		Role: "ksk", Algorithm: "ecdsap256sha256",
 		PublicKeyB64: pubB64, KeyTag: 12345,
 	}
@@ -132,7 +132,7 @@ func TestComputeDSRecord_ECDSAFixedVector(t *testing.T) {
 }
 
 func TestComputeDSRecord_RejectsUnsupportedAlgorithm(t *testing.T) {
-	key := dbq.DnsKeyRow{
+	key := dbq.DnsKey{
 		Role: "ksk", Algorithm: "unsupported-future", PublicKeyB64: "AAAA",
 	}
 	if _, err := computeDSRecord("example.com.", key); err == nil {
@@ -141,7 +141,7 @@ func TestComputeDSRecord_RejectsUnsupportedAlgorithm(t *testing.T) {
 }
 
 func TestComputeDSRecord_RejectsMalformedPublicKey(t *testing.T) {
-	key := dbq.DnsKeyRow{
+	key := dbq.DnsKey{
 		Role: "ksk", Algorithm: "ecdsap256sha256",
 		PublicKeyB64: "not-valid-base64!!!",
 	}
@@ -155,7 +155,7 @@ func TestComputeDSRecord_FQDNTrimmingMatchesPython(t *testing.T) {
 	// + add '.' → identical wire-name input).
 	pub := make([]byte, 64)
 	pubB64 := base64.StdEncoding.EncodeToString(pub)
-	key := dbq.DnsKeyRow{
+	key := dbq.DnsKey{
 		Role: "ksk", Algorithm: "ecdsap256sha256",
 		PublicKeyB64: pubB64, KeyTag: 1,
 	}
@@ -172,7 +172,7 @@ type fakeDnssecQ struct {
 	fakeQ
 	zone    dbq.DnsZone
 	zoneErr error
-	keys    []dbq.DnsKeyRow
+	keys    []dbq.DnsKey
 }
 
 func (f *fakeDnssecQ) GetDnsZone(_ context.Context, _ uuid.UUID) (dbq.DnsZone, error) {
@@ -192,7 +192,7 @@ func (f *fakeDnssecQ) SetDnsCatalogZoneSigned(_ context.Context, _ dbq.SetDnsCat
 	return nil
 }
 
-func (f *fakeDnssecQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeDnssecQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKey, error) {
 	return f.keys, nil
 }
 
@@ -206,13 +206,13 @@ func TestListZoneKeys_HappyPath(t *testing.T) {
 	id := uuid.New()
 	f := &fakeDnssecQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com"},
-		keys: []dbq.DnsKeyRow{{ID: uuid.New(), Role: "ksk", Algorithm: "ecdsap256sha256"}},
+		keys: []dbq.DnsKey{{ID: uuid.New(), Role: "ksk", Algorithm: "ecdsap256sha256"}},
 	}
 	rec := authed(t, mountDnssec(f), "GET", "/dns/zones/"+id.String()+"/keys", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d (body=%s)", rec.Code, rec.Body.String())
 	}
-	var out []dbq.DnsKeyRow
+	var out []dbq.DnsKey
 	_ = json.NewDecoder(rec.Body).Decode(&out)
 	if len(out) != 1 || out[0].Role != "ksk" {
 		t.Errorf("got %+v", out)
@@ -226,7 +226,7 @@ func TestListZoneKeys_PrivatePemNotInResponse(t *testing.T) {
 	id := uuid.New()
 	f := &fakeDnssecQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com"},
-		keys: []dbq.DnsKeyRow{{
+		keys: []dbq.DnsKey{{
 			ID: uuid.New(), Role: "ksk", PrivatePem: "SECRET-PEM-CONTENTS",
 		}},
 	}
@@ -262,7 +262,7 @@ func TestListZoneDsRecords_OnlyActiveKSK(t *testing.T) {
 	now := time.Now().UTC()
 	f := &fakeDnssecQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com"},
-		keys: []dbq.DnsKeyRow{
+		keys: []dbq.DnsKey{
 			{ID: uuid.New(), Role: "ksk", Algorithm: "ecdsap256sha256", PublicKeyB64: pubB64, KeyTag: 1},
 			{ID: uuid.New(), Role: "ksk", Algorithm: "ecdsap256sha256", PublicKeyB64: pubB64, KeyTag: 2, RetiredAt: &now},
 			{ID: uuid.New(), Role: "zsk", Algorithm: "ecdsap256sha256", PublicKeyB64: pubB64, KeyTag: 3},
@@ -284,7 +284,7 @@ func TestListZoneDsRecords_EmptyWhenNoActiveKSK(t *testing.T) {
 	now := time.Now().UTC()
 	f := &fakeDnssecQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com"},
-		keys: []dbq.DnsKeyRow{
+		keys: []dbq.DnsKey{
 			// All KSKs retired → no DS rows.
 			{Role: "ksk", Algorithm: "ecdsap256sha256", RetiredAt: &now},
 		},
@@ -307,7 +307,7 @@ func TestListZoneDsRecords_SkipsMalformedKeys(t *testing.T) {
 	pubB64 := base64.StdEncoding.EncodeToString(pub)
 	f := &fakeDnssecQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com"},
-		keys: []dbq.DnsKeyRow{
+		keys: []dbq.DnsKey{
 			{Role: "ksk", Algorithm: "ecdsap256sha256", PublicKeyB64: pubB64, KeyTag: 1},
 			{Role: "ksk", Algorithm: "ecdsap256sha256", PublicKeyB64: "garbage!!!", KeyTag: 2},
 		},

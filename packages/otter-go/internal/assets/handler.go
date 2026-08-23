@@ -27,7 +27,7 @@ type Querier interface {
 	CreateAsset(ctx context.Context, arg dbq.CreateAssetParams) (dbq.Asset, error)
 	UpdateAsset(ctx context.Context, arg dbq.UpdateAssetParams) (dbq.Asset, error)
 	SetAssetDecommissioned(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
-	FindAssetByManufacturerSerial(ctx context.Context, manufacturer, serial string) (dbq.Asset, error)
+	FindAssetByManufacturerSerial(ctx context.Context, arg dbq.FindAssetByManufacturerSerialParams) (dbq.Asset, error)
 	CountConsumerPowerDrops(ctx context.Context, assetID uuid.UUID) (int64, error)
 	CountPduPowerDrops(ctx context.Context, pduAssetID uuid.UUID) (int64, error)
 	ListDownstreamAssetNames(ctx context.Context, pduAssetID uuid.UUID) ([]string, error)
@@ -36,7 +36,7 @@ type Querier interface {
 
 	// Placement invariants (PR 51)
 	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
-	ListRackAssetsForPlacement(ctx context.Context, arg dbq.ListRackAssetsForPlacementParams) ([]dbq.RackPlacementRow, error)
+	ListRackAssetsForPlacement(ctx context.Context, arg dbq.ListRackAssetsForPlacementParams) ([]dbq.ListRackAssetsForPlacementRow, error)
 
 	// PR 54: ABAC SiteMatches expansion.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)

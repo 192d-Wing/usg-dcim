@@ -1,18 +1,18 @@
 -- ===== BGP ASNs =====
 -- name: CreateAsn :one
 INSERT INTO bgp_asns (id, asn, name, kind, organization_id, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::asn_kind, $4, $5, NOW(), NOW())
-RETURNING id, asn, name, kind::text AS kind, organization_id, description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(asn), sqlc.arg(name), sqlc.arg(kind)::bgp_asn_kind, sqlc.arg(organization_id), sqlc.arg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateAsn :one
 UPDATE bgp_asns
 SET name            = COALESCE(sqlc.narg(name)::text, name),
-    kind            = COALESCE(sqlc.narg(kind)::asn_kind, kind),
+    kind            = COALESCE(sqlc.narg(kind)::bgp_asn_kind, kind),
     organization_id = CASE WHEN sqlc.arg(org_set)::bool THEN sqlc.narg(organization_id)::uuid ELSE organization_id END,
     description     = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at      = NOW()
 WHERE id = $1
-RETURNING id, asn, name, kind::text AS kind, organization_id, description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteAsn :exec
 DELETE FROM bgp_asns WHERE id = $1;
@@ -20,8 +20,8 @@ DELETE FROM bgp_asns WHERE id = $1;
 -- ===== Prefix lists =====
 -- name: CreatePrefixList :one
 INSERT INTO bgp_prefix_lists (id, name, family, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2::address_family_v4v6, $3, NOW(), NOW())
-RETURNING id, name, family::text AS family, description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(family)::address_family_v4v6, sqlc.arg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdatePrefixList :one
 UPDATE bgp_prefix_lists
@@ -30,7 +30,7 @@ SET name        = COALESCE(sqlc.narg(name)::text, name),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, name, family::text AS family, description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeletePrefixList :exec
 DELETE FROM bgp_prefix_lists WHERE id = $1;
@@ -38,15 +38,15 @@ DELETE FROM bgp_prefix_lists WHERE id = $1;
 -- ===== Prefix list entries =====
 -- name: CreatePrefixListEntry :one
 INSERT INTO bgp_prefix_list_entries (id, prefix_list_id, seq, action, prefix, ge, le, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::policy_action, $4::cidr, $5, $6, $7, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(prefix_list_id), sqlc.arg(seq), sqlc.arg(action)::bgp_policy_action, sqlc.arg(prefix)::cidr, sqlc.arg(ge), sqlc.arg(le), sqlc.arg(description), NOW(), NOW())
 RETURNING id, prefix_list_id, seq, action::text AS action,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
           ge, le, description, created_at, updated_at;
 
 -- name: UpdatePrefixListEntry :one
 UPDATE bgp_prefix_list_entries
 SET seq    = COALESCE(sqlc.narg(seq)::int, seq),
-    action = COALESCE(sqlc.narg(action)::policy_action, action),
+    action = COALESCE(sqlc.narg(action)::bgp_policy_action, action),
     prefix = COALESCE(sqlc.narg(prefix)::cidr, prefix),
     ge     = CASE WHEN sqlc.arg(ge_set)::bool THEN sqlc.narg(ge)::int ELSE ge END,
     le     = CASE WHEN sqlc.arg(le_set)::bool THEN sqlc.narg(le)::int ELSE le END,
@@ -54,7 +54,7 @@ SET seq    = COALESCE(sqlc.narg(seq)::int, seq),
     updated_at  = NOW()
 WHERE id = $1
 RETURNING id, prefix_list_id, seq, action::text AS action,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
           ge, le, description, created_at, updated_at;
 
 -- name: DeletePrefixListEntry :exec
@@ -63,17 +63,17 @@ DELETE FROM bgp_prefix_list_entries WHERE id = $1;
 -- ===== Community lists =====
 -- name: CreateCommunityList :one
 INSERT INTO bgp_community_lists (id, name, kind, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2::community_kind, $3, NOW(), NOW())
-RETURNING id, name, kind::text AS kind, description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(kind)::bgp_community_kind, sqlc.arg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateCommunityList :one
 UPDATE bgp_community_lists
 SET name        = COALESCE(sqlc.narg(name)::text, name),
-    kind        = COALESCE(sqlc.narg(kind)::community_kind, kind),
+    kind        = COALESCE(sqlc.narg(kind)::bgp_community_kind, kind),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, name, kind::text AS kind, description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteCommunityList :exec
 DELETE FROM bgp_community_lists WHERE id = $1;
@@ -81,18 +81,18 @@ DELETE FROM bgp_community_lists WHERE id = $1;
 -- ===== Community list entries =====
 -- name: CreateCommunityListEntry :one
 INSERT INTO bgp_community_list_entries (id, community_list_id, seq, action, value, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::policy_action, $4, $5, NOW(), NOW())
-RETURNING id, community_list_id, seq, action::text AS action, value, description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(community_list_id), sqlc.arg(seq), sqlc.arg(action)::bgp_policy_action, sqlc.arg(value), sqlc.arg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateCommunityListEntry :one
 UPDATE bgp_community_list_entries
 SET seq    = COALESCE(sqlc.narg(seq)::int, seq),
-    action = COALESCE(sqlc.narg(action)::policy_action, action),
+    action = COALESCE(sqlc.narg(action)::bgp_policy_action, action),
     value  = COALESCE(sqlc.narg(value)::text, value),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, community_list_id, seq, action::text AS action, value, description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteCommunityListEntry :exec
 DELETE FROM bgp_community_list_entries WHERE id = $1;
@@ -120,19 +120,16 @@ INSERT INTO bgp_route_map_entries (id, route_map_id, seq, action,
                                    match_prefix_list_id, match_community_list_id, match_as_path_regex,
                                    set_local_pref, set_med, set_community,
                                    description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::policy_action,
-        $4, $5, $6,
-        $7, $8, $9,
-        $10, NOW(), NOW())
-RETURNING id, route_map_id, seq, action::text AS action,
-          match_prefix_list_id, match_community_list_id, match_as_path_regex,
-          set_local_pref, set_med, set_community,
-          description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(route_map_id), sqlc.arg(seq), sqlc.arg(action)::bgp_policy_action,
+        sqlc.arg(match_prefix_list_id), sqlc.arg(match_community_list_id), sqlc.arg(match_as_path_regex),
+        sqlc.arg(set_local_pref), sqlc.arg(set_med), sqlc.arg(set_community),
+        sqlc.arg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateRouteMapEntry :one
 UPDATE bgp_route_map_entries
 SET seq    = COALESCE(sqlc.narg(seq)::int, seq),
-    action = COALESCE(sqlc.narg(action)::policy_action, action),
+    action = COALESCE(sqlc.narg(action)::bgp_policy_action, action),
     match_prefix_list_id    = CASE WHEN sqlc.arg(mpl_set)::bool THEN sqlc.narg(match_prefix_list_id)::uuid    ELSE match_prefix_list_id END,
     match_community_list_id = CASE WHEN sqlc.arg(mcl_set)::bool THEN sqlc.narg(match_community_list_id)::uuid ELSE match_community_list_id END,
     match_as_path_regex     = CASE WHEN sqlc.arg(asp_set)::bool THEN sqlc.narg(match_as_path_regex)::text     ELSE match_as_path_regex END,
@@ -142,10 +139,7 @@ SET seq    = COALESCE(sqlc.narg(seq)::int, seq),
     description             = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, route_map_id, seq, action::text AS action,
-          match_prefix_list_id, match_community_list_id, match_as_path_regex,
-          set_local_pref, set_med, set_community,
-          description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteRouteMapEntry :exec
 DELETE FROM bgp_route_map_entries WHERE id = $1;
@@ -219,7 +213,7 @@ RETURNING id, name, arin_org_id,
           description, created_at, updated_at;
 
 -- name: CountAsnsForOrganization :one
-SELECT count(*)::bigint FROM bgp_asns WHERE organization_id = $1;
+SELECT count(*)::bigint FROM bgp_asns WHERE organization_id = sqlc.arg(org_id)::uuid;
 
 -- name: DeleteOrganization :exec
 DELETE FROM organizations WHERE id = $1;
@@ -234,21 +228,21 @@ DELETE FROM organizations WHERE id = $1;
 INSERT INTO collectors (id, site_id, name, capabilities, status,
                         enrollment_token_hash, buffered_samples, enabled,
                         config_overrides, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::jsonb, 'pending'::collector_status,
-        $4, 0, true, '{}'::jsonb, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(site_id), sqlc.arg(name), sqlc.arg(capabilities_json)::jsonb, 'pending'::collector_status,
+        sqlc.arg(enrollment_token_hash)::text, 0, true, '{}'::jsonb, NOW(), NOW())
 RETURNING id, site_id;
 
 -- name: HeartbeatCollector :one
 -- Updates the collector row on heartbeat and returns the current
 -- config_overrides so the response can echo them back to the agent.
--- $3 (version) is non-null only when the agent advertised one; null
--- preserves the existing value via COALESCE. $4 (status) flips between
+-- version is non-null only when the agent advertised one; null
+-- preserves the existing value via COALESCE. status flips between
 -- 'healthy' and 'degraded' based on whether last_error was set.
 UPDATE collectors
-SET last_seen_at      = $2::timestamptz,
-    buffered_samples  = $5::int,
-    version           = COALESCE($3::text, version),
-    status            = $4::collector_status,
+SET last_seen_at      = sqlc.arg(last_seen_at)::timestamptz,
+    buffered_samples  = sqlc.arg(buffered_samples)::int,
+    version           = COALESCE(sqlc.narg(version)::text, version),
+    status            = sqlc.arg(status)::collector_status,
     updated_at        = NOW()
 WHERE id = $1
 RETURNING config_overrides;
@@ -260,13 +254,13 @@ RETURNING config_overrides;
 INSERT INTO collector_heartbeats (id, collector_id, received_at,
                                   queue_depth, last_error, metrics_json,
                                   created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2::timestamptz,
-        $3::int, $4, $5::jsonb,
+VALUES (gen_random_uuid(), sqlc.arg(collector_id), sqlc.arg(received_at)::timestamptz,
+        sqlc.arg(queue_depth)::int, sqlc.arg(last_error), sqlc.arg(metrics_json)::jsonb,
         NOW(), NOW());
 
 -- name: SetCollectorConfigOverrides :one
 UPDATE collectors
-SET config_overrides = $2::jsonb,
+SET config_overrides = sqlc.arg(config_overrides)::jsonb,
     updated_at = NOW()
 WHERE id = $1
 RETURNING id, site_id, name, version, mtls_fingerprint,

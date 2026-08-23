@@ -67,28 +67,28 @@ func TestCarver_HandlesV6(t *testing.T) {
 
 // ---- fake querier additions for phase 4 ----
 
-func (f *fakeQ) GetLandingFabric(_ context.Context, _ string) (dbq.LandingFabricRow, error) {
+func (f *fakeQ) GetLandingFabric(_ context.Context, _ string) (dbq.GetLandingFabricRow, error) {
 	if f.landing != nil {
 		return *f.landing, nil
 	}
-	return dbq.LandingFabricRow{}, pgx.ErrNoRows
+	return dbq.GetLandingFabricRow{}, pgx.ErrNoRows
 }
 
-func (f *fakeQ) ListPoolSupernetsForCarve(_ context.Context, poolID uuid.UUID) ([]dbq.PoolSupernetForCarveRow, error) {
+func (f *fakeQ) ListPoolSupernetsForCarve(_ context.Context, poolID uuid.UUID) ([]dbq.ListPoolSupernetsForCarveRow, error) {
 	return f.carveSources[poolID], nil
 }
 
-func (f *fakeQ) ListAllocatedPrefixesInPool(_ context.Context, poolID uuid.UUID) ([]dbq.AllocatedPrefixRow, error) {
+func (f *fakeQ) ListAllocatedPrefixesInPool(_ context.Context, poolID uuid.UUID) ([]dbq.ListAllocatedPrefixesInPoolRow, error) {
 	return f.carveAllocated[poolID], nil
 }
 
-func (f *fakeQ) ApproveLirRequest(_ context.Context, a dbq.ApproveLirRequestParams) (dbq.ApprovalResultRow, error) {
+func (f *fakeQ) ApproveLirRequest(_ context.Context, a dbq.ApproveLirRequestParams) (dbq.ApproveLirRequestRow, error) {
 	f.approveCalled = &a
 	// Honor the "stale-pending" simulation: when the test set the
 	// request to a non-pending status, the CTE's RETURNING comes
 	// back empty.
 	if r, ok := f.requests[a.RequestID]; ok && r.Status != "pending_approval" {
-		return dbq.ApprovalResultRow{}, pgx.ErrNoRows
+		return dbq.ApproveLirRequestRow{}, pgx.ErrNoRows
 	}
 	allocID := uuid.New()
 	tenantSupernetID := uuid.New()
@@ -115,12 +115,45 @@ func (f *fakeQ) ApproveLirRequest(_ context.Context, a dbq.ApproveLirRequestPara
 	}
 	f.allocations[allocID] = alloc
 	// Return the post-update rows the CTE would have produced; the
-	// handler reads result.Request / result.Allocation directly
-	// rather than re-fetching.
-	return dbq.ApprovalResultRow{
-		Request:    f.requests[a.RequestID],
-		Allocation: alloc,
-	}, nil
+	// handler splits the flat row back into request + allocation
+	// (splitApprovalRow) rather than re-fetching.
+	return approvalRowFrom(f.requests[a.RequestID], alloc), nil
+}
+
+// approvalRowFrom composes the flat ApproveLirRequestRow the CTE's
+// RETURNING produces — the exact inverse of splitApprovalRow in
+// approval.go (request fields first, allocation fields with _2
+// suffixes on the colliding names).
+func approvalRowFrom(req dbq.LirRequest, alloc dbq.LirAllocation) dbq.ApproveLirRequestRow {
+	return dbq.ApproveLirRequestRow{
+		ID: req.ID, OrganizationID: req.OrganizationID,
+		RequesterUserID: req.RequesterUserID, PoolID: req.PoolID,
+		SiteID: req.SiteID, IPFamily: req.IPFamily,
+		PrefixLength: req.PrefixLength, Purpose: req.Purpose,
+		Classification: req.Classification, Justification: req.Justification,
+		Status: req.Status, SubmittedAt: req.SubmittedAt,
+		DecidedAt: req.DecidedAt, DecidedByUserID: req.DecidedByUserID,
+		DecisionNotes: req.DecisionNotes, ApprovedPoolID: req.ApprovedPoolID,
+		CreatedAt: req.CreatedAt, UpdatedAt: req.UpdatedAt,
+
+		ID_2: alloc.ID, RequestID: alloc.RequestID,
+		OrganizationID_2: alloc.OrganizationID, PoolID_2: alloc.PoolID,
+		PoolSupernetID: alloc.PoolSupernetID, TenantSupernetID: alloc.TenantSupernetID,
+		Prefix: alloc.Prefix, AllocatedAt: alloc.AllocatedAt,
+		AllocatedByUserID: alloc.AllocatedByUserID, Status_2: alloc.Status,
+		ReturnRequestedAt:       alloc.ReturnRequestedAt,
+		ReturnRequestedByUserID: alloc.ReturnRequestedByUserID,
+		ReturnReason:            alloc.ReturnReason,
+		ReturnedAt:              alloc.ReturnedAt,
+		ReturnedByUserID:        alloc.ReturnedByUserID,
+		ArinStatus:              alloc.ArinStatus,
+		ArinNetHandle:           alloc.ArinNetHandle,
+		ArinLastAttemptAt:       alloc.ArinLastAttemptAt,
+		ArinLastError:           alloc.ArinLastError,
+		ArinAttempts:            alloc.ArinAttempts,
+		CreatedAt_2:             alloc.CreatedAt,
+		UpdatedAt_2:             alloc.UpdatedAt,
+	}
 }
 
 func (f *fakeQ) RejectLirRequest(_ context.Context, a dbq.RejectLirRequestParams) (dbq.LirRequest, error) {
@@ -137,15 +170,16 @@ func (f *fakeQ) RejectLirRequest(_ context.Context, a dbq.RejectLirRequestParams
 	return r, nil
 }
 
-func (f *fakeQ) GetLirAllocation(_ context.Context, id uuid.UUID) (dbq.LirAllocation, error) {
+func (f *fakeQ) GetLirAllocation(_ context.Context, id uuid.UUID) (dbq.GetLirAllocationRow, error) {
 	if a, ok := f.allocations[id]; ok {
-		return a, nil
+		// Field-identical structs — direct conversion.
+		return dbq.GetLirAllocationRow(a), nil
 	}
-	return dbq.LirAllocation{}, pgx.ErrNoRows
+	return dbq.GetLirAllocationRow{}, pgx.ErrNoRows
 }
 
-func (f *fakeQ) ListLirAllocations(_ context.Context, p dbq.ListLirAllocationsParams) ([]dbq.LirAllocation, error) {
-	out := []dbq.LirAllocation{}
+func (f *fakeQ) ListLirAllocations(_ context.Context, p dbq.ListLirAllocationsParams) ([]dbq.ListLirAllocationsRow, error) {
+	out := []dbq.ListLirAllocationsRow{}
 	for _, a := range f.allocations {
 		if !inOrgFilter(a.OrganizationID, p.ScopeOrgIds) {
 			continue
@@ -153,7 +187,7 @@ func (f *fakeQ) ListLirAllocations(_ context.Context, p dbq.ListLirAllocationsPa
 		if p.StatusFilter != nil && a.Status != *p.StatusFilter {
 			continue
 		}
-		out = append(out, a)
+		out = append(out, dbq.ListLirAllocationsRow(a))
 	}
 	return out, nil
 }
@@ -180,17 +214,17 @@ func setupApproveScenario(t *testing.T) (*fakeQ, uuid.UUID, uuid.UUID) {
 	// Pool: v4, /20..29, enabled.
 	poolID := uuid.New()
 	f.pools[poolID] = dbq.LirPool{
-		ID: poolID, IpFamily: 4, Enabled: true,
+		ID: poolID, IPFamily: 4, Enabled: true,
 		MinPrefixLength: 20, MaxPrefixLength: 29,
 	}
 	// One source supernet: 10.0.0.0/16. Plenty of room.
 	srcID := uuid.New()
-	f.carveSources = map[uuid.UUID][]dbq.PoolSupernetForCarveRow{
+	f.carveSources = map[uuid.UUID][]dbq.ListPoolSupernetsForCarveRow{
 		poolID: {{ID: srcID, Prefix: "10.0.0.0/16"}},
 	}
-	f.carveAllocated = map[uuid.UUID][]dbq.AllocatedPrefixRow{}
+	f.carveAllocated = map[uuid.UUID][]dbq.ListAllocatedPrefixesInPoolRow{}
 	// Landing fabric available.
-	f.landing = &dbq.LandingFabricRow{
+	f.landing = &dbq.GetLandingFabricRow{
 		FabricID: uuid.New(), DefaultVrfID: uuid.New(),
 	}
 	// Pending request asking for /24.
@@ -200,7 +234,7 @@ func setupApproveScenario(t *testing.T) (*fakeQ, uuid.UUID, uuid.UUID) {
 		reqID: {
 			ID: reqID, OrganizationID: orgID,
 			RequesterUserID: uuid.New(), PoolID: &poolID,
-			IpFamily: 4, PrefixLength: 24,
+			IPFamily: 4, PrefixLength: 24,
 			Justification: "lab", Status: "pending_approval",
 		},
 	}
@@ -268,7 +302,7 @@ func TestApprove_RejectsFamilyMismatch(t *testing.T) {
 	f, reqID, poolID := setupApproveScenario(t)
 	// Flip pool to v6 — request is v4.
 	p := f.pools[poolID]
-	p.IpFamily = 6
+	p.IPFamily = 6
 	f.pools[poolID] = p
 	rec := do(t, mountWith(f, globalPrincipal()),
 		"POST", "/lir/requests/"+reqID.String()+"/approve", nil)
@@ -317,7 +351,7 @@ func TestApprove_ExhaustedPool(t *testing.T) {
 	f, reqID, poolID := setupApproveScenario(t)
 	// Fill the /16 with a single /16 allocation so no /24 fits.
 	src := f.carveSources[poolID][0]
-	f.carveAllocated[poolID] = []dbq.AllocatedPrefixRow{
+	f.carveAllocated[poolID] = []dbq.ListAllocatedPrefixesInPoolRow{
 		{PoolSupernetID: src.ID, Prefix: "10.0.0.0/16"},
 	}
 	rec := do(t, mountWith(f, globalPrincipal()),
@@ -331,7 +365,7 @@ func TestApprove_CarverSkipsExistingAllocations(t *testing.T) {
 	f, reqID, poolID := setupApproveScenario(t)
 	src := f.carveSources[poolID][0]
 	// First /24 already used → carver should pick the next.
-	f.carveAllocated[poolID] = []dbq.AllocatedPrefixRow{
+	f.carveAllocated[poolID] = []dbq.ListAllocatedPrefixesInPoolRow{
 		{PoolSupernetID: src.ID, Prefix: "10.0.0.0/24"},
 	}
 	rec := do(t, mountWith(f, globalPrincipal()),
@@ -368,11 +402,11 @@ func TestApprove_PoolOverride(t *testing.T) {
 	f, reqID, _ := setupApproveScenario(t)
 	overridePoolID := uuid.New()
 	f.pools[overridePoolID] = dbq.LirPool{
-		ID: overridePoolID, IpFamily: 4, Enabled: true,
+		ID: overridePoolID, IPFamily: 4, Enabled: true,
 		MinPrefixLength: 20, MaxPrefixLength: 29,
 	}
 	overrideSrcID := uuid.New()
-	f.carveSources[overridePoolID] = []dbq.PoolSupernetForCarveRow{
+	f.carveSources[overridePoolID] = []dbq.ListPoolSupernetsForCarveRow{
 		{ID: overrideSrcID, Prefix: "172.16.0.0/16"},
 	}
 	rec := do(t, mountWith(f, globalPrincipal()),

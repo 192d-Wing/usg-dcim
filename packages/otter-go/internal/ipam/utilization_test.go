@@ -66,11 +66,11 @@ func TestNetworkCapacityRejectsBadInput(t *testing.T) {
 // relies on.
 type fakeUtilQ struct {
 	fakeQ
-	supernet    dbq.Supernet
+	supernet    dbq.GetSupernetRow
 	supernetErr error
 	prefixes    []string
 	prefixesErr error
-	subnet      dbq.Subnet
+	subnet      dbq.GetSubnetRow
 	subnetErr   error
 	addresses   []string
 	addressErr  error
@@ -80,7 +80,7 @@ type fakeUtilQ struct {
 	gotAddrs    uuid.UUID
 }
 
-func (f *fakeUtilQ) GetSupernet(_ context.Context, id uuid.UUID) (dbq.Supernet, error) {
+func (f *fakeUtilQ) GetSupernet(_ context.Context, id uuid.UUID) (dbq.GetSupernetRow, error) {
 	f.gotSupernet = id
 	return f.supernet, f.supernetErr
 }
@@ -90,7 +90,7 @@ func (f *fakeUtilQ) ListSubnetPrefixesBySupernet(_ context.Context, id uuid.UUID
 	return f.prefixes, f.prefixesErr
 }
 
-func (f *fakeUtilQ) GetSubnet(_ context.Context, id uuid.UUID) (dbq.Subnet, error) {
+func (f *fakeUtilQ) GetSubnet(_ context.Context, id uuid.UUID) (dbq.GetSubnetRow, error) {
 	f.gotSubnet = id
 	return f.subnet, f.subnetErr
 }
@@ -109,7 +109,7 @@ func mountUtil(f *fakeUtilQ) http.Handler {
 func TestSupernetUtilization_HappyPath(t *testing.T) {
 	id := uuid.New()
 	f := &fakeUtilQ{
-		supernet: dbq.Supernet{ID: id, Prefix: "10.0.0.0/16"},
+		supernet: dbq.GetSupernetRow{ID: id, Prefix: "10.0.0.0/16"},
 		prefixes: []string{"10.0.0.0/24", "10.0.1.0/24"}, // 254 + 254 = 508
 	}
 	srv := httptest.NewServer(mountUtil(f))
@@ -178,7 +178,7 @@ func TestSupernetUtilization_EmptySubnets(t *testing.T) {
 	// place.
 	id := uuid.New()
 	f := &fakeUtilQ{
-		supernet: dbq.Supernet{ID: id, Prefix: "10.0.0.0/24"},
+		supernet: dbq.GetSupernetRow{ID: id, Prefix: "10.0.0.0/24"},
 		prefixes: []string{},
 	}
 	srv := httptest.NewServer(mountUtil(f))
@@ -205,7 +205,7 @@ func TestSupernetUtilization_SkipsUnparseableChildPrefixes(t *testing.T) {
 	// nobody quietly flips it to fail-the-request later.
 	id := uuid.New()
 	f := &fakeUtilQ{
-		supernet: dbq.Supernet{ID: id, Prefix: "10.0.0.0/16"},
+		supernet: dbq.GetSupernetRow{ID: id, Prefix: "10.0.0.0/16"},
 		prefixes: []string{"10.0.0.0/24", "garbage", "10.0.1.0/24"},
 	}
 	srv := httptest.NewServer(mountUtil(f))
@@ -314,7 +314,7 @@ func TestNextFreeAddress(t *testing.T) {
 func TestSubnetUtilization_HappyPath(t *testing.T) {
 	id := uuid.New()
 	f := &fakeUtilQ{
-		subnet:    dbq.Subnet{ID: id, Prefix: "10.0.0.0/24"},
+		subnet:    dbq.GetSubnetRow{ID: id, Prefix: "10.0.0.0/24"},
 		addresses: []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"},
 	}
 	srv := httptest.NewServer(mountUtil(f))
@@ -381,7 +381,7 @@ func TestSubnetUtilization_EmptySubnet(t *testing.T) {
 	// first host, allocated=0, free=capacity.
 	id := uuid.New()
 	f := &fakeUtilQ{
-		subnet:    dbq.Subnet{ID: id, Prefix: "10.0.0.0/24"},
+		subnet:    dbq.GetSubnetRow{ID: id, Prefix: "10.0.0.0/24"},
 		addresses: []string{},
 	}
 	srv := httptest.NewServer(mountUtil(f))
@@ -408,7 +408,7 @@ func TestSubnetUtilization_FullSubnet(t *testing.T) {
 	// next_available=null, percent=100, free=0.
 	id := uuid.New()
 	f := &fakeUtilQ{
-		subnet:    dbq.Subnet{ID: id, Prefix: "10.0.0.0/30"},
+		subnet:    dbq.GetSubnetRow{ID: id, Prefix: "10.0.0.0/30"},
 		addresses: []string{"10.0.0.1", "10.0.0.2"},
 	}
 	srv := httptest.NewServer(mountUtil(f))

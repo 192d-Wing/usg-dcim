@@ -1,8 +1,8 @@
 -- ===== DNS blocklists =====
 -- name: ListDnsBlocklists :many
 SELECT id, name, fabric_id, action::text AS action,
-       host(sink_ipv4) AS sink_ipv4,
-       host(sink_ipv6) AS sink_ipv6,
+       CASE WHEN sink_ipv4 IS NULL THEN NULL ELSE host(sink_ipv4) END AS sink_ipv4,
+       CASE WHEN sink_ipv6 IS NULL THEN NULL ELSE host(sink_ipv6) END AS sink_ipv6,
        enabled, description, created_at, updated_at
 FROM dns_blocklists
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
@@ -17,15 +17,15 @@ WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
 
 -- name: GetDnsBlocklist :one
 SELECT id, name, fabric_id, action::text AS action,
-       host(sink_ipv4) AS sink_ipv4,
-       host(sink_ipv6) AS sink_ipv6,
+       CASE WHEN sink_ipv4 IS NULL THEN NULL ELSE host(sink_ipv4) END AS sink_ipv4,
+       CASE WHEN sink_ipv6 IS NULL THEN NULL ELSE host(sink_ipv6) END AS sink_ipv6,
        enabled, description, created_at, updated_at
 FROM dns_blocklists
 WHERE id = $1;
 
 -- ===== DNS blocklist entries =====
 -- name: ListDnsBlocklistEntries :many
-SELECT id, blocklist_id, pattern, description, created_at, updated_at
+SELECT *
 FROM dns_blocklist_entries
 WHERE blocklist_id = $3
 ORDER BY pattern
@@ -46,7 +46,7 @@ WHERE blocklist_id = $1;
 
 -- ===== DNS views =====
 -- name: ListDnsViews :many
-SELECT id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at
+SELECT *
 FROM dns_views
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))

@@ -57,7 +57,7 @@ type PduSummary struct {
 // ListPowerConnectionsByOutletIDs (returns []PowerConnection) is
 // reused; ListOutletsByPduIDs is the new bulk lookup.
 type Querier interface {
-	ListOutletsByPduIDs(ctx context.Context, pduIDs []uuid.UUID) ([]dbq.OutletForPowerChainRow, error)
+	ListOutletsByPduIDs(ctx context.Context, pduIDs []uuid.UUID) ([]dbq.ListOutletsByPduIDsRow, error)
 	ListPowerConnectionsByOutletIDs(ctx context.Context, outletIDs []uuid.UUID) ([]dbq.PowerConnection, error)
 }
 
@@ -146,7 +146,7 @@ func pduAssetsOf(assets []dbq.Asset) []dbq.Asset {
 }
 
 func loadOutletsAndConnections(ctx context.Context, q Querier, pdus []dbq.Asset) (
-	[]dbq.OutletForPowerChainRow, []dbq.PowerConnection, error,
+	[]dbq.ListOutletsByPduIDsRow, []dbq.PowerConnection, error,
 ) {
 	if len(pdus) == 0 {
 		return nil, nil, nil
@@ -173,11 +173,11 @@ func loadOutletsAndConnections(ctx context.Context, q Querier, pdus []dbq.Asset)
 	return outlets, conns, nil
 }
 
-func indexOutlets(outlets []dbq.OutletForPowerChainRow) (
-	map[uuid.UUID]dbq.OutletForPowerChainRow, map[uuid.UUID][]dbq.OutletForPowerChainRow,
+func indexOutlets(outlets []dbq.ListOutletsByPduIDsRow) (
+	map[uuid.UUID]dbq.ListOutletsByPduIDsRow, map[uuid.UUID][]dbq.ListOutletsByPduIDsRow,
 ) {
-	byID := make(map[uuid.UUID]dbq.OutletForPowerChainRow, len(outlets))
-	byPdu := map[uuid.UUID][]dbq.OutletForPowerChainRow{}
+	byID := make(map[uuid.UUID]dbq.ListOutletsByPduIDsRow, len(outlets))
+	byPdu := map[uuid.UUID][]dbq.ListOutletsByPduIDsRow{}
 	for _, o := range outlets {
 		byID[o.ID] = o
 		byPdu[o.PduAssetID] = append(byPdu[o.PduAssetID], o)
@@ -209,7 +209,7 @@ func emptyEntry() AssetEntry {
 	}
 }
 
-func buildConnection(pdu dbq.Asset, outlet dbq.OutletForPowerChainRow, c dbq.PowerConnection) Connection {
+func buildConnection(pdu dbq.Asset, outlet dbq.ListOutletsByPduIDsRow, c dbq.PowerConnection) Connection {
 	return Connection{
 		PduID:          pdu.ID.String(),
 		PduName:        pdu.Name,
@@ -221,7 +221,7 @@ func buildConnection(pdu dbq.Asset, outlet dbq.OutletForPowerChainRow, c dbq.Pow
 	}
 }
 
-func buildPduSummary(p dbq.Asset, outletsForP []dbq.OutletForPowerChainRow, usedOutletIDs map[uuid.UUID]struct{}) PduSummary {
+func buildPduSummary(p dbq.Asset, outletsForP []dbq.ListOutletsByPduIDsRow, usedOutletIDs map[uuid.UUID]struct{}) PduSummary {
 	used := 0
 	for _, o := range outletsForP {
 		if _, ok := usedOutletIDs[o.ID]; ok {

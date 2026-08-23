@@ -14,23 +14,23 @@ import (
 )
 
 type fakeQ struct {
-	scope         dbq.DhcpScopeForPushRow
+	scope         dbq.GetDhcpScopeForPushRow
 	scopeErr      error
-	server        dbq.DhcpServerForPushRow
+	server        dbq.GetDhcpServerForPushRow
 	serverErr     error
 	template      *dbq.DhcpScopeTemplate
 	diffWriteArgs *dbq.WriteDhcpScopeDiffStateParams
 }
 
-func (f *fakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
+func (f *fakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
 	if f.scopeErr != nil {
-		return dbq.DhcpScopeForPushRow{}, f.scopeErr
+		return dbq.GetDhcpScopeForPushRow{}, f.scopeErr
 	}
 	return f.scope, nil
 }
-func (f *fakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
+func (f *fakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
 	if f.serverErr != nil {
-		return dbq.DhcpServerForPushRow{}, f.serverErr
+		return dbq.GetDhcpServerForPushRow{}, f.serverErr
 	}
 	return f.server, nil
 }
@@ -63,12 +63,12 @@ func (f *fakeKea) Subnet6Get(_ context.Context, id int64) ([]byte, error) {
 }
 
 func builderReturning(fk *fakeKea) KeaClientBuilder {
-	return func(_ dbq.DhcpServerForPushRow) KeaClient { return fk }
+	return func(_ dbq.GetDhcpServerForPushRow) KeaClient { return fk }
 }
 
 // ---- fixtures ----
 
-func validScope(t *testing.T, family int32) dbq.DhcpScopeForPushRow {
+func validScope(t *testing.T, family int32) dbq.GetDhcpScopeForPushRow {
 	t.Helper()
 	keaID := int32(1)
 	pools := `[{"first":"10.0.0.10","last":"10.0.0.250"}]`
@@ -77,7 +77,7 @@ func validScope(t *testing.T, family int32) dbq.DhcpScopeForPushRow {
 		pools = `[{"first":"2001:db8::10","last":"2001:db8::ffff"}]`
 		prefix = "2001:db8::/64"
 	}
-	return dbq.DhcpScopeForPushRow{
+	return dbq.GetDhcpScopeForPushRow{
 		ID:           uuid.New(),
 		DhcpServerID: uuid.New(),
 		IPFamily:     family,
@@ -91,7 +91,7 @@ func validScope(t *testing.T, family int32) dbq.DhcpScopeForPushRow {
 // matchingKeaResponse builds a subnet{4,6}-get reply that mirrors
 // the DCIM render — used by the in_sync test to confirm "DCIM == Kea
 // → empty delta → in_sync".
-func matchingKeaResponse(scope dbq.DhcpScopeForPushRow) []byte {
+func matchingKeaResponse(scope dbq.GetDhcpScopeForPushRow) []byte {
 	listKey := "subnet4"
 	if scope.IPFamily == 6 {
 		listKey = "subnet6"
@@ -116,7 +116,7 @@ func matchingKeaResponse(scope dbq.DhcpScopeForPushRow) []byte {
 	return b
 }
 
-func renderPoolsForFamily(s dbq.DhcpScopeForPushRow) []any {
+func renderPoolsForFamily(s dbq.GetDhcpScopeForPushRow) []any {
 	if s.IPFamily == 4 {
 		return []any{map[string]any{"pool": "10.0.0.10 - 10.0.0.250"}}
 	}
@@ -360,8 +360,12 @@ func TestPersistDiffState_DriftedStoresDelta(t *testing.T) {
 	if q.diffWriteArgs == nil {
 		t.Fatal("WriteDhcpScopeDiffState was not called")
 	}
-	if q.diffWriteArgs.LastDiffStatus != "drifted" {
-		t.Errorf("status: got %q, want drifted", q.diffWriteArgs.LastDiffStatus)
+	if q.diffWriteArgs.LastDiffStatus == nil || *q.diffWriteArgs.LastDiffStatus != "drifted" {
+		var got string
+		if q.diffWriteArgs.LastDiffStatus != nil {
+			got = *q.diffWriteArgs.LastDiffStatus
+		}
+		t.Errorf("status: got %q, want drifted", got)
 	}
 	if len(q.diffWriteArgs.LastDiffDeltaJSON) == 0 {
 		t.Errorf("delta_json should be populated on drifted; got empty")

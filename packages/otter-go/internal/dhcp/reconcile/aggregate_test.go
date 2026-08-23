@@ -69,7 +69,7 @@ func TestReconcile_MatchingReservationSource_Clean(t *testing.T) {
 	ipID := uuid.New()
 	mac := "aa:bb:cc:dd:ee:01"
 	res := []map[string]any{reservation(mac, "", "10.0.0.5")}
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: ipID, Address: "10.0.0.5/24", Source: "reservation", DhcpMac: &mac},
 	}
 	got := Reconcile(scopeID, &subnetID, mustJSON(t, res), rows)
@@ -85,7 +85,7 @@ func TestReconcile_StaticSource_Collision(t *testing.T) {
 	scopeID := uuid.New()
 	subnetID := uuid.New()
 	res := []map[string]any{reservation("aa:bb:cc:dd:ee:01", "", "10.0.0.5")}
-	rows := []dbq.DhcpReconcileIPRow{{ID: uuid.New(), Address: "10.0.0.5", Source: "static"}}
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{{ID: uuid.New(), Address: "10.0.0.5", Source: "static"}}
 	got := Reconcile(scopeID, &subnetID, mustJSON(t, res), rows)
 	if got.Counts[string(StatusCollision)] != 1 {
 		t.Errorf("collision = %d, want 1", got.Counts[string(StatusCollision)])
@@ -99,7 +99,7 @@ func TestReconcile_NoMatchingIP_Unbacked(t *testing.T) {
 	scopeID := uuid.New()
 	subnetID := uuid.New()
 	res := []map[string]any{reservation("aa:bb:cc:dd:ee:01", "", "10.0.0.99")}
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: uuid.New(), Address: "10.0.0.5", Source: "reservation"},
 	}
 	got := Reconcile(scopeID, &subnetID, mustJSON(t, res), rows)
@@ -114,7 +114,7 @@ func TestReconcile_MacMismatch(t *testing.T) {
 	scopeID := uuid.New()
 	subnetID := uuid.New()
 	leaseMac := "11:22:33:44:55:66"
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: uuid.New(), Address: "10.0.0.5", Source: "dhcp", DhcpMac: &leaseMac},
 	}
 	res := []map[string]any{reservation("aa:bb:cc:dd:ee:01", "", "10.0.0.5")}
@@ -130,7 +130,7 @@ func TestReconcile_DuidMismatch(t *testing.T) {
 	scopeID := uuid.New()
 	subnetID := uuid.New()
 	leaseDuid := "00:01:00:01:abcd:ef00:0001"
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: uuid.New(), Address: "2001:db8::1", Source: "dhcp", DhcpDuid: &leaseDuid},
 	}
 	res := []map[string]any{reservation("", "00:01:00:01:dead:beef:0001", "2001:db8::1")}
@@ -145,7 +145,7 @@ func TestReconcile_MissingBindingSideSkipsCheck(t *testing.T) {
 	// false alarm). dhcp_mac=nil on the row → clean, not mismatch.
 	scopeID := uuid.New()
 	subnetID := uuid.New()
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: uuid.New(), Address: "10.0.0.5", Source: "dhcp", DhcpMac: nil},
 	}
 	res := []map[string]any{reservation("aa:bb:cc:dd:ee:01", "", "10.0.0.5")}
@@ -175,7 +175,7 @@ func TestReconcile_IPCanonicalization(t *testing.T) {
 	// step. "2001:db8::0001" → "2001:db8::1".
 	scopeID := uuid.New()
 	subnetID := uuid.New()
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: uuid.New(), Address: "2001:db8::1", Source: "reservation"},
 	}
 	res := []map[string]any{reservation("", "00:01:abcd", "2001:db8::0001")}

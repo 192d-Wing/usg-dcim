@@ -108,7 +108,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	})
 	httpx.JSON(w, http.StatusCreated, connectOut{
 		ID: out.ID, OutletID: out.OutletID, AssetID: out.AssetID,
-		PsuIndex: out.PsuIndex, CordColor: out.CordColor, CordLengthM: out.CordLengthM,
+		PsuIndex: out.PsuIndex, CordColor: out.CordColor, CordLengthM: floatPtrToStr(out.CordLengthM),
 		CreatedAt: out.CreatedAt,
 	})
 }

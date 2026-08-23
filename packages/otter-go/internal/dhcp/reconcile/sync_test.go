@@ -94,7 +94,7 @@ func TestSync_DhcpSourcePromoted(t *testing.T) {
 	ipID := uuid.New()
 	mac := "aa:bb:cc:dd:ee:01"
 	res := []map[string]any{reservation(mac, "", "10.0.0.5")}
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: ipID, Address: "10.0.0.5", Source: "dhcp", DhcpMac: &mac},
 	}
 	w := &captureWriter{}
@@ -113,7 +113,7 @@ func TestSync_DhcpSourcePromoted(t *testing.T) {
 func TestSync_StaticSourceSkippedCollision(t *testing.T) {
 	subnetID := uuid.New()
 	res := []map[string]any{reservation("aa:bb:cc:dd:ee:01", "", "10.0.0.5")}
-	rows := []dbq.DhcpReconcileIPRow{{ID: uuid.New(), Address: "10.0.0.5", Source: "static"}}
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{{ID: uuid.New(), Address: "10.0.0.5", Source: "static"}}
 	w := &captureWriter{}
 	got, err := Sync(context.Background(), w, uuid.New(), &subnetID, mustJSON(t, res), rows)
 	if err != nil {
@@ -130,7 +130,7 @@ func TestSync_StaticSourceSkippedCollision(t *testing.T) {
 func TestSync_AlreadyReservation_SkippedClean(t *testing.T) {
 	subnetID := uuid.New()
 	res := []map[string]any{reservation("aa:bb:cc:dd:ee:01", "", "10.0.0.5")}
-	rows := []dbq.DhcpReconcileIPRow{{ID: uuid.New(), Address: "10.0.0.5", Source: "reservation"}}
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{{ID: uuid.New(), Address: "10.0.0.5", Source: "reservation"}}
 	w := &captureWriter{}
 	got, err := Sync(context.Background(), w, uuid.New(), &subnetID, mustJSON(t, res), rows)
 	if err != nil {
@@ -148,7 +148,7 @@ func TestSync_MacMismatch_RefusesToPromote(t *testing.T) {
 	subnetID := uuid.New()
 	leaseMac := "11:22:33:44:55:66"
 	resMac := "aa:bb:cc:dd:ee:01"
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: uuid.New(), Address: "10.0.0.5", Source: "dhcp", DhcpMac: &leaseMac},
 	}
 	res := []map[string]any{reservation(resMac, "", "10.0.0.5")}
@@ -175,7 +175,7 @@ func TestSync_DuidMismatch_RefusesToPromote(t *testing.T) {
 	subnetID := uuid.New()
 	leaseDuid := "00:01:00:01:abcd:ef00"
 	resDuid := "00:01:00:01:dead:beef"
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: uuid.New(), Address: "2001:db8::1", Source: "dhcp", DhcpDuid: &leaseDuid},
 	}
 	res := []map[string]any{reservation("", resDuid, "2001:db8::1")}
@@ -212,7 +212,7 @@ func TestSync_PromoteParamsCarryReservationFields(t *testing.T) {
 	subnetID := uuid.New()
 	ipID := uuid.New()
 	mac := "aa:bb:cc:dd:ee:01"
-	rows := []dbq.DhcpReconcileIPRow{
+	rows := []dbq.ListIPAddressesInSubnetForReconcileRow{
 		{ID: ipID, Address: "10.0.0.5", Source: "dhcp", DhcpMac: nil},
 	}
 	res := []map[string]any{{"ip": "10.0.0.5", "mac": mac, "hostname": "host-1"}}

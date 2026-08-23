@@ -19,23 +19,23 @@ import (
 
 type fakeBulkAddrQ struct {
 	fakeQ
-	subnet       dbq.Subnet
+	subnet       dbq.GetSubnetRow
 	subnetErr    error
 	uniqueViolN  int
 	insertedRows []dbq.CreateIPAddressParams
 }
 
-func (f *fakeBulkAddrQ) GetSubnet(_ context.Context, _ uuid.UUID) (dbq.Subnet, error) {
+func (f *fakeBulkAddrQ) GetSubnet(_ context.Context, _ uuid.UUID) (dbq.GetSubnetRow, error) {
 	return f.subnet, f.subnetErr
 }
 
-func (f *fakeBulkAddrQ) CreateIPAddress(_ context.Context, a dbq.CreateIPAddressParams) (dbq.IPAddress, error) {
+func (f *fakeBulkAddrQ) CreateIPAddress(_ context.Context, a dbq.CreateIPAddressParams) (dbq.CreateIPAddressRow, error) {
 	if f.uniqueViolN > 0 {
 		f.uniqueViolN--
-		return dbq.IPAddress{}, &pgconn.PgError{Code: "23505", Message: "duplicate"}
+		return dbq.CreateIPAddressRow{}, &pgconn.PgError{Code: "23505", Message: "duplicate"}
 	}
 	f.insertedRows = append(f.insertedRows, a)
-	return dbq.IPAddress{ID: uuid.New(), SubnetID: a.SubnetID, Address: a.Address}, nil
+	return dbq.CreateIPAddressRow{ID: uuid.New(), SubnetID: a.SubnetID, Address: a.Address}, nil
 }
 
 func mountBulkAddr(f *fakeBulkAddrQ) http.Handler {
@@ -65,7 +65,7 @@ func doBulkAddr(t *testing.T, f *fakeBulkAddrQ, rows []map[string]any) *bulkResu
 
 func TestBulkAddresses_AllInserted(t *testing.T) {
 	sub := uuid.New()
-	f := &fakeBulkAddrQ{subnet: dbq.Subnet{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
+	f := &fakeBulkAddrQ{subnet: dbq.GetSubnetRow{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
 	out := doBulkAddr(t, f, []map[string]any{
 		{"subnet_id": sub, "address": "10.0.0.10"},
 		{"subnet_id": sub, "address": "10.0.0.11"},
@@ -79,7 +79,7 @@ func TestBulkAddresses_DefaultsApplied(t *testing.T) {
 	// Rows without role/status/source should land with the same
 	// defaults the single-row create uses.
 	sub := uuid.New()
-	f := &fakeBulkAddrQ{subnet: dbq.Subnet{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
+	f := &fakeBulkAddrQ{subnet: dbq.GetSubnetRow{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
 	out := doBulkAddr(t, f, []map[string]any{{"subnet_id": sub, "address": "10.0.0.10"}})
 	if out.Inserted != 1 {
 		t.Fatalf("counts = %+v", out)
@@ -94,7 +94,7 @@ func TestBulkAddresses_DefaultsApplied(t *testing.T) {
 func TestBulkAddresses_UniqueViolationSkips(t *testing.T) {
 	sub := uuid.New()
 	f := &fakeBulkAddrQ{
-		subnet:      dbq.Subnet{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"},
+		subnet:      dbq.GetSubnetRow{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"},
 		uniqueViolN: 1,
 	}
 	out := doBulkAddr(t, f, []map[string]any{
@@ -111,7 +111,7 @@ func TestBulkAddresses_UniqueViolationSkips(t *testing.T) {
 
 func TestBulkAddresses_AddressOutsideSubnetFails(t *testing.T) {
 	sub := uuid.New()
-	f := &fakeBulkAddrQ{subnet: dbq.Subnet{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
+	f := &fakeBulkAddrQ{subnet: dbq.GetSubnetRow{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
 	out := doBulkAddr(t, f, []map[string]any{{"subnet_id": sub, "address": "11.0.0.5"}})
 	if out.Failed != 1 || out.Inserted != 0 {
 		t.Errorf("counts = %+v, want failed=1", out)
@@ -120,7 +120,7 @@ func TestBulkAddresses_AddressOutsideSubnetFails(t *testing.T) {
 
 func TestBulkAddresses_BadAddressFails(t *testing.T) {
 	sub := uuid.New()
-	f := &fakeBulkAddrQ{subnet: dbq.Subnet{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
+	f := &fakeBulkAddrQ{subnet: dbq.GetSubnetRow{ID: sub, FabricID: uuid.New(), Prefix: "10.0.0.0/24"}}
 	out := doBulkAddr(t, f, []map[string]any{{"subnet_id": sub, "address": "not-an-ip"}})
 	if out.Failed != 1 {
 		t.Errorf("counts = %+v", out)
@@ -161,7 +161,7 @@ func TestBulkAddresses_RequiresBulkCapability(t *testing.T) {
 func TestBulkAddresses_FabricScopeDeniedFailsRow(t *testing.T) {
 	subFabric, other := uuid.New(), uuid.New()
 	sub := uuid.New()
-	f := &fakeBulkAddrQ{subnet: dbq.Subnet{ID: sub, FabricID: subFabric, Prefix: "10.0.0.0/24"}}
+	f := &fakeBulkAddrQ{subnet: dbq.GetSubnetRow{ID: sub, FabricID: subFabric, Prefix: "10.0.0.0/24"}}
 	body, _ := json.Marshal([]map[string]any{{"subnet_id": sub, "address": "10.0.0.10"}})
 	req := httptest.NewRequest("POST", "/ipam/addresses/bulk", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

@@ -23,12 +23,12 @@ func (dhcpPushNoop) GetDhcpScopeFabricID(_ context.Context, _ uuid.UUID) (uuid.U
 	return uuid.Nil, pgx.ErrNoRows
 }
 
-func (dhcpPushNoop) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
-	return dbq.DhcpScopeForPushRow{}, pgx.ErrNoRows
+func (dhcpPushNoop) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
+	return dbq.GetDhcpScopeForPushRow{}, pgx.ErrNoRows
 }
 
-func (dhcpPushNoop) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
-	return dbq.DhcpServerForPushRow{}, pgx.ErrNoRows
+func (dhcpPushNoop) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
+	return dbq.GetDhcpServerForPushRow{}, pgx.ErrNoRows
 }
 
 func (dhcpPushNoop) GetDhcpScopeTemplateForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeTemplate, error) {
@@ -59,7 +59,7 @@ func (dhcpPushNoop) WriteDhcpScopeDiffState(_ context.Context, _ dbq.WriteDhcpSc
 	return nil
 }
 
-func (dhcpPushNoop) ListDhcpScopePushHistoryByScope(_ context.Context, _ dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistoryRow, error) {
+func (dhcpPushNoop) ListDhcpScopePushHistoryByScope(_ context.Context, _ dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistory, error) {
 	return nil, nil
 }
 
@@ -71,7 +71,7 @@ func (dhcpPushNoop) ListDriftedScopeIDsForServer(_ context.Context, _ uuid.UUID)
 	return nil, nil
 }
 
-func (dhcpPushNoop) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.DhcpScopeIDAndPriorDriftRow, error) {
+func (dhcpPushNoop) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.ListAllScopeIDsAndPriorDriftForServerRow, error) {
 	return nil, nil
 }
 
@@ -107,11 +107,11 @@ func (dhcpPushNoop) DeleteDhcpScopeTemplate(_ context.Context, _ uuid.UUID) erro
 // DHCP drift-summary read paths (PR 9). All three return empty
 // slices so unrelated tests don't accidentally fall into a half-
 // defined fleet state.
-func (dhcpPushNoop) ListDhcpServersForDriftSummary(_ context.Context, _ []uuid.UUID) ([]dbq.DhcpServerDriftSummaryRow, error) {
+func (dhcpPushNoop) ListDhcpServersForDriftSummary(_ context.Context, _ []uuid.UUID) ([]dbq.ListDhcpServersForDriftSummaryRow, error) {
 	return nil, nil
 }
 
-func (dhcpPushNoop) ListDhcpScopeDriftStatusByServers(_ context.Context, _ []uuid.UUID) ([]dbq.DhcpScopeDriftStatusRow, error) {
+func (dhcpPushNoop) ListDhcpScopeDriftStatusByServers(_ context.Context, _ []uuid.UUID) ([]dbq.ListDhcpScopeDriftStatusByServersRow, error) {
 	return nil, nil
 }
 
@@ -122,7 +122,7 @@ func (dhcpPushNoop) ListFiringDhcpDriftAlertKeys(_ context.Context) ([]string, e
 // DHCP scope CRUD reads (PR 10). LIST returns nil + count zero;
 // GetDhcpScope returns ErrNoRows so unrelated tests fall through to
 // 404 paths rather than half-defined scope state.
-func (dhcpPushNoop) ListDhcpScopesByServer(_ context.Context, _ dbq.ListDhcpScopesByServerParams) ([]dbq.DhcpScope, error) {
+func (dhcpPushNoop) ListDhcpScopesByServer(_ context.Context, _ dbq.ListDhcpScopesByServerParams) ([]dbq.ListDhcpScopesByServerRow, error) {
 	return nil, nil
 }
 
@@ -130,33 +130,33 @@ func (dhcpPushNoop) CountDhcpScopesByServer(_ context.Context, _ dbq.CountDhcpSc
 	return 0, nil
 }
 
-func (dhcpPushNoop) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
-	return dbq.DhcpScope{}, pgx.ErrNoRows
+func (dhcpPushNoop) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeRow, error) {
+	return dbq.GetDhcpScopeRow{}, pgx.ErrNoRows
 }
 
 // DHCP scope mutation stubs (PR 11). CREATE/UPDATE/RESTORE return
 // zero values; SoftDelete is a no-op. Tests that exercise the
 // mutation paths override these on their own fake.
-func (dhcpPushNoop) CreateDhcpScope(_ context.Context, _ dbq.CreateDhcpScopeParams) (dbq.DhcpScope, error) {
-	return dbq.DhcpScope{}, nil
+func (dhcpPushNoop) CreateDhcpScope(_ context.Context, _ dbq.CreateDhcpScopeParams) (dbq.CreateDhcpScopeRow, error) {
+	return dbq.CreateDhcpScopeRow{}, nil
 }
 
-func (dhcpPushNoop) UpdateDhcpScope(_ context.Context, _ dbq.UpdateDhcpScopeParams) (dbq.DhcpScope, error) {
-	return dbq.DhcpScope{}, nil
+func (dhcpPushNoop) UpdateDhcpScope(_ context.Context, _ dbq.UpdateDhcpScopeParams) (dbq.UpdateDhcpScopeRow, error) {
+	return dbq.UpdateDhcpScopeRow{}, nil
 }
 
 func (dhcpPushNoop) SoftDeleteDhcpScope(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
-func (dhcpPushNoop) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
-	return dbq.DhcpScope{}, nil
+func (dhcpPushNoop) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.RestoreDhcpScopeRow, error) {
+	return dbq.RestoreDhcpScopeRow{}, nil
 }
 
 // DHCP reconcile narrow-projection read (PR 12). Returns an empty
 // slice so unrelated tests don't accidentally exercise the matcher
 // against partial state.
-func (dhcpPushNoop) ListIPAddressesInSubnetForReconcile(_ context.Context, _ uuid.UUID) ([]dbq.DhcpReconcileIPRow, error) {
+func (dhcpPushNoop) ListIPAddressesInSubnetForReconcile(_ context.Context, _ uuid.UUID) ([]dbq.ListIPAddressesInSubnetForReconcileRow, error) {
 	return nil, nil
 }
 
@@ -173,11 +173,11 @@ func (dhcpPushNoop) PromoteDhcpLeaseToReservation(_ context.Context, _ dbq.Promo
 
 // On-demand sync stubs (PR 17). leasesync.Querier embeds five methods
 // + ListEnabledDhcpServersForLeaseSync. All return empty/ErrNoRows.
-func (dhcpPushNoop) ListEnabledDhcpServersForLeaseSync(_ context.Context) ([]dbq.DhcpServerForLeaseSyncRow, error) {
+func (dhcpPushNoop) ListEnabledDhcpServersForLeaseSync(_ context.Context) ([]dbq.ListEnabledDhcpServersForLeaseSyncRow, error) {
 	return nil, nil
 }
 
-func (dhcpPushNoop) ListSubnetsForFabricLeaseSync(_ context.Context, _ uuid.UUID) ([]dbq.SubnetForLeaseSyncRow, error) {
+func (dhcpPushNoop) ListSubnetsForFabricLeaseSync(_ context.Context, _ uuid.UUID) ([]dbq.ListSubnetsForFabricLeaseSyncRow, error) {
 	return nil, nil
 }
 

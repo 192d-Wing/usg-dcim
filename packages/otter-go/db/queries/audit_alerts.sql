@@ -7,9 +7,7 @@
 -- matching Python — `NULL = ANY(arr)` is NULL ≈ false, so the filter
 -- naturally drops them.
 -- name: ListAuditLog :many
-SELECT id, occurred_at, actor_user_id, actor_token_id, actor_label, actor_ip,
-       action, target_type, target_id, site_id, request_id, success,
-       diff_json, metadata_json, created_at, updated_at
+SELECT *
 FROM audit_log
 WHERE (sqlc.narg(actor_user_id)::uuid IS NULL OR actor_user_id = sqlc.narg(actor_user_id))
   AND (sqlc.narg(action)::text        IS NULL OR action        = sqlc.narg(action))
@@ -55,9 +53,7 @@ ORDER BY action;
 -- (enterprise defaults — apply to every site, so a scoped admin sees
 -- them too). Mutate semantic is restrictive (PR 59 — only global can
 -- mutate null-site rules); read semantic is permissive.
-SELECT id, name, description, metric, operator, threshold, duration_seconds,
-       severity::text AS severity, site_scope_id, asset_filter_json, enabled,
-       runbook_url, created_at, updated_at
+SELECT *
 FROM alert_rules
 WHERE (sqlc.narg(site_scope_id)::uuid IS NULL OR site_scope_id = sqlc.narg(site_scope_id))
   AND (sqlc.narg(enabled)::bool       IS NULL OR enabled       = sqlc.narg(enabled))
@@ -83,20 +79,12 @@ WHERE (sqlc.narg(site_scope_id)::uuid IS NULL OR site_scope_id = sqlc.narg(site_
 -- Single-row fetch the notify_bridge cron uses to hydrate an alert
 -- payload pulled off the dcim:notify:bridge Redis queue. Same column
 -- shape as ListAlerts so the dispatcher fan-out can reuse the row.
-SELECT id, rule_id, site_id, asset_id, collector_id,
-       severity::text AS severity, state::text AS state,
-       dedupe_key, correlation_key, summary, detail,
-       first_seen_at, last_seen_at, acked_by, acked_at, resolved_at,
-       labels_json, created_at, updated_at
+SELECT *
 FROM alerts
 WHERE id = $1;
 
 -- name: ListAlerts :many
-SELECT id, rule_id, site_id, asset_id, collector_id,
-       severity::text AS severity, state::text AS state,
-       dedupe_key, correlation_key, summary, detail,
-       first_seen_at, last_seen_at, acked_by, acked_at, resolved_at,
-       labels_json, created_at, updated_at
+SELECT *
 FROM alerts
 WHERE (sqlc.narg(site_id)::uuid  IS NULL OR site_id  = sqlc.narg(site_id))
   AND (sqlc.narg(state)::text    IS NULL OR state::text    = sqlc.narg(state))

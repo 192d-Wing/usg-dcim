@@ -83,7 +83,7 @@ func dnsWireName(fqdn string) []byte {
 // digest_type=2 (SHA-256). Returns the row + nil on success, or
 // "skip" via empty key_tag when the algorithm or public key is
 // malformed — surfaces as an empty list entry the caller filters.
-func computeDSRecord(zoneName string, key dbq.DnsKeyRow) (dsRecord, error) {
+func computeDSRecord(zoneName string, key dbq.DnsKey) (dsRecord, error) {
 	alg := dnssecAlgNumber(key.Algorithm)
 	if alg == 0 {
 		return dsRecord{}, fmt.Errorf("unsupported algorithm %q", key.Algorithm)

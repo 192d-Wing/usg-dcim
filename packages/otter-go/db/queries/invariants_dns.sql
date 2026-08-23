@@ -5,4 +5,4 @@
 SELECT z.id AS zone_id, z.frozen
 FROM dns_records r
 JOIN dns_zones z ON z.id = r.zone_id
-WHERE r.id = $1;
+WHERE r.id = sqlc.arg(record_id);

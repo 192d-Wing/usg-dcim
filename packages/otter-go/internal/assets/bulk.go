@@ -90,7 +90,7 @@ func (h *Handler) bulkUpsertRow(
 	var existing *dbq.Asset
 	if row.Manufacturer != nil && *row.Manufacturer != "" &&
 		row.Serial != nil && *row.Serial != "" {
-		a, err := h.Q.FindAssetByManufacturerSerial(ctx, *row.Manufacturer, *row.Serial)
+		a, err := h.Q.FindAssetByManufacturerSerial(ctx, dbq.FindAssetByManufacturerSerialParams{Manufacturer: *row.Manufacturer, Serial: *row.Serial})
 		if err == nil {
 			existing = &a
 		} else if !errors.Is(err, pgx.ErrNoRows) {

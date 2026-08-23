@@ -7,7 +7,7 @@ WHERE id = $1;
 
 -- name: ListOutletsByPdu :many
 SELECT id, pdu_asset_id, position, label,
-       phase::text AS phase, max_amps, receptacle, created_at, updated_at
+       phase, max_amps, receptacle, created_at, updated_at
 FROM outlets
 WHERE pdu_asset_id = $1
 ORDER BY position;
@@ -15,4 +15,4 @@ ORDER BY position;
 -- name: ListPowerConnectionsByOutletIDs :many
 SELECT id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at
 FROM power_connections
-WHERE outlet_id = ANY($1::uuid[]);
+WHERE outlet_id = ANY(sqlc.arg(outlet_ids)::uuid[]);

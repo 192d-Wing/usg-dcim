@@ -179,7 +179,7 @@ func (h *Handler) enableDnssec(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(existing) > 0 {
 		if !zone.Signed {
-			if _, err := h.Q.SetDnsZoneSigned(r.Context(), id, true); err != nil {
+			if _, err := h.Q.SetDnsZoneSigned(r.Context(), dbq.SetDnsZoneSignedParams{ID: id, Signed: true}); err != nil {
 				status, msg := httpx.Mapped(err)
 				httpx.Error(w, status, msg)
 				return
@@ -191,7 +191,7 @@ func (h *Handler) enableDnssec(w http.ResponseWriter, r *http.Request) {
 	// Generate KSK + ZSK. Default algorithm is ECDSAP256 — short
 	// keys, ubiquitous resolver support. Matches Python's default.
 	defaultAlg := defaultDnssecAlgorithm()
-	out := make([]dbq.DnsKeyRow, 0, 2)
+	out := make([]dbq.DnsKey, 0, 2)
 	for _, role := range []string{"ksk", "zsk"} {
 		material, err := generateDnssecKeypair(role, defaultAlg)
 		if err != nil {
@@ -210,7 +210,7 @@ func (h *Handler) enableDnssec(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, row)
 	}
-	if _, err := h.Q.SetDnsZoneSigned(r.Context(), id, true); err != nil {
+	if _, err := h.Q.SetDnsZoneSigned(r.Context(), dbq.SetDnsZoneSignedParams{ID: id, Signed: true}); err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
 		return

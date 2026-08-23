@@ -639,14 +639,14 @@ var ErrOutsideScope = httpx.ErrOutsideScope
 // is silently dropped (the OIDC-mapping path may later contribute
 // dimensions we don't yet enumerate). Production behavior matches
 // Python — unknown == ignored.
-func resolveUserScopes(rows []dbq.ScopedCapabilityRow) map[string]Scope {
+func resolveUserScopes(rows []dbq.GetUserScopedCapabilitiesRow) map[string]Scope {
 	if len(rows) == 0 {
 		return nil
 	}
 	out := map[string]Scope{}
 	for _, r := range rows {
 		s := out[r.Code]
-		add := scopeRowToDimension(r.ScopeType, r.TargetID)
+		add := scopeRowToDimension(&r.ScopeType, r.TargetID)
 		out[r.Code] = s.Union(add)
 	}
 	return out

@@ -61,7 +61,7 @@ func (h *Handler) listTcpAoKeys(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []dbq.TcpAoKey{}
 	}
-	total, err := h.Q.CountTcpAoKeys(r.Context(), dbq.CountTcpAoKeysParams{KeyChainID: params.KeyChainID})
+	total, err := h.Q.CountTcpAoKeys(r.Context(), params.KeyChainID)
 	if err != nil {
 		writeMapped(w, err)
 		return

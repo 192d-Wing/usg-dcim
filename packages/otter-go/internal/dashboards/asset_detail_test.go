@@ -23,9 +23,9 @@ type fakeAdQ struct {
 	fakeQ
 	asset      dbq.Asset
 	assetErr   error
-	sources    []dbq.AssetTelemetrySourceRow
-	ips        []dbq.AssetIPAddressRow
-	alerts     []dbq.RecentAssetAlertRow
+	sources    []dbq.ListAssetTelemetrySourcesRow
+	ips        []dbq.ListAssetIPAddressesRow
+	alerts     []dbq.ListRecentAssetAlertsRow
 	gotAssetID uuid.UUID
 	sourcesErr error
 }
@@ -34,13 +34,13 @@ func (f *fakeAdQ) GetAsset(_ context.Context, id uuid.UUID) (dbq.Asset, error) {
 	f.gotAssetID = id
 	return f.asset, f.assetErr
 }
-func (f *fakeAdQ) ListAssetTelemetrySources(_ context.Context, _ uuid.UUID) ([]dbq.AssetTelemetrySourceRow, error) {
+func (f *fakeAdQ) ListAssetTelemetrySources(_ context.Context, _ uuid.UUID) ([]dbq.ListAssetTelemetrySourcesRow, error) {
 	return f.sources, f.sourcesErr
 }
-func (f *fakeAdQ) ListAssetIPAddresses(_ context.Context, _ uuid.UUID) ([]dbq.AssetIPAddressRow, error) {
+func (f *fakeAdQ) ListAssetIPAddresses(_ context.Context, _ uuid.UUID) ([]dbq.ListAssetIPAddressesRow, error) {
 	return f.ips, nil
 }
-func (f *fakeAdQ) ListRecentAssetAlerts(_ context.Context, _ uuid.UUID) ([]dbq.RecentAssetAlertRow, error) {
+func (f *fakeAdQ) ListRecentAssetAlerts(_ context.Context, _ uuid.UUID) ([]dbq.ListRecentAssetAlertsRow, error) {
 	return f.alerts, nil
 }
 
@@ -74,15 +74,15 @@ func TestAssetDetail_HappyPath(t *testing.T) {
 			MgmtIP: &mgmtIP, MgmtPort: &mgmtPort,
 			LifecycleState: "active",
 		},
-		sources: []dbq.AssetTelemetrySourceRow{
+		sources: []dbq.ListAssetTelemetrySourcesRow{
 			{Metric: "cpu.load", Freshness: "current", LastValue: &lv,
 				LastReadingAt: &t1, LastSuccessAt: &t1, PollIntervalSeconds: 60},
 		},
-		ips: []dbq.AssetIPAddressRow{
+		ips: []dbq.ListAssetIPAddressesRow{
 			{ID: ipID, SubnetID: subID, Address: "10.0.0.5",
 				Role: "host", Status: "active", Source: "manual"},
 		},
-		alerts: []dbq.RecentAssetAlertRow{
+		alerts: []dbq.ListRecentAssetAlertsRow{
 			{ID: alertID, Severity: "major", State: "firing",
 				Summary: "interface down", FirstSeenAt: t1, LastSeenAt: t1},
 		},

@@ -21,23 +21,23 @@ import (
 // integration tests can configure each loader's return without
 // going through the full DNS Querier surface.
 type fakeBundleQ struct {
-	server         dbq.DnsServer
+	server         dbq.GetDnsServerRow
 	serverErr      error
 	zones          []dbq.DnsZone
 	zonesErr       error
-	records        []dbq.DnsRecordForBundle
+	records        []dbq.ListDnsRecordsByZoneIDsRow
 	recordsErr     error
 	unhealthyIDs   []uuid.UUID
 	unhealthyErr   error
 }
 
-func (f *fakeBundleQ) GetDnsServer(_ context.Context, _ uuid.UUID) (dbq.DnsServer, error) {
+func (f *fakeBundleQ) GetDnsServer(_ context.Context, _ uuid.UUID) (dbq.GetDnsServerRow, error) {
 	return f.server, f.serverErr
 }
 func (f *fakeBundleQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return f.zones, f.zonesErr
 }
-func (f *fakeBundleQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeBundleQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return f.records, f.recordsErr
 }
 func (f *fakeBundleQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -46,10 +46,10 @@ func (f *fakeBundleQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context
 func (f *fakeBundleQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeBundleQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeBundleQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeBundleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeBundleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 func (f *fakeBundleQ) ListDnsViewsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsView, error) {
@@ -61,14 +61,14 @@ func (f *fakeBundleQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID) 
 func (f *fakeBundleQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeBundleQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeBundleQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeBundleQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeBundleQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeBundleQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeBundleQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeBundleQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -93,7 +93,7 @@ func TestAssembleAuthBundle_EmitsOneZoneFilePerZone(t *testing.T) {
 	in := AuthBundleInput{
 		Server: dbq.DnsServer{Role: "auth"},
 		Zones:  []dbq.DnsZone{zone1, zone2},
-		RecordsByZone: map[uuid.UUID][]dbq.DnsRecordForBundle{},
+		RecordsByZone: map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow{},
 	}
 	out, err := AssembleAuthBundle(in)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestAssembleAuthBundle_UnhealthyRecordFiltered(t *testing.T) {
 	in := AuthBundleInput{
 		Server: dbq.DnsServer{Role: "auth"},
 		Zones:  []dbq.DnsZone{zone},
-		RecordsByZone: map[uuid.UUID][]dbq.DnsRecordForBundle{
+		RecordsByZone: map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow{
 			zone.ID: {
 				{Name: "ok", Type: "A", Data: []byte(`{"target":"10.0.0.1"}`)},
 				{Name: "sick", Type: "A", Data: []byte(`{"target":"10.0.0.2"}`), HealthCheckID: &hcID},
@@ -255,18 +255,18 @@ type recursiveOKFakeQ struct {
 	role string
 }
 
-func (f *recursiveOKFakeQ) GetDnsServer(_ context.Context, id uuid.UUID) (dbq.DnsServer, error) {
-	return dbq.DnsServer{ID: id, Role: f.role, FabricID: uuid.New()}, nil
+func (f *recursiveOKFakeQ) GetDnsServer(_ context.Context, id uuid.UUID) (dbq.GetDnsServerRow, error) {
+	return dbq.GetDnsServerRow{ID: id, Role: f.role, FabricID: uuid.New()}, nil
 }
-func (f *recursiveOKFakeQ) GetFabricForRecursiveBundle(_ context.Context, id uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{ID: id, RecursiveEngine: "coredns"}, nil
+func (f *recursiveOKFakeQ) GetFabricForRecursiveBundle(_ context.Context, id uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{ID: id, RecursiveEngine: "coredns"}, nil
 }
 
 func TestBundleHandler_AuthOK_SetsEtagHeader(t *testing.T) {
 	ts := time.Unix(1700000000, 0).UTC()
 	zone := mkBundleZoneRow(uuid.New(), "z.example.", ts)
 	q := &fakeBundleQ{
-		server: dbq.DnsServer{Role: "auth"},
+		server: dbq.GetDnsServerRow{Role: "auth"},
 		zones:  []dbq.DnsZone{zone},
 	}
 	rec := doBundle(t, mountBundle(q), "/dns/servers/"+uuid.New().String()+"/bundle", "")
@@ -299,7 +299,7 @@ func TestBundleHandler_IfNoneMatch304(t *testing.T) {
 	ts := time.Unix(1700000000, 0).UTC()
 	zone := mkBundleZoneRow(uuid.New(), "z.example.", ts)
 	q := &fakeBundleQ{
-		server: dbq.DnsServer{Role: "auth"},
+		server: dbq.GetDnsServerRow{Role: "auth"},
 		zones:  []dbq.DnsZone{zone},
 	}
 	// First call to learn the etag.

@@ -26,7 +26,7 @@ func (f *fakeQ) CreateLirRequest(_ context.Context, a dbq.CreateLirRequestParams
 	r := dbq.LirRequest{
 		ID: uuid.New(), OrganizationID: a.OrganizationID,
 		RequesterUserID: a.RequesterUserID, PoolID: a.PoolID, SiteID: a.SiteID,
-		IpFamily: a.IpFamily, PrefixLength: a.PrefixLength,
+		IPFamily: a.IPFamily, PrefixLength: a.PrefixLength,
 		Purpose: a.Purpose, Classification: a.Classification,
 		Justification: a.Justification, Status: "pending_approval",
 	}

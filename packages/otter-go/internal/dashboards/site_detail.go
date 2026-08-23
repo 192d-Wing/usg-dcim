@@ -22,13 +22,13 @@ import (
 type SiteDetailQuerier interface {
 	GetSite(ctx context.Context, id uuid.UUID) (dbq.Site, error)
 	GetRegion(ctx context.Context, id uuid.UUID) (dbq.Region, error)
-	ListBuildingsBySite(ctx context.Context, siteID uuid.UUID) ([]dbq.SiteBuildingRow, error)
-	ListRoomsByBuildingIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SiteRoomRow, error)
-	ListRowsByRoomIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SiteRowRow, error)
+	ListBuildingsBySite(ctx context.Context, siteID uuid.UUID) ([]dbq.ListBuildingsBySiteRow, error)
+	ListRoomsByBuildingIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.ListRoomsByBuildingIDsRow, error)
+	ListRowsByRoomIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.ListRowsByRoomIDsRow, error)
 	ListRacksBySite(ctx context.Context, siteID uuid.UUID) ([]dbq.Rack, error)
 	ListAssetsBySite(ctx context.Context, siteID uuid.UUID) ([]dbq.Asset, error)
-	ListSiteAlertsBySeverity(ctx context.Context, siteID uuid.UUID) ([]dbq.SiteAlertSeverityRow, error)
-	ListSiteCollectors(ctx context.Context, siteID uuid.UUID) ([]dbq.SiteCollectorRow, error)
+	ListSiteAlertsBySeverity(ctx context.Context, siteID uuid.UUID) ([]dbq.ListSiteAlertsBySeverityRow, error)
+	ListSiteCollectors(ctx context.Context, siteID uuid.UUID) ([]dbq.ListSiteCollectorsRow, error)
 	capacity.Querier
 }
 
@@ -215,9 +215,9 @@ func loadOptionalRegion(ctx context.Context, q SiteDetailQuerier, id uuid.UUID) 
 }
 
 type siteTopology struct {
-	buildings []dbq.SiteBuildingRow
-	rooms     []dbq.SiteRoomRow
-	rows      []dbq.SiteRowRow
+	buildings []dbq.ListBuildingsBySiteRow
+	rooms     []dbq.ListRoomsByBuildingIDsRow
+	rows      []dbq.ListRowsByRoomIDsRow
 	racks     []dbq.Rack
 	assets    []dbq.Asset
 }
@@ -248,7 +248,7 @@ func loadSiteTopology(ctx context.Context, q SiteDetailQuerier, siteID uuid.UUID
 	return t, nil
 }
 
-func listRoomsForBuildings(ctx context.Context, q SiteDetailQuerier, buildings []dbq.SiteBuildingRow) ([]dbq.SiteRoomRow, error) {
+func listRoomsForBuildings(ctx context.Context, q SiteDetailQuerier, buildings []dbq.ListBuildingsBySiteRow) ([]dbq.ListRoomsByBuildingIDsRow, error) {
 	if len(buildings) == 0 {
 		return nil, nil
 	}
@@ -259,7 +259,7 @@ func listRoomsForBuildings(ctx context.Context, q SiteDetailQuerier, buildings [
 	return q.ListRoomsByBuildingIDs(ctx, ids)
 }
 
-func listRowsForRooms(ctx context.Context, q SiteDetailQuerier, rooms []dbq.SiteRoomRow) ([]dbq.SiteRowRow, error) {
+func listRowsForRooms(ctx context.Context, q SiteDetailQuerier, rooms []dbq.ListRoomsByBuildingIDsRow) ([]dbq.ListRowsByRoomIDsRow, error) {
 	if len(rooms) == 0 {
 		return nil, nil
 	}
@@ -301,7 +301,7 @@ func assetsByLifecycle(assets []dbq.Asset) map[string]int64 {
 	return out
 }
 
-func alertsKpiFrom(rows []dbq.SiteAlertSeverityRow) map[string]int64 {
+func alertsKpiFrom(rows []dbq.ListSiteAlertsBySeverityRow) map[string]int64 {
 	out := map[string]int64{
 		"info":     0,
 		"warning":  0,
@@ -326,7 +326,7 @@ func alertsKpiFrom(rows []dbq.SiteAlertSeverityRow) map[string]int64 {
 // counts a collector whose status is literally "stale" and is also
 // flagged stale by the freshness threshold. Match that semantically
 // even though it's likely a Python bug — wire parity is the goal.
-func collectorsKpiFrom(rows []dbq.SiteCollectorRow, staleBefore time.Time) map[string]int64 {
+func collectorsKpiFrom(rows []dbq.ListSiteCollectorsRow, staleBefore time.Time) map[string]int64 {
 	out := map[string]int64{
 		"pending":        0,
 		"healthy":        0,
@@ -427,8 +427,8 @@ func buildHierarchy(
 }
 
 func buildRoomNodes(
-	rooms []dbq.SiteRoomRow,
-	rowsByRoom map[uuid.UUID][]dbq.SiteRowRow,
+	rooms []dbq.ListRoomsByBuildingIDsRow,
+	rowsByRoom map[uuid.UUID][]dbq.ListRowsByRoomIDsRow,
 	racksByRow map[uuid.UUID][]dbq.Rack,
 	caps map[uuid.UUID]capacity.RackCapacity,
 	assetsByRack map[uuid.UUID][]dbq.Asset,
@@ -448,7 +448,7 @@ func buildRoomNodes(
 }
 
 func buildRowNodes(
-	rows []dbq.SiteRowRow,
+	rows []dbq.ListRowsByRoomIDsRow,
 	racksByRow map[uuid.UUID][]dbq.Rack,
 	caps map[uuid.UUID]capacity.RackCapacity,
 	assetsByRack map[uuid.UUID][]dbq.Asset,
@@ -487,16 +487,16 @@ func makeRackNode(rk dbq.Rack, caps map[uuid.UUID]capacity.RackCapacity, assetsB
 	}
 }
 
-func groupRoomsByBuilding(rooms []dbq.SiteRoomRow) map[uuid.UUID][]dbq.SiteRoomRow {
-	out := map[uuid.UUID][]dbq.SiteRoomRow{}
+func groupRoomsByBuilding(rooms []dbq.ListRoomsByBuildingIDsRow) map[uuid.UUID][]dbq.ListRoomsByBuildingIDsRow {
+	out := map[uuid.UUID][]dbq.ListRoomsByBuildingIDsRow{}
 	for _, r := range rooms {
 		out[r.BuildingID] = append(out[r.BuildingID], r)
 	}
 	return out
 }
 
-func groupRowsByRoom(rows []dbq.SiteRowRow) map[uuid.UUID][]dbq.SiteRowRow {
-	out := map[uuid.UUID][]dbq.SiteRowRow{}
+func groupRowsByRoom(rows []dbq.ListRowsByRoomIDsRow) map[uuid.UUID][]dbq.ListRowsByRoomIDsRow {
+	out := map[uuid.UUID][]dbq.ListRowsByRoomIDsRow{}
 	for _, r := range rows {
 		out[r.RoomID] = append(out[r.RoomID], r)
 	}

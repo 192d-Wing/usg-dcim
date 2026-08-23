@@ -21,11 +21,11 @@ type fakeBdQ struct {
 	building     dbq.Building
 	buildingErr  error
 	site         dbq.Site
-	rooms        []dbq.SiteRoomRow
-	rows         []dbq.SiteRowRow
+	rooms        []dbq.ListRoomsByBuildingIDsRow
+	rows         []dbq.ListRowsByRoomIDsRow
 	racks        []dbq.Rack
 	assets       []dbq.Asset
-	pduTelemetry []dbq.PduKwTelemetryRow
+	pduTelemetry []dbq.ListPduKwTelemetryRow
 }
 
 func (f *fakeBdQ) GetBuilding(_ context.Context, _ uuid.UUID) (dbq.Building, error) {
@@ -34,10 +34,10 @@ func (f *fakeBdQ) GetBuilding(_ context.Context, _ uuid.UUID) (dbq.Building, err
 func (f *fakeBdQ) GetSite(_ context.Context, _ uuid.UUID) (dbq.Site, error) {
 	return f.site, nil
 }
-func (f *fakeBdQ) ListRoomsByBuildingIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SiteRoomRow, error) {
+func (f *fakeBdQ) ListRoomsByBuildingIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListRoomsByBuildingIDsRow, error) {
 	return f.rooms, nil
 }
-func (f *fakeBdQ) ListRowsByRoomIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SiteRowRow, error) {
+func (f *fakeBdQ) ListRowsByRoomIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListRowsByRoomIDsRow, error) {
 	return f.rows, nil
 }
 func (f *fakeBdQ) ListRacksByRowIDs(_ context.Context, _ []uuid.UUID) ([]dbq.Rack, error) {
@@ -46,7 +46,7 @@ func (f *fakeBdQ) ListRacksByRowIDs(_ context.Context, _ []uuid.UUID) ([]dbq.Rac
 func (f *fakeBdQ) ListAssetsByRackIDs(_ context.Context, _ []uuid.UUID) ([]dbq.Asset, error) {
 	return f.assets, nil
 }
-func (f *fakeBdQ) ListPduKwTelemetry(_ context.Context, _ []uuid.UUID) ([]dbq.PduKwTelemetryRow, error) {
+func (f *fakeBdQ) ListPduKwTelemetry(_ context.Context, _ []uuid.UUID) ([]dbq.ListPduKwTelemetryRow, error) {
 	return f.pduTelemetry, nil
 }
 
@@ -82,16 +82,17 @@ func TestBuildingDetail_BadUUIDIs400(t *testing.T) {
 func TestBuildingDetail_HappyPath(t *testing.T) {
 	sid, bid, rmid, rw1, rw2, rkid := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	pduID := uuid.New()
-	dkw, cool, maxKw, kwNow := "12.00", "3.50", "8.00", "1.250"
+	dkw, cool, maxKw := "12.00", "3.50", "8.00"
+	kwNow := 1.25
 	f := &fakeBdQ{
 		building: dbq.Building{ID: bid, SiteID: sid, Name: "Bldg A", Code: "BA"},
 		site:     dbq.Site{ID: sid, Name: "Site A", Code: "SA", RegionID: uuid.New(), LifecycleState: "active"},
-		rooms: []dbq.SiteRoomRow{{
+		rooms: []dbq.ListRoomsByBuildingIDsRow{{
 			ID: rmid, BuildingID: bid, Name: "Data Hall 1", Code: "DH1",
 			DesignKw: &dkw, FloorAreaSqft: intPtrLocal(400), DesignCoolingTons: &cool,
 			GridCols: intPtrLocal(24), GridRows: intPtrLocal(12),
 		}},
-		rows: []dbq.SiteRowRow{
+		rows: []dbq.ListRowsByRoomIDsRow{
 			{ID: rw1, RoomID: rmid, Name: "Row 1", Code: "RW1"},
 			{ID: rw2, RoomID: rmid, Name: "Row 2", Code: "RW2"},
 		},
@@ -104,7 +105,7 @@ func TestBuildingDetail_HappyPath(t *testing.T) {
 				RackPositionU: intPtrLocal(1), RackUnits: intPtrLocal(2)},
 			{ID: pduID, SiteID: sid, RackID: &rkid, Kind: "pdu", LifecycleState: "active"},
 		},
-		pduTelemetry: []dbq.PduKwTelemetryRow{
+		pduTelemetry: []dbq.ListPduKwTelemetryRow{
 			{AssetID: pduID, Metric: "pdu.input.kw", LastValue: &kwNow},
 		},
 	}

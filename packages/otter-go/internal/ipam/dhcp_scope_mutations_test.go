@@ -43,7 +43,7 @@ type dhcpMutFakeQ struct {
 	fakeQ
 
 	serverFabricID uuid.UUID
-	getResult      dbq.DhcpScope
+	getResult      dbq.GetDhcpScopeRow
 	getErr         error
 
 	subnetExists bool
@@ -53,27 +53,27 @@ type dhcpMutFakeQ struct {
 	templateExists bool
 
 	createLast   dbq.CreateDhcpScopeParams
-	createResult dbq.DhcpScope
+	createResult dbq.CreateDhcpScopeRow
 
 	updateLast   dbq.UpdateDhcpScopeParams
-	updateResult dbq.DhcpScope
+	updateResult dbq.UpdateDhcpScopeRow
 
 	softDeleteCalls int
-	restoreResult   dbq.DhcpScope
+	restoreResult   dbq.RestoreDhcpScopeRow
 	restoreCalls    int
 }
 
 func (f *dhcpMutFakeQ) GetDhcpServerFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return f.serverFabricID, nil
 }
-func (f *dhcpMutFakeQ) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
+func (f *dhcpMutFakeQ) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeRow, error) {
 	return f.getResult, f.getErr
 }
-func (f *dhcpMutFakeQ) GetSubnet(_ context.Context, id uuid.UUID) (dbq.Subnet, error) {
+func (f *dhcpMutFakeQ) GetSubnet(_ context.Context, id uuid.UUID) (dbq.GetSubnetRow, error) {
 	if !f.subnetExists {
-		return dbq.Subnet{}, pgx.ErrNoRows
+		return dbq.GetSubnetRow{}, pgx.ErrNoRows
 	}
-	return dbq.Subnet{ID: id}, nil
+	return dbq.GetSubnetRow{ID: id}, nil
 }
 func (f *dhcpMutFakeQ) GetDhcpScopeTemplate(_ context.Context, id uuid.UUID) (dbq.DhcpScopeTemplate, error) {
 	if !f.templateExists {
@@ -81,11 +81,11 @@ func (f *dhcpMutFakeQ) GetDhcpScopeTemplate(_ context.Context, id uuid.UUID) (db
 	}
 	return dbq.DhcpScopeTemplate{ID: id, IPFamily: f.templateFamily}, nil
 }
-func (f *dhcpMutFakeQ) CreateDhcpScope(_ context.Context, a dbq.CreateDhcpScopeParams) (dbq.DhcpScope, error) {
+func (f *dhcpMutFakeQ) CreateDhcpScope(_ context.Context, a dbq.CreateDhcpScopeParams) (dbq.CreateDhcpScopeRow, error) {
 	f.createLast = a
 	return f.createResult, nil
 }
-func (f *dhcpMutFakeQ) UpdateDhcpScope(_ context.Context, a dbq.UpdateDhcpScopeParams) (dbq.DhcpScope, error) {
+func (f *dhcpMutFakeQ) UpdateDhcpScope(_ context.Context, a dbq.UpdateDhcpScopeParams) (dbq.UpdateDhcpScopeRow, error) {
 	f.updateLast = a
 	return f.updateResult, nil
 }
@@ -93,7 +93,7 @@ func (f *dhcpMutFakeQ) SoftDeleteDhcpScope(_ context.Context, _ uuid.UUID) error
 	f.softDeleteCalls++
 	return nil
 }
-func (f *dhcpMutFakeQ) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
+func (f *dhcpMutFakeQ) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.RestoreDhcpScopeRow, error) {
 	f.restoreCalls++
 	return f.restoreResult, nil
 }
@@ -101,11 +101,11 @@ func (f *dhcpMutFakeQ) RestoreDhcpScope(_ context.Context, _ uuid.UUID) (dbq.Dhc
 // Override push.Querier methods that DeleteScopeFromKea touches so
 // the DELETE path doesn't fall into pgx.ErrNoRows from the noop fake
 // and surface as kea.StatusError.
-func (f *dhcpMutFakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
+func (f *dhcpMutFakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
 	if f.getResult.ID == uuid.Nil {
-		return dbq.DhcpScopeForPushRow{}, pgx.ErrNoRows
+		return dbq.GetDhcpScopeForPushRow{}, pgx.ErrNoRows
 	}
-	return dbq.DhcpScopeForPushRow{
+	return dbq.GetDhcpScopeForPushRow{
 		ID:           f.getResult.ID,
 		DhcpServerID: f.getResult.DhcpServerID,
 		IPFamily:     f.getResult.IPFamily,
@@ -114,8 +114,8 @@ func (f *dhcpMutFakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.
 		Enabled:      f.getResult.Enabled,
 	}, nil
 }
-func (f *dhcpMutFakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
-	return dbq.DhcpServerForPushRow{ID: f.getResult.DhcpServerID, Enabled: true, KeaURL: "stub"}, nil
+func (f *dhcpMutFakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
+	return dbq.GetDhcpServerForPushRow{ID: f.getResult.DhcpServerID, Enabled: true, KeaURL: "stub"}, nil
 }
 
 func mountDhcpMut(f *dhcpMutFakeQ, rec *recordingAudit) http.Handler {
@@ -123,7 +123,7 @@ func mountDhcpMut(f *dhcpMutFakeQ, rec *recordingAudit) http.Handler {
 	(&Handler{
 		Q:     f,
 		Audit: rec,
-		PushKea: func(_ dbq.DhcpServerForPushRow) push.KeaClient { return &fakeKea{} },
+		PushKea: func(_ dbq.GetDhcpServerForPushRow) push.KeaClient { return &fakeKea{} },
 	}).Mount(r)
 	return r
 }
@@ -310,7 +310,7 @@ func TestUpdateDhcpScope_NullName_400(t *testing.T) {
 	id := uuid.New()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), IPFamily: 4},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: uuid.New(), IPFamily: 4},
 	}
 	body := []byte(`{"name": null}`)
 	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
@@ -323,7 +323,7 @@ func TestUpdateDhcpScope_V4RejectsPdPoolsOnExisting(t *testing.T) {
 	id := uuid.New()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), IPFamily: 4},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: uuid.New(), IPFamily: 4},
 	}
 	body := []byte(`{"pd_pools": [{"prefix": "fd00::/64"}]}`)
 	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
@@ -337,8 +337,8 @@ func TestUpdateDhcpScope_PoolsNullClearsToEmptyArray(t *testing.T) {
 	srvID := uuid.New()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4},
-		updateResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 4},
+		updateResult: dbq.UpdateDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 4},
 	}
 	body := []byte(`{"pools": null}`)
 	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
@@ -360,8 +360,8 @@ func TestUpdateDhcpScope_PdPoolsNullClearsToNull(t *testing.T) {
 	srvID := uuid.New()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 6},
-		updateResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 6},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 6},
+		updateResult: dbq.UpdateDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 6},
 	}
 	body := []byte(`{"pd_pools": null}`)
 	w := runMutationRequest(t, "PATCH", "/ipam/dhcp/scopes/"+id.String(), body, f, &recordingAudit{})
@@ -381,8 +381,8 @@ func TestUpdateDhcpScope_AuditDiffOnlySetKeys(t *testing.T) {
 	srvID := uuid.New()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 6},
-		updateResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 6},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 6},
+		updateResult: dbq.UpdateDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 6},
 	}
 	body := []byte(`{"name": "renamed", "enabled": false}`)
 	rec := &recordingAudit{}
@@ -414,7 +414,7 @@ func TestDeleteDhcpScope_HappyPath_204(t *testing.T) {
 	srvID := uuid.New()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24", Enabled: true},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24", Enabled: true},
 	}
 	rec := &recordingAudit{}
 	w := runMutationRequest(t, "DELETE", "/ipam/dhcp/scopes/"+id.String(), nil, f, rec)
@@ -444,7 +444,7 @@ func TestDeleteDhcpScope_AlreadySoftDeleted_404(t *testing.T) {
 	deletedAt := time.Now()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), DeletedAt: &deletedAt},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: uuid.New(), DeletedAt: &deletedAt},
 	}
 	w := runMutationRequest(t, "DELETE", "/ipam/dhcp/scopes/"+id.String(), nil, f, &recordingAudit{})
 	if w.Code != http.StatusNotFound {
@@ -463,8 +463,8 @@ func TestRestoreDhcpScope_HappyPath_200(t *testing.T) {
 	deletedAt := time.Now()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24", DeletedAt: &deletedAt},
-		restoreResult: dbq.DhcpScope{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24"},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24", DeletedAt: &deletedAt},
+		restoreResult: dbq.RestoreDhcpScopeRow{ID: id, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24"},
 	}
 	rec := &recordingAudit{}
 	w := runMutationRequest(t, "POST", "/ipam/dhcp/scopes/"+id.String()+"/restore", nil, f, rec)
@@ -483,7 +483,7 @@ func TestRestoreDhcpScope_NotSoftDeleted_400(t *testing.T) {
 	id := uuid.New()
 	f := &dhcpMutFakeQ{
 		serverFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{ID: id, DhcpServerID: uuid.New(), DeletedAt: nil},
+		getResult: dbq.GetDhcpScopeRow{ID: id, DhcpServerID: uuid.New(), DeletedAt: nil},
 	}
 	w := runMutationRequest(t, "POST", "/ipam/dhcp/scopes/"+id.String()+"/restore", nil, f, &recordingAudit{})
 	if w.Code != http.StatusBadRequest {

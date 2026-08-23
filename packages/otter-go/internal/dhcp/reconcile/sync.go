@@ -71,7 +71,7 @@ func Sync(
 	scopeID uuid.UUID,
 	subnetID *uuid.UUID,
 	reservationsJSON json.RawMessage,
-	ipRows []dbq.DhcpReconcileIPRow,
+	ipRows []dbq.ListIPAddressesInSubnetForReconcileRow,
 ) (SyncReport, error) {
 	report := SyncReport{ScopeID: scopeID.String(), Entries: []map[string]any{}}
 	if subnetID != nil {
@@ -131,7 +131,7 @@ func syncOne(
 	w Writer,
 	subnetID uuid.UUID,
 	r map[string]any,
-	ipIndex map[string]dbq.DhcpReconcileIPRow,
+	ipIndex map[string]dbq.ListIPAddressesInSubnetForReconcileRow,
 ) (map[string]any, error) {
 	rawIP := stringField(r, "ip")
 	norm, parsable := normalizeIP(rawIP)
@@ -191,7 +191,7 @@ func syncOne(
 // reservation must be SKIPPED rather than promoted — promoting
 // silently would mask the binding conflict (Python comment at
 // services/dhcp_reconcile.py:329-348).
-func mismatchEntry(r map[string]any, match dbq.DhcpReconcileIPRow, norm string) (map[string]any, bool) {
+func mismatchEntry(r map[string]any, match dbq.ListIPAddressesInSubnetForReconcileRow, norm string) (map[string]any, bool) {
 	resMac := normalizeMac(stringField(r, "mac"))
 	rowMac := normalizeMac(deref(match.DhcpMac))
 	if resMac != "" && rowMac != "" && resMac != rowMac {

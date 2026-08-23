@@ -33,8 +33,10 @@ INSERT INTO ip_addresses (
     dhcp_mac, dhcp_duid, dns_name,
     created_at, updated_at
 )
-VALUES (gen_random_uuid(), $1, $2::inet, 'data', 'reserved', 'reservation',
-        $3, $4, $5, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(subnet_id), sqlc.arg(address)::inet,
+        'data', 'reserved', 'reservation',
+        sqlc.narg(dhcp_mac), sqlc.narg(dhcp_duid), sqlc.narg(dns_name),
+        NOW(), NOW())
 RETURNING id;
 
 -- name: PromoteDhcpLeaseToReservation :exec
@@ -47,8 +49,8 @@ RETURNING id;
 UPDATE ip_addresses
 SET source     = 'reservation',
     status     = 'reserved',
-    dhcp_mac   = COALESCE(dhcp_mac,  $2::text),
-    dhcp_duid  = COALESCE(dhcp_duid, $3::text),
-    dns_name   = COALESCE(dns_name,  $4::text),
+    dhcp_mac   = COALESCE(dhcp_mac,  sqlc.narg(dhcp_mac)::text),
+    dhcp_duid  = COALESCE(dhcp_duid, sqlc.narg(dhcp_duid)::text),
+    dns_name   = COALESCE(dns_name,  sqlc.narg(dns_name)::text),
     updated_at = NOW()
-WHERE id = $1;
+WHERE id = sqlc.arg(id);

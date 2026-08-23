@@ -35,7 +35,7 @@ WHERE key = $1;
 -- three. Caller materializes a map[key]value on its side.
 SELECT key, value, updated_at
 FROM system_settings
-WHERE key = ANY($1::text[]);
+WHERE key = ANY(sqlc.arg(keys)::text[]);
 
 -- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, updated_at)
@@ -57,16 +57,18 @@ DELETE FROM system_settings WHERE key = $1;
 -- address fields and the pool's upstream net handle. The row stays
 -- locked until the caller's tx commits or rolls back.
 --
--- $1 = max attempts (typically 5). Filter applies only to 'failed'
+-- max_attempts (typically 5). Filter applies only to 'failed'
 --      rows; 'pending' rows are always eligible regardless of attempt
 --      count (a freshly-approved allocation has attempts=0).
 SELECT
     a.id                                      AS allocation_id,
     a.arin_status,
     a.arin_attempts,
-    host(a.prefix) || '/' || masklen(a.prefix) AS prefix,
+    (host(a.prefix) || '/' || masklen(a.prefix))::text AS prefix,
     a.organization_id,
-    p.arin_parent_net_handle                  AS parent_net_handle,
+    -- Guaranteed non-NULL by the WHERE guard below; COALESCE makes
+    -- that visible to sqlc's nullability inference.
+    COALESCE(p.arin_parent_net_handle, '')    AS parent_net_handle,
     o.name                                    AS org_name,
     o.arin_org_id                             AS org_arin_handle,
     o.address_line1, o.address_line2, o.city, o.state_province,
@@ -83,7 +85,7 @@ WHERE p.arin_parent_net_handle IS NOT NULL
         a.arin_status = 'pending'
         OR (
             a.arin_status = 'failed'
-            AND a.arin_attempts < $1::int
+            AND a.arin_attempts < sqlc.arg(max_attempts)::int
             AND (
                 a.arin_last_attempt_at IS NULL
                 OR a.arin_last_attempt_at + (
@@ -108,12 +110,12 @@ LIMIT 1;
 -- so the row carries a true success count for ops dashboards.
 UPDATE lir_allocations
 SET arin_status        = 'registered',
-    arin_net_handle    = $2::text,
+    arin_net_handle    = sqlc.arg(net_handle)::text,
     arin_attempts      = arin_attempts + 1,
     arin_last_attempt_at = NOW(),
     arin_last_error    = NULL,
     updated_at         = NOW()
-WHERE id = $1;
+WHERE id = sqlc.arg(id);
 
 -- name: MarkArinFailed :exec
 -- Records a failed attempt. The next claim picks the row up again
@@ -124,9 +126,9 @@ UPDATE lir_allocations
 SET arin_status        = 'failed',
     arin_attempts      = arin_attempts + 1,
     arin_last_attempt_at = NOW(),
-    arin_last_error    = $2::text,
+    arin_last_error    = sqlc.arg(error)::text,
     updated_at         = NOW()
-WHERE id = $1;
+WHERE id = sqlc.arg(id);
 
 -- name: ResetArinJobForRetry :exec
 -- Operator-triggered retry. Routes by direction (inferred from

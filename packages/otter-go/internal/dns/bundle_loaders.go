@@ -27,7 +27,7 @@ import (
 // catalogQuerier is the slice of methods the catalog loader needs.
 type catalogQuerier interface {
 	GetEnabledDnsCatalogZoneByFabric(ctx context.Context, fabricID uuid.UUID) (dbq.DnsCatalogZone, error)
-	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error)
+	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error)
 }
 
 // loadCatalogForBundle resolves the fabric's catalog zone (if any),
@@ -56,11 +56,11 @@ func loadCatalogForBundle(
 	members := zones
 	primaries := make([]string, 0, len(servers))
 	for _, s := range servers {
-		if s.UnicastIP != nil && *s.UnicastIP != "" {
+		if s.UnicastIP != "" {
 			// inet textcast preserves any CIDR suffix; strip before
 			// emitting the property record (matches Python's
 			// `str(s.unicast_ip).split("/", 1)[0]`).
-			bare := *s.UnicastIP
+			bare := s.UnicastIP
 			if i := strings.IndexByte(bare, '/'); i >= 0 {
 				bare = bare[:i]
 			}
@@ -75,7 +75,7 @@ func loadCatalogForBundle(
 
 // dnssecQuerier reads DNSSEC keys for the signed zones.
 type dnssecQuerier interface {
-	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKeyRow, error)
+	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKey, error)
 }
 
 // DnssecArtifacts bundles the three artifacts the assembler consumes
@@ -134,7 +134,7 @@ func signedZones(zones []dbq.DnsZone) []dbq.DnsZone {
 
 func fetchKeysByZone(
 	ctx context.Context, q dnssecQuerier, zones []dbq.DnsZone,
-) (map[uuid.UUID][]dbq.DnsKeyRow, error) {
+) (map[uuid.UUID][]dbq.DnsKey, error) {
 	ids := make([]uuid.UUID, len(zones))
 	for i, z := range zones {
 		ids[i] = z.ID
@@ -143,7 +143,7 @@ func fetchKeysByZone(
 	if err != nil {
 		return nil, fmt.Errorf("dnssec keys lookup: %w", err)
 	}
-	out := make(map[uuid.UUID][]dbq.DnsKeyRow, len(zones))
+	out := make(map[uuid.UUID][]dbq.DnsKey, len(zones))
 	for _, k := range all {
 		if k.ZoneID == nil {
 			continue
@@ -154,7 +154,7 @@ func fetchKeysByZone(
 }
 
 func mergeDnssecForZone(
-	out *DnssecArtifacts, z dbq.DnsZone, zoneKeys []dbq.DnsKeyRow,
+	out *DnssecArtifacts, z dbq.DnsZone, zoneKeys []dbq.DnsKey,
 	decryptPEM func(string) string,
 ) error {
 	if len(zoneKeys) == 0 {
@@ -183,7 +183,7 @@ func mergeDnssecForZone(
 	return nil
 }
 
-func decryptedPemMap(keys []dbq.DnsKeyRow, decryptPEM func(string) string) map[int32]string {
+func decryptedPemMap(keys []dbq.DnsKey, decryptPEM func(string) string) map[int32]string {
 	out := make(map[int32]string, len(keys))
 	for _, k := range keys {
 		pem := k.PrivatePem
@@ -228,7 +228,7 @@ func loadZoneExtraLines(
 }
 
 func buildCdsByZone(
-	zones []dbq.DnsZone, keysByZone map[uuid.UUID][]dbq.DnsKeyRow,
+	zones []dbq.DnsZone, keysByZone map[uuid.UUID][]dbq.DnsKey,
 ) map[uuid.UUID][]string {
 	out := map[uuid.UUID][]string{}
 	for _, z := range zones {
@@ -244,7 +244,7 @@ func buildCdsByZone(
 }
 
 func buildChildDSByParent(
-	zones []dbq.DnsZone, keysByZone map[uuid.UUID][]dbq.DnsKeyRow,
+	zones []dbq.DnsZone, keysByZone map[uuid.UUID][]dbq.DnsKey,
 ) map[uuid.UUID][]string {
 	byName := make(map[string]dbq.DnsZone, len(zones))
 	for _, z := range zones {
@@ -288,7 +288,7 @@ func findDirectParent(child dbq.DnsZone, byName map[string]dbq.DnsZone) (dbq.Dns
 // zone's active KSKs. Uses the existing computeDSRecord (PR #79)
 // for byte-equivalent digests with the GET /zones/{id}/ds-records
 // endpoint.
-func renderChildDSLines(child dbq.DnsZone, keys []dbq.DnsKeyRow) []string {
+func renderChildDSLines(child dbq.DnsZone, keys []dbq.DnsKey) []string {
 	var out []string
 	for _, k := range keys {
 		if k.Role != "ksk" {

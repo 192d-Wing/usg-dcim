@@ -37,7 +37,7 @@ type submitReq struct {
 	OrganizationID string  `json:"organization_id"`
 	PoolID         *string `json:"pool_id"`
 	SiteID         *string `json:"site_id"`
-	IpFamily       int16   `json:"ip_family"`
+	IPFamily       int16   `json:"ip_family"`
 	PrefixLength   int16   `json:"prefix_length"`
 	Purpose        *string `json:"purpose"`
 	Classification *string `json:"classification"`
@@ -58,7 +58,7 @@ func (h *Handler) submitRequest(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnprocessableEntity, "justification is required")
 		return
 	}
-	if err := validateFamilyPrefix(req.IpFamily, req.PrefixLength); err != nil {
+	if err := validateFamilyPrefix(req.IPFamily, req.PrefixLength); err != nil {
 		writeValidationError(w, err)
 		return
 	}
@@ -93,7 +93,7 @@ func (h *Handler) submitRequest(w http.ResponseWriter, r *http.Request) {
 		RequesterUserID: p.Subject,
 		PoolID:          poolIDPtr,
 		SiteID:          siteIDPtr,
-		IpFamily:        req.IpFamily,
+		IPFamily:        req.IPFamily,
 		PrefixLength:    req.PrefixLength,
 		Purpose:         req.Purpose,
 		Classification:  req.Classification,

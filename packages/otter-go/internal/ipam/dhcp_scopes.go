@@ -92,7 +92,7 @@ func (r rawJSONArray) MarshalJSON() ([]byte, error) {
 // datetimes.
 const scopeISOTZ = "2006-01-02T15:04:05.000000-07:00"
 
-func toDhcpScopeOut(s dbq.DhcpScope) dhcpScopeOut {
+func toDhcpScopeOut(s dbq.GetDhcpScopeRow) dhcpScopeOut {
 	out := dhcpScopeOut{
 		ID:                       s.ID,
 		DhcpServerID:             s.DhcpServerID,
@@ -195,7 +195,7 @@ func (h *Handler) listDhcpScopes(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]dhcpScopeOut, len(items))
 	for i, s := range items {
-		out[i] = toDhcpScopeOut(s)
+		out[i] = toDhcpScopeOut(dbq.GetDhcpScopeRow(s))
 	}
 	httpx.JSON(w, http.StatusOK, dhcpScopesPage{Items: out, Total: total, Limit: limit, Offset: offset})
 }

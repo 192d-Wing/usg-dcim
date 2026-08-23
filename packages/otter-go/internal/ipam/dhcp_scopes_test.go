@@ -36,14 +36,14 @@ type dhcpScopesFakeQ struct {
 	scopeFabricErr error
 	serverFabricID uuid.UUID
 
-	listResult []dbq.DhcpScope
+	listResult []dbq.ListDhcpScopesByServerRow
 	listLast   dbq.ListDhcpScopesByServerParams
 	listErr    error
 
 	countResult int64
 	countLast   dbq.CountDhcpScopesByServerParams
 
-	getResult dbq.DhcpScope
+	getResult dbq.GetDhcpScopeRow
 	getErr    error
 }
 
@@ -53,7 +53,7 @@ func (f *dhcpScopesFakeQ) GetDhcpScopeFabricID(_ context.Context, _ uuid.UUID) (
 func (f *dhcpScopesFakeQ) GetDhcpServerFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return f.serverFabricID, nil
 }
-func (f *dhcpScopesFakeQ) ListDhcpScopesByServer(_ context.Context, a dbq.ListDhcpScopesByServerParams) ([]dbq.DhcpScope, error) {
+func (f *dhcpScopesFakeQ) ListDhcpScopesByServer(_ context.Context, a dbq.ListDhcpScopesByServerParams) ([]dbq.ListDhcpScopesByServerRow, error) {
 	f.listLast = a
 	return f.listResult, f.listErr
 }
@@ -61,7 +61,7 @@ func (f *dhcpScopesFakeQ) CountDhcpScopesByServer(_ context.Context, a dbq.Count
 	f.countLast = a
 	return f.countResult, nil
 }
-func (f *dhcpScopesFakeQ) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.DhcpScope, error) {
+func (f *dhcpScopesFakeQ) GetDhcpScope(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeRow, error) {
 	return f.getResult, f.getErr
 }
 
@@ -193,7 +193,7 @@ func TestGetDhcpScope_ReturnsSoftDeletedScope(t *testing.T) {
 	deletedAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	f := &dhcpScopesFakeQ{
 		scopeFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{
+		getResult: dbq.GetDhcpScopeRow{
 			ID: scopeID, IPFamily: 4, Prefix: "10.0.0.0/24",
 			DeletedAt: &deletedAt,
 			PoolsJSON: json.RawMessage(`[]`),
@@ -219,7 +219,7 @@ func TestGetDhcpScope_WireShape_PythonCanonicalFields(t *testing.T) {
 	scopeID := uuid.New()
 	f := &dhcpScopesFakeQ{
 		scopeFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{
+		getResult: dbq.GetDhcpScopeRow{
 			ID: scopeID, IPFamily: 4, Prefix: "10.0.0.0/24",
 			PoolsJSON:        json.RawMessage(`[{"first":"10.0.0.10","last":"10.0.0.250"}]`),
 			OptionsJSON:      json.RawMessage(`[]`),
@@ -268,7 +268,7 @@ func TestGetDhcpScope_NullJSONColumns_RenderAsPythonShape(t *testing.T) {
 	scopeID := uuid.New()
 	f := &dhcpScopesFakeQ{
 		scopeFabricID: uuid.New(),
-		getResult: dbq.DhcpScope{
+		getResult: dbq.GetDhcpScopeRow{
 			ID: scopeID, IPFamily: 6, Prefix: "2001:db8::/64",
 			CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		},
@@ -298,7 +298,7 @@ func TestListDhcpScopes_WireShapeAndCountFilterPropagate(t *testing.T) {
 	scopeID := uuid.New()
 	f := &dhcpScopesFakeQ{
 		serverFabricID: uuid.New(),
-		listResult: []dbq.DhcpScope{
+		listResult: []dbq.ListDhcpScopesByServerRow{
 			{
 				ID: scopeID, DhcpServerID: srvID, IPFamily: 4, Prefix: "10.0.0.0/24",
 				PoolsJSON:        json.RawMessage(`[{"first":"10.0.0.10","last":"10.0.0.250"}]`),

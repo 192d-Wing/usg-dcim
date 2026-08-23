@@ -7,6 +7,7 @@ package collectors
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -27,15 +28,15 @@ const (
 )
 
 type Querier interface {
-	ListCollectors(ctx context.Context, arg dbq.ListCollectorsParams) ([]dbq.Collector, error)
+	ListCollectors(ctx context.Context, arg dbq.ListCollectorsParams) ([]dbq.ListCollectorsRow, error)
 	CountCollectors(ctx context.Context, arg dbq.CountCollectorsParams) (int64, error)
-	GetCollector(ctx context.Context, id uuid.UUID) (dbq.Collector, error)
+	GetCollector(ctx context.Context, id uuid.UUID) (dbq.GetCollectorRow, error)
 	EnrollCollector(ctx context.Context, arg dbq.EnrollCollectorParams) (dbq.EnrollCollectorRow, error)
-	HeartbeatCollector(ctx context.Context, arg dbq.HeartbeatCollectorParams) ([]byte, error)
+	HeartbeatCollector(ctx context.Context, arg dbq.HeartbeatCollectorParams) (json.RawMessage, error)
 	InsertCollectorHeartbeat(ctx context.Context, arg dbq.InsertCollectorHeartbeatParams) error
-	SetCollectorConfigOverrides(ctx context.Context, arg dbq.SetCollectorConfigOverridesParams) (dbq.Collector, error)
-	SetCollectorEnabled(ctx context.Context, arg dbq.SetCollectorEnabledParams) (dbq.Collector, error)
-	DecommissionCollector(ctx context.Context, id uuid.UUID) (dbq.Collector, error)
+	SetCollectorConfigOverrides(ctx context.Context, arg dbq.SetCollectorConfigOverridesParams) (dbq.SetCollectorConfigOverridesRow, error)
+	SetCollectorEnabled(ctx context.Context, arg dbq.SetCollectorEnabledParams) (dbq.SetCollectorEnabledRow, error)
+	DecommissionCollector(ctx context.Context, id uuid.UUID) (dbq.DecommissionCollectorRow, error)
 
 	// EnforceSiteScope dependencies — required so enroll can refuse a
 	// site outside the operator's scope.
@@ -62,7 +63,7 @@ func (h *Handler) Mount(r chi.Router) {
 }
 
 type listResponse struct {
-	Items  []dbq.Collector `json:"items"`
+	Items  []dbq.ListCollectorsRow `json:"items"`
 	Total  int64           `json:"total"`
 	Limit  int32           `json:"limit"`
 	Offset int32           `json:"offset"`

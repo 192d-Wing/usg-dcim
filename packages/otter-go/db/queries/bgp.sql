@@ -1,6 +1,6 @@
 -- ===== ASNs =====
 -- name: ListAsns :many
-SELECT id, asn, name, kind::text AS kind, organization_id, description, created_at, updated_at
+SELECT *
 FROM bgp_asns
 WHERE (sqlc.narg(kind)::text IS NULL OR kind::text = sqlc.narg(kind))
 ORDER BY asn
@@ -13,7 +13,7 @@ WHERE (sqlc.narg(kind)::text IS NULL OR kind::text = sqlc.narg(kind));
 
 -- ===== Prefix lists =====
 -- name: ListPrefixLists :many
-SELECT id, name, family::text AS family, description, created_at, updated_at
+SELECT *
 FROM bgp_prefix_lists
 WHERE (sqlc.narg(family)::text IS NULL OR family::text = sqlc.narg(family))
 ORDER BY name
@@ -27,7 +27,7 @@ WHERE (sqlc.narg(family)::text IS NULL OR family::text = sqlc.narg(family));
 -- ===== Prefix list entries =====
 -- name: ListPrefixListEntries :many
 SELECT id, prefix_list_id, seq, action::text AS action,
-       host(prefix) || '/' || masklen(prefix) AS prefix,
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix,
        ge, le, description, created_at, updated_at
 FROM bgp_prefix_list_entries
 WHERE (sqlc.narg(prefix_list_id)::uuid IS NULL OR prefix_list_id = sqlc.narg(prefix_list_id))

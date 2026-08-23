@@ -20,7 +20,7 @@ import (
 func TestListOidcMappings_HappyPath(t *testing.T) {
 	roleID := uuid.New()
 	f := &fakeQ{
-		oidcList: []dbq.OidcRoleMappingRow{
+		oidcList: []dbq.OidcRoleMapping{
 			{ID: uuid.New(), IdpRole: "keycloak-admin", ClaimSource: "keycloak",
 				DcimRoleID: roleID, CreatedAt: time.Now()},
 		},
@@ -44,7 +44,7 @@ func TestListOidcMappings_HappyPath(t *testing.T) {
 func TestListOidcMappings_UnknownRoleFallback(t *testing.T) {
 	// Stale dcim_role_id (role was deleted) → fallback name.
 	f := &fakeQ{
-		oidcList: []dbq.OidcRoleMappingRow{
+		oidcList: []dbq.OidcRoleMapping{
 			{ID: uuid.New(), IdpRole: "x", DcimRoleID: uuid.New(), CreatedAt: time.Now()},
 		},
 		oidcCount: 1,
@@ -179,7 +179,7 @@ func TestCreateOidcMapping_DuplicateIdpRoleIs409(t *testing.T) {
 	roleID := uuid.New()
 	f := &fakeQ{
 		roleByID: map[uuid.UUID]dbq.Role{roleID: {ID: roleID}},
-		oidcByIdpRole: map[string]dbq.OidcRoleMappingRow{
+		oidcByIdpRole: map[string]dbq.OidcRoleMapping{
 			"dup": {ID: uuid.New(), IdpRole: "dup"},
 		},
 	}
@@ -216,7 +216,7 @@ func TestUpdateOidcMapping_HappyPath(t *testing.T) {
 	f := &fakeQ{
 		roleByID:      map[uuid.UUID]dbq.Role{roleID: {ID: roleID, Name: "admin"}},
 		roleNamesByID: map[uuid.UUID]string{roleID: "admin"},
-		oidcUpdateOut: dbq.OidcRoleMappingRow{ID: id, DcimRoleID: roleID},
+		oidcUpdateOut: dbq.OidcRoleMapping{ID: id, DcimRoleID: roleID},
 	}
 	body, _ := json.Marshal(map[string]any{"description": "Keycloak admin role"})
 	rec := doReq(t, mount(f), "PATCH", "/admin/oidc-role-mappings/"+id.String(), body)
@@ -270,7 +270,7 @@ func TestUpdateOidcMapping_NullScopeDimensionClearsTarget(t *testing.T) {
 	// even if the caller omitted it. SQL CASE in update query
 	// handles this; the handler forwards the *Set flag.
 	id := uuid.New()
-	f := &fakeQ{oidcUpdateOut: dbq.OidcRoleMappingRow{ID: id}}
+	f := &fakeQ{oidcUpdateOut: dbq.OidcRoleMapping{ID: id}}
 	body := []byte(`{"scope_dimension":null}`)
 	rec := doReq(t, mount(f), "PATCH", "/admin/oidc-role-mappings/"+id.String(), body)
 	if rec.Code != http.StatusOK {

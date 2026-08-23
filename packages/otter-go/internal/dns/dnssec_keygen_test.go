@@ -179,7 +179,7 @@ type fakeEnableDnssecQ struct {
 	fakeQ
 	zone         dbq.DnsZone
 	zoneErr      error
-	existingKeys []dbq.DnsKeyRow
+	existingKeys []dbq.DnsKey
 	gotCreates   []dbq.CreateDnsKeyParams
 	gotSigned    bool
 	signedSet    bool
@@ -189,18 +189,18 @@ func (f *fakeEnableDnssecQ) GetDnsZone(_ context.Context, _ uuid.UUID) (dbq.DnsZ
 	return f.zone, f.zoneErr
 }
 
-func (f *fakeEnableDnssecQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeEnableDnssecQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKey, error) {
 	return f.existingKeys, nil
 }
 
-func (f *fakeEnableDnssecQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error) {
+func (f *fakeEnableDnssecQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKey, error) {
 	f.gotCreates = append(f.gotCreates, a)
-	return dbq.DnsKeyRow{ID: uuid.New(), ZoneID: a.ZoneID, Role: a.Role,
+	return dbq.DnsKey{ID: uuid.New(), ZoneID: a.ZoneID, Role: a.Role,
 		Algorithm: a.Algorithm, KeyTag: a.KeyTag}, nil
 }
 
-func (f *fakeEnableDnssecQ) SetDnsZoneSigned(_ context.Context, _ uuid.UUID, signed bool) (int64, error) {
-	f.gotSigned = signed
+func (f *fakeEnableDnssecQ) SetDnsZoneSigned(_ context.Context, a dbq.SetDnsZoneSignedParams) (int64, error) {
+	f.gotSigned = a.Signed
 	f.signedSet = true
 	return 1, nil
 }
@@ -238,7 +238,7 @@ func TestEnableDnssec_IdempotentWhenKeysExist(t *testing.T) {
 	id := uuid.New()
 	f := &fakeEnableDnssecQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com", Signed: false},
-		existingKeys: []dbq.DnsKeyRow{
+		existingKeys: []dbq.DnsKey{
 			{ID: uuid.New(), Role: "ksk", Algorithm: "ecdsap256sha256"},
 			{ID: uuid.New(), Role: "zsk", Algorithm: "ecdsap256sha256"},
 		},
@@ -260,7 +260,7 @@ func TestEnableDnssec_SkipsSetSignedWhenAlreadyTrue(t *testing.T) {
 	id := uuid.New()
 	f := &fakeEnableDnssecQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Signed: true},
-		existingKeys: []dbq.DnsKeyRow{
+		existingKeys: []dbq.DnsKey{
 			{ID: uuid.New(), Role: "ksk"},
 		},
 	}
@@ -321,7 +321,7 @@ func TestEnableDnssec_ReturnsCreatedKeys(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	var out []dbq.DnsKeyRow
+	var out []dbq.DnsKey
 	_ = json.NewDecoder(rec.Body).Decode(&out)
 	if len(out) != 2 {
 		t.Errorf("response should have 2 keys, got %d", len(out))

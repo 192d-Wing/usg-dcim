@@ -136,9 +136,9 @@ func AssembleRecursiveBundle(in RecursiveBundleInput) BundleResult {
 type recursiveBundleQuerier interface {
 	ListApexZoneNamesByFabric(ctx context.Context, fabricID uuid.UUID) ([]string, error)
 	GetSameSiteAuthUnicastIP(ctx context.Context, siteID uuid.UUID) (string, error)
-	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsForwarderRow, error)
-	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.BlocklistForBundleRow, error)
-	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.FabricForRecursiveBundle, error)
+	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error)
+	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error)
+	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error)
 	GetSystemSetting(ctx context.Context, key string) (dbq.SystemSetting, error)
 }
 
@@ -238,9 +238,18 @@ func loadFwdAndBlocklists(
 		in.Blocklists = append(in.Blocklists, Blocklist{
 			Action:   row.Action,
 			Patterns: patterns,
-			SinkIPv4: row.SinkIPv4,
-			SinkIPv6: row.SinkIPv6,
+			SinkIPv4: ifaceStrPtr(row.SinkIPv4),
+			SinkIPv6: ifaceStrPtr(row.SinkIPv6),
 		})
+	}
+	return nil
+}
+
+// ifaceStrPtr unwraps the interface{} sqlc emits for CASE-wrapped
+// nullable host() projections: text arrives as string, NULL as nil.
+func ifaceStrPtr(v interface{}) *string {
+	if s, ok := v.(string); ok {
+		return &s
 	}
 	return nil
 }
@@ -251,7 +260,7 @@ func loadFwdAndBlocklists(
 // 15-branch cognitive complexity cap.
 func applyHickoryFields(
 	in *RecursiveBundleInput,
-	fabric dbq.FabricForRecursiveBundle,
+	fabric dbq.GetFabricForRecursiveBundleRow,
 	cfg RecursiveBundleConfig,
 ) {
 	_ = json.Unmarshal(fabric.DnsDenyNetworks, &in.DenyNetworks)
@@ -272,7 +281,7 @@ func applyHickoryFields(
 // _recursive_upstreams_for_fabric chain.
 func resolveRecursiveUpstreams(
 	ctx context.Context, q recursiveBundleQuerier,
-	fabric dbq.FabricForRecursiveBundle, defaults []string,
+	fabric dbq.GetFabricForRecursiveBundleRow, defaults []string,
 ) ([]string, error) {
 	if fabric.DnsRecursiveUpstreams != nil {
 		var out []string

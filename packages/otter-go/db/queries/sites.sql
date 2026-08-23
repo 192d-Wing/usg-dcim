@@ -3,10 +3,7 @@
 -- the optional in_scope array. Pass site_ids = NULL to skip the filter.
 -- PR 92 dropped the legacy `organization` string column; filter by
 -- organization_id (FK) only.
-SELECT id, region_id, name, code, address, latitude, longitude,
-       timezone, majcom, organization_id, mission_owner,
-       enclave, classification, lifecycle_state, metadata_json,
-       created_at, updated_at
+SELECT *
 FROM sites
 WHERE (sqlc.narg(region_id)::uuid       IS NULL OR region_id       = sqlc.narg(region_id))
   AND (sqlc.narg(majcom)::text          IS NULL OR majcom          = sqlc.narg(majcom))
@@ -28,9 +25,6 @@ WHERE (sqlc.narg(region_id)::uuid       IS NULL OR region_id       = sqlc.narg(r
   AND (sqlc.narg(site_ids)::uuid[]      IS NULL OR id              = ANY(sqlc.narg(site_ids)::uuid[]));
 
 -- name: GetSite :one
-SELECT id, region_id, name, code, address, latitude, longitude,
-       timezone, majcom, organization_id, mission_owner,
-       enclave, classification, lifecycle_state, metadata_json,
-       created_at, updated_at
+SELECT *
 FROM sites
 WHERE id = $1;

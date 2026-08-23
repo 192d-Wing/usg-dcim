@@ -1,14 +1,10 @@
 -- name: GetUser :one
-SELECT id, email, display_name, is_active, sso_subject, password_hash,
-       last_login_at, idp_refresh_token, idp_refresh_token_iat,
-       created_at, updated_at
+SELECT *
 FROM users
 WHERE id = $1;
 
 -- name: GetUserByEmail :one
-SELECT id, email, display_name, is_active, sso_subject, password_hash,
-       last_login_at, idp_refresh_token, idp_refresh_token_iat,
-       created_at, updated_at
+SELECT *
 FROM users
 WHERE email = $1;
 

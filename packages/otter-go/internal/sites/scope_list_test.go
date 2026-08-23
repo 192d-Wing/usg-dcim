@@ -19,14 +19,14 @@ func TestSitesList_GlobalPrincipal_NoExpansion(t *testing.T) {
 	called := false
 	f := &fakeQuerier{
 		list: func(_ context.Context, arg dbq.ListSitesParams) ([]dbq.Site, error) {
-			if arg.SiteIds != nil {
-				t.Errorf("global principal should pass nil SiteIds, got %v", arg.SiteIds)
+			if arg.SiteIDs != nil {
+				t.Errorf("global principal should pass nil SiteIDs, got %v", arg.SiteIDs)
 			}
 			return nil, nil
 		},
 		count: func(_ context.Context, arg dbq.CountSitesParams) (int64, error) {
-			if arg.SiteIds != nil {
-				t.Errorf("global principal should pass nil SiteIds to count, got %v", arg.SiteIds)
+			if arg.SiteIDs != nil {
+				t.Errorf("global principal should pass nil SiteIDs to count, got %v", arg.SiteIDs)
 			}
 			return 0, nil
 		},
@@ -79,11 +79,11 @@ func TestSitesList_ScopedPrincipal_PassesExpandedIds(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200 (body=%q)", rec.Code, rec.Body.String())
 	}
-	if len(gotListArg.SiteIds) != 2 {
-		t.Errorf("ListSites SiteIds should be 2 ids, got %v", gotListArg.SiteIds)
+	if len(gotListArg.SiteIDs) != 2 {
+		t.Errorf("ListSites SiteIDs should be 2 ids, got %v", gotListArg.SiteIDs)
 	}
-	if len(gotCountArg.SiteIds) != 2 {
-		t.Errorf("CountSites SiteIds should be 2 ids, got %v", gotCountArg.SiteIds)
+	if len(gotCountArg.SiteIDs) != 2 {
+		t.Errorf("CountSites SiteIDs should be 2 ids, got %v", gotCountArg.SiteIDs)
 	}
 }
 

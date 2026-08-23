@@ -30,7 +30,7 @@ func (h *Handler) syncDhcpServer(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	var server *dbq.DhcpServerForLeaseSyncRow
+	var server *dbq.ListEnabledDhcpServersForLeaseSyncRow
 	for i, s := range servers {
 		if s.ID == id {
 			server = &servers[i]
@@ -98,7 +98,7 @@ func (h *Handler) leaseKeaBuilder() leasesync.KeaClientBuilder {
 // Same shape conversion the cron driver does at dhcpsync.toServer;
 // kept package-local so the cron driver and the handler don't
 // import each other.
-func toLeaseSyncServer(row dbq.DhcpServerForLeaseSyncRow) leasesync.Server {
+func toLeaseSyncServer(row dbq.ListEnabledDhcpServersForLeaseSyncRow) leasesync.Server {
 	user, pass := "", ""
 	if row.AuthUsername != nil {
 		user = *row.AuthUsername

@@ -30,8 +30,8 @@ WHERE id = $1;
 -- ===== Anycast groups =====
 -- name: ListAnycastGroups :many
 SELECT id, name, fabric_id, service::text AS service,
-       host(anycast_ipv4) AS anycast_ipv4,
-       host(anycast_ipv6) AS anycast_ipv6,
+       CASE WHEN anycast_ipv4 IS NULL THEN NULL ELSE host(anycast_ipv4) END AS anycast_ipv4,
+       CASE WHEN anycast_ipv6 IS NULL THEN NULL ELSE host(anycast_ipv6) END AS anycast_ipv6,
        description, created_at, updated_at
 FROM anycast_groups
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
@@ -48,8 +48,7 @@ WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
 
 -- ===== DNS forwarders =====
 -- name: ListDnsForwarders :many
-SELECT id, name, fabric_id, zone_pattern, upstreams,
-       description, created_at, updated_at
+SELECT *
 FROM dns_forwarders
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
@@ -63,7 +62,7 @@ WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
 
 -- ===== DNS catalog zones =====
 -- name: ListDnsCatalogZones :many
-SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
+SELECT *
 FROM dns_catalog_zones
 WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]))
@@ -76,20 +75,20 @@ WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id))
   AND (sqlc.narg(scope_fabric_ids)::uuid[] IS NULL OR fabric_id = ANY(sqlc.narg(scope_fabric_ids)::uuid[]));
 
 -- name: GetDnsCatalogZone :one
-SELECT id, fabric_id, name, enabled, signed, created_at, updated_at
+SELECT *
 FROM dns_catalog_zones WHERE id = $1;
 
 -- name: ListDnsKeyTagsByCatalog :many
 -- Read just the key_tags for the disable-dnssec audit metadata
 -- (`retired_key_tags`) — pulling the full row would scan the
 -- public-key blob for nothing.
-SELECT key_tag FROM dns_keys WHERE catalog_id = $1;
+SELECT key_tag FROM dns_keys WHERE catalog_id = sqlc.arg(catalog_id)::uuid;
 
 -- name: DeleteDnsKeysByCatalog :exec
 -- Bulk-delete every signing key for a catalog zone. Mirror of
 -- Python's `delete(DnsKey).where(DnsKey.catalog_id == catalog_id)`
 -- in disable_catalog_dnssec.
-DELETE FROM dns_keys WHERE catalog_id = $1;
+DELETE FROM dns_keys WHERE catalog_id = sqlc.arg(catalog_id)::uuid;
 
 -- name: SetDnsCatalogZoneSigned :exec
 -- Used by disable-dnssec to clear the signed flag after the

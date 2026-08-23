@@ -30,9 +30,9 @@ type fakeQ struct {
 	serverIDs []uuid.UUID
 	listErr   error
 
-	allByServer map[uuid.UUID][]dbq.DhcpScopeIDAndPriorDriftRow
+	allByServer map[uuid.UUID][]dbq.ListAllScopeIDsAndPriorDriftForServerRow
 	allErrFor   map[uuid.UUID]error
-	scopes      map[uuid.UUID]dbq.DhcpScopeForPushRow
+	scopes      map[uuid.UUID]dbq.GetDhcpScopeForPushRow
 	writes      map[uuid.UUID]dbq.WriteDhcpScopeDiffStateParams
 }
 
@@ -42,16 +42,16 @@ func (f *fakeQ) ListEnabledDhcpServerIDs(_ context.Context) ([]uuid.UUID, error)
 	}
 	return f.serverIDs, nil
 }
-func (f *fakeQ) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, sid uuid.UUID) ([]dbq.DhcpScopeIDAndPriorDriftRow, error) {
+func (f *fakeQ) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, sid uuid.UUID) ([]dbq.ListAllScopeIDsAndPriorDriftForServerRow, error) {
 	if err, ok := f.allErrFor[sid]; ok {
 		return nil, err
 	}
 	return f.allByServer[sid], nil
 }
-func (f *fakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
+func (f *fakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
 	r, ok := f.scopes[id]
 	if !ok {
-		return dbq.DhcpScopeForPushRow{}, pgx.ErrNoRows
+		return dbq.GetDhcpScopeForPushRow{}, pgx.ErrNoRows
 	}
 	return r, nil
 }
@@ -60,8 +60,8 @@ func (f *fakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.DhcpSc
 // fixture scope short-circuits at the never_pushed branch in
 // DiffScope. Sentinel ErrNoRows so a future test reaching the full
 // diff path fails loudly. Same posture diff/bulk_test.go uses.
-func (f *fakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
-	return dbq.DhcpServerForPushRow{}, pgx.ErrNoRows
+func (f *fakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
+	return dbq.GetDhcpServerForPushRow{}, pgx.ErrNoRows
 }
 func (f *fakeQ) GetDhcpScopeTemplateForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeTemplate, error) {
 	return dbq.DhcpScopeTemplate{}, pgx.ErrNoRows
@@ -78,7 +78,7 @@ func (f *fakeQ) WriteDhcpScopeDiffState(_ context.Context, arg dbq.WriteDhcpScop
 // circuit fires without needing a Kea client.
 func seedScope(f *fakeQ) uuid.UUID {
 	id := uuid.New()
-	f.scopes[id] = dbq.DhcpScopeForPushRow{
+	f.scopes[id] = dbq.GetDhcpScopeForPushRow{
 		ID: id, IPFamily: 4, Prefix: "10.0.0.0/24",
 		PoolsJSON: []byte(`[]`), PdPoolsJSON: []byte(`[]`),
 		OptionsJSON: []byte(`[]`), ReservationsJSON: []byte(`[]`),
@@ -89,8 +89,8 @@ func seedScope(f *fakeQ) uuid.UUID {
 
 func newFake() *fakeQ {
 	return &fakeQ{
-		allByServer: map[uuid.UUID][]dbq.DhcpScopeIDAndPriorDriftRow{},
-		scopes:      map[uuid.UUID]dbq.DhcpScopeForPushRow{},
+		allByServer: map[uuid.UUID][]dbq.ListAllScopeIDsAndPriorDriftForServerRow{},
+		scopes:      map[uuid.UUID]dbq.GetDhcpScopeForPushRow{},
 	}
 }
 
@@ -136,7 +136,7 @@ func TestRun_PerServerError_LoopContinues(t *testing.T) {
 	f.serverIDs = []uuid.UUID{srv1, srv2}
 	f.allErrFor = map[uuid.UUID]error{srv1: errors.New("kea unreachable")}
 	scopeID := seedScope(f)
-	f.allByServer[srv2] = []dbq.DhcpScopeIDAndPriorDriftRow{
+	f.allByServer[srv2] = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{
 		{ID: scopeID, Prefix: "10.0.0.0/24", LastDiffStatus: nil},
 	}
 	j := &Job{Q: f}
@@ -167,7 +167,7 @@ func TestRun_CountsAggregateAcrossServers(t *testing.T) {
 	f.serverIDs = []uuid.UUID{srv1, srv2}
 	for _, sid := range []uuid.UUID{srv1, srv2} {
 		scopeID := seedScope(f)
-		f.allByServer[sid] = []dbq.DhcpScopeIDAndPriorDriftRow{
+		f.allByServer[sid] = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{
 			{ID: scopeID, Prefix: "10.0.0.0/24", LastDiffStatus: nil},
 		}
 	}
@@ -221,7 +221,7 @@ func TestRun_ContextCancellation_MidLoop_KeepsPartialCounts(t *testing.T) {
 	// returns ctx.Canceled (simulating the cancel arriving mid-
 	// DiffAllScopes).
 	scopeID := seedScope(f)
-	f.allByServer[srv1] = []dbq.DhcpScopeIDAndPriorDriftRow{
+	f.allByServer[srv1] = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{
 		{ID: scopeID, Prefix: "10.0.0.0/24", LastDiffStatus: nil},
 	}
 	f.allErrFor = map[uuid.UUID]error{srv2: context.Canceled}
@@ -252,11 +252,11 @@ func TestRun_ContextCancellation_MidLoop_KeepsPartialCounts(t *testing.T) {
 // hiding typos like "totalDrifted += report.Counts[StatusInSync]".
 type driftedFake struct {
 	*fakeQ
-	server     dbq.DhcpServerForPushRow
+	server     dbq.GetDhcpServerForPushRow
 	keaSubnet4 []byte
 }
 
-func (f *driftedFake) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
+func (f *driftedFake) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
 	return f.server, nil
 }
 
@@ -271,7 +271,7 @@ func TestRun_AggregateCountsDriftedAcrossServers(t *testing.T) {
 	scopeID := uuid.New()
 	base := newFake()
 	base.serverIDs = []uuid.UUID{srvID}
-	base.scopes[scopeID] = dbq.DhcpScopeForPushRow{
+	base.scopes[scopeID] = dbq.GetDhcpScopeForPushRow{
 		ID: scopeID, DhcpServerID: srvID, IPFamily: 4,
 		Prefix: "10.0.0.0/24", KeaSubnetID: &keaID,
 		PoolsJSON:    []byte(`[{"first":"10.0.0.10","last":"10.0.0.250"}]`),
@@ -280,7 +280,7 @@ func TestRun_AggregateCountsDriftedAcrossServers(t *testing.T) {
 		ReservationsJSON: []byte(`[]`),
 		Enabled: true,
 	}
-	base.allByServer[srvID] = []dbq.DhcpScopeIDAndPriorDriftRow{
+	base.allByServer[srvID] = []dbq.ListAllScopeIDsAndPriorDriftForServerRow{
 		{ID: scopeID, Prefix: "10.0.0.0/24", LastDiffStatus: nil},
 	}
 	// Kea returns a subnet with a different pool first/last so the
@@ -290,12 +290,12 @@ func TestRun_AggregateCountsDriftedAcrossServers(t *testing.T) {
 	keaResp := []byte(`[{"result":0,"arguments":{"subnet4":[{"id":1,"subnet":"10.0.0.0/24","pools":[{"first":"10.0.0.50","last":"10.0.0.200"}]}]}}]`)
 	f := &driftedFake{
 		fakeQ:      base,
-		server:     dbq.DhcpServerForPushRow{ID: srvID, KeaURL: "stub", Enabled: true},
+		server:     dbq.GetDhcpServerForPushRow{ID: srvID, KeaURL: "stub", Enabled: true},
 		keaSubnet4: keaResp,
 	}
 	j := &Job{
 		Q: f,
-		KeaBuilder: func(_ dbq.DhcpServerForPushRow) diff.KeaClient {
+		KeaBuilder: func(_ dbq.GetDhcpServerForPushRow) diff.KeaClient {
 			return driftedKea{resp: keaResp}
 		},
 	}

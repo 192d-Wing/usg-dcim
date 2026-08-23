@@ -25,7 +25,7 @@ type Querier interface {
 	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
 	CreateRack(ctx context.Context, arg dbq.CreateRackParams) (dbq.Rack, error)
 	UpdateRack(ctx context.Context, arg dbq.UpdateRackParams) (dbq.Rack, error)
-	GetRackAssetsForShrinkCheck(ctx context.Context, rackID uuid.UUID) ([]dbq.RackPlacedAsset, error)
+	GetRackAssetsForShrinkCheck(ctx context.Context, rackID uuid.UUID) ([]dbq.GetRackAssetsForShrinkCheckRow, error)
 
 	// PR 54: ABAC SiteMatches expansion.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)

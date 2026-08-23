@@ -23,20 +23,20 @@ import (
 // no-op defaults.
 type fakeFreeSpaceQ struct {
 	fakeQ
-	subnets   []dbq.SubnetForFreeSpaceRow
-	addresses []dbq.AddressInSubnetRow
+	subnets   []dbq.ListSubnetsForFreeSpaceRow
+	addresses []dbq.ListAddressesInSubnetsRow
 	gotParams dbq.ListSubnetsForFreeSpaceParams
 	gotIDs    []uuid.UUID
 }
 
-func (f *fakeFreeSpaceQ) ListSubnetsForFreeSpace(_ context.Context, arg dbq.ListSubnetsForFreeSpaceParams) ([]dbq.SubnetForFreeSpaceRow, error) {
+func (f *fakeFreeSpaceQ) ListSubnetsForFreeSpace(_ context.Context, arg dbq.ListSubnetsForFreeSpaceParams) ([]dbq.ListSubnetsForFreeSpaceRow, error) {
 	f.gotParams = arg
 	return f.subnets, nil
 }
 
-func (f *fakeFreeSpaceQ) ListAddressesInSubnets(_ context.Context, ids []uuid.UUID) ([]dbq.AddressInSubnetRow, error) {
+func (f *fakeFreeSpaceQ) ListAddressesInSubnets(_ context.Context, ids []uuid.UUID) ([]dbq.ListAddressesInSubnetsRow, error) {
 	f.gotIDs = ids
-	out := []dbq.AddressInSubnetRow{}
+	out := []dbq.ListAddressesInSubnetsRow{}
 	want := make(map[uuid.UUID]struct{}, len(ids))
 	for _, id := range ids {
 		want[id] = struct{}{}
@@ -57,8 +57,8 @@ func mountFreeSpace(f *fakeFreeSpaceQ) http.Handler {
 
 // Helper: build a SubnetForFreeSpaceRow with the bare-minimum fields
 // the response cares about.
-func sub(id uuid.UUID, prefix string) dbq.SubnetForFreeSpaceRow {
-	return dbq.SubnetForFreeSpaceRow{
+func sub(id uuid.UUID, prefix string) dbq.ListSubnetsForFreeSpaceRow {
+	return dbq.ListSubnetsForFreeSpaceRow{
 		ID: id, FabricID: uuid.New(), VrfID: uuid.New(),
 		Prefix: prefix,
 	}
@@ -67,12 +67,12 @@ func sub(id uuid.UUID, prefix string) dbq.SubnetForFreeSpaceRow {
 func TestFreeSpaceInSubnets_SortsByFreeDescending(t *testing.T) {
 	a, b, c := uuid.New(), uuid.New(), uuid.New()
 	f := &fakeFreeSpaceQ{
-		subnets: []dbq.SubnetForFreeSpaceRow{
+		subnets: []dbq.ListSubnetsForFreeSpaceRow{
 			sub(a, "10.0.0.0/30"),  // capacity 2, allocated 1, free 1
 			sub(b, "10.0.1.0/24"),  // capacity 254, allocated 0, free 254
 			sub(c, "10.0.2.0/28"),  // capacity 14, allocated 2, free 12
 		},
-		addresses: []dbq.AddressInSubnetRow{
+		addresses: []dbq.ListAddressesInSubnetsRow{
 			{SubnetID: a, Address: "10.0.0.1"},
 			{SubnetID: c, Address: "10.0.2.1"},
 			{SubnetID: c, Address: "10.0.2.2"},
@@ -103,7 +103,7 @@ func TestFreeSpaceInSubnets_SortsByFreeDescending(t *testing.T) {
 func TestFreeSpaceInSubnets_FilterByFamily(t *testing.T) {
 	a, b := uuid.New(), uuid.New()
 	f := &fakeFreeSpaceQ{
-		subnets: []dbq.SubnetForFreeSpaceRow{
+		subnets: []dbq.ListSubnetsForFreeSpaceRow{
 			sub(a, "10.0.0.0/24"),
 			sub(b, "2001:db8::/64"),
 		},
@@ -132,7 +132,7 @@ func TestFreeSpaceInSubnets_MinFreeThreshold(t *testing.T) {
 	// min_free=100 should drop the /30 (free=2) and keep the /24 (free=254).
 	a, b := uuid.New(), uuid.New()
 	f := &fakeFreeSpaceQ{
-		subnets: []dbq.SubnetForFreeSpaceRow{
+		subnets: []dbq.ListSubnetsForFreeSpaceRow{
 			sub(a, "10.0.0.0/30"),
 			sub(b, "10.0.1.0/24"),
 		},
@@ -153,7 +153,7 @@ func TestFreeSpaceInSubnets_LimitCapsResponse(t *testing.T) {
 	// happens before the limit cut).
 	a, b, c := uuid.New(), uuid.New(), uuid.New()
 	f := &fakeFreeSpaceQ{
-		subnets: []dbq.SubnetForFreeSpaceRow{
+		subnets: []dbq.ListSubnetsForFreeSpaceRow{
 			sub(a, "10.0.0.0/30"),  // free 2
 			sub(b, "10.0.1.0/24"),  // free 254
 			sub(c, "10.0.2.0/28"),  // free 14
@@ -246,7 +246,7 @@ func TestFreeSpaceInSubnets_SkipsUnparseablePrefixes(t *testing.T) {
 	// A bad prefix on a subnet row shouldn't tank the whole scan.
 	a, b := uuid.New(), uuid.New()
 	f := &fakeFreeSpaceQ{
-		subnets: []dbq.SubnetForFreeSpaceRow{
+		subnets: []dbq.ListSubnetsForFreeSpaceRow{
 			sub(a, "garbage"),
 			sub(b, "10.0.1.0/24"),
 		},
@@ -265,8 +265,8 @@ func TestFreeSpaceInSubnets_SkipsUnparseablePrefixes(t *testing.T) {
 func TestFreeSpaceInSubnets_IncludesNextAvailable(t *testing.T) {
 	a := uuid.New()
 	f := &fakeFreeSpaceQ{
-		subnets: []dbq.SubnetForFreeSpaceRow{sub(a, "10.0.0.0/24")},
-		addresses: []dbq.AddressInSubnetRow{
+		subnets: []dbq.ListSubnetsForFreeSpaceRow{sub(a, "10.0.0.0/24")},
+		addresses: []dbq.ListAddressesInSubnetsRow{
 			{SubnetID: a, Address: "10.0.0.1"},
 		},
 	}

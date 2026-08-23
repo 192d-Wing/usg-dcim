@@ -100,7 +100,7 @@ func (j *Job) Run(ctx context.Context) (map[string]any, error) {
 		if z.Frozen {
 			continue
 		}
-		active, err := j.Q.ListActiveDnsKeysForZoneAndRole(ctx, z.ID, role)
+		active, err := j.Q.ListActiveDnsKeysForZoneAndRole(ctx, dbq.ListActiveDnsKeysForZoneAndRoleParams{ZoneID: z.ID, Role: role})
 		if err != nil {
 			logger.Warn("dns_rotate_zsks_list_keys_failed",
 				"zone_id", z.ID, "zone", z.Name, "err", err)

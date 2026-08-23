@@ -21,7 +21,7 @@ import (
 // path because the helper aborts on the first failed Count.
 type fakeQ struct {
 	zones        []dbq.DnsZone
-	ipsBySite    map[uuid.UUID][]dbq.IPAddressForSyncRow
+	ipsBySite    map[uuid.UUID][]dbq.ListIPAddressesForSiteWithDnsNameRow
 	dropPerZone  int64
 	listZonesErr error
 	failCount    bool
@@ -33,16 +33,17 @@ func (f *fakeQ) ListAllSiteDnsZones(_ context.Context) ([]dbq.DnsZone, error) {
 	}
 	return f.zones, nil
 }
-func (f *fakeQ) ListReverseZonesForSite(_ context.Context, _, _ uuid.UUID) ([]dbq.DnsZone, error) {
+func (f *fakeQ) ListReverseZonesForSite(_ context.Context, _ dbq.ListReverseZonesForSiteParams) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeQ) GetReverseZoneByName(_ context.Context, _, _ uuid.UUID, _ string) (dbq.DnsZone, error) {
+func (f *fakeQ) GetReverseZoneByName(_ context.Context, _ dbq.GetReverseZoneByNameParams) (dbq.DnsZone, error) {
 	return dbq.DnsZone{}, pgx.ErrNoRows
 }
-func (f *fakeQ) CreateReverseZone(_ context.Context, name string, fabricID, siteID uuid.UUID) (dbq.DnsZone, error) {
-	return dbq.DnsZone{ID: uuid.New(), Name: name, Kind: "reverse", FabricID: fabricID, SiteID: &siteID}, nil
+func (f *fakeQ) CreateReverseZone(_ context.Context, arg dbq.CreateReverseZoneParams) (dbq.DnsZone, error) {
+	siteID := arg.SiteID
+	return dbq.DnsZone{ID: uuid.New(), Name: arg.Name, Kind: "reverse", FabricID: arg.FabricID, SiteID: &siteID}, nil
 }
-func (f *fakeQ) ListIPAddressesForSiteWithDnsName(_ context.Context, siteID uuid.UUID) ([]dbq.IPAddressForSyncRow, error) {
+func (f *fakeQ) ListIPAddressesForSiteWithDnsName(_ context.Context, siteID uuid.UUID) ([]dbq.ListIPAddressesForSiteWithDnsNameRow, error) {
 	return f.ipsBySite[siteID], nil
 }
 func (f *fakeQ) DeleteIPAMRecordsInZones(_ context.Context, _ []uuid.UUID) error { return nil }
@@ -110,7 +111,7 @@ func TestRun_AggregatesAcrossZones(t *testing.T) {
 	name2 := "host2.site.example.com"
 	q := &fakeQ{
 		zones: []dbq.DnsZone{z1, z2},
-		ipsBySite: map[uuid.UUID][]dbq.IPAddressForSyncRow{
+		ipsBySite: map[uuid.UUID][]dbq.ListIPAddressesForSiteWithDnsNameRow{
 			*z1.SiteID: {{ID: uuid.New(), Address: "10.0.0.1", DnsName: &name1, Source: "ipam"}},
 			*z2.SiteID: {{ID: uuid.New(), Address: "10.0.0.2", DnsName: &name2, Source: "ipam"}},
 		},

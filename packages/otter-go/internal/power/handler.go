@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ import (
 )
 
 type Querier interface {
-	GetPduAsset(ctx context.Context, id uuid.UUID) (dbq.AssetKindRow, error)
+	GetPduAsset(ctx context.Context, id uuid.UUID) (dbq.GetPduAssetRow, error)
 	ListOutletsByPdu(ctx context.Context, pduID uuid.UUID) ([]dbq.Outlet, error)
 	ListPowerConnectionsByOutletIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.PowerConnection, error)
 
@@ -61,6 +62,26 @@ type connectedInfo struct {
 	PsuIndex    int32     `json:"psu_index"`
 	CordColor   *string   `json:"cord_color"`
 	CordLengthM *string   `json:"cord_length_m"`
+}
+
+// int32PtrToStr / floatPtrToStr keep the wire shape stable: the
+// Python API (and the hand-maintained dbq before sqlc regeneration)
+// serialized max_amps / cord_length_m as decimal strings even though
+// the columns are INTEGER / DOUBLE PRECISION.
+func int32PtrToStr(v *int32) *string {
+	if v == nil {
+		return nil
+	}
+	s := strconv.FormatInt(int64(*v), 10)
+	return &s
+}
+
+func floatPtrToStr(v *float64) *string {
+	if v == nil {
+		return nil
+	}
+	s := strconv.FormatFloat(*v, 'f', -1, 64)
+	return &s
 }
 
 type outletWithConn struct {
@@ -128,12 +149,12 @@ func (h *Handler) listOutlets(w http.ResponseWriter, r *http.Request) {
 	for _, o := range outlets {
 		ow := outletWithConn{
 			ID: o.ID, PduAssetID: o.PduAssetID, Position: o.Position,
-			Label: o.Label, Phase: o.Phase, MaxAmps: o.MaxAmps, Receptacle: o.Receptacle,
+			Label: o.Label, Phase: o.Phase, MaxAmps: int32PtrToStr(o.MaxAmps), Receptacle: o.Receptacle,
 		}
 		if c, ok := byOutlet[o.ID]; ok {
 			ow.Connected = &connectedInfo{
 				AssetID: c.AssetID, PsuIndex: c.PsuIndex,
-				CordColor: c.CordColor, CordLengthM: c.CordLengthM,
+				CordColor: c.CordColor, CordLengthM: floatPtrToStr(c.CordLengthM),
 			}
 		}
 		out = append(out, ow)

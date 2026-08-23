@@ -20,7 +20,7 @@ type fakeFsQ struct {
 	fakeQ         // embed so enterprise-side methods are filled too
 	racks         []dbq.Rack
 	assets        []dbq.Asset
-	pduTelemetry  []dbq.PduKwTelemetryRow
+	pduTelemetry  []dbq.ListPduKwTelemetryRow
 	gotFilter     dbq.ListRacksForFreeSpaceParams
 	gotAssetRacks []uuid.UUID
 	gotPduIDs     []uuid.UUID
@@ -35,7 +35,7 @@ func (f *fakeFsQ) ListAssetsByRackIDs(_ context.Context, ids []uuid.UUID) ([]dbq
 	f.gotAssetRacks = ids
 	return f.assets, nil
 }
-func (f *fakeFsQ) ListPduKwTelemetry(_ context.Context, ids []uuid.UUID) ([]dbq.PduKwTelemetryRow, error) {
+func (f *fakeFsQ) ListPduKwTelemetry(_ context.Context, ids []uuid.UUID) ([]dbq.ListPduKwTelemetryRow, error) {
 	f.gotPduIDs = ids
 	if len(ids) == 0 {
 		return nil, nil
@@ -44,7 +44,7 @@ func (f *fakeFsQ) ListPduKwTelemetry(_ context.Context, ids []uuid.UUID) ([]dbq.
 	for _, id := range ids {
 		want[id] = struct{}{}
 	}
-	var out []dbq.PduKwTelemetryRow
+	var out []dbq.ListPduKwTelemetryRow
 	for _, r := range f.pduTelemetry {
 		if _, ok := want[r.AssetID]; ok {
 			out = append(out, r)
@@ -153,8 +153,8 @@ func TestFreeSpace_MinKwHeadroomRejects(t *testing.T) {
 		assets: []dbq.Asset{
 			{ID: pduID, RackID: &rid, Kind: "pdu"},
 		},
-		pduTelemetry: []dbq.PduKwTelemetryRow{
-			{AssetID: pduID, Metric: "pdu.input.kw", LastValue: strPtrLocal("4.5")},
+		pduTelemetry: []dbq.ListPduKwTelemetryRow{
+			{AssetID: pduID, Metric: "pdu.input.kw", LastValue: floatPtrLocal(4.5)},
 		},
 	}
 	// kw_max=5, kw_current=4.5 → headroom 0.5. Request 1.0 → reject.

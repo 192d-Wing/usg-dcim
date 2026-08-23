@@ -148,7 +148,7 @@ func TestList_ScopedButReachesNothing_EmptyPage(t *testing.T) {
 			listCalled = true
 			return nil, nil
 		},
-		count: func(_ context.Context, _ dbq.CountRegionsParams) (int64, error) {
+		count: func(_ context.Context, _ []uuid.UUID) (int64, error) {
 			countCalled = true
 			return 0, nil
 		},

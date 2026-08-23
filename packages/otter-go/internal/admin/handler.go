@@ -28,12 +28,12 @@ import (
 )
 
 type Querier interface {
-	ListAdminUsers(ctx context.Context, arg dbq.ListAdminUsersParams) ([]dbq.User, error)
+	ListAdminUsers(ctx context.Context, arg dbq.ListAdminUsersParams) ([]dbq.ListAdminUsersRow, error)
 	CountAdminUsers(ctx context.Context) (int64, error)
 	GetUser(ctx context.Context, id uuid.UUID) (dbq.User, error)
 	GetUserByEmail(ctx context.Context, email string) (dbq.User, error)
-	CreateAdminUser(ctx context.Context, arg dbq.CreateAdminUserParams) (dbq.User, error)
-	UpdateAdminUser(ctx context.Context, arg dbq.UpdateAdminUserParams) (dbq.User, error)
+	CreateAdminUser(ctx context.Context, arg dbq.CreateAdminUserParams) (dbq.CreateAdminUserRow, error)
+	UpdateAdminUser(ctx context.Context, arg dbq.UpdateAdminUserParams) (dbq.UpdateAdminUserRow, error)
 
 	ListAdminRoles(ctx context.Context, arg dbq.ListAdminRolesParams) ([]dbq.Role, error)
 	CountAdminRoles(ctx context.Context) (int64, error)
@@ -44,23 +44,23 @@ type Querier interface {
 	DeleteAdminRole(ctx context.Context, id uuid.UUID) (int64, error)
 	CountUserRolesForRole(ctx context.Context, roleID uuid.UUID) (int64, error)
 
-	ListUserAssignments(ctx context.Context, userID uuid.UUID) ([]dbq.UserRoleRow, error)
-	GetUserRole(ctx context.Context, id uuid.UUID) (dbq.UserRoleRow, error)
-	FindUserRoleByUserAndRole(ctx context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error)
-	CreateUserRole(ctx context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error)
+	ListUserAssignments(ctx context.Context, userID uuid.UUID) ([]dbq.UserRole, error)
+	GetUserRole(ctx context.Context, id uuid.UUID) (dbq.UserRole, error)
+	FindUserRoleByUserAndRole(ctx context.Context, arg dbq.FindUserRoleByUserAndRoleParams) (dbq.UserRole, error)
+	CreateUserRole(ctx context.Context, arg dbq.CreateUserRoleParams) (dbq.UserRole, error)
 	DeleteUserRole(ctx context.Context, id uuid.UUID) (int64, error)
-	ListRoleScopesByAssignment(ctx context.Context, assignmentID uuid.UUID) ([]dbq.RoleScopeRow, error)
-	ListRoleScopesByAssignments(ctx context.Context, ids []uuid.UUID) ([]dbq.RoleScopeRow, error)
-	CreateRoleScope(ctx context.Context, arg dbq.CreateRoleScopeParams) (dbq.RoleScopeRow, error)
+	ListRoleScopesByAssignment(ctx context.Context, assignmentID uuid.UUID) ([]dbq.RoleScope, error)
+	ListRoleScopesByAssignments(ctx context.Context, ids []uuid.UUID) ([]dbq.RoleScope, error)
+	CreateRoleScope(ctx context.Context, arg dbq.CreateRoleScopeParams) (dbq.RoleScope, error)
 	DeleteRoleScopesForAssignment(ctx context.Context, assignmentID uuid.UUID) error
-	GetRoleNamesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.RoleNameRow, error)
+	GetRoleNamesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.GetRoleNamesByIDsRow, error)
 
-	ListOidcRoleMappings(ctx context.Context, arg dbq.ListOidcRoleMappingsParams) ([]dbq.OidcRoleMappingRow, error)
+	ListOidcRoleMappings(ctx context.Context, arg dbq.ListOidcRoleMappingsParams) ([]dbq.OidcRoleMapping, error)
 	CountOidcRoleMappings(ctx context.Context) (int64, error)
-	GetOidcRoleMapping(ctx context.Context, id uuid.UUID) (dbq.OidcRoleMappingRow, error)
-	GetOidcRoleMappingByIdpRole(ctx context.Context, idpRole string) (dbq.OidcRoleMappingRow, error)
-	CreateOidcRoleMapping(ctx context.Context, arg dbq.CreateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error)
-	UpdateOidcRoleMapping(ctx context.Context, arg dbq.UpdateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error)
+	GetOidcRoleMapping(ctx context.Context, id uuid.UUID) (dbq.OidcRoleMapping, error)
+	GetOidcRoleMappingByIdpRole(ctx context.Context, idpRole string) (dbq.OidcRoleMapping, error)
+	CreateOidcRoleMapping(ctx context.Context, arg dbq.CreateOidcRoleMappingParams) (dbq.OidcRoleMapping, error)
+	UpdateOidcRoleMapping(ctx context.Context, arg dbq.UpdateOidcRoleMappingParams) (dbq.OidcRoleMapping, error)
 	DeleteOidcRoleMapping(ctx context.Context, id uuid.UUID) (int64, error)
 
 	// system_settings access for /admin/system/dns-settings.
@@ -117,7 +117,7 @@ func (h *Handler) Mount(r chi.Router) {
 // ---- list ----
 
 type listResponse struct {
-	Items  []dbq.User `json:"items"`
+	Items  []dbq.ListAdminUsersRow `json:"items"`
 	Total  int64      `json:"total"`
 	Limit  int32      `json:"limit"`
 	Offset int32      `json:"offset"`

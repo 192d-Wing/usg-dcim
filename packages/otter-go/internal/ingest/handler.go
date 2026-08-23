@@ -159,7 +159,7 @@ func (h *Handler) upsertFreshness(r *http.Request, b batch, receivedAt time.Time
 	}
 	for key, s := range freshBy {
 		if err := h.Q.UpsertTelemetrySource(r.Context(), dbq.UpsertTelemetrySourceParams{
-			SiteID: b.SiteID, AssetID: key.assetID, CollectorID: b.CollectorID,
+			SiteID: b.SiteID, AssetID: key.assetID, CollectorID: &b.CollectorID,
 			Metric: key.metric, Unit: s.Unit,
 			LastSuccessAt: receivedAt, LastReadingAt: s.TS, LastValue: s.Value,
 		}); err != nil {

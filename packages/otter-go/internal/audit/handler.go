@@ -20,7 +20,7 @@ import (
 type Querier interface {
 	ListAuditLog(ctx context.Context, arg dbq.ListAuditLogParams) ([]dbq.AuditLog, error)
 	CountAuditLog(ctx context.Context, arg dbq.CountAuditLogParams) (int64, error)
-	ListAuditActions(ctx context.Context, arg dbq.ListAuditActionsParams) ([]string, error)
+	ListAuditActions(ctx context.Context, scopeSiteIds []uuid.UUID) ([]string, error)
 	// Embedded so we can call auth.ScopedSiteFilter — site-scope
 	// expansion walks direct + region + site-group + organization.
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
@@ -264,9 +264,7 @@ func (h *Handler) listActions(w http.ResponseWriter, r *http.Request) {
 	if done {
 		return
 	}
-	actions, err := h.Q.ListAuditActions(r.Context(), dbq.ListAuditActionsParams{
-		ScopeSiteIds: scopeSiteIDs,
-	})
+	actions, err := h.Q.ListAuditActions(r.Context(), scopeSiteIDs)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

@@ -205,11 +205,10 @@ func TestProjectKw_AlreadyOverMax(t *testing.T) {
 func TestSamplesFromRows_WConversionAndDailySum(t *testing.T) {
 	day1 := time.Date(2026, 5, 28, 0, 0, 0, 0, time.UTC)
 	day2 := time.Date(2026, 5, 29, 0, 0, 0, 0, time.UTC)
-	rows := []dbq.KwHistoryRow{
-		{Day: day1, Metric: "pdu.input.kw", AvgV: fPtr(2.5)},
-		{Day: day1, Metric: "pdu.input.w", AvgV: fPtr(1500.0)}, // → 1.5 kW
-		{Day: day2, Metric: "pdu.input.kw", AvgV: fPtr(4.0)},
-		{Day: day1, Metric: "pdu.input.w", AvgV: nil}, // ignored
+	rows := []dbq.ListKwHistorySamplesRow{
+		{Day: day1, Metric: "pdu.input.kw", AvgV: 2.5},
+		{Day: day1, Metric: "pdu.input.w", AvgV: 1500.0}, // → 1.5 kW
+		{Day: day2, Metric: "pdu.input.kw", AvgV: 4.0},
 	}
 	samples := SamplesFromRows(rows)
 	if len(samples) != 2 {

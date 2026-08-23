@@ -1,0 +1,3 @@
+# Regenerated locally / in CI from a migrated Postgres (see
+# db/sqlc.yaml for the recipe) — never committed.
+db/schema.sql

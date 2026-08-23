@@ -46,10 +46,7 @@ DELETE FROM tcp_ao_key_chains WHERE id = $1;
 
 -- name: ListTcpAoKeys :many
 -- Optional key_chain_id filter narrows to one chain's history.
-SELECT id, key_chain_id, key_id, send_id, recv_id,
-       algorithm::text AS algorithm,
-       secret, valid_from, valid_to, description,
-       created_at, updated_at
+SELECT *
 FROM tcp_ao_keys
 WHERE (sqlc.narg(key_chain_id)::uuid IS NULL OR key_chain_id = sqlc.narg(key_chain_id))
 ORDER BY key_chain_id, key_id
@@ -61,10 +58,7 @@ FROM tcp_ao_keys
 WHERE (sqlc.narg(key_chain_id)::uuid IS NULL OR key_chain_id = sqlc.narg(key_chain_id));
 
 -- name: GetTcpAoKey :one
-SELECT id, key_chain_id, key_id, send_id, recv_id,
-       algorithm::text AS algorithm,
-       secret, valid_from, valid_to, description,
-       created_at, updated_at
+SELECT *
 FROM tcp_ao_keys
 WHERE id = $1;
 
@@ -72,13 +66,10 @@ WHERE id = $1;
 INSERT INTO tcp_ao_keys (id, key_chain_id, key_id, send_id, recv_id,
                          algorithm, secret, valid_from, valid_to,
                          description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4,
-        $5::tcp_ao_algorithm, $6, $7, $8,
-        $9, NOW(), NOW())
-RETURNING id, key_chain_id, key_id, send_id, recv_id,
-          algorithm::text AS algorithm,
-          secret, valid_from, valid_to, description,
-          created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(key_chain_id), sqlc.arg(key_id), sqlc.arg(send_id), sqlc.arg(recv_id),
+        sqlc.arg(algorithm)::tcp_ao_algorithm, sqlc.arg(secret), sqlc.arg(valid_from), sqlc.arg(valid_to),
+        sqlc.arg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateTcpAoKey :one
 -- key_chain_id is intentionally not patchable — moving a key across
@@ -96,10 +87,7 @@ SET key_id      = COALESCE(sqlc.narg(key_id)::int, key_id),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, key_chain_id, key_id, send_id, recv_id,
-          algorithm::text AS algorithm,
-          secret, valid_from, valid_to, description,
-          created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteTcpAoKey :exec
 DELETE FROM tcp_ao_keys WHERE id = $1;

@@ -140,22 +140,60 @@ func writeApprovalCTEError(w http.ResponseWriter, err error) bool {
 func (h *Handler) respondApprovalSuccess(
 	ctx context.Context, w http.ResponseWriter,
 	requestID, poolID uuid.UUID, chosenPrefix, arinInit string,
-	result dbq.ApprovalResultRow,
+	result dbq.ApproveLirRequestRow,
 ) {
+	req, alloc := splitApprovalRow(result)
 	audit.Record(ctx, h.Audit, nil, audit.Event{
 		Action: "lir.request.approve", TargetType: "lir_request",
 		TargetID: requestID.String(),
 		Metadata: map[string]any{
-			"allocation_id":      result.Allocation.ID.String(),
-			"tenant_supernet_id": result.Allocation.TenantSupernetID.String(),
+			"allocation_id":      alloc.ID.String(),
+			"tenant_supernet_id": alloc.TenantSupernetID.String(),
 			"approved_pool_id":   poolID.String(),
 			"prefix":             chosenPrefix,
 			"arin_initial":       arinInit,
 		},
 	})
 	httpx.JSON(w, http.StatusOK, approveResponse{
-		Request: result.Request, Allocation: result.Allocation,
+		Request: req, Allocation: alloc,
 	})
+}
+
+// splitApprovalRow unpacks the CTE's flat SELECT (18 LirRequest
+// columns then 22 LirAllocation columns, collision-suffixed _2 by
+// sqlc) back into the two entities the response shape carries.
+func splitApprovalRow(r dbq.ApproveLirRequestRow) (dbq.LirRequest, dbq.LirAllocation) {
+	req := dbq.LirRequest{
+		ID: r.ID, OrganizationID: r.OrganizationID,
+		RequesterUserID: r.RequesterUserID, PoolID: r.PoolID,
+		SiteID: r.SiteID, IPFamily: r.IPFamily,
+		PrefixLength: r.PrefixLength, Purpose: r.Purpose,
+		Classification: r.Classification, Justification: r.Justification,
+		Status: r.Status, SubmittedAt: r.SubmittedAt,
+		DecidedAt: r.DecidedAt, DecidedByUserID: r.DecidedByUserID,
+		DecisionNotes: r.DecisionNotes, ApprovedPoolID: r.ApprovedPoolID,
+		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	}
+	alloc := dbq.LirAllocation{
+		ID: r.ID_2, RequestID: r.RequestID,
+		OrganizationID: r.OrganizationID_2, PoolID: r.PoolID_2,
+		PoolSupernetID: r.PoolSupernetID, TenantSupernetID: r.TenantSupernetID,
+		Prefix: r.Prefix, AllocatedAt: r.AllocatedAt,
+		AllocatedByUserID: r.AllocatedByUserID, Status: r.Status_2,
+		ReturnRequestedAt:       r.ReturnRequestedAt,
+		ReturnRequestedByUserID: r.ReturnRequestedByUserID,
+		ReturnReason:            r.ReturnReason,
+		ReturnedAt:              r.ReturnedAt,
+		ReturnedByUserID:        r.ReturnedByUserID,
+		ArinStatus:              r.ArinStatus,
+		ArinNetHandle:           r.ArinNetHandle,
+		ArinLastAttemptAt:       r.ArinLastAttemptAt,
+		ArinLastError:           r.ArinLastError,
+		ArinAttempts:            r.ArinAttempts,
+		CreatedAt:               r.CreatedAt_2,
+		UpdatedAt:               r.UpdatedAt_2,
+	}
+	return req, alloc
 }
 
 // loadApprovableRequest fetches the request, org-scope checks against
@@ -200,7 +238,7 @@ func (h *Handler) validatePoolForApproval(
 			"approved pool is disabled; enable it or pick another")
 		return dbq.LirPool{}, false
 	}
-	if pool.IpFamily != existing.IpFamily {
+	if pool.IPFamily != existing.IPFamily {
 		httpx.Error(w, http.StatusUnprocessableEntity,
 			"pool family doesn't match request family")
 		return dbq.LirPool{}, false
