@@ -44,7 +44,9 @@ SET name           = COALESCE(sqlc.narg(name)::text, name),
     mgmt_port      = CASE WHEN sqlc.arg(mgmt_port_set)::bool THEN sqlc.narg(mgmt_port)::int ELSE mgmt_port END,
     firmware       = CASE WHEN sqlc.arg(firmware_set)::bool THEN sqlc.narg(firmware)::text ELSE firmware END,
     lifecycle_state = COALESCE(sqlc.narg(lifecycle_state)::lifecycle_state, lifecycle_state),
-    metadata_json  = COALESCE(sqlc.narg(metadata_json)::jsonb, metadata_json),
+    -- ::json, not ::jsonb: the column is json and COALESCE cannot
+    -- implicitly unify jsonb with json — ::jsonb fails at plan time.
+    metadata_json  = COALESCE(sqlc.narg(metadata_json)::json, metadata_json),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING id, site_id, rack_id, parent_asset_id, name, hostname, kind::text AS kind,

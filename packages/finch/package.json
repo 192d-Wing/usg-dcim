@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "fmt": "prettier --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@cloudscape-design/components": "^3.0.1345",
@@ -37,6 +38,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^25.9.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

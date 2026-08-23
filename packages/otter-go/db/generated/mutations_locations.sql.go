@@ -118,7 +118,7 @@ SET name           = COALESCE($2::text, name),
     mission_owner  = CASE WHEN $9::bool  THEN $10::text ELSE mission_owner END,
     enclave        = CASE WHEN $11::bool THEN $12::text ELSE enclave END,
     lifecycle_state = COALESCE($13::lifecycle_state, lifecycle_state),
-    metadata_json  = COALESCE($14::jsonb, metadata_json),
+    metadata_json  = COALESCE($14::json, metadata_json),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING ` + siteRetCols

@@ -1,2 +1,7 @@
 # Smoke-test screenshot output (smoke.mjs writes here).
 smoke/
+
+# Playwright: saved auth state and run artifacts.
+e2e/.auth/
+test-results/
+playwright-report/

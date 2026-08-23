@@ -39,7 +39,9 @@ SET name           = COALESCE(sqlc.narg(name)::text, name),
     mission_owner  = CASE WHEN sqlc.arg(mission_owner_set)::bool    THEN sqlc.narg(mission_owner)::text    ELSE mission_owner END,
     enclave        = CASE WHEN sqlc.arg(enclave_set)::bool          THEN sqlc.narg(enclave)::text          ELSE enclave END,
     lifecycle_state = COALESCE(sqlc.narg(lifecycle_state)::lifecycle_state, lifecycle_state),
-    metadata_json  = COALESCE(sqlc.narg(metadata_json)::jsonb, metadata_json),
+    -- ::json, not ::jsonb: the column is json and COALESCE cannot
+    -- implicitly unify jsonb with json — ::jsonb fails at plan time.
+    metadata_json  = COALESCE(sqlc.narg(metadata_json)::json, metadata_json),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING id, region_id, name, code, address, latitude, longitude,
