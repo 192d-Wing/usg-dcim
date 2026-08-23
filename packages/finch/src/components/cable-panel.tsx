@@ -358,6 +358,7 @@ function CableDialog({
     if (!aAssetId) errs.a_asset_id = 'Required';
     if (!bAssetId) errs.b_asset_id = 'Required';
     if (aAssetId && bAssetId && aAssetId === bAssetId) errs.b_asset_id = 'A-end and B-end must differ';
+    if (lengthM.trim() && Number.isNaN(Number(lengthM))) errs.length_m = 'Number';
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
 
@@ -368,7 +369,9 @@ function CableDialog({
       b_port: bPort || null,
       medium: medium || null,
       color: color || null,
-      length_m: lengthM ? Number(lengthM) : null,
+      // NUMERIC rides as a JSON string on the wire (the backend field
+      // is *string) — a JSON number fails decoding.
+      length_m: lengthM.trim() || null,
       label: label || null,
       face: face || null,
     };
@@ -467,7 +470,7 @@ function CableDialog({
                   {COMMON_COLORS.map((c) => <option key={c} value={c} />)}
                 </datalist>
               </FormField>
-              <FormField label="Length (m)">
+              <FormField label="Length (m)" errorText={errors.length_m}>
                 <Input
                   type="number"
                   value={lengthM}

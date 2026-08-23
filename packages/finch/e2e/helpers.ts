@@ -85,6 +85,22 @@ export class Api {
     expect(r.ok(), `DELETE ${path}: ${r.status()}`).toBeTruthy();
   }
 
+  /** A fresh rack for this run in the fixture row (racks have no
+   *  DELETE, so per-run racks isolate specs from each other). */
+  async createRunRack(code: string): Promise<{ rackId: string; siteId: string }> {
+    const { siteId } = await this.ensureFixtures();
+    const bldg = (await this.list('/inventory/buildings', { site_id: siteId }))
+      .find((b: any) => b.code === FIXTURES.rackHomeBuilding);
+    const room = (await this.list('/inventory/rooms', { building_id: bldg.id }))
+      .find((r: any) => r.code === FIXTURES.rackHomeFloor);
+    const row = (await this.list('/inventory/rows', { room_id: room.id }))
+      .find((r: any) => r.code === FIXTURES.rackHomeRow);
+    const rack = await this.post('/inventory/racks', {
+      site_id: siteId, row_id: row.id, name: `E2E Rack ${code}`, code, u_height: 42,
+    });
+    return { rackId: rack.id, siteId };
+  }
+
   /** Region + site + rack-home building/floor/row, created if missing. */
   async ensureFixtures(): Promise<{ siteId: string; rackHomeBuildingId: string }> {
     let region = (await this.list('/inventory/regions')).find((r) => r.code === FIXTURES.regionCode);
