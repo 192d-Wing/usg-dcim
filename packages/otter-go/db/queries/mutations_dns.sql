@@ -86,7 +86,10 @@ RETURNING id, zone_id, name, type::text AS type, ttl, data, source::text AS sour
 UPDATE dns_records
 SET name        = COALESCE(sqlc.narg(name)::text, name),
     ttl         = CASE WHEN sqlc.arg(ttl_set)::bool         THEN sqlc.narg(ttl)::int    ELSE ttl END,
-    data        = COALESCE(sqlc.narg(data)::jsonb, data),
+    -- ::json casts here and below, not ::jsonb: these columns are json
+    -- and COALESCE cannot implicitly unify jsonb with json — ::jsonb
+    -- fails at plan time.
+    data        = COALESCE(sqlc.narg(data)::json, data),
     view_id     = CASE WHEN sqlc.arg(view_set)::bool        THEN sqlc.narg(view_id)::uuid       ELSE view_id END,
     health_check_id = CASE WHEN sqlc.arg(hc_set)::bool      THEN sqlc.narg(health_check_id)::uuid ELSE health_check_id END,
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
@@ -157,7 +160,7 @@ RETURNING id, name, fabric_id, zone_pattern, upstreams, description, created_at,
 UPDATE dns_forwarders
 SET name         = COALESCE(sqlc.narg(name)::text, name),
     zone_pattern = COALESCE(sqlc.narg(zone_pattern)::text, zone_pattern),
-    upstreams    = COALESCE(sqlc.narg(upstreams)::jsonb, upstreams),
+    upstreams    = COALESCE(sqlc.narg(upstreams)::json, upstreams),
     description  = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at   = NOW()
 WHERE id = $1
@@ -226,7 +229,7 @@ RETURNING id, name, fabric_id, match_cidrs, priority, description, created_at, u
 -- name: UpdateDnsView :one
 UPDATE dns_views
 SET name        = COALESCE(sqlc.narg(name)::text, name),
-    match_cidrs = COALESCE(sqlc.narg(match_cidrs)::jsonb, match_cidrs),
+    match_cidrs = COALESCE(sqlc.narg(match_cidrs)::json, match_cidrs),
     priority    = COALESCE(sqlc.narg(priority)::int, priority),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()

@@ -237,7 +237,7 @@ func (q *Queries) CreateDnsRecord(ctx context.Context, arg CreateDnsRecordParams
 const updateDnsRecord = `UPDATE dns_records
 SET name        = COALESCE($2::text, name),
     ttl         = CASE WHEN $3::bool THEN $4::int ELSE ttl END,
-    data        = COALESCE($5::jsonb, data),
+    data        = COALESCE($5::json, data),
     view_id     = CASE WHEN $6::bool THEN $7::uuid ELSE view_id END,
     health_check_id = CASE WHEN $8::bool THEN $9::uuid ELSE health_check_id END,
     description = CASE WHEN $10::bool THEN $11::text ELSE description END,
@@ -452,7 +452,7 @@ func (q *Queries) CreateDnsForwarder(ctx context.Context, arg CreateDnsForwarder
 const updateDnsForwarder = `UPDATE dns_forwarders
 SET name         = COALESCE($2::text, name),
     zone_pattern = COALESCE($3::text, zone_pattern),
-    upstreams    = COALESCE($4::jsonb, upstreams),
+    upstreams    = COALESCE($4::json, upstreams),
     description  = CASE WHEN $5::bool THEN $6::text ELSE description END,
     updated_at   = NOW()
 WHERE id = $1
@@ -656,7 +656,7 @@ func (q *Queries) CreateDnsView(ctx context.Context, arg CreateDnsViewParams) (D
 
 const updateDnsView = `UPDATE dns_views
 SET name        = COALESCE($2::text, name),
-    match_cidrs = COALESCE($3::jsonb, match_cidrs),
+    match_cidrs = COALESCE($3::json, match_cidrs),
     priority    = COALESCE($4::int, priority),
     description = CASE WHEN $5::bool THEN $6::text ELSE description END,
     updated_at  = NOW()

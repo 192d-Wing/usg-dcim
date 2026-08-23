@@ -96,7 +96,7 @@ SET name             = COALESCE($2::text, name),
     duration_seconds = COALESCE($8::int, duration_seconds),
     severity         = COALESCE($9::text, severity),
     site_scope_id    = CASE WHEN $10::bool THEN $11::uuid ELSE site_scope_id END,
-    asset_filter_json = COALESCE($12::jsonb, asset_filter_json),
+    asset_filter_json = COALESCE($12::json, asset_filter_json),
     enabled          = COALESCE($13::bool, enabled),
     runbook_url      = CASE WHEN $14::bool THEN $15::text ELSE runbook_url END,
     updated_at       = NOW()
@@ -178,7 +178,7 @@ func (q *Queries) CreateMaintenanceWindow(ctx context.Context, arg CreateMainten
 const updateMaintenanceWindow = `UPDATE maintenance_windows
 SET name              = COALESCE($2::text, name),
     site_id           = CASE WHEN $3::bool THEN $4::uuid ELSE site_id END,
-    asset_filter_json = COALESCE($5::jsonb, asset_filter_json),
+    asset_filter_json = COALESCE($5::json, asset_filter_json),
     starts_at         = COALESCE($6::timestamptz, starts_at),
     ends_at           = COALESCE($7::timestamptz, ends_at),
     reason            = CASE WHEN $8::bool THEN $9::text ELSE reason END,

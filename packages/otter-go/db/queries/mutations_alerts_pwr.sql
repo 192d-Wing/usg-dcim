@@ -33,7 +33,9 @@ SET name             = COALESCE(sqlc.narg(name)::text, name),
     duration_seconds = COALESCE(sqlc.narg(duration_seconds)::int, duration_seconds),
     severity         = COALESCE(sqlc.narg(severity)::text, severity),
     site_scope_id    = CASE WHEN sqlc.arg(site_set)::bool       THEN sqlc.narg(site_scope_id)::uuid    ELSE site_scope_id END,
-    asset_filter_json = COALESCE(sqlc.narg(asset_filter_json)::jsonb, asset_filter_json),
+    -- ::json, not ::jsonb: the column is json and COALESCE cannot
+    -- implicitly unify jsonb with json — ::jsonb fails at plan time.
+    asset_filter_json = COALESCE(sqlc.narg(asset_filter_json)::json, asset_filter_json),
     enabled          = COALESCE(sqlc.narg(enabled)::bool, enabled),
     runbook_url      = CASE WHEN sqlc.arg(runbook_set)::bool    THEN sqlc.narg(runbook_url)::text     ELSE runbook_url END,
     updated_at       = NOW()
@@ -59,7 +61,9 @@ RETURNING id, name, site_id, asset_filter_json,
 UPDATE maintenance_windows
 SET name              = COALESCE(sqlc.narg(name)::text, name),
     site_id           = CASE WHEN sqlc.arg(site_set)::bool   THEN sqlc.narg(site_id)::uuid    ELSE site_id END,
-    asset_filter_json = COALESCE(sqlc.narg(asset_filter_json)::jsonb, asset_filter_json),
+    -- ::json, not ::jsonb: the column is json and COALESCE cannot
+    -- implicitly unify jsonb with json — ::jsonb fails at plan time.
+    asset_filter_json = COALESCE(sqlc.narg(asset_filter_json)::json, asset_filter_json),
     starts_at         = COALESCE(sqlc.narg(starts_at)::timestamptz, starts_at),
     ends_at           = COALESCE(sqlc.narg(ends_at)::timestamptz, ends_at),
     reason            = CASE WHEN sqlc.arg(reason_set)::bool THEN sqlc.narg(reason)::text     ELSE reason END,

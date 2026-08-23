@@ -99,7 +99,7 @@ SET name           = COALESCE($2::text, name),
     mgmt_port      = CASE WHEN $23::bool THEN $24::int ELSE mgmt_port END,
     firmware       = CASE WHEN $25::bool THEN $26::text ELSE firmware END,
     lifecycle_state = COALESCE($27::lifecycle_state, lifecycle_state),
-    metadata_json  = COALESCE($28::jsonb, metadata_json),
+    metadata_json  = COALESCE($28::json, metadata_json),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING ` + assetRetCols
