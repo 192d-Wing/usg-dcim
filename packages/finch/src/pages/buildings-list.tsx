@@ -2,9 +2,8 @@
 // create/edit/delete modals. Row click opens the building floor view.
 
 import { useState } from 'react';
-import { useList, useTable } from '@refinedev/core';
+import { useInvalidate, useList, useTable } from '@refinedev/core';
 import { useNavigate } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import Box from '@cloudscape-design/components/box';
@@ -41,7 +40,7 @@ type ModalState =
 
 export function BuildingsListPage() {
   const nav = useNavigate();
-  const qc = useQueryClient();
+  const invalidate = useInvalidate();
   const [siteOpt, setSiteOpt] = useState<SelectProps.Option | null>(null);
   const [modal, setModal] = useState<ModalState>(null);
 
@@ -64,7 +63,9 @@ export function BuildingsListPage() {
   const canDelete = hasCapability('inventory:buildings:delete');
 
   async function refresh() {
-    await qc.invalidateQueries({ queryKey: ['data', 'inventory/buildings'] });
+    // Refine's own invalidation — hand-built react-query keys never
+    // matched the library's key shape, leaving the table stale.
+    await invalidate({ resource: 'inventory/buildings', invalidates: ['list'] });
   }
 
   return (

@@ -5,9 +5,8 @@
 // remains the bulk bring-up path; this covers the one-off site.
 
 import { useState } from 'react';
-import { useList, useTable } from '@refinedev/core';
+import { useInvalidate, useList, useTable } from '@refinedev/core';
 import { useNavigate } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import Box from '@cloudscape-design/components/box';
@@ -51,7 +50,7 @@ type ModalState = { mode: 'create' } | { mode: 'edit'; site: Site } | null;
 
 export function SitesListPage() {
   const navigate = useNavigate();
-  const qc = useQueryClient();
+  const invalidate = useInvalidate();
   const { tableQuery, result, currentPage, pageCount, setCurrentPage } = useTable<Site>({
     resource: 'inventory/sites',
     pagination: { pageSize: 50 },
@@ -66,7 +65,9 @@ export function SitesListPage() {
   const canUpdate = hasCapability('inventory:sites:update');
 
   async function refresh() {
-    await qc.invalidateQueries({ queryKey: ['data', 'inventory/sites'] });
+    // Refine's own invalidation — hand-built react-query keys never
+    // matched the library's key shape, leaving the table stale.
+    await invalidate({ resource: 'inventory/sites', invalidates: ['list'] });
   }
 
   return (
@@ -182,7 +183,7 @@ function SiteFormModal({
   onSaved: (newId: string | null) => void;
 }>) {
   const isEdit = site !== null;
-  const qc = useQueryClient();
+  const invalidate = useInvalidate();
 
   const regions = useList<Region>({
     resource: 'inventory/regions',
@@ -211,7 +212,7 @@ function SiteFormModal({
     try {
       const r = await http.post('/inventory/regions', { name: v.trim(), code: v.trim() });
       toast.success('Region created');
-      await qc.invalidateQueries({ queryKey: ['data', 'inventory/regions'] });
+      await invalidate({ resource: 'inventory/regions', invalidates: ['list'] });
       setRegionOpt({ value: r.data.id, label: `${v.trim()} · ${v.trim()}` });
     } catch (err: any) {
       toast.error(err?.message ?? 'failed');
