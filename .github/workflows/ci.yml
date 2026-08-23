@@ -128,6 +128,160 @@ jobs:
       - name: go test
         run: go test -race -count=1 ./...
 
+  # Runs the Playwright suite (packages/finch/e2e) against a live
+  # stack assembled directly on the runner — no container builds:
+  # TimescaleDB + redis as service containers, otter-go built from
+  # source (migrations + a seeded break-glass admin), and the vite
+  # dev server, whose existing proxy already points /api at :8000.
+  # This is the stack-equivalence trade-off: it exercises the same
+  # code paths as the deployed chart minus ingress/scheduler/heron,
+  # none of which the suite touches. Every bug the suite has caught
+  # so far (broken UPDATE casts, wire-type mismatches, stale
+  # invalidations) would have failed this job pre-merge.
+  e2e:
+    name: E2E (Playwright vs live stack)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Timescale build of PG16 — migration 00046 CREATE EXTENSIONs
+        # timescaledb, which plain postgres images don't carry.
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: dcim
+          POSTGRES_PASSWORD: dcim
+          POSTGRES_DB: dcim
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U dcim"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.5'
+          cache-dependency-path: packages/otter-go/go.sum
+
+      - name: Build otter-go
+        working-directory: packages/otter-go
+        run: |
+          go build -o /tmp/otter-go ./cmd/otter-go
+          go build -o /tmp/otter-go-migrate ./cmd/otter-go-migrate
+
+      - name: Migrate and seed the break-glass admin
+        env:
+          DCIM_POSTGRES_DSN: postgres://dcim:dcim@localhost:5432/dcim
+        # The admin password is random per run (masked, handed to the
+        # suite via E2E_PASSWORD) and hashed with the same bcrypt dep
+        # otter-go itself uses — nothing secret-shaped in the repo.
+        run: |
+          /tmp/otter-go-migrate -cmd up
+          PW=$(openssl rand -hex 16)
+          echo "::add-mask::$PW"
+          # Exported under the name the suite reads — flows to the
+          # playwright step through the job environment.
+          echo "E2E_PASSWORD=$PW" >> "$GITHUB_ENV"
+          cat > /tmp/hashgen.go <<'EOF'
+          package main
+
+          import (
+          	"fmt"
+          	"os"
+
+          	"golang.org/x/crypto/bcrypt"
+          )
+
+          func main() {
+          	h, err := bcrypt.GenerateFromPassword([]byte(os.Args[1]), bcrypt.DefaultCost)
+          	if err != nil {
+          		panic(err)
+          	}
+          	fmt.Print(string(h))
+          }
+          EOF
+          HASH=$(cd packages/otter-go && go run /tmp/hashgen.go "$PW")
+          psql "postgresql://dcim:dcim@localhost:5432/dcim" -v ON_ERROR_STOP=1 -v hash="$HASH" <<'SQL'
+          INSERT INTO roles (id, name, description, permission_codes, is_system)
+          VALUES (gen_random_uuid(), 'admin', 'CI admin', '["*"]', true)
+          ON CONFLICT (name) DO NOTHING;
+          INSERT INTO users (id, email, display_name, is_active, password_hash)
+          VALUES (gen_random_uuid(), 'admin@dcim.local', 'CI Admin', true, :'hash')
+          ON CONFLICT (email) DO NOTHING;
+          INSERT INTO user_roles (id, user_id, role_id)
+          SELECT gen_random_uuid(), u.id, r.id FROM users u, roles r
+          WHERE u.email = 'admin@dcim.local' AND r.name = 'admin'
+          ON CONFLICT ON CONSTRAINT uq_user_role DO NOTHING;
+          SQL
+
+      - name: Start otter-go
+        env:
+          DCIM_POSTGRES_DSN_RAW: postgres://dcim:dcim@localhost:5432/dcim
+          DCIM_REDIS_DSN: redis://localhost:6379/0
+          DCIM_JWT_SECRET: ci-e2e-not-a-secret
+        run: |
+          /tmp/otter-go > /tmp/otter-go.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fs http://localhost:8000/healthz >/dev/null && exit 0
+            sleep 1
+          done
+          echo "otter-go never became healthy"; cat /tmp/otter-go.log; exit 1
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: packages/finch/package-lock.json
+
+      - name: Install finch
+        working-directory: packages/finch
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('packages/finch/package-lock.json') }}
+
+      # Not `npx` — the binaries come from the locked install above or
+      # the step fails (same posture as the finch job's tsc).
+      - name: Install chromium
+        working-directory: packages/finch
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Start finch (vite dev proxies /api to otter-go)
+        working-directory: packages/finch
+        run: |
+          node scripts/sync-nic-schema.mjs
+          ./node_modules/.bin/vite --host 127.0.0.1 > /tmp/vite.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fs http://localhost:5173 >/dev/null && exit 0
+            sleep 1
+          done
+          echo "vite never came up"; cat /tmp/vite.log; exit 1
+
+      - name: Run the E2E suite
+        working-directory: packages/finch
+        env:
+          E2E_BASE_URL: http://localhost:5173
+        run: ./node_modules/.bin/playwright test
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure
+          path: |
+            packages/finch/test-results/
+            /tmp/otter-go.log
+            /tmp/vite.log
+          retention-days: 7
+
   container-build:
     name: Container images build (Podman/Buildah)
     runs-on: ubuntu-latest
