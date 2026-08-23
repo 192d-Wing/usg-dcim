@@ -31,7 +31,9 @@ SET name             = COALESCE(sqlc.narg(name)::text, name),
     operator         = COALESCE(sqlc.narg(operator)::text, operator),
     threshold        = COALESCE(sqlc.narg(threshold)::float, threshold),
     duration_seconds = COALESCE(sqlc.narg(duration_seconds)::int, duration_seconds),
-    severity         = COALESCE(sqlc.narg(severity)::text, severity),
+    -- ::alert_severity, not ::text: the column is an enum and
+    -- COALESCE cannot mix text with it — fails at plan time.
+    severity         = COALESCE(sqlc.narg(severity)::alert_severity, severity),
     site_scope_id    = CASE WHEN sqlc.arg(site_set)::bool       THEN sqlc.narg(site_scope_id)::uuid    ELSE site_scope_id END,
     -- ::json, not ::jsonb: the column is json and COALESCE cannot
     -- implicitly unify jsonb with json — ::jsonb fails at plan time.
@@ -89,7 +91,8 @@ RETURNING id, name, kind, config_json, min_severity,
 UPDATE notification_channels
 SET name              = COALESCE(sqlc.narg(name)::text, name),
     config_json       = COALESCE(sqlc.narg(config_json)::jsonb, config_json),
-    min_severity      = COALESCE(sqlc.narg(min_severity)::text, min_severity),
+    -- ::alert_severity, not ::text — enum, same as severity above.
+    min_severity      = COALESCE(sqlc.narg(min_severity)::alert_severity, min_severity),
     notify_on_fire    = COALESCE(sqlc.narg(notify_on_fire)::bool, notify_on_fire),
     notify_on_resolve = COALESCE(sqlc.narg(notify_on_resolve)::bool, notify_on_resolve),
     enabled           = COALESCE(sqlc.narg(enabled)::bool, enabled),

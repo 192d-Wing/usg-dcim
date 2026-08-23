@@ -59,7 +59,7 @@ SET name           = COALESCE($2::text, name),
     dns_recursive_upstreams = CASE WHEN $10::bool THEN $11::jsonb ELSE dns_recursive_upstreams END,
     dns_deny_networks       = CASE WHEN $12::bool THEN $13::jsonb ELSE dns_deny_networks END,
     catalog_transfer_acl    = CASE WHEN $14::bool THEN $15::jsonb ELSE catalog_transfer_acl END,
-    recursive_engine        = COALESCE($16::text, recursive_engine),
+    recursive_engine        = COALESCE($16::recursive_dns_engine, recursive_engine),
     updated_at     = NOW()
 WHERE id = $1
 RETURNING ` + fabricRetCols
