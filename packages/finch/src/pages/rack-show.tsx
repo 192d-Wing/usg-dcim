@@ -292,13 +292,19 @@ function EditRackForm({
       toast.error(`${orphans.length} device(s) would be orphaned at U${uHeight}`);
       return;
     }
+    if (maxKw.trim() && Number.isNaN(Number(maxKw))) {
+      toast.error('Max kW must be a number');
+      return;
+    }
     update(
       {
         resource: 'inventory/racks',
         id: rack.id,
         values: {
           name, u_height: uHeight,
-          max_kw: maxKw ? Number(maxKw) : null,
+          // NUMERIC rides as a JSON string on the wire (the backend
+          // field is *string) — a JSON number fails decoding with a 400.
+          max_kw: maxKw.trim() || null,
           serial: serial || null,
         },
         successNotification: false,
