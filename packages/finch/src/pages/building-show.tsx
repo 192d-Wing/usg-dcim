@@ -64,6 +64,7 @@ export function BuildingShowPage() {
   const qc = useQueryClient();
   const [floorModal, setFloorModal] = useState<FloorModalState>(null);
   const [deleteFloor, setDeleteFloor] = useState<FloorNode | null>(null);
+  const [addRowFloor, setAddRowFloor] = useState<FloorNode | null>(null);
 
   const detail = useQuery({
     queryKey: ['building-detail', id],
@@ -91,6 +92,7 @@ export function BuildingShowPage() {
   const canManageFloors = hasCapability('inventory:rooms:create');
   const canEditFloors = hasCapability('inventory:rooms:update');
   const canDeleteFloors = hasCapability('inventory:rooms:delete');
+  const canAddRows = hasCapability('inventory:rows:create');
 
   async function refresh() {
     await qc.invalidateQueries({ queryKey: ['building-detail', id] });
@@ -205,6 +207,7 @@ export function BuildingShowPage() {
             onRotate={(rackId, rotation) => patchPlacement(rackId, { grid_rotation: rotation })}
             onEdit={canEditFloors ? () => setFloorModal({ mode: 'edit', floor: f }) : undefined}
             onDelete={canDeleteFloors ? () => setDeleteFloor(f) : undefined}
+            onAddRow={canAddRows ? () => setAddRowFloor(f) : undefined}
           />
         ))}
       </SpaceBetween>
@@ -224,6 +227,13 @@ export function BuildingShowPage() {
           onDeleted={async () => { setDeleteFloor(null); await refresh(); }}
         />
       )}
+      {addRowFloor && (
+        <AddRowModal
+          floor={addRowFloor}
+          onDismiss={() => setAddRowFloor(null)}
+          onSaved={async () => { setAddRowFloor(null); await refresh(); }}
+        />
+      )}
     </ContentLayout>
   );
 }
@@ -237,7 +247,7 @@ function floorSummary(f: FloorNode): string {
 }
 
 function FloorSection({
-  floor, canPlace, onRackClick, onPlace, onRotate, onEdit, onDelete,
+  floor, canPlace, onRackClick, onPlace, onRotate, onEdit, onDelete, onAddRow,
 }: Readonly<{
   floor: FloorNode;
   canPlace: boolean;
@@ -246,10 +256,15 @@ function FloorSection({
   onRotate: (rackId: string, rotation: number) => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onAddRow?: () => void;
 }>) {
   const [view, setView] = useState<'plan' | 'rows'>('plan');
   const allRacks = floor.rows.flatMap((rw) => rw.racks);
   const c = floor.capacity;
+  // Render the plan as soon as a tile grid is configured, even with no
+  // rows yet — editing a floor's grid dims must visibly change the
+  // page, not leave it stuck on the empty-state text.
+  const hasGrid = floor.grid_cols !== null && floor.grid_rows !== null;
   // Draw vs the floor's design budget when one is set; otherwise fall
   // back to the summed rack ratings.
   const powerTotal = floor.design_kw ?? c.kw_max_sum;
@@ -262,8 +277,9 @@ function FloorSection({
       headerCounter={`(${c.racks_total} rack${c.racks_total === 1 ? '' : 's'})`}
       headerDescription={floorSummary(floor)}
       headerActions={
-        (onEdit || onDelete) ? (
+        (onAddRow || onEdit || onDelete) ? (
           <SpaceBetween size="xs" direction="horizontal">
+            {onAddRow && <Button onClick={onAddRow}>Add row</Button>}
             {onEdit && <Button onClick={onEdit}>Edit floor</Button>}
             {onDelete && <Button onClick={onDelete}>Delete</Button>}
           </SpaceBetween>
@@ -311,7 +327,7 @@ function FloorSection({
             ]}
           />
         )}
-        {floor.rows.length > 0 && view === 'plan' && (
+        {(floor.rows.length > 0 || hasGrid) && view === 'plan' && (
           <FloorPlan
             cols={floor.grid_cols}
             rows={floor.grid_rows}
@@ -323,9 +339,12 @@ function FloorSection({
           />
         )}
         {floor.rows.length === 0 && (
-          <Box color="text-status-inactive" fontSize="body-s">
-            No rows on this floor yet.
-          </Box>
+          <SpaceBetween size="xs" direction="horizontal" alignItems="center">
+            <Box color="text-status-inactive" fontSize="body-s">
+              No rows on this floor yet{onAddRow ? ' — add one, then rack it up.' : '.'}
+            </Box>
+            {onAddRow && <Button iconName="add-plus" onClick={onAddRow}>Add row</Button>}
+          </SpaceBetween>
         )}
         {view === 'rows' && floor.rows.map((rw) => (
           <div key={rw.id} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -459,6 +478,63 @@ function FloorFormModal({
           </FormField>
         </ColumnLayout>
       </SpaceBetween>
+    </Modal>
+  );
+}
+
+function AddRowModal({
+  floor, onDismiss, onSaved,
+}: Readonly<{
+  floor: FloorNode;
+  onDismiss: () => void;
+  onSaved: () => void;
+}>) {
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function onSubmit() {
+    const errs: Record<string, string> = {};
+    if (!name.trim()) errs.name = 'Name required';
+    if (!code.trim()) errs.code = 'Code required';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
+    try {
+      await http.post('/inventory/rows', { room_id: floor.id, name, code });
+      toast.success('Row created');
+      onSaved();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed');
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      visible
+      onDismiss={onDismiss}
+      header={`Add row to ${floor.code}`}
+      footer={
+        <Box float="right">
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button onClick={onDismiss}>Cancel</Button>
+            <Button variant="primary" loading={submitting} onClick={onSubmit}>
+              Create
+            </Button>
+          </SpaceBetween>
+        </Box>
+      }
+    >
+      <ColumnLayout columns={2}>
+        <FormField label="Name" errorText={errors.name}>
+          <Input value={name} onChange={({ detail }) => setName(detail.value)} />
+        </FormField>
+        <FormField label="Code" errorText={errors.code}>
+          <Input value={code} onChange={({ detail }) => setCode(detail.value)} />
+        </FormField>
+      </ColumnLayout>
     </Modal>
   );
 }
