@@ -72,6 +72,17 @@ http.interceptors.response.use(
       (e as any).details = env.details;
       return Promise.reject(e);
     }
+    // otter-go's httpx.Error shape is {"detail": "..."} — surface it so
+    // toasts show the API's message instead of axios's generic
+    // "Request failed with status code NNN". Keep .response attached:
+    // callers branch on err.response.status (e.g. the 409 delete guards).
+    const detail = err.response?.data?.detail;
+    if (typeof detail === 'string' && detail) {
+      const e = new Error(detail);
+      (e as any).statusCode = err.response?.status;
+      (e as any).response = err.response;
+      return Promise.reject(e);
+    }
     return Promise.reject(err);
   },
 );

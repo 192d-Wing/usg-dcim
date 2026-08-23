@@ -104,6 +104,7 @@ export function RackCreatePage() {
     if (!name.trim()) errs.name = 'Name required';
     if (!code.trim()) errs.code = 'Code required';
     if (uHeight < 1 || uHeight > 60) errs.height = '1..60';
+    if (maxKw.trim() && Number.isNaN(Number(maxKw))) errs.maxKw = 'Number';
     setErrors(errs);
     if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
@@ -112,7 +113,9 @@ export function RackCreatePage() {
         site_id: siteId,
         row_id: rowOpt!.value,
         name, code, u_height: uHeight,
-        max_kw: maxKw ? Number(maxKw) : null,
+        // NUMERIC rides as a JSON string on the wire (the backend field
+        // is *string) — a JSON number fails decoding with a 400.
+        max_kw: maxKw.trim() || null,
         serial: serial || null,
       });
       toast.success('Rack created');
@@ -198,7 +201,7 @@ export function RackCreatePage() {
                 <RackHeightPicker value={uHeight} onChange={(v) => setUHeight(v)} />
               </FormField>
               <ColumnLayout columns={2}>
-                <FormField label="Max kW">
+                <FormField label="Max kW" errorText={errors.maxKw}>
                   <Input type="number" value={maxKw} onChange={({ detail }) => setMaxKw(detail.value)} />
                 </FormField>
                 <FormField label="Serial">
