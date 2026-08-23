@@ -176,18 +176,41 @@ jobs:
       - name: Migrate and seed the break-glass admin
         env:
           DCIM_POSTGRES_DSN: postgres://dcim:dcim@localhost:5432/dcim
-        # The bcrypt hash is "changeme" — CI-only credentials on a
-        # throwaway database, matching the suite's E2E_EMAIL/PASSWORD
-        # defaults.
+        # The admin password is random per run (masked, handed to the
+        # suite via E2E_PASSWORD) and hashed with the same bcrypt dep
+        # otter-go itself uses — nothing secret-shaped in the repo.
         run: |
           /tmp/otter-go-migrate -cmd up
-          psql "postgresql://dcim:dcim@localhost:5432/dcim" -v ON_ERROR_STOP=1 <<'SQL'
+          PW=$(openssl rand -hex 16)
+          echo "::add-mask::$PW"
+          # Exported under the name the suite reads — flows to the
+          # playwright step through the job environment.
+          echo "E2E_PASSWORD=$PW" >> "$GITHUB_ENV"
+          cat > /tmp/hashgen.go <<'EOF'
+          package main
+
+          import (
+          	"fmt"
+          	"os"
+
+          	"golang.org/x/crypto/bcrypt"
+          )
+
+          func main() {
+          	h, err := bcrypt.GenerateFromPassword([]byte(os.Args[1]), bcrypt.DefaultCost)
+          	if err != nil {
+          		panic(err)
+          	}
+          	fmt.Print(string(h))
+          }
+          EOF
+          HASH=$(cd packages/otter-go && go run /tmp/hashgen.go "$PW")
+          psql "postgresql://dcim:dcim@localhost:5432/dcim" -v ON_ERROR_STOP=1 -v hash="$HASH" <<'SQL'
           INSERT INTO roles (id, name, description, permission_codes, is_system)
           VALUES (gen_random_uuid(), 'admin', 'CI admin', '["*"]', true)
           ON CONFLICT (name) DO NOTHING;
           INSERT INTO users (id, email, display_name, is_active, password_hash)
-          VALUES (gen_random_uuid(), 'admin@dcim.local', 'CI Admin', true,
-                  '$2a$10$N7Tnq.I4TSghXYQEPkanxOjN9.bcJQbsFAs/yucb1And0GkNDkGKq')
+          VALUES (gen_random_uuid(), 'admin@dcim.local', 'CI Admin', true, :'hash')
           ON CONFLICT (email) DO NOTHING;
           INSERT INTO user_roles (id, user_id, role_id)
           SELECT gen_random_uuid(), u.id, r.id FROM users u, roles r
@@ -225,15 +248,17 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('packages/finch/package-lock.json') }}
 
+      # Not `npx` — the binaries come from the locked install above or
+      # the step fails (same posture as the finch job's tsc).
       - name: Install chromium
         working-directory: packages/finch
-        run: npx playwright install --with-deps chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: Start finch (vite dev proxies /api to otter-go)
         working-directory: packages/finch
         run: |
           node scripts/sync-nic-schema.mjs
-          npx vite --host 127.0.0.1 > /tmp/vite.log 2>&1 &
+          ./node_modules/.bin/vite --host 127.0.0.1 > /tmp/vite.log 2>&1 &
           for i in $(seq 1 60); do
             curl -fs http://localhost:5173 >/dev/null && exit 0
             sleep 1
@@ -244,7 +269,7 @@ jobs:
         working-directory: packages/finch
         env:
           E2E_BASE_URL: http://localhost:5173
-        run: npx playwright test
+        run: ./node_modules/.bin/playwright test
 
       - name: Upload failure artifacts
         if: failure()
