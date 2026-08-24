@@ -154,7 +154,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(w, r)
+	id, ok := httpx.IDParam(w, r)
 	if !ok {
 		return
 	}
@@ -164,7 +164,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusNotFound, msgAssetNotFound)
 			return
 		}
-		writeMapped(w, err)
+		httpx.WriteMapped(w, err)
 		return
 	}
 	// Per-row ABAC: scoped principals can't read assets outside scope.
@@ -172,7 +172,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	// mutation handlers' bare 403 — preserved as-is.)
 	p, _ := auth.From(r.Context())
 	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, asset.SiteID, capAssetsRead); serr != nil {
-		writeMapped(w, serr)
+		httpx.WriteMapped(w, serr)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, asset)

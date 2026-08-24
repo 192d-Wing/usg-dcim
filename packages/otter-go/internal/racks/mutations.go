@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -16,28 +15,7 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
-const (
-	msgRackNotFound = "rack not found"
-	msgBadID        = "id is not a uuid"
-)
-
-// writeMapped translates err through httpx.Mapped and writes it —
-// the same shorthand internal/locations uses.
-func writeMapped(w http.ResponseWriter, err error) {
-	status, msg := httpx.Mapped(err)
-	httpx.Error(w, status, msg)
-}
-
-// parseID pulls the {id} route param, writing a 400 when it isn't a
-// uuid. ok=false means the response has already been written.
-func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, msgBadID)
-		return uuid.Nil, false
-	}
-	return id, true
-}
+const msgRackNotFound = "rack not found"
 
 // loadRackForMutation is the shared prefetch chain of update and
 // delete: fetch the rack (404 when it doesn't exist) and enforce the
@@ -50,7 +28,7 @@ func (h *Handler) loadRackForMutation(w http.ResponseWriter, r *http.Request, id
 			httpx.Error(w, http.StatusNotFound, msgRackNotFound)
 			return dbq.Rack{}, false
 		}
-		writeMapped(w, err)
+		httpx.WriteMapped(w, err)
 		return dbq.Rack{}, false
 	}
 	p, _ := auth.From(r.Context())
@@ -93,7 +71,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		UHeight: u, MaxKw: req.MaxKw, MaxWeightLbs: req.MaxWeightLbs, Serial: req.Serial,
 	})
 	if err != nil {
-		writeMapped(w, err)
+		httpx.WriteMapped(w, err)
 		return
 	}
 	sid := out.SiteID
@@ -167,7 +145,7 @@ func (u *updateReq) UnmarshalJSON(data []byte) error {
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(w, r)
+	id, ok := httpx.IDParam(w, r)
 	if !ok {
 		return
 	}
@@ -237,7 +215,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusNotFound, msgRackNotFound)
 			return
 		}
-		writeMapped(w, err)
+		httpx.WriteMapped(w, err)
 		return
 	}
 	sid := out.SiteID
@@ -251,7 +229,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 // lifecycle path — rack DELETE exists for mistakes and test hygiene.
 // Racks with mounted assets refuse with 409 so nothing is orphaned.
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseID(w, r)
+	id, ok := httpx.IDParam(w, r)
 	if !ok {
 		return
 	}
@@ -262,7 +240,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	mounted, err := h.Q.CountAssetsInRack(r.Context(), &id)
 	if err != nil {
-		writeMapped(w, err)
+		httpx.WriteMapped(w, err)
 		return
 	}
 	if mounted > 0 {
@@ -271,7 +249,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.Q.DeleteRack(r.Context(), id)
 	if err != nil {
-		writeMapped(w, err)
+		httpx.WriteMapped(w, err)
 		return
 	}
 	if rows == 0 {

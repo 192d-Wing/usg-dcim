@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -105,4 +107,24 @@ func isPgFKViolation(err error) bool {
 func isPgUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// WriteMapped translates err through Mapped and writes it — the
+// shorthand several handler packages had grown locally (assets,
+// racks, locations).
+func WriteMapped(w http.ResponseWriter, err error) {
+	status, msg := Mapped(err)
+	Error(w, status, msg)
+}
+
+// IDParam pulls the {id} chi route param, writing a 400 when it
+// isn't a uuid. ok=false means the response has already been
+// written.
+func IDParam(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		Error(w, http.StatusBadRequest, "id is not a uuid")
+		return uuid.Nil, false
+	}
+	return id, true
 }
