@@ -1,0 +1,122 @@
+# GitOps for the windep dev cluster: merge to main → CI publishes
+# `main-<committime>-<sha>` image tags → Flux's ImagePolicy picks the
+# newest → ImageUpdateAutomation commits the tag bump into
+# values-windep.yaml → the HelmRelease reconciles the chart from git.
+# No push access to the cluster is needed from CI (GitHub-hosted
+# runners can't reach it); the cluster pulls everything.
+#
+# One-time cluster setup (documented, already applied to windep):
+#   1. Install Flux with the image controllers:
+#        kubectl apply -f https://github.com/fluxcd/flux2/releases/latest/download/install.yaml
+#      (the release manifest ships all controllers, including
+#      image-reflector and image-automation)
+#   2. Deploy key (write) for the tag write-back:
+#        ssh-keygen -t ed25519 -N '' -f flux-dcim-deploy
+#        gh api repos/192d-Wing/usg-dcim/keys -f title=flux-windep \
+#          -f "key=$(cat flux-dcim-deploy.pub)" -F read_only=false
+#        kubectl -n flux-system create secret generic flux-git-deploy \
+#          --from-file=identity=flux-dcim-deploy \
+#          --from-file=identity.pub=flux-dcim-deploy.pub \
+#          --from-literal=known_hosts="$(ssh-keyscan github.com 2>/dev/null)"
+#   3. Values secrets (kept out of the public repo):
+#        kubectl -n flux-system create secret generic dcim-windep-values \
+#          --from-file=values.yaml=<fragment with global.config.jwtSecret
+#                                   + collectorTokenSecret>
+#   4. kubectl apply -f deploy/flux/dcim-dev.yaml
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: usg-dcim
+  namespace: flux-system
+spec:
+  interval: 2m
+  url: ssh://git@github.com/192d-Wing/usg-dcim
+  ref:
+    branch: main
+  secretRef:
+    name: flux-git-deploy
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: dcim
+  namespace: flux-system
+spec:
+  interval: 5m
+  releaseName: dcim
+  targetNamespace: dcim
+  storageNamespace: dcim
+  chart:
+    spec:
+      chart: deploy/helm/dcim
+      # Revision, not ChartVersion: rebuild the chart on any git
+      # change — the chart version isn't bumped per commit.
+      reconcileStrategy: Revision
+      sourceRef:
+        kind: GitRepository
+        name: usg-dcim
+      valuesFiles:
+        - deploy/helm/dcim/values-windep.yaml
+  valuesFrom:
+    # jwtSecret / collectorTokenSecret — merged over the values file;
+    # see the setup notes above.
+    - kind: Secret
+      name: dcim-windep-values
+      valuesKey: values.yaml
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: dcim-otter-go
+  namespace: flux-system
+spec:
+  image: ghcr.io/192d-wing/dcim-otter-go
+  interval: 2m
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: dcim-otter-go
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: dcim-otter-go
+  filterTags:
+    # main-<UTC yyyymmddHHMMSS>-<shortsha>, computed in ci.yml from
+    # the commit timestamp so all six images carry the identical tag.
+    # Watching otter-go's repo alone is enough — global.image.tag is
+    # shared by every dcim-* deployment.
+    pattern: '^main-(?P<ts>\d{14})-'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: dcim-windep
+  namespace: flux-system
+spec:
+  interval: 2m
+  sourceRef:
+    kind: GitRepository
+    name: usg-dcim
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        name: flux-windep
+        email: flux-windep@oopl.dev.mil
+      messageTemplate: |
+        deploy(windep): bump dev image tag to {{ range .Changed.Changes }}{{ .NewValue }}{{ end }}
+
+        Automated by Flux image automation on the windep cluster.
+    push:
+      branch: main
+  update:
+    path: deploy/helm/dcim
+    strategy: Setters

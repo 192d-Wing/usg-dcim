@@ -1,0 +1,101 @@
+# Dev overrides for the windep k3s cluster (uk8wtwr001–005, arm64
+# Raspberry Pis, Traefik ingress, Longhorn storage). Mirrors the
+# values-k3d.yaml laptop profile, adapted for that cluster.
+#
+# Images: since PR #366 CI publishes the dcim-* images as amd64+arm64
+# manifest lists, so the nodes pull the pinned main-commit tag straight
+# from ghcr and containerd selects the arm64 variant itself.
+#
+# Postgres + redis run in-cluster from the companion manifests applied
+# alongside this install (timescaledb + redis Deployments in the dcim
+# namespace) — not from the chart.
+#
+# Auth: OIDC left unconfigured, so the SPA offers the local
+# email/password login and otter-go serves the bcrypt break-glass
+# path.
+#
+# SECRETS ARE NOT IN THIS FILE (public repo). global.config.jwtSecret
+# and global.config.collectorTokenSecret live in the in-cluster
+# Secret `dcim-windep-values` (flux-system namespace), merged over
+# this file by the HelmRelease's valuesFrom — see deploy/flux.
+#
+# The tag line's trailing marker is Flux image automation's setter:
+# the image-automation-controller rewrites the tag to the newest
+# `main-<committime>-<sha>` the ImagePolicy selects and commits the
+# change back to this file. Manual edits still work (Flux rebases).
+
+global:
+  image:
+    registry: ghcr.io/192d-wing
+    pullPolicy: IfNotPresent
+    tag: "432295b81f6a49cc21c397ec63be47bd6325ea07" # {"$imagepolicy": "flux-system:dcim-otter-go:tag"}
+  postgresql:
+    external: false
+    dsn: "postgresql+asyncpg://dcim:dcim@postgres:5432/dcim"
+  redis:
+    external: false
+    dsn: "redis://redis:6379/0"
+
+heron:
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 1Gi }
+  mtls:
+    enabled: false
+
+finch:
+  replicaCount: 1
+
+# Single replica + no PDB: same reasoning as the k3d profile — small
+# cluster, don't deadlock drains.
+otter-go:
+  replicaCount: 1
+  podDisruptionBudget:
+    enabled: false
+
+otter-go-scheduler:
+  enabled: true
+
+magpie:
+  enabled: false
+
+beagle:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: traefik
+  # Prefix-only routing (Traefik ignores the nginx use-regex
+  # annotation) — same trade-off as the k3d profile.
+  hosts:
+    - host: dcim.oopl.dev.mil
+      paths:
+        - { path: /api/v1/lir,           pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/auth,          pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/audit,         pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/telemetry,     pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/admin,         pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/search,        pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/inventory,     pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/dashboards,    pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/bgp,           pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/alerts,        pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/dns,           pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/ipam,          pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/notifications, pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/organizations, pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/stencils,      pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/power,         pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/collectors,    pathType: Prefix, backend: otter-go }
+        - { path: /api/v1/ingest,        pathType: Prefix, backend: otter-go }
+        - { path: /api,                  pathType: Prefix, backend: otter-go }
+        - { path: /,                     pathType: Prefix, backend: finch    }
+  tls: []
+
+monitoring:
+  serviceMonitor:
+    enabled: false
+
+networkPolicy:
+  enabled: false
