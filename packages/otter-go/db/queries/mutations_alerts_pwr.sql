@@ -94,6 +94,23 @@ RETURNING *;
 DELETE FROM notification_channels WHERE id = $1;
 
 -- ===== Power: outlet connect/disconnect =====
+
+-- name: SeedPduOutlets :execrows
+-- PDU outlet auto-seed on asset create (Python parity:
+-- create_asset seeded 24 outlets for new PDUs). One statement so
+-- the whole strip appears atomically; the caller wraps it in the
+-- same transaction as the asset INSERT. Odd positions land on
+-- phase A, even on B — the standard alternating-bank layout the
+-- Python seeder produced. Receptacle defaults to C13.
+-- label stays NULL — the UI renders "Outlet {label ?? position}",
+-- so a NULL label falls back to the zero-padded position.
+INSERT INTO outlets (id, pdu_asset_id, position, label, phase,
+                     max_amps, receptacle, created_at, updated_at)
+SELECT gen_random_uuid(), sqlc.arg(pdu_asset_id), s, NULL,
+       CASE WHEN s % 2 = 1 THEN 'A'::pdu_side ELSE 'B'::pdu_side END,
+       NULL, 'C13', NOW(), NOW()
+FROM generate_series(1, sqlc.arg(outlet_count)::int) AS s;
+
 -- name: GetOutletByID :one
 SELECT id, pdu_asset_id, position, label, phase, max_amps, receptacle, created_at, updated_at
 FROM outlets WHERE id = $1;

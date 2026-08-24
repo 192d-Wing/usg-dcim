@@ -285,7 +285,6 @@ SELECT id, pdu_asset_id, position, label, phase, max_amps, receptacle, created_a
 FROM outlets WHERE id = $1
 `
 
-// ===== Power: outlet connect/disconnect =====
 func (q *Queries) GetOutletByID(ctx context.Context, id uuid.UUID) (Outlet, error) {
 	row := q.db.QueryRow(ctx, getOutletByID, id)
 	var i Outlet
@@ -322,6 +321,38 @@ func (q *Queries) GetPowerConnectionByOutlet(ctx context.Context, outletID uuid.
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const seedPduOutlets = `-- name: SeedPduOutlets :execrows
+
+INSERT INTO outlets (id, pdu_asset_id, position, label, phase,
+                     max_amps, receptacle, created_at, updated_at)
+SELECT gen_random_uuid(), $1, s, NULL,
+       CASE WHEN s % 2 = 1 THEN 'A'::pdu_side ELSE 'B'::pdu_side END,
+       NULL, 'C13', NOW(), NOW()
+FROM generate_series(1, $2::int) AS s
+`
+
+type SeedPduOutletsParams struct {
+	PduAssetID  uuid.UUID `json:"pdu_asset_id"`
+	OutletCount int32     `json:"outlet_count"`
+}
+
+// ===== Power: outlet connect/disconnect =====
+// PDU outlet auto-seed on asset create (Python parity:
+// create_asset seeded 24 outlets for new PDUs). One statement so
+// the whole strip appears atomically; the caller wraps it in the
+// same transaction as the asset INSERT. Odd positions land on
+// phase A, even on B — the standard alternating-bank layout the
+// Python seeder produced. Receptacle defaults to C13.
+// label stays NULL — the UI renders "Outlet {label ?? position}",
+// so a NULL label falls back to the zero-padded position.
+func (q *Queries) SeedPduOutlets(ctx context.Context, arg SeedPduOutletsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, seedPduOutlets, arg.PduAssetID, arg.OutletCount)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateAlertRule = `-- name: UpdateAlertRule :one

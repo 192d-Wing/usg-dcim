@@ -688,7 +688,6 @@ type Querier interface {
 	// Pre-check used by the create handler for the dup-409 path.
 	GetOidcRoleMappingByIdpRole(ctx context.Context, idpRole string) (OidcRoleMapping, error)
 	GetOrganization(ctx context.Context, id uuid.UUID) (Organization, error)
-	// ===== Power: outlet connect/disconnect =====
 	GetOutletByID(ctx context.Context, id uuid.UUID) (Outlet, error)
 	GetOverlayFabricID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	// Confirms the asset is a PDU before returning outlets — matches the
@@ -1637,6 +1636,16 @@ type Querier interface {
 	// the handler walks to fetch vrf+fabric in the same fan-out).
 	SearchSubnetsByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]SearchSubnetsByIDsRow, error)
 	SearchVrfsByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]SearchVrfsByIDsRow, error)
+	// ===== Power: outlet connect/disconnect =====
+	// PDU outlet auto-seed on asset create (Python parity:
+	// create_asset seeded 24 outlets for new PDUs). One statement so
+	// the whole strip appears atomically; the caller wraps it in the
+	// same transaction as the asset INSERT. Odd positions land on
+	// phase A, even on B — the standard alternating-bank layout the
+	// Python seeder produced. Receptacle defaults to C13.
+	// label stays NULL — the UI renders "Outlet {label ?? position}",
+	// so a NULL label falls back to the zero-padded position.
+	SeedPduOutlets(ctx context.Context, arg SeedPduOutletsParams) (int64, error)
 	SetAssetDecommissioned(ctx context.Context, id uuid.UUID) (Asset, error)
 	SetCollectorConfigOverrides(ctx context.Context, arg SetCollectorConfigOverridesParams) (SetCollectorConfigOverridesRow, error)
 	SetCollectorEnabled(ctx context.Context, arg SetCollectorEnabledParams) (SetCollectorEnabledRow, error)

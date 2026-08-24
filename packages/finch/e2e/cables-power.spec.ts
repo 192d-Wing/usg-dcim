@@ -1,11 +1,9 @@
 // Cables and power-chain panels on the rack page. Cables get full
 // CRUD (log/edit/delete between two devices with port pickers). The
-// power side asserts the honest current state: the connect dialog
-// opens and offers the rack's PDU, but outlets cannot exist yet —
-// asset-create defers the PDU outlet auto-seed and no outlet
-// provisioning endpoint or UI exists, so the outlet list is empty
-// and Connect stays disabled. When outlet seeding lands, this spec
-// is where the real connect/disconnect coverage goes.
+// power side covers the real connect/disconnect flow: creating a
+// PDU auto-seeds its 24-outlet strip (odd positions phase A, even
+// B, C13 receptacles), so the per-run PDU is immediately
+// connectable through the modal's outlet picker.
 import { test, expect } from '@playwright/test';
 import { Api, uniq } from './helpers';
 
@@ -85,15 +83,32 @@ test('delete the cable', async ({ page }) => {
   await expect(page.getByText('No cables logged for this rack yet.')).toBeVisible();
 });
 
-test('power chain lists the PDU but outlets cannot be provisioned yet', async ({ page }) => {
+test('connect a server PSU to an auto-seeded PDU outlet', async ({ page }) => {
   await page.goto(`/racks/${rackId}`);
+  // The per-run PDU was created after outlet auto-seeding landed, so
+  // it carries the 24-outlet strip (odd = phase A, even = B, C13).
+  await expect(page.getByText('0 / 24 outlets used')).toBeVisible();
   const serverRow = page.getByRole('row', { name: new RegExp(serverName) });
   await serverRow.getByRole('button', { name: 'Connect' }).click();
   const modal = page.getByRole('dialog');
   await expect(modal.getByText(`Connect ${serverName} to a PDU outlet`)).toBeVisible();
-  // The rack's PDU is pre-selected…
+  // The rack's PDU is pre-selected; pick the first free outlet.
   await expect(modal.getByText(new RegExp(pduName))).toBeVisible();
-  // …but no outlet-provisioning path exists (create defers the
-  // auto-seed; no endpoint or UI), so Connect must stay disabled.
-  await expect(modal.getByRole('button', { name: 'Connect', exact: true })).toBeDisabled();
+  await modal.getByRole('button', { name: 'Pick an outlet' }).click();
+  await page.getByRole('option', { name: /Outlet 01 · phase A · C13/ }).click();
+  const connect = modal.getByRole('button', { name: 'Connect', exact: true });
+  await expect(connect).toBeEnabled();
+  await connect.click();
+  await expect(page.getByText('Connected PSU1').first()).toBeVisible();
+  // The chain row now shows the drop and the PDU counts it.
+  await expect(page.getByText(new RegExp(`PSU1 → ${pduName}`))).toBeVisible();
+  await expect(page.getByText('1 / 24 outlets used')).toBeVisible();
+});
+
+test('disconnect the PSU drop', async ({ page }) => {
+  await page.goto(`/racks/${rackId}`);
+  await expect(page.getByText(new RegExp(`PSU1 → ${pduName}`))).toBeVisible();
+  await page.getByRole('button', { name: 'Disconnect' }).first().click();
+  await expect(page.getByText('Disconnected').first()).toBeVisible();
+  await expect(page.getByText('0 / 24 outlets used')).toBeVisible();
 });
