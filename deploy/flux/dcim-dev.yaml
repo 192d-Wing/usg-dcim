@@ -56,7 +56,11 @@ spec:
       sourceRef:
         kind: GitRepository
         name: usg-dcim
+      # NOTE: unlike `helm -f`, valuesFiles REPLACES the chart's
+      # default values.yaml — list it first to keep the defaults
+      # underneath the windep overrides.
       valuesFiles:
+        - deploy/helm/dcim/values.yaml
         - deploy/helm/dcim/values-windep.yaml
   valuesFrom:
     # jwtSecret / collectorTokenSecret — merged over the values file;
@@ -65,7 +69,7 @@ spec:
       name: dcim-windep-values
       valuesKey: values.yaml
 ---
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageRepository
 metadata:
   name: dcim-otter-go
@@ -74,7 +78,7 @@ spec:
   image: ghcr.io/192d-wing/dcim-otter-go
   interval: 2m
 ---
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImagePolicy
 metadata:
   name: dcim-otter-go
@@ -93,7 +97,7 @@ spec:
     numerical:
       order: asc
 ---
-apiVersion: image.toolkit.fluxcd.io/v1beta2
+apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageUpdateAutomation
 metadata:
   name: dcim-windep
