@@ -28,7 +28,7 @@ global:
   image:
     registry: ghcr.io/192d-wing
     pullPolicy: IfNotPresent
-    tag: "main-20260824062423-5683f96" # {"$imagepolicy": "flux-system:dcim-otter-go:tag"}
+    tag: "main-20260824063048-bc59166" # {"$imagepolicy": "flux-system:dcim-otter-go:tag"}
   postgresql:
     external: false
     dsn: "postgresql+asyncpg://dcim:dcim@postgres:5432/dcim"
