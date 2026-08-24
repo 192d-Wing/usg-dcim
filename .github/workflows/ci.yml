@@ -397,6 +397,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Flux image automation on the windep dev cluster sorts on this
+      # tag (see deploy/flux). Derived from the COMMIT timestamp so
+      # every matrix shard computes the identical tag — a wall-clock
+      # date would diverge across shards and publish images whose tag
+      # sets don't line up under one global.image.tag.
+      - name: Add sortable dev tag (main only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          ts=$(TZ=UTC git log -1 --format=%cd --date=format-local:'%Y%m%d%H%M%S')
+          echo "IMAGE_TAGS=$IMAGE_TAGS main-${ts}-${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+
       # Iron Bank requires auth even to PULL, and every runtime stage now
       # has a FROM against registry1. So unlike the ghcr.io login further
       # down — which only gates the push on main — this has to run before
