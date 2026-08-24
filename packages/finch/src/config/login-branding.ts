@@ -17,14 +17,21 @@ export type LoginLogo = {
 };
 
 export type LoginSso = {
-  /** Render the SSO button. Hide entirely when false. */
+  /**
+   * Branding kill-switch for the SSO button. Whether the button
+   * actually renders is `enabled && methods.sso` — the login page asks
+   * the backend (GET /api/v1/auth/methods) whether OIDC is configured,
+   * so a deployment without an IdP never shows a dead button even with
+   * this left true. Set false to hide the button unconditionally.
+   */
   enabled: boolean;
   /** Button label, e.g. "Login using DOD E-ICAM". */
   label: string;
   /**
-   * URL the browser is sent to when the button is clicked. The
-   * backend at this path is expected to 302 to the IdP. Relative
-   * paths are resolved against the current origin.
+   * Fallback URL the browser is sent to when the button is clicked,
+   * used only if /auth/methods omits sso_login_url (the backend's
+   * value wins). The backend at this path is expected to 302 to the
+   * IdP. Relative paths are resolved against the current origin.
    */
   loginUrl: string;
 };

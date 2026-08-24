@@ -18,7 +18,11 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
-const capAssetsRead = "inventory:assets:read"
+const (
+	capAssetsRead = "inventory:assets:read"
+
+	assetByIDPath = "/assets/{id}"
+)
 
 type Querier interface {
 	ListAssets(ctx context.Context, arg dbq.ListAssetsParams) ([]dbq.Asset, error)
@@ -34,6 +38,17 @@ type Querier interface {
 	ListDownstreamAssetNames(ctx context.Context, pduAssetID uuid.UUID) ([]string, error)
 	DeleteConsumerPowerConnections(ctx context.Context, assetID uuid.UUID) error
 	DeletePduPowerConnections(ctx context.Context, pduAssetID uuid.UUID) error
+
+	// Hard delete (UX-debt batch). Decommission remains the lifecycle
+	// path; DELETE is for mistakes and test hygiene. Guards: child
+	// assets and logged cables refuse the delete (409); IP bindings
+	// detach and alerts drop; outlets + power connections ride the
+	// schema's ON DELETE CASCADE.
+	CountChildAssets(ctx context.Context, parentAssetID *uuid.UUID) (int64, error)
+	CountCablesForAsset(ctx context.Context, assetID uuid.UUID) (int64, error)
+	DetachIPAddressesFromAsset(ctx context.Context, assetID *uuid.UUID) (int64, error)
+	DeleteAlertsForAsset(ctx context.Context, assetID *uuid.UUID) (int64, error)
+	DeleteAsset(ctx context.Context, id uuid.UUID) (int64, error)
 
 	// Placement invariants (PR 51)
 	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
@@ -69,11 +84,12 @@ func (h *Handler) Mount(r chi.Router) {
 	// Read paths gated by inventory:assets:read — see sites/Mount for
 	// why ScopedSiteFilter alone doesn't keep cap-less principals out.
 	r.With(auth.RequireCapability(capAssetsRead)).Get("/assets", h.list)
-	r.With(auth.RequireCapability(capAssetsRead)).Get("/assets/{id}", h.get)
+	r.With(auth.RequireCapability(capAssetsRead)).Get(assetByIDPath, h.get)
 	r.With(auth.RequireCapability(capAssetsRead)).Get("/assets/{id}/decommission/preview", h.decommissionPreview)
 	r.With(auth.RequireCapability("inventory:assets:create")).Post("/assets", h.create)
-	r.With(auth.RequireCapability("inventory:assets:update")).Patch("/assets/{id}", h.update)
+	r.With(auth.RequireCapability("inventory:assets:update")).Patch(assetByIDPath, h.update)
 	r.With(auth.RequireCapability("inventory:assets:update")).Post("/assets/{id}/decommission", h.decommission)
+	r.With(auth.RequireCapability("inventory:assets:delete")).Delete(assetByIDPath, h.delete)
 	r.With(auth.RequireCapability("inventory:bulk:execute")).Post("/assets/bulk", h.bulkUpsert)
 }
 
@@ -138,26 +154,25 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := httpx.IDParam(w, r)
+	if !ok {
 		return
 	}
 	asset, err := h.Q.GetAsset(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "asset not found")
+			httpx.Error(w, http.StatusNotFound, msgAssetNotFound)
 			return
 		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		httpx.WriteMapped(w, err)
 		return
 	}
 	// Per-row ABAC: scoped principals can't read assets outside scope.
+	// (Read path maps the scope error via Mapped rather than the
+	// mutation handlers' bare 403 — preserved as-is.)
 	p, _ := auth.From(r.Context())
 	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, asset.SiteID, capAssetsRead); serr != nil {
-		status, msg := httpx.Mapped(serr)
-		httpx.Error(w, status, msg)
+		httpx.WriteMapped(w, serr)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, asset)

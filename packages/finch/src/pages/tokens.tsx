@@ -1,8 +1,12 @@
 // API tokens — Cloudscape table with issue Modal + plaintext-reveal
 // Modal. Capabilities are picked from a checkbox list bounded by the
 // caller's own capabilities (you can't grant what you don't hold).
+// Wildcard (`*`) holders are the exception: their only literal cap is
+// `*`, so the picker is populated from the admin capability catalog
+// instead — otherwise a full admin literally could not issue a
+// granular token.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useGetIdentity } from '@refinedev/core';
 import { toast } from 'sonner';
@@ -38,6 +42,27 @@ type Token = {
   plaintext?: string | null;
 };
 
+// Wire shape of GET /admin/capabilities/catalog (see otter-go
+// internal/admin/capabilities.go): domain → resource → [actions],
+// plus two-segment specialty codes keyed by code.
+type CapabilityCatalog = {
+  catalog: Record<string, Record<string, string[]>>;
+  specialties: Record<string, string>;
+};
+
+/** Flatten the catalog to sorted `domain:resource:action` codes plus
+ *  the specialty codes. */
+function flattenCatalog(cat: CapabilityCatalog): string[] {
+  const codes: string[] = [];
+  for (const [domain, resources] of Object.entries(cat.catalog)) {
+    for (const [resource, actions] of Object.entries(resources)) {
+      for (const action of actions) codes.push(`${domain}:${resource}:${action}`);
+    }
+  }
+  codes.push(...Object.keys(cat.specialties));
+  return codes.sort((a, b) => a.localeCompare(b));
+}
+
 export function TokensPage() {
   const qc = useQueryClient();
   const { data: identity } = useGetIdentity<{ email: string | null; capabilities: string[] }>();
@@ -49,6 +74,21 @@ export function TokensPage() {
     queryFn: async () => (await http.get<Token[]>('/auth/tokens')).data,
     enabled: canManage,
   });
+
+  // A wildcard holder's literal capability list is just ['*'] — useless
+  // as a granular picker. Populate from the capability catalog instead
+  // (the endpoint is gated on admin:roles:read, which `*` grants).
+  const isWildcard = myCaps.includes('*');
+  const catalogQ = useQuery({
+    queryKey: ['capability-catalog'],
+    queryFn: async () => (await http.get<CapabilityCatalog>('/admin/capabilities/catalog')).data,
+    enabled: canManage && isWildcard,
+  });
+  const offeredCaps = useMemo(() => {
+    if (!isWildcard) return myCaps; // non-wildcard callers keep the old bound list
+    if (!catalogQ.data) return myCaps; // catalog still loading → at least offer `*`
+    return ['*', ...flattenCatalog(catalogQ.data)];
+  }, [isWildcard, myCaps, catalogQ.data]);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [issued, setIssued] = useState<Token | null>(null);
@@ -165,7 +205,7 @@ export function TokensPage() {
         size="medium"
       >
         <IssueForm
-          myCapabilities={myCaps}
+          myCapabilities={offeredCaps}
           onIssued={async (t) => {
             setCreateOpen(false);
             setIssued(t);
@@ -249,10 +289,11 @@ function IssueForm({
             description="You can only grant capabilities you hold. Pick the smallest set the token needs."
             errorText={capsErr}
           >
-            {/* Two-column scrollable list of the caller's capabilities.
-                Cloudscape doesn't ship a native multi-select for this
-                kind of list, so we render Checkboxes in a Box-bounded
-                grid. */}
+            {/* Two-column scrollable list of the grantable capabilities
+                (the caller's own caps, or the full catalog for `*`
+                holders). Cloudscape doesn't ship a native multi-select
+                for this kind of list, so we render Checkboxes in a
+                Box-bounded grid. */}
             {myCapabilities.length === 0 ? (
               <Box color="text-status-inactive" fontSize="body-s">
                 Your account has no capabilities to delegate.

@@ -12,6 +12,37 @@ import (
 	"github.com/google/uuid"
 )
 
+const countCablesForAsset = `-- name: CountCablesForAsset :one
+SELECT count(*)::bigint FROM cables
+WHERE a_asset_id = $1 OR b_asset_id = $1
+`
+
+func (q *Queries) CountCablesForAsset(ctx context.Context, assetID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countCablesForAsset, assetID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countChildAssets = `-- name: CountChildAssets :one
+
+SELECT count(*)::bigint FROM assets WHERE parent_asset_id = $1
+`
+
+// ===== Hard delete (UX-debt batch) =====
+// Decommission remains the lifecycle path; DELETE is for mistakes
+// and test hygiene. Guards are enforced by the handler: child
+// assets and cables refuse the delete (409), IP bindings detach,
+// alerts purge, and outlets + power drops ride the FK cascades.
+// Telemetry-instrumented assets still refuse via the RESTRICT FKs
+// (mapped to a conflict error).
+func (q *Queries) CountChildAssets(ctx context.Context, parentAssetID *uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countChildAssets, parentAssetID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countConsumerPowerDrops = `-- name: CountConsumerPowerDrops :one
 
 SELECT count(*)::bigint
@@ -204,6 +235,30 @@ func (q *Queries) CreateCable(ctx context.Context, arg CreateCableParams) (Cable
 	return i, err
 }
 
+const deleteAlertsForAsset = `-- name: DeleteAlertsForAsset :execrows
+DELETE FROM alerts WHERE asset_id = $1
+`
+
+func (q *Queries) DeleteAlertsForAsset(ctx context.Context, assetID *uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAlertsForAsset, assetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteAsset = `-- name: DeleteAsset :execrows
+DELETE FROM assets WHERE id = $1
+`
+
+func (q *Queries) DeleteAsset(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAsset, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteCable = `-- name: DeleteCable :exec
 DELETE FROM cables WHERE id = $1
 `
@@ -230,6 +285,19 @@ WHERE outlet_id IN (SELECT id FROM outlets WHERE pdu_asset_id = $1)
 func (q *Queries) DeletePduPowerConnections(ctx context.Context, pduAssetID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deletePduPowerConnections, pduAssetID)
 	return err
+}
+
+const detachIPAddressesFromAsset = `-- name: DetachIPAddressesFromAsset :execrows
+UPDATE ip_addresses SET asset_id = NULL, updated_at = NOW()
+WHERE asset_id = $1
+`
+
+func (q *Queries) DetachIPAddressesFromAsset(ctx context.Context, assetID *uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, detachIPAddressesFromAsset, assetID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const findAssetByManufacturerSerial = `-- name: FindAssetByManufacturerSerial :one

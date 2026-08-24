@@ -181,8 +181,26 @@ func TestConnect_AlreadyConnectedFriendly(t *testing.T) {
 
 func TestConnect_BadAssetID(t *testing.T) {
 	rec := mutate(t, &fakeQ{}, "POST", "/power/outlets/"+uuid.New().String()+"/connect", `{}`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "asset_id required") {
+		t.Fatalf("got %d %s, want 400 missing asset_id", rec.Code, rec.Body.String())
+	}
+}
+
+// Regression: a body that fails decoding (here cord_length_m as a JSON
+// string where the struct wants a number) used to share the missing-
+// field branch and 400 with the misleading "asset_id required".
+func TestConnect_WireTypeMismatch_Honest400(t *testing.T) {
+	rec := mutate(t, &fakeQ{}, "POST", "/power/outlets/"+uuid.New().String()+"/connect",
+		`{"asset_id":"`+uuid.New().String()+`","cord_length_m":"3"}`)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got %d, want 400 missing asset_id", rec.Code)
+		t.Fatalf("got %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "invalid request body") {
+		t.Errorf("want decode-error message, got %q", body)
+	}
+	if strings.Contains(body, "asset_id required") {
+		t.Errorf("misleading field-validation message leaked through: %q", body)
 	}
 }
 

@@ -129,3 +129,28 @@ SELECT *
 FROM assets
 WHERE manufacturer = sqlc.arg(manufacturer)::text AND serial = sqlc.arg(serial)::text
 LIMIT 1;
+
+-- ===== Hard delete (UX-debt batch) =====
+-- Decommission remains the lifecycle path; DELETE is for mistakes
+-- and test hygiene. Guards are enforced by the handler: child
+-- assets and cables refuse the delete (409), IP bindings detach,
+-- alerts purge, and outlets + power drops ride the FK cascades.
+-- Telemetry-instrumented assets still refuse via the RESTRICT FKs
+-- (mapped to a conflict error).
+
+-- name: CountChildAssets :one
+SELECT count(*)::bigint FROM assets WHERE parent_asset_id = $1;
+
+-- name: CountCablesForAsset :one
+SELECT count(*)::bigint FROM cables
+WHERE a_asset_id = sqlc.arg(asset_id) OR b_asset_id = sqlc.arg(asset_id);
+
+-- name: DetachIPAddressesFromAsset :execrows
+UPDATE ip_addresses SET asset_id = NULL, updated_at = NOW()
+WHERE asset_id = $1;
+
+-- name: DeleteAlertsForAsset :execrows
+DELETE FROM alerts WHERE asset_id = $1;
+
+-- name: DeleteAsset :execrows
+DELETE FROM assets WHERE id = $1;

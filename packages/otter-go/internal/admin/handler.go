@@ -34,6 +34,7 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (dbq.User, error)
 	CreateAdminUser(ctx context.Context, arg dbq.CreateAdminUserParams) (dbq.CreateAdminUserRow, error)
 	UpdateAdminUser(ctx context.Context, arg dbq.UpdateAdminUserParams) (dbq.UpdateAdminUserRow, error)
+	SetUserPasswordHash(ctx context.Context, arg dbq.SetUserPasswordHashParams) (int64, error)
 
 	ListAdminRoles(ctx context.Context, arg dbq.ListAdminRolesParams) ([]dbq.Role, error)
 	CountAdminRoles(ctx context.Context) (int64, error)
@@ -85,6 +86,10 @@ func (h *Handler) Mount(r chi.Router) {
 		r.With(auth.RequireCapability("admin:users:read")).Get("/users", h.listUsers)
 		r.With(auth.RequireCapability("admin:users:create")).Post("/users", h.createUser)
 		r.With(auth.RequireCapability("admin:users:update")).Patch("/users/{id}", h.updateUser)
+		// Local password set/reset for admin-created users. Same
+		// mutation cap as updateUser — setting a password IS a user
+		// mutation, and a separate cap would just fragment role bundles.
+		r.With(auth.RequireCapability("admin:users:update")).Post("/users/{id}/password", h.setUserPassword)
 
 		r.With(auth.RequireCapability("admin:roles:read")).Get("/roles", h.listRoles)
 		r.With(auth.RequireCapability("admin:roles:create")).Post("/roles", h.createRole)

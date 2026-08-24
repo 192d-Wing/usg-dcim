@@ -33,6 +33,11 @@ type fakeQ struct {
 	gotCreate  dbq.CreateAdminUserParams
 	gotUpdate  dbq.UpdateAdminUserParams
 
+	// Password set/reset
+	setPwRows int64
+	setPwErr  error
+	gotSetPw  dbq.SetUserPasswordHashParams
+
 	// Roles
 	rolesList         []dbq.Role
 	rolesCount        int64
@@ -105,6 +110,10 @@ func (f *fakeQ) UpdateAdminUser(_ context.Context, a dbq.UpdateAdminUserParams) 
 		return dbq.UpdateAdminUserRow{}, f.updateErr
 	}
 	return dbq.UpdateAdminUserRow{ID: a.ID, DisplayName: a.DisplayName, IsActive: defaultBool(a.IsActive, true)}, nil
+}
+func (f *fakeQ) SetUserPasswordHash(_ context.Context, a dbq.SetUserPasswordHashParams) (int64, error) {
+	f.gotSetPw = a
+	return f.setPwRows, f.setPwErr
 }
 
 // ---- Role stubs (PR 75) ----

@@ -1,7 +1,6 @@
 package power
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -43,7 +42,15 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req connectReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AssetID == uuid.Nil {
+	// Split decode-failure from missing-field: a body that fails to
+	// decode (wire-type mismatch, malformed JSON) reports the real
+	// error instead of the misleading "asset_id required". Deliberate
+	// deviation from Python's message on malformed bodies only; a
+	// well-formed body missing asset_id still answers verbatim.
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.AssetID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "asset_id required")
 		return
 	}

@@ -156,3 +156,9 @@ SELECT name, rack_position_u, rack_units
 FROM assets
 WHERE rack_id = sqlc.arg(rack_id)::uuid
   AND rack_position_u IS NOT NULL;
+
+-- name: CountAssetsInRack :one
+SELECT count(*)::bigint FROM assets WHERE rack_id = $1;
+
+-- name: DeleteRack :execrows
+DELETE FROM racks WHERE id = $1;

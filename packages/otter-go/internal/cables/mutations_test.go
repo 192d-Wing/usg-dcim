@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -89,6 +90,68 @@ func patch(t *testing.T, h http.Handler, path string, body any) *httptest.Respon
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	return rec
+}
+
+// postRaw sends a raw (possibly deliberately malformed) JSON string so
+// the decode-failure paths can be exercised without json.Marshal
+// "fixing" the body first.
+func postRaw(t *testing.T, h http.Handler, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := authtest.Request(http.MethodPost, path, authtest.PrincipalWithCaps("*"), strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+// Regression: a wire-type mismatch (number where the NUMERIC-as-string
+// convention expects a JSON string) used to fall through to the
+// field-validation branch and 400 with the misleading "a_asset_id and
+// b_asset_id required". It must now name the real problem.
+func TestCreateCable_WireTypeMismatch_Honest400(t *testing.T) {
+	rec := postRaw(t, mountMut(&fakeMutQ{}), "/cables", `{"length_m": 5}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "invalid request body") {
+		t.Errorf("want decode-error message, got %q", body)
+	}
+	if strings.Contains(body, "a_asset_id and b_asset_id required") {
+		t.Errorf("misleading field-validation message leaked through: %q", body)
+	}
+}
+
+// A well-formed body that merely omits the endpoints still gets the
+// field-validation message — DecodeJSON only owns decode failures.
+func TestCreateCable_MissingEndpoints_FieldMessage(t *testing.T) {
+	rec := postRaw(t, mountMut(&fakeMutQ{}), "/cables", `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "a_asset_id and b_asset_id required") {
+		t.Errorf("got %q", rec.Body.String())
+	}
+}
+
+// PATCH's decode branch now surfaces the real error too — including
+// updateReq.UnmarshalJSON's own validation errors, which used to be
+// flattened into "bad request body".
+func TestPatchCable_WireTypeMismatch_Honest400(t *testing.T) {
+	id, sid := uuid.New(), uuid.New()
+	f := &fakeMutQ{cable: dbq.Cable{ID: id, SiteID: sid, AAssetID: uuid.New(), BAssetID: uuid.New()}}
+	req := authtest.Request(http.MethodPatch, "/cables/"+id.String(),
+		authtest.PrincipalWithCaps("*"), strings.NewReader(`{"medium": 5}`))
+	rec := httptest.NewRecorder()
+	mountMut(f).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid request body") {
+		t.Errorf("got %q", rec.Body.String())
+	}
+	if f.updateCalled {
+		t.Error("UpdateCable must not run on a decode failure")
+	}
 }
 
 func TestPatchCable_NotFound(t *testing.T) {
