@@ -17,7 +17,11 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
-const capRacksRead = "inventory:racks:read"
+const (
+	capRacksRead = "inventory:racks:read"
+
+	rackByIDPath = "/racks/{id}"
+)
 
 type Querier interface {
 	ListRacks(ctx context.Context, arg dbq.ListRacksParams) ([]dbq.Rack, error)
@@ -50,10 +54,10 @@ func (h *Handler) Mount(r chi.Router) {
 	// Read paths gated by inventory:racks:read — see sites/Mount for
 	// why ScopedSiteFilter alone doesn't keep cap-less principals out.
 	r.With(auth.RequireCapability(capRacksRead)).Get("/racks", h.list)
-	r.With(auth.RequireCapability(capRacksRead)).Get("/racks/{id}", h.get)
+	r.With(auth.RequireCapability(capRacksRead)).Get(rackByIDPath, h.get)
 	r.With(auth.RequireCapability("inventory:racks:create")).Post("/racks", h.create)
-	r.With(auth.RequireCapability("inventory:racks:update")).Patch("/racks/{id}", h.update)
-	r.With(auth.RequireCapability("inventory:racks:delete")).Delete("/racks/{id}", h.delete)
+	r.With(auth.RequireCapability("inventory:racks:update")).Patch(rackByIDPath, h.update)
+	r.With(auth.RequireCapability("inventory:racks:delete")).Delete(rackByIDPath, h.delete)
 }
 
 type listResponse = httpx.Page[dbq.Rack]
@@ -105,26 +109,25 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 	rack, err := h.Q.GetRack(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "rack not found")
+			httpx.Error(w, http.StatusNotFound, msgRackNotFound)
 			return
 		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	// Per-row ABAC: scoped principals can't read racks outside scope.
+	// (Read path maps the scope error via Mapped rather than the
+	// mutation handlers' bare 403 — preserved as-is.)
 	p, _ := auth.From(r.Context())
 	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, rack.SiteID, capRacksRead); serr != nil {
-		status, msg := httpx.Mapped(serr)
-		httpx.Error(w, status, msg)
+		writeMapped(w, serr)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, rack)

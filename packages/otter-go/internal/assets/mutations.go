@@ -30,6 +30,46 @@ func (h *Handler) enforceSite(w http.ResponseWriter, r *http.Request, siteID uui
 	return true
 }
 
+const msgAssetNotFound = "asset not found"
+
+// writeMapped translates err through httpx.Mapped and writes it —
+// the same shorthand internal/locations uses.
+func writeMapped(w http.ResponseWriter, err error) {
+	status, msg := httpx.Mapped(err)
+	httpx.Error(w, status, msg)
+}
+
+// parseID pulls the {id} route param, writing a 400 when it isn't a
+// uuid. ok=false means the response has already been written.
+func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+// loadAssetForMutation is the shared prefetch chain of update,
+// decommission (and its preview), and delete: fetch the asset (404
+// when it doesn't exist) and enforce the caller's site scope for
+// capCode (403). ok=false means the response has already been written.
+func (h *Handler) loadAssetForMutation(w http.ResponseWriter, r *http.Request, id uuid.UUID, capCode string) (dbq.Asset, bool) {
+	current, err := h.Q.GetAsset(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, msgAssetNotFound)
+			return dbq.Asset{}, false
+		}
+		writeMapped(w, err)
+		return dbq.Asset{}, false
+	}
+	if !h.enforceSite(w, r, current.SiteID, capCode) {
+		return dbq.Asset{}, false
+	}
+	return current, true
+}
+
 // NOTE: PR 41 ports the basic CRUD + decommission. The following are
 // intentionally deferred and will arrive in a focused follow-up PR:
 //   - PDU outlet auto-seeding on POST /assets (Python create_asset
@@ -157,8 +197,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		LifecycleState: req.LifecycleState, MetadataJson: req.MetadataJson,
 	})
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	sid := out.SiteID
@@ -257,9 +296,8 @@ func (u *updateReq) UnmarshalJSON(data []byte) error {
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 	var req updateReq
@@ -268,17 +306,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// PR 54 ABAC: resolve current site, enforce before write.
-	current, err := h.Q.GetAsset(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "asset not found")
-			return
-		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:update") {
+	if _, ok := h.loadAssetForMutation(w, r, id, "inventory:assets:update"); !ok {
 		return
 	}
 	out, err := h.Q.UpdateAsset(r.Context(), dbq.UpdateAssetParams{
@@ -299,11 +327,10 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "asset not found")
+			httpx.Error(w, http.StatusNotFound, msgAssetNotFound)
 			return
 		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	sid := out.SiteID
@@ -327,65 +354,53 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 // idempotent-ish and a failure midway leaves only detached IPs /
 // dropped alerts, which a retry (or decommission) cleans up.
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
-	current, err := h.Q.GetAsset(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "asset not found")
+	current, ok := h.loadAssetForMutation(w, r, id, "inventory:assets:delete")
+	if !ok {
+		return
+	}
+	// 409 guards: each counts a dependent that must be gone first.
+	guards := []struct {
+		count func() (int64, error)
+		msg   string
+	}{
+		{func() (int64, error) { return h.Q.CountChildAssets(r.Context(), &id) },
+			"asset has %d child assets; move or delete them first"},
+		{func() (int64, error) { return h.Q.CountCablesForAsset(r.Context(), id) },
+			"asset has %d cables logged; delete them first"},
+	}
+	for _, g := range guards {
+		n, err := g.count()
+		if err != nil {
+			writeMapped(w, err)
 			return
 		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:delete") {
-		return
-	}
-	children, err := h.Q.CountChildAssets(r.Context(), &id)
-	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	if children > 0 {
-		httpx.Error(w, http.StatusConflict, fmt.Sprintf("asset has %d child assets; move or delete them first", children))
-		return
-	}
-	cables, err := h.Q.CountCablesForAsset(r.Context(), id)
-	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	if cables > 0 {
-		httpx.Error(w, http.StatusConflict, fmt.Sprintf("asset has %d cables logged; delete them first", cables))
-		return
+		if n > 0 {
+			httpx.Error(w, http.StatusConflict, fmt.Sprintf(g.msg, n))
+			return
+		}
 	}
 	detachedIPs, err := h.Q.DetachIPAddressesFromAsset(r.Context(), &id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	droppedAlerts, err := h.Q.DeleteAlertsForAsset(r.Context(), &id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	rows, err := h.Q.DeleteAsset(r.Context(), id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	if rows == 0 {
 		// Raced with a concurrent delete between the pre-fetch and here.
-		httpx.Error(w, http.StatusNotFound, "asset not found")
+		httpx.Error(w, http.StatusNotFound, msgAssetNotFound)
 		return
 	}
 	sid := current.SiteID
@@ -436,51 +451,29 @@ func (h *Handler) computeImpact(r *http.Request, assetID uuid.UUID) (decommissio
 }
 
 func (h *Handler) decommissionPreview(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 	// 404 if asset doesn't exist — matches Python's preflight check.
-	current, err := h.Q.GetAsset(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "asset not found")
-			return
-		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:read") {
+	if _, ok := h.loadAssetForMutation(w, r, id, "inventory:assets:read"); !ok {
 		return
 	}
 	imp, err := h.computeImpact(r, id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, imp)
 }
 
 func (h *Handler) decommission(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
-	current, err := h.Q.GetAsset(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "asset not found")
-			return
-		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:update") {
+	current, ok := h.loadAssetForMutation(w, r, id, "inventory:assets:update")
+	if !ok {
 		return
 	}
 	if current.LifecycleState == "decommissioned" {
@@ -490,24 +483,20 @@ func (h *Handler) decommission(w http.ResponseWriter, r *http.Request) {
 	// Compute impact BEFORE deletes so the response carries accurate counts.
 	imp, err := h.computeImpact(r, id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	if err := h.Q.DeleteConsumerPowerConnections(r.Context(), id); err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	if err := h.Q.DeletePduPowerConnections(r.Context(), id); err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	updated, err := h.Q.SetAssetDecommissioned(r.Context(), id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	sid := updated.SiteID

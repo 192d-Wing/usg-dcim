@@ -1,11 +1,12 @@
 // DELETE /assets/{id} — hard delete added in the UX-debt batch.
-// Mirrors the fakeQ handler-test pattern: 404 unknown id, 409 on
-// child assets or logged cables, success path runs detach-IPs →
-// drop-alerts → delete in order, plus the capability + scope gates.
+// Refused requests (404/400/409-children/409-cables/403) are table-
+// driven and must never reach the destructive calls; success runs the
+// detach-IPs → drop-alerts → delete chain; site scope is enforced.
 package assets
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -17,91 +18,86 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/auth/authtest"
 )
 
-func TestDeleteAsset_NotFound(t *testing.T) {
-	f := &fakeQ{} // default GetAsset → ErrNoRows
-	rec := authtest.ServeRequest(mount(f), authtest.PrincipalWithCaps("*"), "DELETE", "/assets/"+uuid.New().String(), nil)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("got %d, want 404 (body=%s)", rec.Code, rec.Body.String())
-	}
-	if len(f.deletedAssets) != 0 {
-		t.Errorf("DeleteAsset called on a 404")
-	}
-}
-
-func TestDeleteAsset_BadID(t *testing.T) {
-	rec := authtest.ServeRequest(mount(&fakeQ{}), authtest.PrincipalWithCaps("*"), "DELETE", "/assets/not-uuid", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("got %d, want 400", rec.Code)
+// existingAssetQ returns a fakeQ that serves an asset for GetAsset and
+// feeds the given dependent counts to the delete handler's 409 guards.
+func existingAssetQ(children, cables int64) *fakeQ {
+	return &fakeQ{
+		asset:      &dbq.Asset{ID: uuid.New(), SiteID: uuid.New(), Name: "srv-1"},
+		childCount: children,
+		cableCount: cables,
 	}
 }
 
-func TestDeleteAsset_ConflictWithChildren(t *testing.T) {
-	id := uuid.New()
-	f := &fakeQ{
-		asset:      &dbq.Asset{ID: id, SiteID: uuid.New(), Name: "chassis-1"},
-		childCount: 2,
-	}
-	rec := authtest.ServeRequest(mount(f), authtest.PrincipalWithCaps("*"), "DELETE", "/assets/"+id.String(), nil)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("got %d, want 409 (body=%s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "2 child assets") {
-		t.Errorf("409 body should name the child-asset count: %s", rec.Body.String())
-	}
-	if len(f.deletedAssets) != 0 || len(f.detachedIPs) != 0 || len(f.deletedAlerts) != 0 {
-		t.Errorf("no destructive call may run when children exist")
-	}
+func doDelete(t *testing.T, f *fakeQ, p auth.Principal, id string) *httptest.ResponseRecorder {
+	t.Helper()
+	return authtest.ServeRequest(mount(f), p, "DELETE", "/assets/"+id, nil)
 }
 
-func TestDeleteAsset_ConflictWithCables(t *testing.T) {
-	id := uuid.New()
-	f := &fakeQ{
-		asset:      &dbq.Asset{ID: id, SiteID: uuid.New(), Name: "sw-1"},
-		cableCount: 4,
+// destructiveCalls counts every write the delete path can make, so
+// refusal cases can assert none of them ran.
+func destructiveCalls(f *fakeQ) int {
+	return len(f.detachedIPs) + len(f.deletedAlerts) + len(f.deletedAssets)
+}
+
+func TestDeleteAsset_Refusals(t *testing.T) {
+	admin := authtest.PrincipalWithCaps("*")
+	cases := []struct {
+		name     string
+		q        *fakeQ
+		p        auth.Principal
+		id       string
+		wantCode int
+		wantBody string
+	}{
+		{"unknown id", &fakeQ{}, admin, uuid.New().String(), http.StatusNotFound, ""},
+		{"bad id", &fakeQ{}, admin, "not-uuid", http.StatusBadRequest, ""},
+		{"child assets", existingAssetQ(2, 0), admin, uuid.New().String(),
+			http.StatusConflict, "2 child assets"},
+		{"logged cables", existingAssetQ(0, 4), admin, uuid.New().String(),
+			http.StatusConflict, "4 cables logged"},
+		// read+update (decommission's caps) but no delete — the gate refuses.
+		{"missing capability", existingAssetQ(0, 0),
+			authtest.PrincipalWithCaps("inventory:assets:read", "inventory:assets:update"),
+			uuid.New().String(), http.StatusForbidden, ""},
 	}
-	rec := authtest.ServeRequest(mount(f), authtest.PrincipalWithCaps("*"), "DELETE", "/assets/"+id.String(), nil)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("got %d, want 409 (body=%s)", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "4 cables logged") {
-		t.Errorf("409 body should name the cable count: %s", rec.Body.String())
-	}
-	if len(f.deletedAssets) != 0 || len(f.detachedIPs) != 0 || len(f.deletedAlerts) != 0 {
-		t.Errorf("no destructive call may run when cables are logged")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doDelete(t, tc.q, tc.p, tc.id)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("got %d, want %d (body=%s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if tc.wantBody != "" && !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Errorf("body %q should contain %q", rec.Body.String(), tc.wantBody)
+			}
+			if n := destructiveCalls(tc.q); n != 0 {
+				t.Errorf("%d destructive calls ran on a refused request", n)
+			}
+		})
 	}
 }
 
 func TestDeleteAsset_SuccessRunsCleanupChain(t *testing.T) {
 	id := uuid.New()
+	// Deleting a decommissioned asset must work — decommission only
+	// flips lifecycle_state, it is not a delete precondition.
 	f := &fakeQ{
 		asset: &dbq.Asset{ID: id, SiteID: uuid.New(), Name: "srv-1", LifecycleState: "decommissioned"},
 	}
-	rec := authtest.ServeRequest(mount(f), authtest.PrincipalWithCaps("*"), "DELETE", "/assets/"+id.String(), nil)
+	rec := doDelete(t, f, authtest.PrincipalWithCaps("*"), id.String())
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("got %d, want 204 (body=%s)", rec.Code, rec.Body.String())
 	}
-	if len(f.detachedIPs) != 1 || f.detachedIPs[0] != id {
-		t.Errorf("DetachIPAddressesFromAsset calls = %v, want [%s]", f.detachedIPs, id)
-	}
-	if len(f.deletedAlerts) != 1 || f.deletedAlerts[0] != id {
-		t.Errorf("DeleteAlertsForAsset calls = %v, want [%s]", f.deletedAlerts, id)
-	}
-	if len(f.deletedAssets) != 1 || f.deletedAssets[0] != id {
-		t.Errorf("DeleteAsset calls = %v, want [%s]", f.deletedAssets, id)
-	}
-}
-
-func TestDeleteAsset_MissingCapability(t *testing.T) {
-	id := uuid.New()
-	f := &fakeQ{asset: &dbq.Asset{ID: id, SiteID: uuid.New()}}
-	// read+update (decommission's caps) but no delete — the gate refuses.
-	p := authtest.PrincipalWithCaps("inventory:assets:read", "inventory:assets:update")
-	rec := authtest.ServeRequest(mount(f), p, "DELETE", "/assets/"+id.String(), nil)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("got %d, want 403", rec.Code)
-	}
-	if len(f.deletedAssets) != 0 {
-		t.Errorf("DeleteAsset ran without the delete capability")
+	for _, c := range []struct {
+		name string
+		got  []uuid.UUID
+	}{
+		{"DetachIPAddressesFromAsset", f.detachedIPs},
+		{"DeleteAlertsForAsset", f.deletedAlerts},
+		{"DeleteAsset", f.deletedAssets},
+	} {
+		if len(c.got) != 1 || c.got[0] != id {
+			t.Errorf("%s calls = %v, want [%s]", c.name, c.got, id)
+		}
 	}
 }
 
@@ -123,7 +119,7 @@ func TestEnforceSite_DeleteAsset_Forbidden(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("got %d, want 403", rec.Code)
 	}
-	if len(f.deletedAssets) != 0 {
-		t.Errorf("DeleteAsset ran for an out-of-scope site")
+	if n := destructiveCalls(f); n != 0 {
+		t.Errorf("%d destructive calls ran for an out-of-scope site", n)
 	}
 }

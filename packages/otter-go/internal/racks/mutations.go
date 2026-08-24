@@ -16,6 +16,51 @@ import (
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
+const (
+	msgRackNotFound = "rack not found"
+	msgBadID        = "id is not a uuid"
+)
+
+// writeMapped translates err through httpx.Mapped and writes it —
+// the same shorthand internal/locations uses.
+func writeMapped(w http.ResponseWriter, err error) {
+	status, msg := httpx.Mapped(err)
+	httpx.Error(w, status, msg)
+}
+
+// parseID pulls the {id} route param, writing a 400 when it isn't a
+// uuid. ok=false means the response has already been written.
+func parseID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, msgBadID)
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+// loadRackForMutation is the shared prefetch chain of update and
+// delete: fetch the rack (404 when it doesn't exist) and enforce the
+// caller's site scope for capCode (403). ok=false means the response
+// has already been written.
+func (h *Handler) loadRackForMutation(w http.ResponseWriter, r *http.Request, id uuid.UUID, capCode string) (dbq.Rack, bool) {
+	rack, err := h.Q.GetRack(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, msgRackNotFound)
+			return dbq.Rack{}, false
+		}
+		writeMapped(w, err)
+		return dbq.Rack{}, false
+	}
+	p, _ := auth.From(r.Context())
+	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, rack.SiteID, capCode); serr != nil {
+		httpx.Error(w, http.StatusForbidden, serr.Error())
+		return dbq.Rack{}, false
+	}
+	return rack, true
+}
+
 type createReq struct {
 	SiteID       uuid.UUID `json:"site_id"`
 	RowID        uuid.UUID `json:"row_id"`
@@ -48,8 +93,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		UHeight: u, MaxKw: req.MaxKw, MaxWeightLbs: req.MaxWeightLbs, Serial: req.Serial,
 	})
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	sid := out.SiteID
@@ -123,9 +167,8 @@ func (u *updateReq) UnmarshalJSON(data []byte) error {
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 	var req updateReq
@@ -150,19 +193,8 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// PR 54 ABAC: look up the rack's site and enforce before any work.
-	currentRack, err := h.Q.GetRack(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "rack not found")
-			return
-		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	p, _ := auth.From(r.Context())
-	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, currentRack.SiteID, "inventory:racks:update"); serr != nil {
-		httpx.Error(w, http.StatusForbidden, serr.Error())
+	currentRack, ok := h.loadRackForMutation(w, r, id, "inventory:racks:update")
+	if !ok {
 		return
 	}
 	// Shrink check: if u_height is decreasing, refuse if any placed
@@ -202,11 +234,10 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "rack not found")
+			httpx.Error(w, http.StatusNotFound, msgRackNotFound)
 			return
 		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	sid := out.SiteID
@@ -220,31 +251,18 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 // lifecycle path — rack DELETE exists for mistakes and test hygiene.
 // Racks with mounted assets refuse with 409 so nothing is orphaned.
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+	id, ok := parseID(w, r)
+	if !ok {
 		return
 	}
 	// Pre-fetch for the 404 + site-scope check, same as update.
-	rack, err := h.Q.GetRack(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.Error(w, http.StatusNotFound, "rack not found")
-			return
-		}
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
-		return
-	}
-	p, _ := auth.From(r.Context())
-	if serr := auth.EnforceSiteScope(r.Context(), h.Q, p, rack.SiteID, "inventory:racks:delete"); serr != nil {
-		httpx.Error(w, http.StatusForbidden, serr.Error())
+	rack, ok := h.loadRackForMutation(w, r, id, "inventory:racks:delete")
+	if !ok {
 		return
 	}
 	mounted, err := h.Q.CountAssetsInRack(r.Context(), &id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	if mounted > 0 {
@@ -253,13 +271,12 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.Q.DeleteRack(r.Context(), id)
 	if err != nil {
-		status, msg := httpx.Mapped(err)
-		httpx.Error(w, status, msg)
+		writeMapped(w, err)
 		return
 	}
 	if rows == 0 {
 		// Raced with a concurrent delete between the pre-fetch and here.
-		httpx.Error(w, http.StatusNotFound, "rack not found")
+		httpx.Error(w, http.StatusNotFound, msgRackNotFound)
 		return
 	}
 	sid := rack.SiteID
