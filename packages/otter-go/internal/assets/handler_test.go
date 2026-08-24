@@ -1,7 +1,9 @@
 package assets
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,7 +17,17 @@ import (
 )
 
 type fakeQ struct {
-	last dbq.ListAssetsParams
+	last     dbq.ListAssetsParams
+	seeded   []dbq.SeedPduOutletsParams
+	seedFail bool
+}
+
+func (f *fakeQ) SeedPduOutlets(_ context.Context, a dbq.SeedPduOutletsParams) (int64, error) {
+	if f.seedFail {
+		return 0, pgx.ErrTxClosed
+	}
+	f.seeded = append(f.seeded, a)
+	return int64(a.OutletCount), nil
 }
 
 func (f *fakeQ) ListAssets(_ context.Context, a dbq.ListAssetsParams) ([]dbq.Asset, error) {
@@ -136,5 +148,59 @@ func TestGetAsset_BadID(t *testing.T) {
 	rec := do(t, mount(&fakeQ{}), "/assets/x")
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("got %d", rec.Code)
+	}
+}
+
+// doCreate POSTs an asset create with a global-scope principal and
+// returns the recorder.
+func doCreate(t *testing.T, f *fakeQ, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	b, _ := json.Marshal(body)
+	req := authtest.Request("POST", "/assets", authtest.PrincipalWithCaps("*"), bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mount(f).ServeHTTP(rec, req)
+	return rec
+}
+
+func TestCreateAsset_PduSeedsOutlets(t *testing.T) {
+	f := &fakeQ{}
+	rec := doCreate(t, f, map[string]any{
+		"site_id": uuid.New(), "name": "pdu-1", "kind": "pdu",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if len(f.seeded) != 1 {
+		t.Fatalf("SeedPduOutlets calls = %d, want 1", len(f.seeded))
+	}
+	if f.seeded[0].OutletCount != 24 {
+		t.Errorf("outlet count = %d, want 24", f.seeded[0].OutletCount)
+	}
+	if f.seeded[0].PduAssetID == uuid.Nil {
+		t.Error("seed called with nil pdu_asset_id")
+	}
+}
+
+func TestCreateAsset_NonPduDoesNotSeed(t *testing.T) {
+	f := &fakeQ{}
+	rec := doCreate(t, f, map[string]any{
+		"site_id": uuid.New(), "name": "srv-1", "kind": "server",
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if len(f.seeded) != 0 {
+		t.Errorf("SeedPduOutlets calls = %d, want 0 for non-PDU", len(f.seeded))
+	}
+}
+
+func TestCreateAsset_PduSeedFailureSurfaces(t *testing.T) {
+	f := &fakeQ{seedFail: true}
+	rec := doCreate(t, f, map[string]any{
+		"site_id": uuid.New(), "name": "pdu-2", "kind": "pdu",
+	})
+	if rec.Code == http.StatusCreated {
+		t.Fatalf("expected error status when outlet seeding fails, got 201")
 	}
 }

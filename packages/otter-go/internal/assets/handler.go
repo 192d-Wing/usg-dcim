@@ -28,6 +28,7 @@ type Querier interface {
 	UpdateAsset(ctx context.Context, arg dbq.UpdateAssetParams) (dbq.Asset, error)
 	SetAssetDecommissioned(ctx context.Context, id uuid.UUID) (dbq.Asset, error)
 	FindAssetByManufacturerSerial(ctx context.Context, arg dbq.FindAssetByManufacturerSerialParams) (dbq.Asset, error)
+	SeedPduOutlets(ctx context.Context, arg dbq.SeedPduOutletsParams) (int64, error)
 	CountConsumerPowerDrops(ctx context.Context, assetID uuid.UUID) (int64, error)
 	CountPduPowerDrops(ctx context.Context, pduAssetID uuid.UUID) (int64, error)
 	ListDownstreamAssetNames(ctx context.Context, pduAssetID uuid.UUID) ([]string, error)
@@ -47,9 +48,21 @@ type Querier interface {
 	ListSiteIDsForExpansion(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
 }
 
+// TxBeginner is the slim subset of *pgxpool.Pool the PDU-create path
+// needs so the asset INSERT and its outlet auto-seed commit or roll
+// back together (same shape as bgp.TxBeginner).
+type TxBeginner interface {
+	BeginTx(ctx context.Context, opts pgx.TxOptions) (pgx.Tx, error)
+}
+
 type Handler struct {
 	Q     Querier
 	Audit audit.Recorder
+	// Pool enables the transactional PDU-create path. When nil
+	// (tests), PDU creates fall back to autocommit: asset first,
+	// then outlets — a failure in between leaves a PDU without
+	// outlets, which the operator can delete and recreate.
+	Pool TxBeginner
 }
 
 func (h *Handler) Mount(r chi.Router) {

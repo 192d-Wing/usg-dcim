@@ -70,7 +70,7 @@ func main() {
 	rh := &regions.Handler{Q: q, Audit: q}
 	lh := &locations.Handler{Q: q, Audit: q}
 	rkh := &racks.Handler{Q: q, Audit: q}
-	ah := &assets.Handler{Q: q, Audit: q}
+	ah := &assets.Handler{Q: q, Audit: q, Pool: pool}
 	ch := &cables.Handler{Q: q, Audit: q}
 	ih := &ipam.Handler{Q: q, Audit: q}
 	lih := &lir.Handler{Q: q, Audit: q}

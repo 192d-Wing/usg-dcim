@@ -1,9 +1,11 @@
 package assets
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -61,6 +63,57 @@ type createReq struct {
 	MetadataJson       json.RawMessage `json:"metadata_json"`
 }
 
+// pduOutletCount matches Python create_asset's fixed strip size: new
+// PDUs come with a 24-outlet strip (odd positions phase A, even B,
+// C13 receptacles — see SeedPduOutlets).
+const pduOutletCount = 24
+
+// createAsset runs the asset INSERT — and, for PDUs, the outlet
+// auto-seed in the same transaction so a half-created PDU can't
+// escape. With no Pool (tests) the PDU path degrades to autocommit:
+// asset first, then outlets.
+func (h *Handler) createAsset(ctx context.Context, arg dbq.CreateAssetParams) (dbq.Asset, error) {
+	if arg.Kind != "pdu" {
+		return h.Q.CreateAsset(ctx, arg)
+	}
+	if h.Pool == nil {
+		out, err := h.Q.CreateAsset(ctx, arg)
+		if err != nil {
+			return out, err
+		}
+		_, err = h.Q.SeedPduOutlets(ctx, dbq.SeedPduOutletsParams{
+			PduAssetID: out.ID, OutletCount: pduOutletCount,
+		})
+		return out, err
+	}
+	tx, err := h.Pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return dbq.Asset{}, err
+	}
+	// Rollback on a fresh background context so cleanup still runs
+	// when the request context is cancelled mid-flight (same pattern
+	// as bgp's rotate-batch).
+	defer func() {
+		rbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(rbCtx)
+	}()
+	q := dbq.New(tx)
+	out, err := q.CreateAsset(ctx, arg)
+	if err != nil {
+		return dbq.Asset{}, err
+	}
+	if _, err := q.SeedPduOutlets(ctx, dbq.SeedPduOutletsParams{
+		PduAssetID: out.ID, OutletCount: pduOutletCount,
+	}); err != nil {
+		return dbq.Asset{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return dbq.Asset{}, err
+	}
+	return out, nil
+}
+
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var req createReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
@@ -91,7 +144,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	out, err := h.Q.CreateAsset(r.Context(), dbq.CreateAssetParams{
+	out, err := h.createAsset(r.Context(), dbq.CreateAssetParams{
 		SiteID: req.SiteID, RackID: req.RackID, ParentAssetID: req.ParentAssetID,
 		Name: req.Name, Hostname: req.Hostname, Kind: req.Kind,
 		Manufacturer: req.Manufacturer, Model: req.Model, Serial: req.Serial,
