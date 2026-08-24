@@ -115,8 +115,15 @@ spec:
       author:
         name: flux-windep
         email: flux-windep@oopl.dev.mil
+      # [skip ci] is load-bearing: without it the bump commit triggers
+      # main CI, which publishes a main-<ts> image OF THE BUMP COMMIT,
+      # which the ImagePolicy selects, which commits another bump — a
+      # self-feeding deploy loop (observed live, one cycle per ~6min).
+      # GitHub Actions skips the whole workflow for commits whose
+      # message carries the marker; human edits to the values file
+      # still build normally.
       messageTemplate: |
-        deploy(windep): bump dev image tag to {{ range .Changed.Changes }}{{ .NewValue }}{{ end }}
+        deploy(windep): bump dev image tag to {{ range .Changed.Changes }}{{ .NewValue }}{{ end }} [skip ci]
 
         Automated by Flux image automation on the windep cluster.
     push:
