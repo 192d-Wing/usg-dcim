@@ -18,10 +18,10 @@ import (
 
 type fakeQ struct {
 	last dbq.GetTelemetrySeriesParams
-	rows []dbq.TelemetryPoint
+	rows []dbq.GetTelemetrySeriesRow
 }
 
-func (f *fakeQ) GetTelemetrySeries(_ context.Context, a dbq.GetTelemetrySeriesParams) ([]dbq.TelemetryPoint, error) {
+func (f *fakeQ) GetTelemetrySeries(_ context.Context, a dbq.GetTelemetrySeriesParams) ([]dbq.GetTelemetrySeriesRow, error) {
 	f.last = a
 	return f.rows, nil
 }
@@ -60,7 +60,7 @@ func TestSeries_RequiresIDs(t *testing.T) {
 
 func TestSeries_Defaults(t *testing.T) {
 	sid, aid := uuid.New(), uuid.New()
-	f := &fakeQ{rows: []dbq.TelemetryPoint{{TS: time.Now(), Value: 1.5}}}
+	f := &fakeQ{rows: []dbq.GetTelemetrySeriesRow{{TS: time.Now(), Value: 1.5}}}
 	rec := do(t, mount(f), "/telemetry/series?site_id="+sid.String()+"&asset_id="+aid.String()+"&metric=temp_c")
 	if rec.Code != 200 {
 		t.Fatalf("got %d", rec.Code)

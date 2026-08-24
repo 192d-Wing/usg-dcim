@@ -162,10 +162,11 @@ func (h *Handler) enroll(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "could not generate token")
 		return
 	}
+	tokenHash := auth.HashAPIToken(raw)
 	row, err := h.Q.EnrollCollector(r.Context(), dbq.EnrollCollectorParams{
 		SiteID: req.SiteID, Name: req.Name,
 		CapabilitiesJson:    capsJSON,
-		EnrollmentTokenHash: auth.HashAPIToken(raw),
+		EnrollmentTokenHash: tokenHash,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)

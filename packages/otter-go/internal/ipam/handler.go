@@ -28,38 +28,38 @@ type Querier interface {
 	ListVrfs(ctx context.Context, arg dbq.ListVrfsParams) ([]dbq.Vrf, error)
 	CountVrfs(ctx context.Context, arg dbq.CountVrfsParams) (int64, error)
 	GetVrf(ctx context.Context, id uuid.UUID) (dbq.Vrf, error)
-	ListSubnets(ctx context.Context, arg dbq.ListSubnetsParams) ([]dbq.Subnet, error)
+	ListSubnets(ctx context.Context, arg dbq.ListSubnetsParams) ([]dbq.ListSubnetsRow, error)
 	CountSubnets(ctx context.Context, arg dbq.CountSubnetsParams) (int64, error)
-	GetSubnet(ctx context.Context, id uuid.UUID) (dbq.Subnet, error)
-	ListIPAddresses(ctx context.Context, arg dbq.ListIPAddressesParams) ([]dbq.IPAddress, error)
+	GetSubnet(ctx context.Context, id uuid.UUID) (dbq.GetSubnetRow, error)
+	ListIPAddresses(ctx context.Context, arg dbq.ListIPAddressesParams) ([]dbq.ListIPAddressesRow, error)
 	CountIPAddresses(ctx context.Context, arg dbq.CountIPAddressesParams) (int64, error)
-	GetIPAddress(ctx context.Context, id uuid.UUID) (dbq.IPAddress, error)
+	GetIPAddress(ctx context.Context, id uuid.UUID) (dbq.GetIPAddressRow, error)
 	ListAddressStringsInSubnet(ctx context.Context, subnetID uuid.UUID) ([]string, error)
-	ListSubnetsForFreeSpace(ctx context.Context, arg dbq.ListSubnetsForFreeSpaceParams) ([]dbq.SubnetForFreeSpaceRow, error)
-	ListAddressesInSubnets(ctx context.Context, subnetIDs []uuid.UUID) ([]dbq.AddressInSubnetRow, error)
+	ListSubnetsForFreeSpace(ctx context.Context, arg dbq.ListSubnetsForFreeSpaceParams) ([]dbq.ListSubnetsForFreeSpaceRow, error)
+	ListAddressesInSubnets(ctx context.Context, subnetIDs []uuid.UUID) ([]dbq.ListAddressesInSubnetsRow, error)
 
 	ListFabrics(ctx context.Context, arg dbq.ListFabricsParams) ([]dbq.Fabric, error)
 	CountFabrics(ctx context.Context, arg dbq.CountFabricsParams) (int64, error)
 	GetFabric(ctx context.Context, id uuid.UUID) (dbq.Fabric, error)
-	ListSupernets(ctx context.Context, arg dbq.ListSupernetsParams) ([]dbq.Supernet, error)
+	ListSupernets(ctx context.Context, arg dbq.ListSupernetsParams) ([]dbq.ListSupernetsRow, error)
 	CountSupernets(ctx context.Context, arg dbq.CountSupernetsParams) (int64, error)
-	GetSupernet(ctx context.Context, id uuid.UUID) (dbq.Supernet, error)
+	GetSupernet(ctx context.Context, id uuid.UUID) (dbq.GetSupernetRow, error)
 	ListSubnetPrefixesBySupernet(ctx context.Context, supernetID uuid.UUID) ([]string, error)
-	ListSupernetsForCarver(ctx context.Context, arg dbq.ListSupernetsForCarverParams) ([]dbq.SupernetForCarverRow, error)
-	ListSubnetPrefixesBySupernets(ctx context.Context, supernetIDs []uuid.UUID) ([]dbq.SubnetPrefixBySupernetRow, error)
+	ListSupernetsForCarver(ctx context.Context, arg dbq.ListSupernetsForCarverParams) ([]dbq.ListSupernetsForCarverRow, error)
+	ListSubnetPrefixesBySupernets(ctx context.Context, supernetIDs []uuid.UUID) ([]dbq.ListSubnetPrefixesBySupernetsRow, error)
 
 	ListOverlays(ctx context.Context, arg dbq.ListOverlaysParams) ([]dbq.Overlay, error)
 	CountOverlays(ctx context.Context, arg dbq.CountOverlaysParams) (int64, error)
-	ListVnis(ctx context.Context, arg dbq.ListVnisParams) ([]dbq.Vni, error)
+	ListVnis(ctx context.Context, arg dbq.ListVnisParams) ([]dbq.VNI, error)
 	CountVnis(ctx context.Context, arg dbq.CountVnisParams) (int64, error)
-	ListVteps(ctx context.Context, arg dbq.ListVtepsParams) ([]dbq.Vtep, error)
+	ListVteps(ctx context.Context, arg dbq.ListVtepsParams) ([]dbq.ListVtepsRow, error)
 	CountVteps(ctx context.Context, arg dbq.CountVtepsParams) (int64, error)
 	ListVtepMemberships(ctx context.Context, arg dbq.ListVtepMembershipsParams) ([]dbq.VtepVniMembership, error)
 	CountVtepMemberships(ctx context.Context, arg dbq.CountVtepMembershipsParams) (int64, error)
-	ListDhcpServers(ctx context.Context, arg dbq.ListDhcpServersParams) ([]dbq.DhcpServer, error)
+	ListDhcpServers(ctx context.Context, arg dbq.ListDhcpServersParams) ([]dbq.ListDhcpServersRow, error)
 	CountDhcpServers(ctx context.Context, arg dbq.CountDhcpServersParams) (int64, error)
 
-	ListVrfBgpPeers(ctx context.Context, arg dbq.ListVrfBgpPeersParams) ([]dbq.VrfBgpPeer, error)
+	ListVrfBgpPeers(ctx context.Context, arg dbq.ListVrfBgpPeersParams) ([]dbq.ListVrfBgpPeersRow, error)
 	CountVrfBgpPeers(ctx context.Context, arg dbq.CountVrfBgpPeersParams) (int64, error)
 
 	// Fabrics
@@ -73,28 +73,28 @@ type Querier interface {
 	CountSupernetsInVrf(ctx context.Context, vrfID uuid.UUID) (int64, error)
 	DeleteVrf(ctx context.Context, id uuid.UUID) error
 	// VrfBgpPeers
-	CreateVrfBgpPeer(ctx context.Context, arg dbq.CreateVrfBgpPeerParams) (dbq.VrfBgpPeer, error)
-	UpdateVrfBgpPeer(ctx context.Context, arg dbq.UpdateVrfBgpPeerParams) (dbq.VrfBgpPeer, error)
+	CreateVrfBgpPeer(ctx context.Context, arg dbq.CreateVrfBgpPeerParams) (dbq.CreateVrfBgpPeerRow, error)
+	UpdateVrfBgpPeer(ctx context.Context, arg dbq.UpdateVrfBgpPeerParams) (dbq.UpdateVrfBgpPeerRow, error)
 	DeleteVrfBgpPeer(ctx context.Context, id uuid.UUID) error
 	// Supernets
-	CreateSupernet(ctx context.Context, arg dbq.CreateSupernetParams) (dbq.Supernet, error)
-	UpdateSupernet(ctx context.Context, arg dbq.UpdateSupernetParams) (dbq.Supernet, error)
+	CreateSupernet(ctx context.Context, arg dbq.CreateSupernetParams) (dbq.CreateSupernetRow, error)
+	UpdateSupernet(ctx context.Context, arg dbq.UpdateSupernetParams) (dbq.UpdateSupernetRow, error)
 	CountSubnetsInSupernet(ctx context.Context, supernetID uuid.UUID) (int64, error)
 	DeleteSupernet(ctx context.Context, id uuid.UUID) error
-	GetSupernetVrfAndFabric(ctx context.Context, id uuid.UUID) (dbq.SupernetVrfAndFabric, error)
+	GetSupernetVrfAndFabric(ctx context.Context, id uuid.UUID) (dbq.GetSupernetVrfAndFabricRow, error)
 	// Move endpoint — relocates a tenant-owned supernet out of the LIR
 	// landing fabric. See internal/ipam/move.go.
-	GetSupernetForMove(ctx context.Context, id uuid.UUID) (dbq.SupernetForMoveRow, error)
-	GetVrfForMove(ctx context.Context, id uuid.UUID) (dbq.VrfForMoveRow, error)
-	MoveSupernet(ctx context.Context, arg dbq.MoveSupernetParams) (dbq.Supernet, error)
+	GetSupernetForMove(ctx context.Context, id uuid.UUID) (dbq.GetSupernetForMoveRow, error)
+	GetVrfForMove(ctx context.Context, id uuid.UUID) (dbq.GetVrfForMoveRow, error)
+	MoveSupernet(ctx context.Context, arg dbq.MoveSupernetParams) (dbq.MoveSupernetRow, error)
 	// Subnets
-	CreateSubnet(ctx context.Context, arg dbq.CreateSubnetParams) (dbq.Subnet, error)
-	UpdateSubnet(ctx context.Context, arg dbq.UpdateSubnetParams) (dbq.Subnet, error)
+	CreateSubnet(ctx context.Context, arg dbq.CreateSubnetParams) (dbq.CreateSubnetRow, error)
+	UpdateSubnet(ctx context.Context, arg dbq.UpdateSubnetParams) (dbq.UpdateSubnetRow, error)
 	CountAddressesInSubnet(ctx context.Context, subnetID uuid.UUID) (int64, error)
 	DeleteSubnet(ctx context.Context, id uuid.UUID) error
 	// IPAddresses
-	CreateIPAddress(ctx context.Context, arg dbq.CreateIPAddressParams) (dbq.IPAddress, error)
-	UpdateIPAddress(ctx context.Context, arg dbq.UpdateIPAddressParams) (dbq.IPAddress, error)
+	CreateIPAddress(ctx context.Context, arg dbq.CreateIPAddressParams) (dbq.CreateIPAddressRow, error)
+	UpdateIPAddress(ctx context.Context, arg dbq.UpdateIPAddressParams) (dbq.UpdateIPAddressRow, error)
 	DeleteIPAddress(ctx context.Context, id uuid.UUID) error
 	// Overlays
 	CreateOverlay(ctx context.Context, arg dbq.CreateOverlayParams) (dbq.Overlay, error)
@@ -102,25 +102,25 @@ type Querier interface {
 	CountVnisInOverlay(ctx context.Context, overlayID uuid.UUID) (int64, error)
 	DeleteOverlay(ctx context.Context, id uuid.UUID) error
 	// VNIs
-	CreateVni(ctx context.Context, arg dbq.CreateVniParams) (dbq.Vni, error)
-	UpdateVni(ctx context.Context, arg dbq.UpdateVniParams) (dbq.Vni, error)
+	CreateVni(ctx context.Context, arg dbq.CreateVniParams) (dbq.VNI, error)
+	UpdateVni(ctx context.Context, arg dbq.UpdateVniParams) (dbq.VNI, error)
 	DeleteVni(ctx context.Context, id uuid.UUID) error
 	// VTEPs
-	CreateVtep(ctx context.Context, arg dbq.CreateVtepParams) (dbq.Vtep, error)
-	UpdateVtep(ctx context.Context, arg dbq.UpdateVtepParams) (dbq.Vtep, error)
+	CreateVtep(ctx context.Context, arg dbq.CreateVtepParams) (dbq.CreateVtepRow, error)
+	UpdateVtep(ctx context.Context, arg dbq.UpdateVtepParams) (dbq.UpdateVtepRow, error)
 	DeleteVtep(ctx context.Context, id uuid.UUID) error
 	// VTEP/VNI memberships
 	CreateVtepMembership(ctx context.Context, arg dbq.CreateVtepMembershipParams) (dbq.VtepVniMembership, error)
 	DeleteVtepMembership(ctx context.Context, id uuid.UUID) error
 	// DHCP servers
-	CreateDhcpServer(ctx context.Context, arg dbq.CreateDhcpServerParams) (dbq.DhcpServer, error)
-	UpdateDhcpServer(ctx context.Context, arg dbq.UpdateDhcpServerParams) (dbq.DhcpServer, error)
+	CreateDhcpServer(ctx context.Context, arg dbq.CreateDhcpServerParams) (dbq.CreateDhcpServerRow, error)
+	UpdateDhcpServer(ctx context.Context, arg dbq.UpdateDhcpServerParams) (dbq.UpdateDhcpServerRow, error)
 	DeleteDhcpServer(ctx context.Context, id uuid.UUID) error
 	// DHCP bundle endpoint (PR 3 in the bundle work) — projection of
 	// dhcp_servers with base_config + bundle_cache_*; scope + template
 	// reads used to live-render when the cache is empty.
-	GetDhcpServerBundleRow(ctx context.Context, id uuid.UUID) (dbq.DhcpServerBundleRow, error)
-	ListDhcpScopesForBundle(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.DhcpScope, error)
+	GetDhcpServerBundleRow(ctx context.Context, id uuid.UUID) (dbq.GetDhcpServerBundleRowRow, error)
+	ListDhcpScopesForBundle(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.ListDhcpScopesForBundleRow, error)
 	ListDhcpScopeTemplatesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.DhcpScopeTemplate, error)
 
 	// ABAC parent-fabric lookups. Used by mutation handlers to resolve
@@ -150,7 +150,7 @@ type Querier interface {
 	// (bulk) endpoint surfaces.
 	push.BulkQuerier
 	diff.BulkQuerier
-	ListDhcpScopePushHistoryByScope(ctx context.Context, arg dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistoryRow, error)
+	ListDhcpScopePushHistoryByScope(ctx context.Context, arg dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistory, error)
 
 	// DHCP scope-template CRUD (PR 8). GetDhcpScopeTemplate is
 	// distinct from GetDhcpScopeTemplateForPush even though the SELECT
@@ -166,32 +166,32 @@ type Querier interface {
 
 	// DHCP drift-summary endpoint (PR 9). Three narrow projections
 	// the fleet aggregator consumes.
-	ListDhcpServersForDriftSummary(ctx context.Context, scopeFabricIds []uuid.UUID) ([]dbq.DhcpServerDriftSummaryRow, error)
-	ListDhcpScopeDriftStatusByServers(ctx context.Context, serverIDs []uuid.UUID) ([]dbq.DhcpScopeDriftStatusRow, error)
+	ListDhcpServersForDriftSummary(ctx context.Context, scopeFabricIds []uuid.UUID) ([]dbq.ListDhcpServersForDriftSummaryRow, error)
+	ListDhcpScopeDriftStatusByServers(ctx context.Context, serverIDs []uuid.UUID) ([]dbq.ListDhcpScopeDriftStatusByServersRow, error)
 	ListFiringDhcpDriftAlertKeys(ctx context.Context) ([]string, error)
 
 	// DHCP scope read surface (PR 10). LIST per server with filters,
 	// GET by id (returns tombstones too — wire shape carries
 	// deleted_at).
-	ListDhcpScopesByServer(ctx context.Context, arg dbq.ListDhcpScopesByServerParams) ([]dbq.DhcpScope, error)
+	ListDhcpScopesByServer(ctx context.Context, arg dbq.ListDhcpScopesByServerParams) ([]dbq.ListDhcpScopesByServerRow, error)
 	CountDhcpScopesByServer(ctx context.Context, arg dbq.CountDhcpScopesByServerParams) (int64, error)
-	GetDhcpScope(ctx context.Context, id uuid.UUID) (dbq.DhcpScope, error)
+	GetDhcpScope(ctx context.Context, id uuid.UUID) (dbq.GetDhcpScopeRow, error)
 
 	// DHCP scope mutation surface (PR 11). CREATE / partial UPDATE /
 	// SOFT_DELETE / RESTORE. DELETE also calls push.DeleteScopeFromKea
 	// (already in the push.Querier embed above) for best-effort Kea
 	// cleanup before tombstoning.
-	CreateDhcpScope(ctx context.Context, arg dbq.CreateDhcpScopeParams) (dbq.DhcpScope, error)
-	UpdateDhcpScope(ctx context.Context, arg dbq.UpdateDhcpScopeParams) (dbq.DhcpScope, error)
+	CreateDhcpScope(ctx context.Context, arg dbq.CreateDhcpScopeParams) (dbq.CreateDhcpScopeRow, error)
+	UpdateDhcpScope(ctx context.Context, arg dbq.UpdateDhcpScopeParams) (dbq.UpdateDhcpScopeRow, error)
 	SoftDeleteDhcpScope(ctx context.Context, id uuid.UUID) error
-	RestoreDhcpScope(ctx context.Context, id uuid.UUID) (dbq.DhcpScope, error)
+	RestoreDhcpScope(ctx context.Context, id uuid.UUID) (dbq.RestoreDhcpScopeRow, error)
 
 	// DHCP reservation ↔ IPAM reconciliation (PR 12). Narrow
 	// projection that includes dhcp_duid (PR 94 in Python; not in
 	// the standard IPAddress projection). The aggregator in
 	// internal/dhcp/reconcile classifies each reservation against
 	// these rows.
-	ListIPAddressesInSubnetForReconcile(ctx context.Context, subnetID uuid.UUID) ([]dbq.DhcpReconcileIPRow, error)
+	ListIPAddressesInSubnetForReconcile(ctx context.Context, subnetID uuid.UUID) ([]dbq.ListIPAddressesInSubnetForReconcileRow, error)
 
 	// DHCP reconcile sync (PR 13). INSERT for unbacked reservations,
 	// UPDATE for source=dhcp → source=reservation promotions. The
@@ -206,7 +206,7 @@ type Querier interface {
 	// (the orchestrator wants the auth pair, which the standard
 	// DhcpServer projection omits).
 	leasesync.Querier
-	ListEnabledDhcpServersForLeaseSync(ctx context.Context) ([]dbq.DhcpServerForLeaseSyncRow, error)
+	ListEnabledDhcpServersForLeaseSync(ctx context.Context) ([]dbq.ListEnabledDhcpServersForLeaseSyncRow, error)
 }
 
 type Handler struct {
@@ -428,14 +428,14 @@ func (h *Handler) Mount(r chi.Router) {
 	})
 }
 
-type vrfBgpPeersPage = httpx.Page[dbq.VrfBgpPeer]
+type vrfBgpPeersPage = httpx.Page[dbq.ListVrfBgpPeersRow]
 
 func (h *Handler) listVrfBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vrf-bgp-peers:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.VrfBgpPeer](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListVrfBgpPeersRow](limit, offset))
 		return
 	}
 	params := dbq.ListVrfBgpPeersParams{
@@ -535,14 +535,14 @@ func (h *Handler) getVrf(w http.ResponseWriter, r *http.Request) {
 
 // ---- Subnets ----
 
-type subnetsPage = httpx.Page[dbq.Subnet]
+type subnetsPage = httpx.Page[dbq.ListSubnetsRow]
 
 func (h *Handler) listSubnets(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:subnets:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Subnet](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListSubnetsRow](limit, offset))
 		return
 	}
 	params := dbq.ListSubnetsParams{Limit: limit, Offset: offset, Purpose: strPtr(q.Get("purpose")), ScopeFabricIds: scopeIds}
@@ -602,14 +602,14 @@ func (h *Handler) getSubnet(w http.ResponseWriter, r *http.Request) {
 
 // ---- IP Addresses ----
 
-type addressesPage = httpx.Page[dbq.IPAddress]
+type addressesPage = httpx.Page[dbq.ListIPAddressesRow]
 
 func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:addresses:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.IPAddress](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListIPAddressesRow](limit, offset))
 		return
 	}
 	params := dbq.ListIPAddressesParams{
@@ -720,7 +720,7 @@ func (h *Handler) getFabric(w http.ResponseWriter, r *http.Request) {
 
 // ---- Supernets ----
 
-type supernetsPage = httpx.Page[dbq.Supernet]
+type supernetsPage = httpx.Page[dbq.ListSupernetsRow]
 
 // parentFilter computes the (mode, id) pair the SQL CASE expects.
 // Python semantics:
@@ -758,7 +758,7 @@ func (h *Handler) listSupernets(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeIds, ok := scopedListFilter(r, "ipam:supernets:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Supernet](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListSupernetsRow](limit, offset))
 		return
 	}
 	params := dbq.ListSupernetsParams{
@@ -858,14 +858,14 @@ func (h *Handler) listOverlays(w http.ResponseWriter, r *http.Request) {
 
 // ---- VNIs ----
 
-type vnisPage = httpx.Page[dbq.Vni]
+type vnisPage = httpx.Page[dbq.VNI]
 
 func (h *Handler) listVnis(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vnis:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Vni](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.VNI](limit, offset))
 		return
 	}
 	params := dbq.ListVnisParams{Limit: limit, Offset: offset, Kind: strPtr(q.Get("kind")), ScopeFabricIds: scopeIds}
@@ -905,14 +905,14 @@ func (h *Handler) listVnis(w http.ResponseWriter, r *http.Request) {
 
 // ---- VTEPs ----
 
-type vtepsPage = httpx.Page[dbq.Vtep]
+type vtepsPage = httpx.Page[dbq.ListVtepsRow]
 
 func (h *Handler) listVteps(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:vteps:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Vtep](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListVtepsRow](limit, offset))
 		return
 	}
 	params := dbq.ListVtepsParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}
@@ -997,14 +997,14 @@ func (h *Handler) listVtepMemberships(w http.ResponseWriter, r *http.Request) {
 
 // ---- DHCP servers ----
 
-type dhcpServersPage = httpx.Page[dbq.DhcpServer]
+type dhcpServersPage = httpx.Page[dbq.ListDhcpServersRow]
 
 func (h *Handler) listDhcpServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "ipam:dhcp-servers:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DhcpServer](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListDhcpServersRow](limit, offset))
 		return
 	}
 	params := dbq.ListDhcpServersParams{Limit: limit, Offset: offset, ScopeFabricIds: scopeIds}

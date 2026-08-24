@@ -48,8 +48,8 @@ import (
 // satisfies it; the HTTP handler in a follow-up PR composes this
 // with the larger ipam.Querier via embedding.
 type Querier interface {
-	GetDhcpScopeForPush(ctx context.Context, id uuid.UUID) (dbq.DhcpScopeForPushRow, error)
-	GetDhcpServerForPush(ctx context.Context, id uuid.UUID) (dbq.DhcpServerForPushRow, error)
+	GetDhcpScopeForPush(ctx context.Context, id uuid.UUID) (dbq.GetDhcpScopeForPushRow, error)
+	GetDhcpServerForPush(ctx context.Context, id uuid.UUID) (dbq.GetDhcpServerForPushRow, error)
 	GetDhcpScopeTemplateForPush(ctx context.Context, id uuid.UUID) (dbq.DhcpScopeTemplate, error)
 	ListKeaSubnetIDsForServer(ctx context.Context, dhcpServerID uuid.UUID) ([]int32, error)
 	UpdateDhcpScopeKeaSubnetID(ctx context.Context, arg dbq.UpdateDhcpScopeKeaSubnetIDParams) error
@@ -77,12 +77,12 @@ type KeaClient interface {
 // pattern (rather than a single *kea.Client passed in) means each
 // PushScope call gets a client configured for the right server
 // without the orchestrator caring about credential storage.
-type KeaClientBuilder func(server dbq.DhcpServerForPushRow) KeaClient
+type KeaClientBuilder func(server dbq.GetDhcpServerForPushRow) KeaClient
 
 // DefaultKeaClientBuilder wires production *kea.Client instances.
 // The HTTP handler passes this in; tests pass a stub builder that
 // returns a fake.
-func DefaultKeaClientBuilder(server dbq.DhcpServerForPushRow) KeaClient {
+func DefaultKeaClientBuilder(server dbq.GetDhcpServerForPushRow) KeaClient {
 	user, pass := "", ""
 	if server.AuthUsername != nil {
 		user = *server.AuthUsername
@@ -122,14 +122,14 @@ var ErrServerDisabled = errors.New("dhcp server disabled; refusing to push")
 // errResult, fatalErr): ok=false means a Result has been prepared
 // and the caller should return it; fatalErr is non-nil only for
 // unexpected internal failures (DB unreachable).
-func loadScopeForPush(ctx context.Context, q Querier, scopeID uuid.UUID) (dbq.DhcpScopeForPushRow, bool, Result, error) {
+func loadScopeForPush(ctx context.Context, q Querier, scopeID uuid.UUID) (dbq.GetDhcpScopeForPushRow, bool, Result, error) {
 	scope, err := q.GetDhcpScopeForPush(ctx, scopeID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return dbq.DhcpScopeForPushRow{}, false,
+			return dbq.GetDhcpScopeForPushRow{}, false,
 				Result{ScopeID: scopeID, Status: kea.StatusError, Error: "scope not found"}, nil
 		}
-		return dbq.DhcpScopeForPushRow{}, false, Result{}, fmt.Errorf("load scope: %w", err)
+		return dbq.GetDhcpScopeForPushRow{}, false, Result{}, fmt.Errorf("load scope: %w", err)
 	}
 	return scope, true, Result{}, nil
 }
@@ -142,14 +142,14 @@ func loadScopeForPush(ctx context.Context, q Querier, scopeID uuid.UUID) (dbq.Dh
 func loadEnabledServerForPush(
 	ctx context.Context, q Querier, scopeID uuid.UUID,
 	serverID uuid.UUID, scopeKeaID *int32,
-) (dbq.DhcpServerForPushRow, bool, Result, error) {
+) (dbq.GetDhcpServerForPushRow, bool, Result, error) {
 	server, err := q.GetDhcpServerForPush(ctx, serverID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return dbq.DhcpServerForPushRow{}, false,
+			return dbq.GetDhcpServerForPushRow{}, false,
 				Result{ScopeID: scopeID, Status: kea.StatusError, Error: "parent dhcp server not found"}, nil
 		}
-		return dbq.DhcpServerForPushRow{}, false, Result{}, fmt.Errorf("load server: %w", err)
+		return dbq.GetDhcpServerForPushRow{}, false, Result{}, fmt.Errorf("load server: %w", err)
 	}
 	if !server.Enabled {
 		return server, false,
@@ -251,7 +251,7 @@ func PushScope(ctx context.Context, q Querier, build KeaClientBuilder, scopeID u
 // claimKeaSubnetID allocates and writes the new kea_subnet_id on a
 // first-push scope. Split out of PushScope to keep the orchestrator
 // linear and the cognitive complexity under sonar's 15 ceiling.
-func claimKeaSubnetID(ctx context.Context, q Querier, scope *dbq.DhcpScopeForPushRow, serverID uuid.UUID) error {
+func claimKeaSubnetID(ctx context.Context, q Querier, scope *dbq.GetDhcpScopeForPushRow, serverID uuid.UUID) error {
 	allocated, err := AllocateKeaSubnetID(ctx, q, serverID)
 	if err != nil {
 		return fmt.Errorf("allocate kea_subnet_id: %w", err)
@@ -291,7 +291,7 @@ func loadTemplate(ctx context.Context, q Querier, templateID *uuid.UUID) (*dbq.D
 // straight from kea.InterpretResponse.
 func callKea(
 	ctx context.Context, client KeaClient,
-	scope dbq.DhcpScopeForPushRow, tpl *dbq.DhcpScopeTemplate, isUpdate bool,
+	scope dbq.GetDhcpScopeForPushRow, tpl *dbq.DhcpScopeTemplate, isUpdate bool,
 ) ([]byte, kea.Status, string) {
 	bundleScope := bundle.FromDbqScopeForPush(scope)
 	var bundleTpl *bundle.Template
@@ -350,13 +350,13 @@ func dispatchKeaCall(
 // + _record_push_history called in series.
 func recordOutcome(
 	ctx context.Context, q Querier,
-	scope dbq.DhcpScopeForPushRow, server dbq.DhcpServerForPushRow,
+	scope dbq.GetDhcpScopeForPushRow, server dbq.GetDhcpServerForPushRow,
 	operation string, status kea.Status, errStr string, durationMs int32,
 ) error {
 	statusStr := string(status)
 	errPtr := maybeErrorPtr(errStr)
 	if err := q.UpdateDhcpServerLastPush(ctx, dbq.UpdateDhcpServerLastPushParams{
-		ID: server.ID, LastPushStatus: statusStr, LastPushError: errPtr,
+		ID: server.ID, LastPushStatus: &statusStr, LastPushError: errPtr,
 	}); err != nil {
 		return err
 	}

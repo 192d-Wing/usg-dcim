@@ -64,9 +64,9 @@ type Querier interface {
 	CountAllocationsForPool(ctx context.Context, poolID uuid.UUID) (int64, error)
 
 	// Pool ↔ supernet linkage
-	ListPoolSourceSupernets(ctx context.Context, arg dbq.ListPoolSourceSupernetsParams) ([]dbq.PoolSourceSupernetRow, error)
+	ListPoolSourceSupernets(ctx context.Context, arg dbq.ListPoolSourceSupernetsParams) ([]dbq.ListPoolSourceSupernetsRow, error)
 	CountPoolSourceSupernets(ctx context.Context, poolID uuid.UUID) (int64, error)
-	GetSupernetForLirAttach(ctx context.Context, id uuid.UUID) (dbq.SupernetLirAttachRow, error)
+	GetSupernetForLirAttach(ctx context.Context, id uuid.UUID) (dbq.GetSupernetForLirAttachRow, error)
 	AttachSupernetToPool(ctx context.Context, arg dbq.AttachSupernetToPoolParams) error
 	DetachSupernetFromPool(ctx context.Context, arg dbq.DetachSupernetFromPoolParams) error
 	DetachAllPoolSupernets(ctx context.Context, poolID uuid.UUID) error
@@ -80,13 +80,13 @@ type Querier interface {
 	CancelLirRequest(ctx context.Context, arg dbq.CancelLirRequestParams) (dbq.LirRequest, error)
 
 	// Allocation engine (approve / reject + reads)
-	GetLandingFabric(ctx context.Context, slug string) (dbq.LandingFabricRow, error)
-	ListPoolSupernetsForCarve(ctx context.Context, poolID uuid.UUID) ([]dbq.PoolSupernetForCarveRow, error)
-	ListAllocatedPrefixesInPool(ctx context.Context, poolID uuid.UUID) ([]dbq.AllocatedPrefixRow, error)
-	ApproveLirRequest(ctx context.Context, arg dbq.ApproveLirRequestParams) (dbq.ApprovalResultRow, error)
+	GetLandingFabric(ctx context.Context, slug string) (dbq.GetLandingFabricRow, error)
+	ListPoolSupernetsForCarve(ctx context.Context, poolID uuid.UUID) ([]dbq.ListPoolSupernetsForCarveRow, error)
+	ListAllocatedPrefixesInPool(ctx context.Context, poolID uuid.UUID) ([]dbq.ListAllocatedPrefixesInPoolRow, error)
+	ApproveLirRequest(ctx context.Context, arg dbq.ApproveLirRequestParams) (dbq.ApproveLirRequestRow, error)
 	RejectLirRequest(ctx context.Context, arg dbq.RejectLirRequestParams) (dbq.LirRequest, error)
-	GetLirAllocation(ctx context.Context, id uuid.UUID) (dbq.LirAllocation, error)
-	ListLirAllocations(ctx context.Context, arg dbq.ListLirAllocationsParams) ([]dbq.LirAllocation, error)
+	GetLirAllocation(ctx context.Context, id uuid.UUID) (dbq.GetLirAllocationRow, error)
+	ListLirAllocations(ctx context.Context, arg dbq.ListLirAllocationsParams) ([]dbq.ListLirAllocationsRow, error)
 	CountLirAllocations(ctx context.Context, arg dbq.CountLirAllocationsParams) (int64, error)
 
 	// ARIN manual retry (worker-side claim/mark methods live on
@@ -94,8 +94,8 @@ type Querier interface {
 	ResetArinJobForRetry(ctx context.Context, id uuid.UUID) error
 
 	// Return lifecycle
-	RequestReturnLirAllocation(ctx context.Context, arg dbq.RequestReturnLirAllocationParams) (dbq.LirAllocation, error)
-	ConfirmReturnLirAllocation(ctx context.Context, arg dbq.ConfirmReturnLirAllocationParams) (dbq.LirAllocation, error)
+	RequestReturnLirAllocation(ctx context.Context, arg dbq.RequestReturnLirAllocationParams) (dbq.RequestReturnLirAllocationRow, error)
+	ConfirmReturnLirAllocation(ctx context.Context, arg dbq.ConfirmReturnLirAllocationParams) (dbq.ConfirmReturnLirAllocationRow, error)
 }
 
 type Handler struct {

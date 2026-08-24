@@ -2,26 +2,21 @@
 -- name: AckAlert :one
 UPDATE alerts
 SET state = 'acked'::alert_state,
-    acked_by = $2,
+    acked_by = sqlc.arg(acked_by)::text,
     acked_at = NOW(),
     updated_at = NOW()
-WHERE id = $1
-RETURNING id, rule_id, site_id, asset_id, collector_id, severity, state::text AS state,
-          dedupe_key, correlation_key, summary, detail,
-          first_seen_at, last_seen_at, acked_by, acked_at, resolved_at,
-          labels_json, created_at, updated_at;
+WHERE id = sqlc.arg(id)
+RETURNING *;
 
 -- ===== Alert rules =====
 -- name: CreateAlertRule :one
 INSERT INTO alert_rules (id, name, description, metric, operator, threshold,
                          duration_seconds, severity, site_scope_id, asset_filter_json,
                          enabled, runbook_url, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5,
-        $6, $7, $8, COALESCE($9::jsonb, '{}'::jsonb),
-        $10, $11, NOW(), NOW())
-RETURNING id, name, description, metric, operator, threshold,
-          duration_seconds, severity, site_scope_id, asset_filter_json,
-          enabled, runbook_url, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(description), sqlc.arg(metric), sqlc.arg(operator), sqlc.arg(threshold),
+        sqlc.arg(duration_seconds), sqlc.arg(severity), sqlc.arg(site_scope_id), COALESCE(sqlc.narg(asset_filter_json)::jsonb, '{}'::jsonb),
+        sqlc.arg(enabled), sqlc.arg(runbook_url), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateAlertRule :one
 UPDATE alert_rules
@@ -42,9 +37,7 @@ SET name             = COALESCE(sqlc.narg(name)::text, name),
     runbook_url      = CASE WHEN sqlc.arg(runbook_set)::bool    THEN sqlc.narg(runbook_url)::text     ELSE runbook_url END,
     updated_at       = NOW()
 WHERE id = $1
-RETURNING id, name, description, metric, operator, threshold,
-          duration_seconds, severity, site_scope_id, asset_filter_json,
-          enabled, runbook_url, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteAlertRule :exec
 DELETE FROM alert_rules WHERE id = $1;
@@ -54,10 +47,9 @@ DELETE FROM alert_rules WHERE id = $1;
 INSERT INTO maintenance_windows (id, name, site_id, asset_filter_json,
                                  starts_at, ends_at, created_by, reason,
                                  created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, COALESCE($3::jsonb, '{}'::jsonb),
-        $4, $5, $6, $7, NOW(), NOW())
-RETURNING id, name, site_id, asset_filter_json,
-          starts_at, ends_at, created_by, reason, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(site_id), COALESCE(sqlc.narg(asset_filter_json)::jsonb, '{}'::jsonb),
+        sqlc.arg(starts_at), sqlc.arg(ends_at), sqlc.arg(created_by), sqlc.arg(reason), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateMaintenanceWindow :one
 UPDATE maintenance_windows
@@ -71,8 +63,7 @@ SET name              = COALESCE(sqlc.narg(name)::text, name),
     reason            = CASE WHEN sqlc.arg(reason_set)::bool THEN sqlc.narg(reason)::text     ELSE reason END,
     updated_at        = NOW()
 WHERE id = $1
-RETURNING id, name, site_id, asset_filter_json,
-          starts_at, ends_at, created_by, reason, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteMaintenanceWindow :exec
 DELETE FROM maintenance_windows WHERE id = $1;
@@ -82,10 +73,9 @@ DELETE FROM maintenance_windows WHERE id = $1;
 INSERT INTO notification_channels (id, name, kind, config_json, min_severity,
                                    notify_on_fire, notify_on_resolve, enabled,
                                    created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, COALESCE($3::jsonb, '{}'::jsonb), $4,
-        $5, $6, $7, NOW(), NOW())
-RETURNING id, name, kind, config_json, min_severity,
-          notify_on_fire, notify_on_resolve, enabled, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(kind), COALESCE(sqlc.narg(config_json)::jsonb, '{}'::jsonb), sqlc.arg(min_severity),
+        sqlc.arg(notify_on_fire), sqlc.arg(notify_on_resolve), sqlc.arg(enabled), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateNotificationChannel :one
 UPDATE notification_channels
@@ -98,8 +88,7 @@ SET name              = COALESCE(sqlc.narg(name)::text, name),
     enabled           = COALESCE(sqlc.narg(enabled)::bool, enabled),
     updated_at        = NOW()
 WHERE id = $1
-RETURNING id, name, kind, config_json, min_severity,
-          notify_on_fire, notify_on_resolve, enabled, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteNotificationChannel :exec
 DELETE FROM notification_channels WHERE id = $1;
@@ -115,7 +104,7 @@ FROM power_connections WHERE outlet_id = $1;
 
 -- name: CreatePowerConnection :one
 INSERT INTO power_connections (id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::numeric, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(outlet_id), sqlc.arg(asset_id), sqlc.arg(psu_index), sqlc.arg(cord_color), sqlc.narg(cord_length_m)::numeric, NOW(), NOW())
 RETURNING id, outlet_id, asset_id, psu_index, cord_color, cord_length_m, created_at, updated_at;
 
 -- name: DeleteOutletConnection :exec

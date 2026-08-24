@@ -16,13 +16,13 @@ import (
 type placementFakeQ struct {
 	fakeQ
 	uHeight int32
-	placed  []dbq.RackPlacementRow
+	placed  []dbq.ListRackAssetsForPlacementRow
 }
 
 func (p *placementFakeQ) GetRack(_ context.Context, id uuid.UUID) (dbq.Rack, error) {
 	return dbq.Rack{ID: id, UHeight: p.uHeight}, nil
 }
-func (p *placementFakeQ) ListRackAssetsForPlacement(_ context.Context, _ dbq.ListRackAssetsForPlacementParams) ([]dbq.RackPlacementRow, error) {
+func (p *placementFakeQ) ListRackAssetsForPlacement(_ context.Context, _ dbq.ListRackAssetsForPlacementParams) ([]dbq.ListRackAssetsForPlacementRow, error) {
 	return p.placed, nil
 }
 
@@ -47,7 +47,7 @@ func TestUGridFit_Underflow(t *testing.T) {
 func TestUGridFit_NoCollisionOK(t *testing.T) {
 	h := &Handler{Q: &placementFakeQ{
 		uHeight: 42,
-		placed: []dbq.RackPlacementRow{
+		placed: []dbq.ListRackAssetsForPlacementRow{
 			{ID: uuid.New(), Name: "occupies-u10-12", RackPositionU: u(10), RackUnits: u(3)},
 		},
 	}}
@@ -60,7 +60,7 @@ func TestUGridFit_NoCollisionOK(t *testing.T) {
 func TestUGridFit_Collides(t *testing.T) {
 	h := &Handler{Q: &placementFakeQ{
 		uHeight: 42,
-		placed: []dbq.RackPlacementRow{
+		placed: []dbq.ListRackAssetsForPlacementRow{
 			{ID: uuid.New(), Name: "router-A", RackPositionU: u(10), RackUnits: u(3)},
 		},
 	}}

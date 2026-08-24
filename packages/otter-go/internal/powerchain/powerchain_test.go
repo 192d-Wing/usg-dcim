@@ -72,18 +72,18 @@ func TestClassifyRedundancy_NilSideFiltered(t *testing.T) {
 // ---- Compute ----
 
 type fakeQ struct {
-	outlets []dbq.OutletForPowerChainRow
+	outlets []dbq.ListOutletsByPduIDsRow
 	conns   []dbq.PowerConnection
 	gotPdus []uuid.UUID
 }
 
-func (f *fakeQ) ListOutletsByPduIDs(_ context.Context, ids []uuid.UUID) ([]dbq.OutletForPowerChainRow, error) {
+func (f *fakeQ) ListOutletsByPduIDs(_ context.Context, ids []uuid.UUID) ([]dbq.ListOutletsByPduIDsRow, error) {
 	f.gotPdus = ids
 	want := make(map[uuid.UUID]struct{}, len(ids))
 	for _, id := range ids {
 		want[id] = struct{}{}
 	}
-	var out []dbq.OutletForPowerChainRow
+	var out []dbq.ListOutletsByPduIDsRow
 	for _, o := range f.outlets {
 		if _, ok := want[o.PduAssetID]; ok {
 			out = append(out, o)
@@ -130,7 +130,7 @@ func TestCompute_PduWithRedundantServer(t *testing.T) {
 		{ID: server, Name: "srv-1", Kind: "server", Mount: "rack-front", Face: "front"},
 	}
 	f := &fakeQ{
-		outlets: []dbq.OutletForPowerChainRow{
+		outlets: []dbq.ListOutletsByPduIDsRow{
 			{ID: o1, PduAssetID: pduA, Position: 1},
 			{ID: o2, PduAssetID: pduB, Position: 1},
 		},
@@ -182,7 +182,7 @@ func TestCompute_UnpoweredServer(t *testing.T) {
 		{ID: server, Name: "s", Kind: "server"},
 	}
 	res, _ := Compute(context.Background(), &fakeQ{
-		outlets: []dbq.OutletForPowerChainRow{{ID: uuid.New(), PduAssetID: pdu, Position: 1}},
+		outlets: []dbq.ListOutletsByPduIDsRow{{ID: uuid.New(), PduAssetID: pdu, Position: 1}},
 	}, assets)
 	srv := res.PerAsset[server.String()]
 	if srv.Redundancy != "unpowered" {
@@ -203,7 +203,7 @@ func TestCompute_OneSideOnlyIsSingle(t *testing.T) {
 		{ID: server, Name: "s", Kind: "server"},
 	}
 	res, _ := Compute(context.Background(), &fakeQ{
-		outlets: []dbq.OutletForPowerChainRow{{ID: outletID, PduAssetID: pdu, Position: 1}},
+		outlets: []dbq.ListOutletsByPduIDsRow{{ID: outletID, PduAssetID: pdu, Position: 1}},
 		conns:   []dbq.PowerConnection{{OutletID: outletID, AssetID: server, PsuIndex: 0}},
 	}, assets)
 	srv := res.PerAsset[server.String()]

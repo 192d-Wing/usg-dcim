@@ -22,11 +22,11 @@ type fakeRdQ struct {
 	rack         dbq.Rack
 	rackErr      error
 	assets       []dbq.Asset
-	openAlerts   []dbq.AssetOpenAlertsRow
-	freshness    []dbq.AssetFreshnessRow
-	outlets      []dbq.OutletForPowerChainRow
+	openAlerts   []dbq.ListOpenAlertsByAssetIDsRow
+	freshness    []dbq.ListAssetFreshnessByIDsRow
+	outlets      []dbq.ListOutletsByPduIDsRow
 	connections  []dbq.PowerConnection
-	pduTelemetry []dbq.PduKwTelemetryRow
+	pduTelemetry []dbq.ListPduKwTelemetryRow
 }
 
 func (f *fakeRdQ) GetRack(_ context.Context, _ uuid.UUID) (dbq.Rack, error) {
@@ -35,18 +35,18 @@ func (f *fakeRdQ) GetRack(_ context.Context, _ uuid.UUID) (dbq.Rack, error) {
 func (f *fakeRdQ) ListAssetsByRackOrdered(_ context.Context, _ uuid.UUID) ([]dbq.Asset, error) {
 	return f.assets, nil
 }
-func (f *fakeRdQ) ListOpenAlertsByAssetIDs(_ context.Context, _ []uuid.UUID) ([]dbq.AssetOpenAlertsRow, error) {
+func (f *fakeRdQ) ListOpenAlertsByAssetIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListOpenAlertsByAssetIDsRow, error) {
 	return f.openAlerts, nil
 }
-func (f *fakeRdQ) ListAssetFreshnessByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.AssetFreshnessRow, error) {
+func (f *fakeRdQ) ListAssetFreshnessByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListAssetFreshnessByIDsRow, error) {
 	return f.freshness, nil
 }
-func (f *fakeRdQ) ListOutletsByPduIDs(_ context.Context, ids []uuid.UUID) ([]dbq.OutletForPowerChainRow, error) {
+func (f *fakeRdQ) ListOutletsByPduIDs(_ context.Context, ids []uuid.UUID) ([]dbq.ListOutletsByPduIDsRow, error) {
 	want := make(map[uuid.UUID]struct{}, len(ids))
 	for _, id := range ids {
 		want[id] = struct{}{}
 	}
-	var out []dbq.OutletForPowerChainRow
+	var out []dbq.ListOutletsByPduIDsRow
 	for _, o := range f.outlets {
 		if _, ok := want[o.PduAssetID]; ok {
 			out = append(out, o)
@@ -67,7 +67,7 @@ func (f *fakeRdQ) ListPowerConnectionsByOutletIDs(_ context.Context, ids []uuid.
 	}
 	return out, nil
 }
-func (f *fakeRdQ) ListPduKwTelemetry(_ context.Context, _ []uuid.UUID) ([]dbq.PduKwTelemetryRow, error) {
+func (f *fakeRdQ) ListPduKwTelemetry(_ context.Context, _ []uuid.UUID) ([]dbq.ListPduKwTelemetryRow, error) {
 	return f.pduTelemetry, nil
 }
 
@@ -121,11 +121,11 @@ func TestRackDetail_HappyPath(t *testing.T) {
 			{ID: pduBID, RackID: &rkid, Kind: "pdu", Name: "pdu-b",
 				PduSide: &sideB, Face: "rear", Mount: "rack-side", LifecycleState: "active"},
 		},
-		openAlerts: []dbq.AssetOpenAlertsRow{{AssetID: srvID, N: 3}},
-		freshness: []dbq.AssetFreshnessRow{
+		openAlerts: []dbq.ListOpenAlertsByAssetIDsRow{{AssetID: &srvID, N: 3}},
+		freshness: []dbq.ListAssetFreshnessByIDsRow{
 			{AssetID: srvID, Freshness: "current", N: 5},
 		},
-		outlets: []dbq.OutletForPowerChainRow{
+		outlets: []dbq.ListOutletsByPduIDsRow{
 			{ID: outletA, PduAssetID: pduAID, Position: 1},
 			{ID: outletB, PduAssetID: pduBID, Position: 1},
 		},

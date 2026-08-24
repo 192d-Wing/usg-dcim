@@ -21,7 +21,7 @@ import (
 // Python's render_kea_bundle emits at services/dhcp_bundle.py:175
 // (`str(server.id)`) so the wire shape stays byte-identical across
 // the language port.
-func FromDbqServer(s dbq.DhcpServerBundleRow) Server {
+func FromDbqServer(s dbq.GetDhcpServerBundleRowRow) Server {
 	return Server{
 		ID:         s.ID.String(),
 		BaseConfig: s.BaseConfig,
@@ -33,7 +33,7 @@ func FromDbqServer(s dbq.DhcpServerBundleRow) Server {
 // renderer's "skip key if nil" branches in RenderKeaSubnet4/V6).
 // The bool Enabled column is non-nullable in Postgres but propagated
 // here as a value because the renderer's partition step filters on it.
-func FromDbqScope(s dbq.DhcpScope) Scope {
+func FromDbqScope(s dbq.ListDhcpScopesForBundleRow) Scope {
 	return Scope{
 		ID:                       s.ID.String(),
 		DhcpServerID:             s.DhcpServerID.String(),
@@ -100,11 +100,11 @@ func uuidPtrToStringPtr(v *uuid.UUID) *string {
 // DhcpScopeForPushRow projection (PR 2 of DHCP push) directly to the
 // renderer's Scope input. push.PushScope and diff.DiffScope both
 // load this row shape; sharing the conversion here keeps each
-// orchestrator from carrying its own DhcpScopeForPushRow → dbq.DhcpScope
-// shim. The full dbq.DhcpScope path is still used by the bundle
-// endpoint, which reads more columns than push needs.
-func FromDbqScopeForPush(s dbq.DhcpScopeForPushRow) Scope {
-	return FromDbqScope(dbq.DhcpScope{
+// orchestrator from carrying its own shim onto the bundle row shape.
+// The full bundle row path is still used by the bundle endpoint,
+// which reads more columns than push needs.
+func FromDbqScopeForPush(s dbq.GetDhcpScopeForPushRow) Scope {
+	return FromDbqScope(dbq.ListDhcpScopesForBundleRow{
 		ID:                       s.ID,
 		DhcpServerID:             s.DhcpServerID,
 		IPFamily:                 s.IPFamily,

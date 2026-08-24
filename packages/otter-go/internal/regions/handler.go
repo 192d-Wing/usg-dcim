@@ -24,7 +24,7 @@ const capRegionsRead = "inventory:regions:read"
 // declared as an interface so tests don't need a live Postgres.
 type Querier interface {
 	ListRegions(ctx context.Context, arg dbq.ListRegionsParams) ([]dbq.Region, error)
-	CountRegions(ctx context.Context, arg dbq.CountRegionsParams) (int64, error)
+	CountRegions(ctx context.Context, regionIds []uuid.UUID) (int64, error)
 	GetRegion(ctx context.Context, id uuid.UUID) (dbq.Region, error)
 	CreateRegion(ctx context.Context, arg dbq.CreateRegionParams) (dbq.Region, error)
 	UpdateRegion(ctx context.Context, arg dbq.UpdateRegionParams) (dbq.Region, error)
@@ -173,7 +173,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountRegions(r.Context(), dbq.CountRegionsParams{RegionIds: regionIDs})
+	total, err := h.Q.CountRegions(r.Context(), regionIDs)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

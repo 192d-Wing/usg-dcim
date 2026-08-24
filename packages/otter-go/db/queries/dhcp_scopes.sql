@@ -5,7 +5,7 @@
 -- so the table doesn't grow unbounded. The Kea-side DELETE already
 -- ran when the user soft-deleted the scope (PR 74) — this only
 -- drops orphaned tombstone rows from Postgres.
--- name: PurgeExpiredDhcpScopeTombstones :exec
+-- name: PurgeExpiredDhcpScopeTombstones :execrows
 DELETE FROM dhcp_scopes
 WHERE deleted_at IS NOT NULL
-  AND deleted_at < $1;
+  AND deleted_at < sqlc.arg(cutoff)::timestamptz;

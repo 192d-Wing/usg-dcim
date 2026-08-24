@@ -38,7 +38,7 @@ func (f *fakeQ) UpdateAsset(_ context.Context, a dbq.UpdateAssetParams) (dbq.Ass
 func (f *fakeQ) SetAssetDecommissioned(_ context.Context, id uuid.UUID) (dbq.Asset, error) {
 	return dbq.Asset{ID: id, LifecycleState: "decommissioned"}, nil
 }
-func (f *fakeQ) FindAssetByManufacturerSerial(_ context.Context, _, _ string) (dbq.Asset, error) {
+func (f *fakeQ) FindAssetByManufacturerSerial(_ context.Context, _ dbq.FindAssetByManufacturerSerialParams) (dbq.Asset, error) {
 	return dbq.Asset{}, pgx.ErrNoRows
 }
 func (f *fakeQ) CountConsumerPowerDrops(_ context.Context, _ uuid.UUID) (int64, error) { return 0, nil }
@@ -51,7 +51,7 @@ func (f *fakeQ) DeletePduPowerConnections(_ context.Context, _ uuid.UUID) error 
 func (f *fakeQ) GetRack(_ context.Context, id uuid.UUID) (dbq.Rack, error) {
 	return dbq.Rack{ID: id, UHeight: 42}, nil
 }
-func (f *fakeQ) ListRackAssetsForPlacement(_ context.Context, _ dbq.ListRackAssetsForPlacementParams) ([]dbq.RackPlacementRow, error) {
+func (f *fakeQ) ListRackAssetsForPlacement(_ context.Context, _ dbq.ListRackAssetsForPlacementParams) ([]dbq.ListRackAssetsForPlacementRow, error) {
 	return nil, nil
 }
 func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {

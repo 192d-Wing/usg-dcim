@@ -29,10 +29,10 @@ type fakeHCResultQ struct {
 	rows      int64
 }
 
-func (f *fakeHCResultQ) SetDnsHealthCheckResult(_ context.Context, id uuid.UUID, status string, e *string) (int64, error) {
-	f.gotID = id
-	f.gotStatus = status
-	f.gotErr = e
+func (f *fakeHCResultQ) SetDnsHealthCheckResult(_ context.Context, a dbq.SetDnsHealthCheckResultParams) (int64, error) {
+	f.gotID = a.ID
+	f.gotStatus = a.Status
+	f.gotErr = a.LastError
 	return f.rows, nil
 }
 func (f *fakeHCResultQ) ListDnsBlocklistPatternsByID(_ context.Context, _ uuid.UUID) ([]string, error) {

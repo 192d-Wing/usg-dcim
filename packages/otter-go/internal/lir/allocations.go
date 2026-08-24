@@ -19,7 +19,7 @@ import (
 const msgAllocationNotFound = "lir allocation not found"
 
 type listAllocationsResponse struct {
-	Items  []dbq.LirAllocation `json:"items"`
+	Items  []dbq.ListLirAllocationsRow `json:"items"`
 	Total  int64               `json:"total"`
 	Limit  int32               `json:"limit"`
 	Offset int32               `json:"offset"`
@@ -36,7 +36,7 @@ func (h *Handler) listAllocations(w http.ResponseWriter, r *http.Request) {
 	orgIDs, scoped := scopedOrgIDs(p, capAllocationsRead)
 	if scoped && len(orgIDs) == 0 {
 		httpx.JSON(w, http.StatusOK, listAllocationsResponse{
-			Items: []dbq.LirAllocation{}, Total: 0, Limit: limit, Offset: offset,
+			Items: []dbq.ListLirAllocationsRow{}, Total: 0, Limit: limit, Offset: offset,
 		})
 		return
 	}
@@ -56,7 +56,7 @@ func (h *Handler) listAllocations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if items == nil {
-		items = []dbq.LirAllocation{}
+		items = []dbq.ListLirAllocationsRow{}
 	}
 	httpx.JSON(w, http.StatusOK, listAllocationsResponse{
 		Items: items, Total: total, Limit: limit, Offset: offset,

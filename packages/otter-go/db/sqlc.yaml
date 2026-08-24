@@ -5,14 +5,18 @@ sql:
     schema:
       # Goose owns the schema after the alembic rip (PR #277). For
       # local regeneration, run the migrate binary against any
-      # Postgres, then pg_dump the schema and refresh schema.sql:
+      # Postgres, then pg_dump the schema and refresh schema.sql
+      # (statement-aware filter drops TimescaleDB continuous-aggregate
+      # artifacts sqlc cannot parse — no query references them):
       #   go run ./cmd/otter-go-migrate -cmd up
-      #   pg_dump -s -O -x -d "$DCIM_POSTGRES_DSN" > db/schema.sql
-      #   cd db && sqlc generate
-      # schema.sql is gitignored — sqlc only validates locally for
-      # now. The CI sqlc-drift job was retired because the original
-      # alembic-dump workflow it depended on never landed; the
-      # Postgres-in-CI replacement is a follow-up.
+      #   pg_dump -s -O -x -n public -d "$DCIM_POSTGRES_DSN" \
+      #     | awk 'BEGIN{buf="";drop=0} { buf = buf $0 "\n";
+      #         if ($0 ~ /_timescaledb_internal|timescaledb\.continuous/) drop=1;
+      #         if ($0 ~ /;[[:space:]]*$/) { if (!drop) printf "%s", buf; buf=""; drop=0 } }
+      #         END { if (!drop) printf "%s", buf }' > db/schema.sql
+      #   cd db && go tool sqlc generate
+      # schema.sql is gitignored; CI regenerates it from a migrated
+      # Postgres service container and fails on generated/ drift.
       - schema.sql
     gen:
       go:
@@ -25,19 +29,885 @@ sql:
         emit_prepared_queries: false
         emit_interface: true
         emit_exact_table_names: false
+        rename:
+          # Initialism-style field names the handler code was written
+          # against (sqlc's defaults are IpFamily/PoolsJson/...).
+          ip_family: IPFamily
+          asset_ids: AssetIDs
+          actor_ip: ActorIP
+          last_diff_delta_json: LastDiffDeltaJSON
+          duration_ms: DurationMS
+          kea_url: KeaURL
+          bundle_cache_json: BundleCacheJSON
+          ts: TS
+          target_ids: TargetIDs
+          mgmt_ip: MgmtIP
+          mgmt_ip_set: MgmtIPSet
+          runbook_url: RunbookURL
+          site_ids: SiteIDs
+          outlet_ids: OutletIDs
+          subnet_ids: SubnetIDs
+          supernet_ids: SupernetIDs
+          mtu: MTU
+          mtu_set: MTUSet
+          udp_port: UDPPort
+          vni: VNI
+          rd: RD
+          rd_set: RDSet
+          rt_set: RTSet
+          loopback_ip: LoopbackIP
+          ttl: TTL
+          ttl_set: TTLSet
+          default_ttl: DefaultTTL
+          hc_set: HCSet
+          ag_set: AGSet
+          ao_set: AOSet
+          target_ip: TargetIP
+          unicast_ip: UnicastIP
+          peer_ip: PeerIP
+          anycast_ipv4: AnycastIPv4
+          anycast_ipv6: AnycastIPv6
+          sink_ipv4: SinkIPv4
+          sink_ipv6: SinkIPv6
+          coredns_version: CoreDNSVersion
+          zone_ids: ZoneIDs
+          server_ids: ServerIDs
+          # BGP tables are bgp_-prefixed in the schema, but the models
+          # were hand-named without the prefix.
+          bgp_asn: Asn
+          bgp_prefix_list: PrefixList
+          bgp_prefix_list_entry: PrefixListEntry
+          bgp_community_list: CommunityList
+          bgp_community_list_entry: CommunityListEntry
+          bgp_route_map: RouteMap
+          bgp_route_map_entry: RouteMapEntry
+          # `limit`/`offset` are reserved words, so queries use
+          # result_limit/result_offset as arg names; the Go fields
+          # keep the original names.
+          result_limit: Limit
+          result_offset: Offset
+          # Hand-written *Set flag abbreviations on route-map /
+          # organization update queries.
+          mpl_set: MPLSet
+          mcl_set: MCLSet
+          asp_set: ASPSet
+          slp_set: SLPSet
+          sc_set: SCSet
+          apoc_phone_set: APocPhoneSet
+          tpoc_phone_set: TPocPhoneSet
+          abpoc_phone_set: AbPocPhoneSet
+          npoc_name_set: NPocNameSet
+          npoc_email_set: NPocEmailSet
+          npoc_phone_set: NPocPhoneSet
+          # start/end are reserved words in SQL, so the query args are
+          # start_ts/end_ts; the Go fields keep the original names.
+          start_ts: Start
+          end_ts: End
+          # Model struct for the ip_addresses table (sqlc singularizes
+          # table names for models; the plural key must NOT be added —
+          # it would also rename nic_reg_hosts.ip_addresses).
+          ip_address: IPAddress
+          pools_json: PoolsJSON
+          pd_pools_json: PdPoolsJSON
+          options_json: OptionsJSON
+          reservations_json: ReservationsJSON
         overrides:
-          - db_type: uuid
+          # Wire conventions predate sqlc: uuid/timestamptz map to
+          # stdlib types, NUMERIC travels as a decimal string, and
+          # network types + enums are plain strings. Every override
+          # needs an explicit nullable twin — overrides bypass
+          # emit_pointers_for_null_types.
+          - db_type: "uuid"
             go_type:
               import: github.com/google/uuid
               type: UUID
-          - db_type: timestamptz
+          - db_type: "uuid"
+            nullable: true
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: "pg_catalog.timestamptz"
             go_type:
               import: time
               type: Time
-          - db_type: date
+          - db_type: "pg_catalog.timestamptz"
+            nullable: true
             go_type:
               import: time
               type: Time
-          - db_type: jsonb
+              pointer: true
+          # Cast expressions and inferred params surface the bare
+          # spelling rather than pg_catalog-qualified.
+          - db_type: "timestamptz"
             go_type:
-              type: "[]byte"
+              import: time
+              type: Time
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: "pg_catalog.date"
+            go_type:
+              import: time
+              type: Time
+          - db_type: "pg_catalog.date"
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: "date"
+            go_type:
+              import: time
+              type: Time
+          - db_type: "date"
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true
+          - db_type: "numeric"
+            go_type:
+              type: string
+          - db_type: "numeric"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "pg_catalog.numeric"
+            go_type:
+              type: string
+          - db_type: "pg_catalog.numeric"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          # json.RawMessage (not []byte): rows are sometimes marshaled
+          # straight into responses, and encoding/json base64-encodes
+          # []byte but embeds RawMessage verbatim. []byte values remain
+          # assignable both ways.
+          - db_type: "jsonb"
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "jsonb"
+            nullable: true
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "pg_catalog.jsonb"
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "pg_catalog.jsonb"
+            nullable: true
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "json"
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "json"
+            nullable: true
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "pg_catalog.json"
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "pg_catalog.json"
+            nullable: true
+            go_type:
+              import: encoding/json
+              type: RawMessage
+          - db_type: "cidr"
+            go_type:
+              type: string
+          - db_type: "cidr"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "inet"
+            go_type:
+              type: string
+          - db_type: "inet"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "macaddr"
+            go_type:
+              type: string
+          - db_type: "macaddr"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          # Nullable inet columns projected as text (host()/CASE
+          # expressions type as interface{} in sqlc's engine); pin the
+          # columns to *string.
+          - column: "subnets.gateway"
+            go_type:
+              type: string
+              pointer: true
+          # DNSSEC private key material must never serialize into a
+          # JSON response — the hand-maintained row tagged it json:"-".
+          - column: "dns_keys.private_pem"
+            go_struct_tag: 'json:"-"'
+          # ip_family is SMALLINT in the schema but int32 throughout
+          # the Go code (Python parity).
+          - column: "dhcp_scopes.ip_family"
+            go_type:
+              type: int32
+          - column: "dhcp_scope_templates.ip_family"
+            go_type:
+              type: int32
+          # Enums: hand code treats every enum column as plain string.
+          # Both qualified and bare spellings are needed: table columns
+          # surface as public.<enum>, cast expressions as <enum>.
+          - db_type: "public.address_family_v4v6"
+            go_type:
+              type: string
+          - db_type: "public.address_family_v4v6"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "address_family_v4v6"
+            go_type:
+              type: string
+          - db_type: "address_family_v4v6"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.alert_severity"
+            go_type:
+              type: string
+          - db_type: "public.alert_severity"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "alert_severity"
+            go_type:
+              type: string
+          - db_type: "alert_severity"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.alert_state"
+            go_type:
+              type: string
+          - db_type: "public.alert_state"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "alert_state"
+            go_type:
+              type: string
+          - db_type: "alert_state"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.anycast_service"
+            go_type:
+              type: string
+          - db_type: "public.anycast_service"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "anycast_service"
+            go_type:
+              type: string
+          - db_type: "anycast_service"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.asset_face"
+            go_type:
+              type: string
+          - db_type: "public.asset_face"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "asset_face"
+            go_type:
+              type: string
+          - db_type: "asset_face"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.asset_kind"
+            go_type:
+              type: string
+          - db_type: "public.asset_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "asset_kind"
+            go_type:
+              type: string
+          - db_type: "asset_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.asset_mount"
+            go_type:
+              type: string
+          - db_type: "public.asset_mount"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "asset_mount"
+            go_type:
+              type: string
+          - db_type: "asset_mount"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.bgp_address_family"
+            go_type:
+              type: string
+          - db_type: "public.bgp_address_family"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "bgp_address_family"
+            go_type:
+              type: string
+          - db_type: "bgp_address_family"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.bgp_asn_kind"
+            go_type:
+              type: string
+          - db_type: "public.bgp_asn_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "bgp_asn_kind"
+            go_type:
+              type: string
+          - db_type: "bgp_asn_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.bgp_community_kind"
+            go_type:
+              type: string
+          - db_type: "public.bgp_community_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "bgp_community_kind"
+            go_type:
+              type: string
+          - db_type: "bgp_community_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.bgp_policy_action"
+            go_type:
+              type: string
+          - db_type: "public.bgp_policy_action"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "bgp_policy_action"
+            go_type:
+              type: string
+          - db_type: "bgp_policy_action"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.channel_kind"
+            go_type:
+              type: string
+          - db_type: "public.channel_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "channel_kind"
+            go_type:
+              type: string
+          - db_type: "channel_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.collector_status"
+            go_type:
+              type: string
+          - db_type: "public.collector_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "collector_status"
+            go_type:
+              type: string
+          - db_type: "collector_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_blocklist_action"
+            go_type:
+              type: string
+          - db_type: "public.dns_blocklist_action"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_blocklist_action"
+            go_type:
+              type: string
+          - db_type: "dns_blocklist_action"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_health_check_protocol"
+            go_type:
+              type: string
+          - db_type: "public.dns_health_check_protocol"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_health_check_protocol"
+            go_type:
+              type: string
+          - db_type: "dns_health_check_protocol"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_health_check_status"
+            go_type:
+              type: string
+          - db_type: "public.dns_health_check_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_health_check_status"
+            go_type:
+              type: string
+          - db_type: "dns_health_check_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_key_algorithm"
+            go_type:
+              type: string
+          - db_type: "public.dns_key_algorithm"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_key_algorithm"
+            go_type:
+              type: string
+          - db_type: "dns_key_algorithm"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_key_role"
+            go_type:
+              type: string
+          - db_type: "public.dns_key_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_key_role"
+            go_type:
+              type: string
+          - db_type: "dns_key_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_record_source"
+            go_type:
+              type: string
+          - db_type: "public.dns_record_source"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_record_source"
+            go_type:
+              type: string
+          - db_type: "dns_record_source"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_record_type"
+            go_type:
+              type: string
+          - db_type: "public.dns_record_type"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_record_type"
+            go_type:
+              type: string
+          - db_type: "dns_record_type"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_server_role"
+            go_type:
+              type: string
+          - db_type: "public.dns_server_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_server_role"
+            go_type:
+              type: string
+          - db_type: "dns_server_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.dns_zone_kind"
+            go_type:
+              type: string
+          - db_type: "public.dns_zone_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "dns_zone_kind"
+            go_type:
+              type: string
+          - db_type: "dns_zone_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.freshness_state"
+            go_type:
+              type: string
+          - db_type: "public.freshness_state"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "freshness_state"
+            go_type:
+              type: string
+          - db_type: "freshness_state"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.ip_role"
+            go_type:
+              type: string
+          - db_type: "public.ip_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "ip_role"
+            go_type:
+              type: string
+          - db_type: "ip_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.ip_source"
+            go_type:
+              type: string
+          - db_type: "public.ip_source"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "ip_source"
+            go_type:
+              type: string
+          - db_type: "ip_source"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.ip_status"
+            go_type:
+              type: string
+          - db_type: "public.ip_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "ip_status"
+            go_type:
+              type: string
+          - db_type: "ip_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.lifecycle_state"
+            go_type:
+              type: string
+          - db_type: "public.lifecycle_state"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "lifecycle_state"
+            go_type:
+              type: string
+          - db_type: "lifecycle_state"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.overlay_kind"
+            go_type:
+              type: string
+          - db_type: "public.overlay_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "overlay_kind"
+            go_type:
+              type: string
+          - db_type: "overlay_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.pdu_side"
+            go_type:
+              type: string
+          - db_type: "public.pdu_side"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "pdu_side"
+            go_type:
+              type: string
+          - db_type: "pdu_side"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.recursive_dns_engine"
+            go_type:
+              type: string
+          - db_type: "public.recursive_dns_engine"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "recursive_dns_engine"
+            go_type:
+              type: string
+          - db_type: "recursive_dns_engine"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.region_deployment_event_level"
+            go_type:
+              type: string
+          - db_type: "public.region_deployment_event_level"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "region_deployment_event_level"
+            go_type:
+              type: string
+          - db_type: "region_deployment_event_level"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.region_deployment_node_role"
+            go_type:
+              type: string
+          - db_type: "public.region_deployment_node_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "region_deployment_node_role"
+            go_type:
+              type: string
+          - db_type: "region_deployment_node_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.region_deployment_node_status"
+            go_type:
+              type: string
+          - db_type: "public.region_deployment_node_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "region_deployment_node_status"
+            go_type:
+              type: string
+          - db_type: "region_deployment_node_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.region_deployment_service_kind"
+            go_type:
+              type: string
+          - db_type: "public.region_deployment_service_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "region_deployment_service_kind"
+            go_type:
+              type: string
+          - db_type: "region_deployment_service_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.region_deployment_service_status"
+            go_type:
+              type: string
+          - db_type: "public.region_deployment_service_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "region_deployment_service_status"
+            go_type:
+              type: string
+          - db_type: "region_deployment_service_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.region_deployment_status"
+            go_type:
+              type: string
+          - db_type: "public.region_deployment_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "region_deployment_status"
+            go_type:
+              type: string
+          - db_type: "region_deployment_status"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.scope_type"
+            go_type:
+              type: string
+          - db_type: "public.scope_type"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "scope_type"
+            go_type:
+              type: string
+          - db_type: "scope_type"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.tcp_ao_algorithm"
+            go_type:
+              type: string
+          - db_type: "public.tcp_ao_algorithm"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "tcp_ao_algorithm"
+            go_type:
+              type: string
+          - db_type: "tcp_ao_algorithm"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.vni_kind"
+            go_type:
+              type: string
+          - db_type: "public.vni_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "vni_kind"
+            go_type:
+              type: string
+          - db_type: "vni_kind"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "public.vtep_role"
+            go_type:
+              type: string
+          - db_type: "public.vtep_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: "vtep_role"
+            go_type:
+              type: string
+          - db_type: "vtep_role"
+            nullable: true
+            go_type:
+              type: string
+              pointer: true

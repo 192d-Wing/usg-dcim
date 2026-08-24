@@ -30,9 +30,9 @@ type fakeQ struct {
 	// PR 3 of DHCP bundle work — fakes for the bundle endpoint.
 	// Tests seed the row + scope/template slices; the fake's
 	// last* captures verify the handler actually called through.
-	bundleServer            dbq.DhcpServerBundleRow
+	bundleServer            dbq.GetDhcpServerBundleRowRow
 	bundleServerErr         error
-	bundleScopes            []dbq.DhcpScope
+	bundleScopes            []dbq.ListDhcpScopesForBundleRow
 	bundleTemplates         []dbq.DhcpScopeTemplate
 	// bundleScopesCalled is a bool flag so cache-hit tests can
 	// assert the scope query was NOT called even when the handler
@@ -51,39 +51,39 @@ func (f *fakeQ) CountVrfs(_ context.Context, _ dbq.CountVrfsParams) (int64, erro
 func (f *fakeQ) GetVrf(_ context.Context, _ uuid.UUID) (dbq.Vrf, error) {
 	return dbq.Vrf{}, pgx.ErrNoRows
 }
-func (f *fakeQ) ListSubnets(_ context.Context, a dbq.ListSubnetsParams) ([]dbq.Subnet, error) {
+func (f *fakeQ) ListSubnets(_ context.Context, a dbq.ListSubnetsParams) ([]dbq.ListSubnetsRow, error) {
 	f.lastSubnet = a
 	return nil, nil
 }
 func (f *fakeQ) CountSubnets(_ context.Context, _ dbq.CountSubnetsParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) GetSubnet(_ context.Context, _ uuid.UUID) (dbq.Subnet, error) {
-	return dbq.Subnet{}, pgx.ErrNoRows
+func (f *fakeQ) GetSubnet(_ context.Context, _ uuid.UUID) (dbq.GetSubnetRow, error) {
+	return dbq.GetSubnetRow{}, pgx.ErrNoRows
 }
-func (f *fakeQ) ListIPAddresses(_ context.Context, a dbq.ListIPAddressesParams) ([]dbq.IPAddress, error) {
+func (f *fakeQ) ListIPAddresses(_ context.Context, a dbq.ListIPAddressesParams) ([]dbq.ListIPAddressesRow, error) {
 	f.lastAddr = a
 	return nil, nil
 }
 func (f *fakeQ) CountIPAddresses(_ context.Context, _ dbq.CountIPAddressesParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) GetIPAddress(_ context.Context, _ uuid.UUID) (dbq.IPAddress, error) {
-	return dbq.IPAddress{}, pgx.ErrNoRows
+func (f *fakeQ) GetIPAddress(_ context.Context, _ uuid.UUID) (dbq.GetIPAddressRow, error) {
+	return dbq.GetIPAddressRow{}, pgx.ErrNoRows
 }
 func (f *fakeQ) ListAddressStringsInSubnet(_ context.Context, _ uuid.UUID) ([]string, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListSubnetsForFreeSpace(_ context.Context, _ dbq.ListSubnetsForFreeSpaceParams) ([]dbq.SubnetForFreeSpaceRow, error) {
+func (f *fakeQ) ListSubnetsForFreeSpace(_ context.Context, _ dbq.ListSubnetsForFreeSpaceParams) ([]dbq.ListSubnetsForFreeSpaceRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListAddressesInSubnets(_ context.Context, _ []uuid.UUID) ([]dbq.AddressInSubnetRow, error) {
+func (f *fakeQ) ListAddressesInSubnets(_ context.Context, _ []uuid.UUID) ([]dbq.ListAddressesInSubnetsRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListSupernetsForCarver(_ context.Context, _ dbq.ListSupernetsForCarverParams) ([]dbq.SupernetForCarverRow, error) {
+func (f *fakeQ) ListSupernetsForCarver(_ context.Context, _ dbq.ListSupernetsForCarverParams) ([]dbq.ListSupernetsForCarverRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListSubnetPrefixesBySupernets(_ context.Context, _ []uuid.UUID) ([]dbq.SubnetPrefixBySupernetRow, error) {
+func (f *fakeQ) ListSubnetPrefixesBySupernets(_ context.Context, _ []uuid.UUID) ([]dbq.ListSubnetPrefixesBySupernetsRow, error) {
 	return nil, nil
 }
 
@@ -97,15 +97,15 @@ func (f *fakeQ) CountFabrics(_ context.Context, _ dbq.CountFabricsParams) (int64
 func (f *fakeQ) GetFabric(_ context.Context, _ uuid.UUID) (dbq.Fabric, error) {
 	return dbq.Fabric{}, pgx.ErrNoRows
 }
-func (f *fakeQ) ListSupernets(_ context.Context, a dbq.ListSupernetsParams) ([]dbq.Supernet, error) {
+func (f *fakeQ) ListSupernets(_ context.Context, a dbq.ListSupernetsParams) ([]dbq.ListSupernetsRow, error) {
 	f.lastSupernet = a
 	return nil, nil
 }
 func (f *fakeQ) CountSupernets(_ context.Context, _ dbq.CountSupernetsParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) GetSupernet(_ context.Context, _ uuid.UUID) (dbq.Supernet, error) {
-	return dbq.Supernet{}, pgx.ErrNoRows
+func (f *fakeQ) GetSupernet(_ context.Context, _ uuid.UUID) (dbq.GetSupernetRow, error) {
+	return dbq.GetSupernetRow{}, pgx.ErrNoRows
 }
 func (f *fakeQ) ListSubnetPrefixesBySupernet(_ context.Context, _ uuid.UUID) ([]string, error) {
 	return nil, nil
@@ -134,54 +134,54 @@ func (f *fakeQ) UpdateVrf(_ context.Context, a dbq.UpdateVrfParams) (dbq.Vrf, er
 }
 func (f *fakeQ) CountSupernetsInVrf(_ context.Context, _ uuid.UUID) (int64, error) { return 0, nil }
 func (f *fakeQ) DeleteVrf(_ context.Context, _ uuid.UUID) error                    { return nil }
-func (f *fakeQ) CreateVrfBgpPeer(_ context.Context, a dbq.CreateVrfBgpPeerParams) (dbq.VrfBgpPeer, error) {
-	return dbq.VrfBgpPeer{ID: uuid.New(), VrfID: a.VrfID, BgpPeerID: a.BgpPeerID, AddressFamily: a.AddressFamily, Enabled: a.Enabled}, nil
+func (f *fakeQ) CreateVrfBgpPeer(_ context.Context, a dbq.CreateVrfBgpPeerParams) (dbq.CreateVrfBgpPeerRow, error) {
+	return dbq.CreateVrfBgpPeerRow{ID: uuid.New(), VrfID: a.VrfID, BgpPeerID: a.BgpPeerID, AddressFamily: a.AddressFamily, Enabled: a.Enabled}, nil
 }
-func (f *fakeQ) UpdateVrfBgpPeer(_ context.Context, a dbq.UpdateVrfBgpPeerParams) (dbq.VrfBgpPeer, error) {
-	return dbq.VrfBgpPeer{ID: a.ID}, nil
+func (f *fakeQ) UpdateVrfBgpPeer(_ context.Context, a dbq.UpdateVrfBgpPeerParams) (dbq.UpdateVrfBgpPeerRow, error) {
+	return dbq.UpdateVrfBgpPeerRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteVrfBgpPeer(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateSupernet(_ context.Context, a dbq.CreateSupernetParams) (dbq.Supernet, error) {
-	return dbq.Supernet{ID: uuid.New(), FabricID: a.FabricID, VrfID: a.VrfID, Prefix: a.Prefix}, nil
+func (f *fakeQ) CreateSupernet(_ context.Context, a dbq.CreateSupernetParams) (dbq.CreateSupernetRow, error) {
+	return dbq.CreateSupernetRow{ID: uuid.New(), FabricID: a.FabricID, VrfID: a.VrfID, Prefix: a.Prefix}, nil
 }
-func (f *fakeQ) UpdateSupernet(_ context.Context, a dbq.UpdateSupernetParams) (dbq.Supernet, error) {
-	return dbq.Supernet{ID: a.ID}, nil
+func (f *fakeQ) UpdateSupernet(_ context.Context, a dbq.UpdateSupernetParams) (dbq.UpdateSupernetRow, error) {
+	return dbq.UpdateSupernetRow{ID: a.ID}, nil
 }
 func (f *fakeQ) CountSubnetsInSupernet(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
 func (f *fakeQ) DeleteSupernet(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) GetSupernetVrfAndFabric(_ context.Context, _ uuid.UUID) (dbq.SupernetVrfAndFabric, error) {
-	return dbq.SupernetVrfAndFabric{VrfID: uuid.New(), FabricID: uuid.New()}, nil
+func (f *fakeQ) GetSupernetVrfAndFabric(_ context.Context, _ uuid.UUID) (dbq.GetSupernetVrfAndFabricRow, error) {
+	return dbq.GetSupernetVrfAndFabricRow{VrfID: uuid.New(), FabricID: uuid.New()}, nil
 }
 
 // Move endpoint stubs — concrete behavior lives on moveFakeQ in
 // move_test.go; the base fake satisfies the Querier interface with
 // "not found" so tests that don't exercise the move path build.
-func (f *fakeQ) GetSupernetForMove(_ context.Context, _ uuid.UUID) (dbq.SupernetForMoveRow, error) {
-	return dbq.SupernetForMoveRow{}, pgx.ErrNoRows
+func (f *fakeQ) GetSupernetForMove(_ context.Context, _ uuid.UUID) (dbq.GetSupernetForMoveRow, error) {
+	return dbq.GetSupernetForMoveRow{}, pgx.ErrNoRows
 }
-func (f *fakeQ) GetVrfForMove(_ context.Context, _ uuid.UUID) (dbq.VrfForMoveRow, error) {
-	return dbq.VrfForMoveRow{}, pgx.ErrNoRows
+func (f *fakeQ) GetVrfForMove(_ context.Context, _ uuid.UUID) (dbq.GetVrfForMoveRow, error) {
+	return dbq.GetVrfForMoveRow{}, pgx.ErrNoRows
 }
-func (f *fakeQ) MoveSupernet(_ context.Context, _ dbq.MoveSupernetParams) (dbq.Supernet, error) {
-	return dbq.Supernet{}, nil
+func (f *fakeQ) MoveSupernet(_ context.Context, _ dbq.MoveSupernetParams) (dbq.MoveSupernetRow, error) {
+	return dbq.MoveSupernetRow{}, nil
 }
-func (f *fakeQ) CreateSubnet(_ context.Context, a dbq.CreateSubnetParams) (dbq.Subnet, error) {
-	return dbq.Subnet{ID: uuid.New(), SupernetID: a.SupernetID, FabricID: a.FabricID, VrfID: a.VrfID, Prefix: a.Prefix}, nil
+func (f *fakeQ) CreateSubnet(_ context.Context, a dbq.CreateSubnetParams) (dbq.CreateSubnetRow, error) {
+	return dbq.CreateSubnetRow{ID: uuid.New(), SupernetID: a.SupernetID, FabricID: a.FabricID, VrfID: a.VrfID, Prefix: a.Prefix}, nil
 }
-func (f *fakeQ) UpdateSubnet(_ context.Context, a dbq.UpdateSubnetParams) (dbq.Subnet, error) {
-	return dbq.Subnet{ID: a.ID}, nil
+func (f *fakeQ) UpdateSubnet(_ context.Context, a dbq.UpdateSubnetParams) (dbq.UpdateSubnetRow, error) {
+	return dbq.UpdateSubnetRow{ID: a.ID}, nil
 }
 func (f *fakeQ) CountAddressesInSubnet(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
 func (f *fakeQ) DeleteSubnet(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateIPAddress(_ context.Context, a dbq.CreateIPAddressParams) (dbq.IPAddress, error) {
-	return dbq.IPAddress{ID: uuid.New(), SubnetID: a.SubnetID, Address: a.Address}, nil
+func (f *fakeQ) CreateIPAddress(_ context.Context, a dbq.CreateIPAddressParams) (dbq.CreateIPAddressRow, error) {
+	return dbq.CreateIPAddressRow{ID: uuid.New(), SubnetID: a.SubnetID, Address: a.Address}, nil
 }
-func (f *fakeQ) UpdateIPAddress(_ context.Context, a dbq.UpdateIPAddressParams) (dbq.IPAddress, error) {
-	return dbq.IPAddress{ID: a.ID}, nil
+func (f *fakeQ) UpdateIPAddress(_ context.Context, a dbq.UpdateIPAddressParams) (dbq.UpdateIPAddressRow, error) {
+	return dbq.UpdateIPAddressRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteIPAddress(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) CreateOverlay(_ context.Context, a dbq.CreateOverlayParams) (dbq.Overlay, error) {
@@ -192,29 +192,29 @@ func (f *fakeQ) UpdateOverlay(_ context.Context, a dbq.UpdateOverlayParams) (dbq
 }
 func (f *fakeQ) CountVnisInOverlay(_ context.Context, _ uuid.UUID) (int64, error) { return 0, nil }
 func (f *fakeQ) DeleteOverlay(_ context.Context, _ uuid.UUID) error               { return nil }
-func (f *fakeQ) CreateVni(_ context.Context, a dbq.CreateVniParams) (dbq.Vni, error) {
-	return dbq.Vni{ID: uuid.New(), OverlayID: a.OverlayID, VNI: a.VNI, Kind: a.Kind}, nil
+func (f *fakeQ) CreateVni(_ context.Context, a dbq.CreateVniParams) (dbq.VNI, error) {
+	return dbq.VNI{ID: uuid.New(), OverlayID: a.OverlayID, VNI: a.VNI, Kind: a.Kind}, nil
 }
-func (f *fakeQ) UpdateVni(_ context.Context, a dbq.UpdateVniParams) (dbq.Vni, error) {
-	return dbq.Vni{ID: a.ID}, nil
+func (f *fakeQ) UpdateVni(_ context.Context, a dbq.UpdateVniParams) (dbq.VNI, error) {
+	return dbq.VNI{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteVni(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateVtep(_ context.Context, a dbq.CreateVtepParams) (dbq.Vtep, error) {
-	return dbq.Vtep{ID: uuid.New(), OverlayID: a.OverlayID, AssetID: a.AssetID, Role: a.Role}, nil
+func (f *fakeQ) CreateVtep(_ context.Context, a dbq.CreateVtepParams) (dbq.CreateVtepRow, error) {
+	return dbq.CreateVtepRow{ID: uuid.New(), OverlayID: a.OverlayID, AssetID: a.AssetID, Role: a.Role}, nil
 }
-func (f *fakeQ) UpdateVtep(_ context.Context, a dbq.UpdateVtepParams) (dbq.Vtep, error) {
-	return dbq.Vtep{ID: a.ID}, nil
+func (f *fakeQ) UpdateVtep(_ context.Context, a dbq.UpdateVtepParams) (dbq.UpdateVtepRow, error) {
+	return dbq.UpdateVtepRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteVtep(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) CreateVtepMembership(_ context.Context, a dbq.CreateVtepMembershipParams) (dbq.VtepVniMembership, error) {
 	return dbq.VtepVniMembership{ID: uuid.New(), VtepID: a.VtepID, VniID: a.VniID}, nil
 }
 func (f *fakeQ) DeleteVtepMembership(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateDhcpServer(_ context.Context, a dbq.CreateDhcpServerParams) (dbq.DhcpServer, error) {
-	return dbq.DhcpServer{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, KeaURL: a.KeaURL, Enabled: a.Enabled}, nil
+func (f *fakeQ) CreateDhcpServer(_ context.Context, a dbq.CreateDhcpServerParams) (dbq.CreateDhcpServerRow, error) {
+	return dbq.CreateDhcpServerRow{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, KeaURL: a.KeaURL, Enabled: a.Enabled}, nil
 }
-func (f *fakeQ) UpdateDhcpServer(_ context.Context, a dbq.UpdateDhcpServerParams) (dbq.DhcpServer, error) {
-	return dbq.DhcpServer{ID: a.ID}, nil
+func (f *fakeQ) UpdateDhcpServer(_ context.Context, a dbq.UpdateDhcpServerParams) (dbq.UpdateDhcpServerRow, error) {
+	return dbq.UpdateDhcpServerRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDhcpServer(_ context.Context, _ uuid.UUID) error { return nil }
 
@@ -448,12 +448,12 @@ func (f *fakeQ) ListOverlays(_ context.Context, a dbq.ListOverlaysParams) ([]dbq
 func (f *fakeQ) CountOverlays(_ context.Context, _ dbq.CountOverlaysParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListVnis(_ context.Context, a dbq.ListVnisParams) ([]dbq.Vni, error) {
+func (f *fakeQ) ListVnis(_ context.Context, a dbq.ListVnisParams) ([]dbq.VNI, error) {
 	f.lastVni = a
 	return nil, nil
 }
 func (f *fakeQ) CountVnis(_ context.Context, _ dbq.CountVnisParams) (int64, error) { return 0, nil }
-func (f *fakeQ) ListVteps(_ context.Context, a dbq.ListVtepsParams) ([]dbq.Vtep, error) {
+func (f *fakeQ) ListVteps(_ context.Context, a dbq.ListVtepsParams) ([]dbq.ListVtepsRow, error) {
 	f.lastVtep = a
 	return nil, nil
 }
@@ -467,14 +467,14 @@ func (f *fakeQ) ListVtepMemberships(_ context.Context, a dbq.ListVtepMemberships
 func (f *fakeQ) CountVtepMemberships(_ context.Context, _ dbq.CountVtepMembershipsParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListDhcpServers(_ context.Context, a dbq.ListDhcpServersParams) ([]dbq.DhcpServer, error) {
+func (f *fakeQ) ListDhcpServers(_ context.Context, a dbq.ListDhcpServersParams) ([]dbq.ListDhcpServersRow, error) {
 	f.lastDhcp = a
 	return nil, nil
 }
 func (f *fakeQ) CountDhcpServers(_ context.Context, _ dbq.CountDhcpServersParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListVrfBgpPeers(_ context.Context, a dbq.ListVrfBgpPeersParams) ([]dbq.VrfBgpPeer, error) {
+func (f *fakeQ) ListVrfBgpPeers(_ context.Context, a dbq.ListVrfBgpPeersParams) ([]dbq.ListVrfBgpPeersRow, error) {
 	f.lastVrfPeer = a
 	return nil, nil
 }
@@ -486,16 +486,16 @@ func (f *fakeQ) CountVrfBgpPeers(_ context.Context, _ dbq.CountVrfBgpPeersParams
 // pre-seeded fields when set; nil-id / explicit ErrNoRows simulate
 // 404. List returns the seeded slices. List-templates filters
 // against the seeded map keys.
-func (f *fakeQ) GetDhcpServerBundleRow(_ context.Context, id uuid.UUID) (dbq.DhcpServerBundleRow, error) {
+func (f *fakeQ) GetDhcpServerBundleRow(_ context.Context, id uuid.UUID) (dbq.GetDhcpServerBundleRowRow, error) {
 	if f.bundleServerErr != nil {
-		return dbq.DhcpServerBundleRow{}, f.bundleServerErr
+		return dbq.GetDhcpServerBundleRowRow{}, f.bundleServerErr
 	}
 	if f.bundleServer.ID != id {
-		return dbq.DhcpServerBundleRow{}, pgx.ErrNoRows
+		return dbq.GetDhcpServerBundleRowRow{}, pgx.ErrNoRows
 	}
 	return f.bundleServer, nil
 }
-func (f *fakeQ) ListDhcpScopesForBundle(_ context.Context, serverID uuid.UUID) ([]dbq.DhcpScope, error) {
+func (f *fakeQ) ListDhcpScopesForBundle(_ context.Context, serverID uuid.UUID) ([]dbq.ListDhcpScopesForBundleRow, error) {
 	f.bundleScopesCalled = true
 	f.lastBundleScopesServerID = serverID
 	return f.bundleScopes, nil

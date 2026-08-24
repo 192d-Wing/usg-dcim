@@ -34,8 +34,8 @@ import (
 // internal/scheduler/jobs/dnssecrotate, specifically) can satisfy
 // it without depending on the larger handler.Querier interface.
 type RotationQuerier interface {
-	ListActiveDnsKeysForZoneAndRole(ctx context.Context, zoneID uuid.UUID, role string) ([]dbq.DnsKeyRow, error)
-	CreateDnsKey(ctx context.Context, arg dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error)
+	ListActiveDnsKeysForZoneAndRole(ctx context.Context, arg dbq.ListActiveDnsKeysForZoneAndRoleParams) ([]dbq.DnsKey, error)
+	CreateDnsKey(ctx context.Context, arg dbq.CreateDnsKeyParams) (dbq.DnsKey, error)
 	RetireDnsKey(ctx context.Context, id uuid.UUID) (int64, error)
 	TouchDnsZone(ctx context.Context, id uuid.UUID) (int64, error)
 }
@@ -86,7 +86,7 @@ func RotateZoneKey(ctx context.Context, q RotationQuerier, zone dbq.DnsZone, rol
 	if zone.Frozen {
 		return 0, ErrZoneFrozen
 	}
-	active, err := q.ListActiveDnsKeysForZoneAndRole(ctx, zone.ID, role)
+	active, err := q.ListActiveDnsKeysForZoneAndRole(ctx, dbq.ListActiveDnsKeysForZoneAndRoleParams{ZoneID: zone.ID, Role: role})
 	if err != nil {
 		return 0, err
 	}
@@ -218,7 +218,7 @@ func (h *Handler) disableDnssec(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	if _, err := h.Q.SetDnsZoneSigned(r.Context(), id, false); err != nil {
+	if _, err := h.Q.SetDnsZoneSigned(r.Context(), dbq.SetDnsZoneSignedParams{ID: id, Signed: false}); err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
 		return

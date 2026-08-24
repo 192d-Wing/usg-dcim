@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 	"github.com/usg-dcim/packages/otter-go/internal/httpx"
 )
 
@@ -54,7 +55,7 @@ func (h *Handler) postHealthCheckResult(w http.ResponseWriter, r *http.Request) 
 		}
 		errPtr = &e
 	}
-	n, err := h.Q.SetDnsHealthCheckResult(r.Context(), id, req.Status, errPtr)
+	n, err := h.Q.SetDnsHealthCheckResult(r.Context(), dbq.SetDnsHealthCheckResultParams{ID: id, Status: req.Status, LastError: errPtr})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

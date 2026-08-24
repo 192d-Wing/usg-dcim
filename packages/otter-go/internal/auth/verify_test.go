@@ -33,7 +33,7 @@ func (f *fakeQ) GetCapabilitiesForIdpRoles(_ context.Context, roles []string) ([
 	f.gotIdpRoles = roles
 	return f.idpCaps, nil
 }
-func (f *fakeQ) GetUserScopedCapabilities(_ context.Context, _ uuid.UUID) ([]dbq.ScopedCapabilityRow, error) {
+func (f *fakeQ) GetUserScopedCapabilities(_ context.Context, _ uuid.UUID) ([]dbq.GetUserScopedCapabilitiesRow, error) {
 	return nil, nil
 }
 func (f *fakeQ) IsJtiRevoked(_ context.Context, _ string) (bool, error) {

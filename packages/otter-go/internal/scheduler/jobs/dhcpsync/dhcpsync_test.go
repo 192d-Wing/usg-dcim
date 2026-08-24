@@ -29,13 +29,13 @@ import (
 // fakeQ stands in for *dbq.Queries: returns canned reads + lets
 // tests inject errors per server id.
 type fakeQ struct {
-	servers   []dbq.DhcpServerForLeaseSyncRow
+	servers   []dbq.ListEnabledDhcpServersForLeaseSyncRow
 	listErr   error
 
 	// leasesync.Querier methods. Per-server SyncServer pulls subnets
 	// + finds/upserts; we route everything to no-op so per-server
 	// invariants are exercised at the harness level only.
-	subnetsByServer map[uuid.UUID][]dbq.SubnetForLeaseSyncRow
+	subnetsByServer map[uuid.UUID][]dbq.ListSubnetsForFabricLeaseSyncRow
 
 	// findResult/findErr override the per-key result so a test can
 	// pin "no existing row" (default) vs an existing dhcp row.
@@ -46,10 +46,10 @@ type fakeQ struct {
 	stateErr error
 }
 
-func (f *fakeQ) ListEnabledDhcpServersForLeaseSync(_ context.Context) ([]dbq.DhcpServerForLeaseSyncRow, error) {
+func (f *fakeQ) ListEnabledDhcpServersForLeaseSync(_ context.Context) ([]dbq.ListEnabledDhcpServersForLeaseSyncRow, error) {
 	return f.servers, f.listErr
 }
-func (f *fakeQ) ListSubnetsForFabricLeaseSync(_ context.Context, fabricID uuid.UUID) ([]dbq.SubnetForLeaseSyncRow, error) {
+func (f *fakeQ) ListSubnetsForFabricLeaseSync(_ context.Context, fabricID uuid.UUID) ([]dbq.ListSubnetsForFabricLeaseSyncRow, error) {
 	return f.subnetsByServer[fabricID], nil
 }
 func (f *fakeQ) FindDhcpLeaseIPAddress(_ context.Context, arg dbq.FindDhcpLeaseIPAddressParams) (dbq.FindDhcpLeaseIPAddressRow, error) {
@@ -120,7 +120,7 @@ func TestRun_PerServerKeaError_CountsAsError(t *testing.T) {
 	srvA := uuid.New()
 	srvB := uuid.New()
 	f := &fakeQ{
-		servers: []dbq.DhcpServerForLeaseSyncRow{
+		servers: []dbq.ListEnabledDhcpServersForLeaseSyncRow{
 			{ID: srvA, FabricID: uuid.New(), KeaURL: "http://kea-a"},
 			{ID: srvB, FabricID: uuid.New(), KeaURL: "http://kea-b"},
 		},
@@ -148,7 +148,7 @@ func TestRun_PerServerFatalErr_LoggedAndContinues(t *testing.T) {
 	srvA := uuid.New()
 	srvB := uuid.New()
 	f := &fakeQ{
-		servers: []dbq.DhcpServerForLeaseSyncRow{
+		servers: []dbq.ListEnabledDhcpServersForLeaseSyncRow{
 			{ID: srvA, FabricID: uuid.New(), KeaURL: "http://kea-a"},
 			{ID: srvB, FabricID: uuid.New(), KeaURL: "http://kea-b"},
 		},
@@ -169,7 +169,7 @@ func TestRun_PerServerFatalErr_LoggedAndContinues(t *testing.T) {
 
 func TestRun_ContextCancel_BailsWithPartialCounts(t *testing.T) {
 	f := &fakeQ{
-		servers: []dbq.DhcpServerForLeaseSyncRow{
+		servers: []dbq.ListEnabledDhcpServersForLeaseSyncRow{
 			{ID: uuid.New(), FabricID: uuid.New(), KeaURL: "http://a"},
 			{ID: uuid.New(), FabricID: uuid.New(), KeaURL: "http://b"},
 			{ID: uuid.New(), FabricID: uuid.New(), KeaURL: "http://c"},
@@ -215,11 +215,11 @@ func TestRun_HappyPath_TotalUpsertedSumsAcrossServers(t *testing.T) {
 	subnet1 := uuid.New()
 	subnet2 := uuid.New()
 	f := &fakeQ{
-		servers: []dbq.DhcpServerForLeaseSyncRow{
+		servers: []dbq.ListEnabledDhcpServersForLeaseSyncRow{
 			{ID: uuid.New(), FabricID: srv1FabricID, KeaURL: "http://a"},
 			{ID: uuid.New(), FabricID: srv2FabricID, KeaURL: "http://b"},
 		},
-		subnetsByServer: map[uuid.UUID][]dbq.SubnetForLeaseSyncRow{
+		subnetsByServer: map[uuid.UUID][]dbq.ListSubnetsForFabricLeaseSyncRow{
 			srv1FabricID: {{ID: subnet1, Prefix: "10.0.0.0/24"}},
 			srv2FabricID: {{ID: subnet2, Prefix: "10.0.1.0/24"}},
 		},
@@ -248,7 +248,7 @@ func TestRun_HappyPath_AggregatesPerServerCounters(t *testing.T) {
 	// Each server returns empty leases (no upserts), but the
 	// driver still walks both and sums (0+0).
 	f := &fakeQ{
-		servers: []dbq.DhcpServerForLeaseSyncRow{
+		servers: []dbq.ListEnabledDhcpServersForLeaseSyncRow{
 			{ID: uuid.New(), FabricID: uuid.New(), KeaURL: "http://a"},
 			{ID: uuid.New(), FabricID: uuid.New(), KeaURL: "http://b"},
 		},

@@ -21,15 +21,15 @@ import (
 
 
 type Querier interface {
-	SearchSites(ctx context.Context, arg dbq.SearchSitesParams) ([]dbq.SearchSiteRow, error)
-	SearchRacks(ctx context.Context, arg dbq.SearchRacksParams) ([]dbq.SearchRackRow, error)
-	SearchAssets(ctx context.Context, arg dbq.SearchAssetsParams) ([]dbq.SearchAssetRow, error)
+	SearchSites(ctx context.Context, arg dbq.SearchSitesParams) ([]dbq.SearchSitesRow, error)
+	SearchRacks(ctx context.Context, arg dbq.SearchRacksParams) ([]dbq.SearchRacksRow, error)
+	SearchAssets(ctx context.Context, arg dbq.SearchAssetsParams) ([]dbq.SearchAssetsRow, error)
 
-	SearchIPAddressesByHost(ctx context.Context, arg dbq.SearchIPAddressesByHostParams) ([]dbq.SearchIPAddressRow, error)
-	SearchSubnetsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchSubnetRow, error)
-	SearchVrfsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchVrfRow, error)
-	SearchFabricsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchFabricRow, error)
-	SearchAssetsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchAssetMetaRow, error)
+	SearchIPAddressesByHost(ctx context.Context, arg dbq.SearchIPAddressesByHostParams) ([]dbq.SearchIPAddressesByHostRow, error)
+	SearchSubnetsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchSubnetsByIDsRow, error)
+	SearchVrfsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchVrfsByIDsRow, error)
+	SearchFabricsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchFabricsByIDsRow, error)
+	SearchAssetsByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SearchAssetsByIDsRow, error)
 }
 
 type Handler struct {
@@ -50,9 +50,9 @@ type searchResponse struct {
 }
 
 type searchBuckets struct {
-	Sites  []dbq.SearchSiteRow  `json:"sites"`
-	Racks  []dbq.SearchRackRow  `json:"racks"`
-	Assets []dbq.SearchAssetRow `json:"assets"`
+	Sites  []dbq.SearchSitesRow  `json:"sites"`
+	Racks  []dbq.SearchRacksRow  `json:"racks"`
+	Assets []dbq.SearchAssetsRow `json:"assets"`
 	IPs    []ipResultRow        `json:"ips"`
 }
 
@@ -171,34 +171,34 @@ func (h *Handler) ipSearch(ctx context.Context, host string, limit int32) ([]ipR
 	return out, nil
 }
 
-func (h *Handler) loadSubnets(ctx context.Context, rows []dbq.SearchIPAddressRow) (map[uuid.UUID]dbq.SearchSubnetRow, error) {
+func (h *Handler) loadSubnets(ctx context.Context, rows []dbq.SearchIPAddressesByHostRow) (map[uuid.UUID]dbq.SearchSubnetsByIDsRow, error) {
 	ids := uniqueIDsFromRows(len(rows), func(i int) (uuid.UUID, bool) { return rows[i].SubnetID, true })
 	subnets, err := h.Q.SearchSubnetsByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	return indexBy(subnets, func(s dbq.SearchSubnetRow) uuid.UUID { return s.ID }), nil
+	return indexBy(subnets, func(s dbq.SearchSubnetsByIDsRow) uuid.UUID { return s.ID }), nil
 }
 
-func (h *Handler) loadVrfs(ctx context.Context, subnets map[uuid.UUID]dbq.SearchSubnetRow) (map[uuid.UUID]dbq.SearchVrfRow, error) {
-	ids := uniqueIDsFromMap(subnets, func(s dbq.SearchSubnetRow) uuid.UUID { return s.VrfID })
+func (h *Handler) loadVrfs(ctx context.Context, subnets map[uuid.UUID]dbq.SearchSubnetsByIDsRow) (map[uuid.UUID]dbq.SearchVrfsByIDsRow, error) {
+	ids := uniqueIDsFromMap(subnets, func(s dbq.SearchSubnetsByIDsRow) uuid.UUID { return s.VrfID })
 	vrfs, err := h.Q.SearchVrfsByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	return indexBy(vrfs, func(v dbq.SearchVrfRow) uuid.UUID { return v.ID }), nil
+	return indexBy(vrfs, func(v dbq.SearchVrfsByIDsRow) uuid.UUID { return v.ID }), nil
 }
 
-func (h *Handler) loadFabrics(ctx context.Context, subnets map[uuid.UUID]dbq.SearchSubnetRow) (map[uuid.UUID]dbq.SearchFabricRow, error) {
-	ids := uniqueIDsFromMap(subnets, func(s dbq.SearchSubnetRow) uuid.UUID { return s.FabricID })
+func (h *Handler) loadFabrics(ctx context.Context, subnets map[uuid.UUID]dbq.SearchSubnetsByIDsRow) (map[uuid.UUID]dbq.SearchFabricsByIDsRow, error) {
+	ids := uniqueIDsFromMap(subnets, func(s dbq.SearchSubnetsByIDsRow) uuid.UUID { return s.FabricID })
 	fabrics, err := h.Q.SearchFabricsByIDs(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	return indexBy(fabrics, func(f dbq.SearchFabricRow) uuid.UUID { return f.ID }), nil
+	return indexBy(fabrics, func(f dbq.SearchFabricsByIDsRow) uuid.UUID { return f.ID }), nil
 }
 
-func (h *Handler) loadAssets(ctx context.Context, rows []dbq.SearchIPAddressRow) (map[uuid.UUID]dbq.SearchAssetMetaRow, error) {
+func (h *Handler) loadAssets(ctx context.Context, rows []dbq.SearchIPAddressesByHostRow) (map[uuid.UUID]dbq.SearchAssetsByIDsRow, error) {
 	ids := uniqueIDsFromRows(len(rows), func(i int) (uuid.UUID, bool) {
 		if rows[i].AssetID == nil {
 			return uuid.UUID{}, false
@@ -209,7 +209,7 @@ func (h *Handler) loadAssets(ctx context.Context, rows []dbq.SearchIPAddressRow)
 	if err != nil {
 		return nil, err
 	}
-	return indexBy(assets, func(a dbq.SearchAssetMetaRow) uuid.UUID { return a.ID }), nil
+	return indexBy(assets, func(a dbq.SearchAssetsByIDsRow) uuid.UUID { return a.ID }), nil
 }
 
 // uniqueIDsFromRows pulls (id, present) from n indexed rows, dedupes
@@ -258,11 +258,11 @@ func indexBy[T any, K comparable](rows []T, key func(T) K) map[K]T {
 // subnet → vrf+fabric (via subnet's FKs), asset → name (if attached).
 // Mirrors api/search.py::_ip_search_row.
 func joinIPRow(
-	ip dbq.SearchIPAddressRow,
-	subnets map[uuid.UUID]dbq.SearchSubnetRow,
-	vrfs map[uuid.UUID]dbq.SearchVrfRow,
-	fabrics map[uuid.UUID]dbq.SearchFabricRow,
-	assets map[uuid.UUID]dbq.SearchAssetMetaRow,
+	ip dbq.SearchIPAddressesByHostRow,
+	subnets map[uuid.UUID]dbq.SearchSubnetsByIDsRow,
+	vrfs map[uuid.UUID]dbq.SearchVrfsByIDsRow,
+	fabrics map[uuid.UUID]dbq.SearchFabricsByIDsRow,
+	assets map[uuid.UUID]dbq.SearchAssetsByIDsRow,
 ) ipResultRow {
 	row := ipResultRow{
 		ID:      ip.ID.String(),

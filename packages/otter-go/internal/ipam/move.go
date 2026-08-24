@@ -101,11 +101,11 @@ func (h *Handler) moveSupernet(w http.ResponseWriter, r *http.Request) {
 // the appropriate error and returns ok=false.
 func (h *Handler) loadMoveable(
 	r *http.Request, w http.ResponseWriter, id uuid.UUID, p auth.Principal,
-) (dbq.SupernetForMoveRow, bool) {
+) (dbq.GetSupernetForMoveRow, bool) {
 	src, err := h.Q.GetSupernetForMove(r.Context(), id)
 	if err != nil {
 		mapErr(w, err, "supernet not found")
-		return dbq.SupernetForMoveRow{}, false
+		return dbq.GetSupernetForMoveRow{}, false
 	}
 	if !src.CurrentFabricIsSystem {
 		// is_system is set only on platform-managed fabrics (today
@@ -117,12 +117,12 @@ func (h *Handler) loadMoveable(
 		// check needs a sub-type column to disambiguate.
 		httpx.Error(w, http.StatusConflict,
 			"supernet is not in the LIR landing fabric; nothing to move")
-		return dbq.SupernetForMoveRow{}, false
+		return dbq.GetSupernetForMoveRow{}, false
 	}
 	if src.OwnerOrganizationID == nil {
 		httpx.Error(w, http.StatusConflict,
 			"only tenant-owned supernets (with owner_organization_id) can be moved")
-		return dbq.SupernetForMoveRow{}, false
+		return dbq.GetSupernetForMoveRow{}, false
 	}
 	if scope := auth.FindScope(p, capSupernetsUpdate); scope != nil &&
 		!scope.OrganizationMatches(*src.OwnerOrganizationID) {
@@ -132,7 +132,7 @@ func (h *Handler) loadMoveable(
 		// against the rest of /ipam/*.
 		httpx.Error(w, http.StatusForbidden,
 			"supernet's owner organization is outside your scope for ipam:supernets:update")
-		return dbq.SupernetForMoveRow{}, false
+		return dbq.GetSupernetForMoveRow{}, false
 	}
 	return src, true
 }

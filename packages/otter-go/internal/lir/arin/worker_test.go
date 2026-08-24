@@ -17,14 +17,14 @@ import (
 )
 
 type fakeJobQ struct {
-	jobs       []dbq.ArinSubmitJobRow
+	jobs       []dbq.ClaimNextArinSubmitJobRow
 	registered []dbq.MarkArinRegisteredParams
 	failed     []dbq.MarkArinFailedParams
 }
 
-func (f *fakeJobQ) ClaimNextArinSubmitJob(_ context.Context, _ int32) (dbq.ArinSubmitJobRow, error) {
+func (f *fakeJobQ) ClaimNextArinSubmitJob(_ context.Context, _ int32) (dbq.ClaimNextArinSubmitJobRow, error) {
 	if len(f.jobs) == 0 {
-		return dbq.ArinSubmitJobRow{}, pgx.ErrNoRows
+		return dbq.ClaimNextArinSubmitJobRow{}, pgx.ErrNoRows
 	}
 	j := f.jobs[0]
 	f.jobs = f.jobs[1:]
@@ -46,7 +46,7 @@ type fakeSubmit struct {
 	err    error
 }
 
-func (f *fakeSubmit) SubmitReassignDetailed(_ context.Context, _ dbq.ArinSubmitJobRow) (SubmitResult, error) {
+func (f *fakeSubmit) SubmitReassignDetailed(_ context.Context, _ dbq.ClaimNextArinSubmitJobRow) (SubmitResult, error) {
 	return f.result, f.err
 }
 
@@ -73,7 +73,7 @@ func TestProcessOne_NoJobsReturnsFalse(t *testing.T) {
 
 func TestProcessOne_SuccessMarksRegistered(t *testing.T) {
 	allocID := uuid.New()
-	q := &fakeJobQ{jobs: []dbq.ArinSubmitJobRow{{AllocationID: allocID}}}
+	q := &fakeJobQ{jobs: []dbq.ClaimNextArinSubmitJobRow{{AllocationID: allocID}}}
 	c := &fakeSubmit{result: SubmitResult{NetHandle: "NET-OK-1"}}
 	w := &Worker{Log: discardLog()}
 	more, err := w.ProcessOne(context.Background(), q, c)
@@ -96,7 +96,7 @@ func TestProcessOne_SuccessMarksRegistered(t *testing.T) {
 
 func TestProcessOne_TransientMarksFailed(t *testing.T) {
 	allocID := uuid.New()
-	q := &fakeJobQ{jobs: []dbq.ArinSubmitJobRow{{AllocationID: allocID}}}
+	q := &fakeJobQ{jobs: []dbq.ClaimNextArinSubmitJobRow{{AllocationID: allocID}}}
 	c := &fakeSubmit{err: errors.New("arin transient error: 503")}
 	w := &Worker{Log: discardLog()}
 	if _, err := w.ProcessOne(context.Background(), q, c); err != nil {
@@ -118,7 +118,7 @@ func TestProcessOne_PermanentAlsoMarksFailed(t *testing.T) {
 	// only in the *next* claim: with attempts>=MaxAttempts the row
 	// stops being eligible, and the operator hits /arin/retry.
 	allocID := uuid.New()
-	q := &fakeJobQ{jobs: []dbq.ArinSubmitJobRow{{AllocationID: allocID}}}
+	q := &fakeJobQ{jobs: []dbq.ClaimNextArinSubmitJobRow{{AllocationID: allocID}}}
 	c := &fakeSubmit{err: errors.New("arin permanent error: 400 bad payload")}
 	w := &Worker{Log: discardLog()}
 	if _, err := w.ProcessOne(context.Background(), q, c); err != nil {
@@ -185,13 +185,13 @@ type countingJobQ struct {
 	claimed   int
 }
 
-func (c *countingJobQ) ClaimNextArinSubmitJob(_ context.Context, _ int32) (dbq.ArinSubmitJobRow, error) {
+func (c *countingJobQ) ClaimNextArinSubmitJob(_ context.Context, _ int32) (dbq.ClaimNextArinSubmitJobRow, error) {
 	c.claimed++
 	if c.remaining <= 0 {
-		return dbq.ArinSubmitJobRow{}, pgx.ErrNoRows
+		return dbq.ClaimNextArinSubmitJobRow{}, pgx.ErrNoRows
 	}
 	c.remaining--
-	return dbq.ArinSubmitJobRow{AllocationID: uuid.New()}, nil
+	return dbq.ClaimNextArinSubmitJobRow{AllocationID: uuid.New()}, nil
 }
 
 func (c *countingJobQ) MarkArinRegistered(_ context.Context, _ dbq.MarkArinRegisteredParams) error {
@@ -203,8 +203,8 @@ func (c *countingJobQ) MarkArinFailed(_ context.Context, _ dbq.MarkArinFailedPar
 
 type erroringJobQ struct{}
 
-func (erroringJobQ) ClaimNextArinSubmitJob(context.Context, int32) (dbq.ArinSubmitJobRow, error) {
-	return dbq.ArinSubmitJobRow{}, errors.New("connection refused")
+func (erroringJobQ) ClaimNextArinSubmitJob(context.Context, int32) (dbq.ClaimNextArinSubmitJobRow, error) {
+	return dbq.ClaimNextArinSubmitJobRow{}, errors.New("connection refused")
 }
 func (erroringJobQ) MarkArinRegistered(context.Context, dbq.MarkArinRegisteredParams) error {
 	return nil

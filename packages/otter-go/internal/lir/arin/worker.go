@@ -31,7 +31,7 @@ import (
 // in a tx by Run; tests substitute an in-memory fake that records
 // each call.
 type JobQuerier interface {
-	ClaimNextArinSubmitJob(ctx context.Context, maxAttempts int32) (dbq.ArinSubmitJobRow, error)
+	ClaimNextArinSubmitJob(ctx context.Context, maxAttempts int32) (dbq.ClaimNextArinSubmitJobRow, error)
 	MarkArinRegistered(ctx context.Context, arg dbq.MarkArinRegisteredParams) error
 	MarkArinFailed(ctx context.Context, arg dbq.MarkArinFailedParams) error
 }
@@ -40,7 +40,7 @@ type JobQuerier interface {
 // JobQuerier so test fakes can implement just the direction they
 // care about without stubbing everything.
 type RemoveJobQuerier interface {
-	ClaimNextArinRemoveJob(ctx context.Context, maxAttempts int32) (dbq.ArinRemoveJobRow, error)
+	ClaimNextArinRemoveJob(ctx context.Context, maxAttempts int32) (dbq.ClaimNextArinRemoveJobRow, error)
 	MarkArinRemoved(ctx context.Context, id uuid.UUID) error
 	MarkArinFailed(ctx context.Context, arg dbq.MarkArinFailedParams) error
 }
@@ -50,7 +50,7 @@ type RemoveJobQuerier interface {
 // error so the path through MarkArinRegistered / MarkArinFailed can
 // be exercised without touching the network.
 type SubmitClient interface {
-	SubmitReassignDetailed(ctx context.Context, job dbq.ArinSubmitJobRow) (SubmitResult, error)
+	SubmitReassignDetailed(ctx context.Context, job dbq.ClaimNextArinSubmitJobRow) (SubmitResult, error)
 }
 
 // RemoveClient is the deassignment counterpart. *Client satisfies

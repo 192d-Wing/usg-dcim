@@ -25,8 +25,8 @@ type fakeBulkAssetQ struct {
 	hits map[string]dbq.Asset // key = manufacturer|serial
 }
 
-func (f *fakeBulkAssetQ) FindAssetByManufacturerSerial(_ context.Context, mfr, ser string) (dbq.Asset, error) {
-	if a, ok := f.hits[mfr+"|"+ser]; ok {
+func (f *fakeBulkAssetQ) FindAssetByManufacturerSerial(_ context.Context, arg dbq.FindAssetByManufacturerSerialParams) (dbq.Asset, error) {
+	if a, ok := f.hits[arg.Manufacturer+"|"+arg.Serial]; ok {
 		return a, nil
 	}
 	return dbq.Asset{}, pgx.ErrNoRows

@@ -138,7 +138,7 @@ type KeyFileEntry struct {
 // doesn't flap on map-iteration randomness.
 func RenderDnssecKeyFiles(
 	zoneName string,
-	keys []dbq.DnsKeyRow,
+	keys []dbq.DnsKey,
 	decryptedPrivatePems map[int32]string,
 ) ([]KeyFileEntry, error) {
 	out := make([]KeyFileEntry, 0, 2*len(keys))

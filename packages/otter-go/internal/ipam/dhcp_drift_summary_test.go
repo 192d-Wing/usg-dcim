@@ -30,11 +30,11 @@ import (
 type driftSummaryFakeQ struct {
 	fakeQ
 
-	servers       []dbq.DhcpServerDriftSummaryRow
+	servers       []dbq.ListDhcpServersForDriftSummaryRow
 	serversErr    error
 	serversLastIn []uuid.UUID
 
-	scopes         []dbq.DhcpScopeDriftStatusRow
+	scopes         []dbq.ListDhcpScopeDriftStatusByServersRow
 	scopesErr      error
 	scopesLastArgs []uuid.UUID
 
@@ -42,11 +42,11 @@ type driftSummaryFakeQ struct {
 	alertKeysErr error
 }
 
-func (f *driftSummaryFakeQ) ListDhcpServersForDriftSummary(_ context.Context, scopeFabricIds []uuid.UUID) ([]dbq.DhcpServerDriftSummaryRow, error) {
+func (f *driftSummaryFakeQ) ListDhcpServersForDriftSummary(_ context.Context, scopeFabricIds []uuid.UUID) ([]dbq.ListDhcpServersForDriftSummaryRow, error) {
 	f.serversLastIn = scopeFabricIds
 	return f.servers, f.serversErr
 }
-func (f *driftSummaryFakeQ) ListDhcpScopeDriftStatusByServers(_ context.Context, serverIDs []uuid.UUID) ([]dbq.DhcpScopeDriftStatusRow, error) {
+func (f *driftSummaryFakeQ) ListDhcpScopeDriftStatusByServers(_ context.Context, serverIDs []uuid.UUID) ([]dbq.ListDhcpScopeDriftStatusByServersRow, error) {
 	f.scopesLastArgs = serverIDs
 	return f.scopes, f.scopesErr
 }
@@ -141,10 +141,10 @@ func TestDhcpDriftSummary_HappyPath_FullPipeline(t *testing.T) {
 	scopeID := uuid.New()
 	fabricID := uuid.New()
 	f := &driftSummaryFakeQ{
-		servers: []dbq.DhcpServerDriftSummaryRow{
+		servers: []dbq.ListDhcpServersForDriftSummaryRow{
 			{ID: srvID, Name: "kea-1", FabricID: fabricID, Enabled: true},
 		},
-		scopes: []dbq.DhcpScopeDriftStatusRow{
+		scopes: []dbq.ListDhcpScopeDriftStatusByServersRow{
 			{ID: scopeID, DhcpServerID: srvID, LastDiffStatus: ptrStr("drifted")},
 		},
 		alertKeys: []string{"dhcp-drift:" + scopeID.String()},
@@ -194,7 +194,7 @@ func TestDhcpDriftSummary_ServerListError_500(t *testing.T) {
 func TestDhcpDriftSummary_AlertQueryError_500(t *testing.T) {
 	srvID := uuid.New()
 	f := &driftSummaryFakeQ{
-		servers:      []dbq.DhcpServerDriftSummaryRow{{ID: srvID, Name: "kea-1", FabricID: uuid.New()}},
+		servers:      []dbq.ListDhcpServersForDriftSummaryRow{{ID: srvID, Name: "kea-1", FabricID: uuid.New()}},
 		alertKeysErr: errors.New("alerts table missing"),
 	}
 	req := httptest.NewRequest("GET", "/ipam/dhcp/drift-summary", nil)

@@ -56,7 +56,9 @@ WHERE id = $1;
 -- the lowest free positive int. A production fleet might persist a
 -- per-server sequence; the O(n) scan matches Python's posture and
 -- is fine until a server has thousands of scopes (a wild outlier).
-SELECT kea_subnet_id
+-- The ::int cast makes the WHERE-guaranteed non-NULL visible to
+-- sqlc (the column itself is nullable).
+SELECT kea_subnet_id::int
 FROM dhcp_scopes
 WHERE dhcp_server_id = $1
   AND kea_subnet_id IS NOT NULL

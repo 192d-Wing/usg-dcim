@@ -21,7 +21,7 @@ import (
 )
 
 type fakeQ struct {
-	listOut    []dbq.User
+	listOut    []dbq.ListAdminUsersRow
 	count      int64
 	byEmail    map[string]dbq.User // hit → existing user
 	createOut  dbq.User
@@ -54,28 +54,28 @@ type fakeQ struct {
 	sysDeleteErr     error
 
 	// Assignments
-	assignments         []dbq.UserRoleRow
-	assignmentByID      map[uuid.UUID]dbq.UserRoleRow
-	dupAssignment       map[[2]uuid.UUID]dbq.UserRoleRow
-	scopesByAssignment  []dbq.RoleScopeRow
+	assignments         []dbq.UserRole
+	assignmentByID      map[uuid.UUID]dbq.UserRole
+	dupAssignment       map[[2]uuid.UUID]dbq.UserRole
+	scopesByAssignment  []dbq.RoleScope
 	roleNamesByID       map[uuid.UUID]string
 	gotAssignmentCreate [2]uuid.UUID
 	gotScopeCreates     []dbq.CreateRoleScopeParams
 
 	// OIDC mappings
-	oidcList         []dbq.OidcRoleMappingRow
+	oidcList         []dbq.OidcRoleMapping
 	oidcCount        int64
-	oidcByID         map[uuid.UUID]dbq.OidcRoleMappingRow
-	oidcByIdpRole    map[string]dbq.OidcRoleMappingRow
-	oidcCreateOut    dbq.OidcRoleMappingRow
-	oidcUpdateOut    dbq.OidcRoleMappingRow
+	oidcByID         map[uuid.UUID]dbq.OidcRoleMapping
+	oidcByIdpRole    map[string]dbq.OidcRoleMapping
+	oidcCreateOut    dbq.OidcRoleMapping
+	oidcUpdateOut    dbq.OidcRoleMapping
 	oidcUpdateErr    error
 	oidcDeleteRows   int64
 	gotOidcCreate    dbq.CreateOidcRoleMappingParams
 	gotOidcUpdate    dbq.UpdateOidcRoleMappingParams
 }
 
-func (f *fakeQ) ListAdminUsers(_ context.Context, _ dbq.ListAdminUsersParams) ([]dbq.User, error) {
+func (f *fakeQ) ListAdminUsers(_ context.Context, _ dbq.ListAdminUsersParams) ([]dbq.ListAdminUsersRow, error) {
 	return f.listOut, nil
 }
 func (f *fakeQ) CountAdminUsers(_ context.Context) (int64, error) { return f.count, nil }
@@ -91,20 +91,20 @@ func (f *fakeQ) GetUserByEmail(_ context.Context, email string) (dbq.User, error
 	}
 	return dbq.User{}, pgx.ErrNoRows
 }
-func (f *fakeQ) CreateAdminUser(_ context.Context, a dbq.CreateAdminUserParams) (dbq.User, error) {
+func (f *fakeQ) CreateAdminUser(_ context.Context, a dbq.CreateAdminUserParams) (dbq.CreateAdminUserRow, error) {
 	f.gotCreate = a
 	if f.createErr != nil {
-		return dbq.User{}, f.createErr
+		return dbq.CreateAdminUserRow{}, f.createErr
 	}
-	out := dbq.User{ID: uuid.New(), Email: a.Email, DisplayName: a.DisplayName, IsActive: a.IsActive}
+	out := dbq.CreateAdminUserRow{ID: uuid.New(), Email: a.Email, DisplayName: a.DisplayName, IsActive: a.IsActive}
 	return out, nil
 }
-func (f *fakeQ) UpdateAdminUser(_ context.Context, a dbq.UpdateAdminUserParams) (dbq.User, error) {
+func (f *fakeQ) UpdateAdminUser(_ context.Context, a dbq.UpdateAdminUserParams) (dbq.UpdateAdminUserRow, error) {
 	f.gotUpdate = a
 	if f.updateErr != nil {
-		return dbq.User{}, f.updateErr
+		return dbq.UpdateAdminUserRow{}, f.updateErr
 	}
-	return dbq.User{ID: a.ID, DisplayName: a.DisplayName, IsActive: defaultBool(a.IsActive, true)}, nil
+	return dbq.UpdateAdminUserRow{ID: a.ID, DisplayName: a.DisplayName, IsActive: defaultBool(a.IsActive, true)}, nil
 }
 
 // ---- Role stubs (PR 75) ----
@@ -150,48 +150,48 @@ func (f *fakeQ) CountUserRolesForRole(_ context.Context, _ uuid.UUID) (int64, er
 
 // ---- Assignment stubs (PR 76) ----
 
-func (f *fakeQ) ListUserAssignments(_ context.Context, _ uuid.UUID) ([]dbq.UserRoleRow, error) {
+func (f *fakeQ) ListUserAssignments(_ context.Context, _ uuid.UUID) ([]dbq.UserRole, error) {
 	return f.assignments, nil
 }
-func (f *fakeQ) GetUserRole(_ context.Context, id uuid.UUID) (dbq.UserRoleRow, error) {
+func (f *fakeQ) GetUserRole(_ context.Context, id uuid.UUID) (dbq.UserRole, error) {
 	if f.assignmentByID != nil {
 		if a, ok := f.assignmentByID[id]; ok {
 			return a, nil
 		}
 	}
-	return dbq.UserRoleRow{}, pgx.ErrNoRows
+	return dbq.UserRole{}, pgx.ErrNoRows
 }
-func (f *fakeQ) FindUserRoleByUserAndRole(_ context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error) {
-	if a, ok := f.dupAssignment[[2]uuid.UUID{userID, roleID}]; ok {
+func (f *fakeQ) FindUserRoleByUserAndRole(_ context.Context, arg dbq.FindUserRoleByUserAndRoleParams) (dbq.UserRole, error) {
+	if a, ok := f.dupAssignment[[2]uuid.UUID{arg.UserID, arg.RoleID}]; ok {
 		return a, nil
 	}
-	return dbq.UserRoleRow{}, pgx.ErrNoRows
+	return dbq.UserRole{}, pgx.ErrNoRows
 }
-func (f *fakeQ) CreateUserRole(_ context.Context, userID, roleID uuid.UUID) (dbq.UserRoleRow, error) {
-	f.gotAssignmentCreate = [2]uuid.UUID{userID, roleID}
-	return dbq.UserRoleRow{ID: uuid.New(), UserID: userID, RoleID: roleID}, nil
+func (f *fakeQ) CreateUserRole(_ context.Context, arg dbq.CreateUserRoleParams) (dbq.UserRole, error) {
+	f.gotAssignmentCreate = [2]uuid.UUID{arg.UserID, arg.RoleID}
+	return dbq.UserRole{ID: uuid.New(), UserID: arg.UserID, RoleID: arg.RoleID}, nil
 }
 func (f *fakeQ) DeleteUserRole(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 1, nil
 }
-func (f *fakeQ) ListRoleScopesByAssignment(_ context.Context, _ uuid.UUID) ([]dbq.RoleScopeRow, error) {
+func (f *fakeQ) ListRoleScopesByAssignment(_ context.Context, _ uuid.UUID) ([]dbq.RoleScope, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListRoleScopesByAssignments(_ context.Context, _ []uuid.UUID) ([]dbq.RoleScopeRow, error) {
+func (f *fakeQ) ListRoleScopesByAssignments(_ context.Context, _ []uuid.UUID) ([]dbq.RoleScope, error) {
 	return f.scopesByAssignment, nil
 }
-func (f *fakeQ) CreateRoleScope(_ context.Context, a dbq.CreateRoleScopeParams) (dbq.RoleScopeRow, error) {
+func (f *fakeQ) CreateRoleScope(_ context.Context, a dbq.CreateRoleScopeParams) (dbq.RoleScope, error) {
 	f.gotScopeCreates = append(f.gotScopeCreates, a)
-	return dbq.RoleScopeRow{ID: uuid.New(), AssignmentID: a.AssignmentID, ScopeType: a.ScopeType, TargetID: a.TargetID}, nil
+	return dbq.RoleScope{ID: uuid.New(), AssignmentID: a.AssignmentID, ScopeType: a.ScopeType, TargetID: a.TargetID}, nil
 }
 func (f *fakeQ) DeleteRoleScopesForAssignment(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
-func (f *fakeQ) GetRoleNamesByIDs(_ context.Context, ids []uuid.UUID) ([]dbq.RoleNameRow, error) {
-	out := []dbq.RoleNameRow{}
+func (f *fakeQ) GetRoleNamesByIDs(_ context.Context, ids []uuid.UUID) ([]dbq.GetRoleNamesByIDsRow, error) {
+	out := []dbq.GetRoleNamesByIDsRow{}
 	for _, id := range ids {
 		if n, ok := f.roleNamesByID[id]; ok {
-			out = append(out, dbq.RoleNameRow{ID: id, Name: n})
+			out = append(out, dbq.GetRoleNamesByIDsRow{ID: id, Name: n})
 		}
 	}
 	return out, nil
@@ -199,31 +199,31 @@ func (f *fakeQ) GetRoleNamesByIDs(_ context.Context, ids []uuid.UUID) ([]dbq.Rol
 
 // ---- OIDC mapping stubs (PR 77) ----
 
-func (f *fakeQ) ListOidcRoleMappings(_ context.Context, _ dbq.ListOidcRoleMappingsParams) ([]dbq.OidcRoleMappingRow, error) {
+func (f *fakeQ) ListOidcRoleMappings(_ context.Context, _ dbq.ListOidcRoleMappingsParams) ([]dbq.OidcRoleMapping, error) {
 	return f.oidcList, nil
 }
 func (f *fakeQ) CountOidcRoleMappings(_ context.Context) (int64, error) {
 	return f.oidcCount, nil
 }
-func (f *fakeQ) GetOidcRoleMapping(_ context.Context, id uuid.UUID) (dbq.OidcRoleMappingRow, error) {
+func (f *fakeQ) GetOidcRoleMapping(_ context.Context, id uuid.UUID) (dbq.OidcRoleMapping, error) {
 	if f.oidcByID != nil {
 		if m, ok := f.oidcByID[id]; ok {
 			return m, nil
 		}
 	}
-	return dbq.OidcRoleMappingRow{}, pgx.ErrNoRows
+	return dbq.OidcRoleMapping{}, pgx.ErrNoRows
 }
-func (f *fakeQ) GetOidcRoleMappingByIdpRole(_ context.Context, idpRole string) (dbq.OidcRoleMappingRow, error) {
+func (f *fakeQ) GetOidcRoleMappingByIdpRole(_ context.Context, idpRole string) (dbq.OidcRoleMapping, error) {
 	if f.oidcByIdpRole != nil {
 		if m, ok := f.oidcByIdpRole[idpRole]; ok {
 			return m, nil
 		}
 	}
-	return dbq.OidcRoleMappingRow{}, pgx.ErrNoRows
+	return dbq.OidcRoleMapping{}, pgx.ErrNoRows
 }
-func (f *fakeQ) CreateOidcRoleMapping(_ context.Context, a dbq.CreateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error) {
+func (f *fakeQ) CreateOidcRoleMapping(_ context.Context, a dbq.CreateOidcRoleMappingParams) (dbq.OidcRoleMapping, error) {
 	f.gotOidcCreate = a
-	out := dbq.OidcRoleMappingRow{
+	out := dbq.OidcRoleMapping{
 		ID: uuid.New(), IdpRole: a.IdpRole, ClaimSource: a.ClaimSource,
 		DcimRoleID: a.DcimRoleID, Description: a.Description,
 		ScopeDimension: a.ScopeDimension, ScopeTarget: a.ScopeTarget,
@@ -233,14 +233,14 @@ func (f *fakeQ) CreateOidcRoleMapping(_ context.Context, a dbq.CreateOidcRoleMap
 	}
 	return out, nil
 }
-func (f *fakeQ) UpdateOidcRoleMapping(_ context.Context, a dbq.UpdateOidcRoleMappingParams) (dbq.OidcRoleMappingRow, error) {
+func (f *fakeQ) UpdateOidcRoleMapping(_ context.Context, a dbq.UpdateOidcRoleMappingParams) (dbq.OidcRoleMapping, error) {
 	f.gotOidcUpdate = a
 	if f.oidcUpdateErr != nil {
-		return dbq.OidcRoleMappingRow{}, f.oidcUpdateErr
+		return dbq.OidcRoleMapping{}, f.oidcUpdateErr
 	}
 	out := f.oidcUpdateOut
 	if (out.ID == uuid.UUID{}) {
-		out = dbq.OidcRoleMappingRow{ID: a.ID, ClaimSource: defaultString(a.ClaimSource, "")}
+		out = dbq.OidcRoleMapping{ID: a.ID, ClaimSource: defaultString(a.ClaimSource, "")}
 	}
 	return out, nil
 }
@@ -320,7 +320,7 @@ func defaultBool(p *bool, d bool) bool {
 
 func TestListUsers_HappyPath(t *testing.T) {
 	f := &fakeQ{
-		listOut: []dbq.User{{ID: uuid.New(), Email: "a@example.com", IsActive: true}},
+		listOut: []dbq.ListAdminUsersRow{{ID: uuid.New(), Email: "a@example.com", IsActive: true}},
 		count:   1,
 	}
 	rec := doReq(t, mount(f), "GET", "/admin/users", nil)

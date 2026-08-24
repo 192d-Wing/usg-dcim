@@ -160,7 +160,7 @@ func (h *Handler) listServerMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cutoff := time.Now().UTC().Add(-time.Duration(minutes) * time.Minute)
-	rows, err := h.Q.ListDnsServerMetricsSamples(r.Context(), id, cutoff)
+	rows, err := h.Q.ListDnsServerMetricsSamples(r.Context(), dbq.ListDnsServerMetricsSamplesParams{ServerID: id, Cutoff: cutoff})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

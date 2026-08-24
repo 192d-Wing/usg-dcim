@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -28,19 +27,19 @@ type Querier interface {
 	ListDnsRecords(ctx context.Context, arg dbq.ListDnsRecordsParams) ([]dbq.DnsRecord, error)
 	CountDnsRecords(ctx context.Context, arg dbq.CountDnsRecordsParams) (int64, error)
 
-	ListDnsServers(ctx context.Context, arg dbq.ListDnsServersParams) ([]dbq.DnsServer, error)
+	ListDnsServers(ctx context.Context, arg dbq.ListDnsServersParams) ([]dbq.ListDnsServersRow, error)
 	CountDnsServers(ctx context.Context, arg dbq.CountDnsServersParams) (int64, error)
-	GetDnsServer(ctx context.Context, id uuid.UUID) (dbq.DnsServer, error)
-	ListAnycastGroups(ctx context.Context, arg dbq.ListAnycastGroupsParams) ([]dbq.AnycastGroup, error)
+	GetDnsServer(ctx context.Context, id uuid.UUID) (dbq.GetDnsServerRow, error)
+	ListAnycastGroups(ctx context.Context, arg dbq.ListAnycastGroupsParams) ([]dbq.ListAnycastGroupsRow, error)
 	CountAnycastGroups(ctx context.Context, arg dbq.CountAnycastGroupsParams) (int64, error)
 	ListDnsForwarders(ctx context.Context, arg dbq.ListDnsForwardersParams) ([]dbq.DnsForwarder, error)
 	CountDnsForwarders(ctx context.Context, arg dbq.CountDnsForwardersParams) (int64, error)
 	ListDnsCatalogZones(ctx context.Context, arg dbq.ListDnsCatalogZonesParams) ([]dbq.DnsCatalogZone, error)
 	CountDnsCatalogZones(ctx context.Context, arg dbq.CountDnsCatalogZonesParams) (int64, error)
 
-	ListDnsBlocklists(ctx context.Context, arg dbq.ListDnsBlocklistsParams) ([]dbq.DnsBlocklist, error)
+	ListDnsBlocklists(ctx context.Context, arg dbq.ListDnsBlocklistsParams) ([]dbq.ListDnsBlocklistsRow, error)
 	CountDnsBlocklists(ctx context.Context, arg dbq.CountDnsBlocklistsParams) (int64, error)
-	GetDnsBlocklist(ctx context.Context, id uuid.UUID) (dbq.DnsBlocklist, error)
+	GetDnsBlocklist(ctx context.Context, id uuid.UUID) (dbq.GetDnsBlocklistRow, error)
 	ListDnsBlocklistEntries(ctx context.Context, arg dbq.ListDnsBlocklistEntriesParams) ([]dbq.DnsBlocklistEntry, error)
 	CountDnsBlocklistEntries(ctx context.Context, blocklistID uuid.UUID) (int64, error)
 	ListDnsBlocklistPatternsByID(ctx context.Context, blocklistID uuid.UUID) ([]string, error)
@@ -50,20 +49,20 @@ type Querier interface {
 	SetDnsCatalogZoneSigned(ctx context.Context, arg dbq.SetDnsCatalogZoneSignedParams) error
 	ListDnsViews(ctx context.Context, arg dbq.ListDnsViewsParams) ([]dbq.DnsView, error)
 	CountDnsViews(ctx context.Context, arg dbq.CountDnsViewsParams) (int64, error)
-	ListDnsHealthChecks(ctx context.Context, arg dbq.ListDnsHealthChecksParams) ([]dbq.DnsHealthCheck, error)
+	ListDnsHealthChecks(ctx context.Context, arg dbq.ListDnsHealthChecksParams) ([]dbq.ListDnsHealthChecksRow, error)
 	CountDnsHealthChecks(ctx context.Context, arg dbq.CountDnsHealthChecksParams) (int64, error)
-	ListBgpPeers(ctx context.Context, arg dbq.ListBgpPeersParams) ([]dbq.BgpPeer, error)
+	ListBgpPeers(ctx context.Context, arg dbq.ListBgpPeersParams) ([]dbq.ListBgpPeersRow, error)
 	CountBgpPeers(ctx context.Context, arg dbq.CountBgpPeersParams) (int64, error)
 	ListAnycastBindings(ctx context.Context, arg dbq.ListAnycastBindingsParams) ([]dbq.AnycastBgpBinding, error)
 	CountAnycastBindings(ctx context.Context, arg dbq.CountAnycastBindingsParams) (int64, error)
 
 	// Bundle assembly (PRs 30, 31) — bulk reads.
 	ListDnsZonesByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsZone, error)
-	ListDnsRecordsByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsRecordForBundle, error)
+	ListDnsRecordsByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error)
 	ListUnhealthyEnabledHealthChecksByFabric(ctx context.Context, fabricID uuid.UUID) ([]uuid.UUID, error)
 	GetEnabledDnsCatalogZoneByFabric(ctx context.Context, fabricID uuid.UUID) (dbq.DnsCatalogZone, error)
-	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error)
-	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKeyRow, error)
+	ListEnabledAuthDnsServersByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error)
+	ListDnsKeysByZoneIDs(ctx context.Context, zoneIDs []uuid.UUID) ([]dbq.DnsKey, error)
 	ListDnsViewsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsView, error)
 
 	// Recursive bundle (PR 35) — fabric apex names, local auth IP,
@@ -72,9 +71,9 @@ type Querier interface {
 	// the deployment-wide default upstreams.
 	ListApexZoneNamesByFabric(ctx context.Context, fabricID uuid.UUID) ([]string, error)
 	GetSameSiteAuthUnicastIP(ctx context.Context, siteID uuid.UUID) (string, error)
-	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.DnsForwarderRow, error)
-	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.BlocklistForBundleRow, error)
-	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.FabricForRecursiveBundle, error)
+	ListDnsForwardersForBundle(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error)
+	ListEnabledBlocklistsWithPatternsByFabric(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error)
+	GetFabricForRecursiveBundle(ctx context.Context, id uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error)
 	GetSystemSetting(ctx context.Context, key string) (dbq.SystemSetting, error)
 
 	// Mutations (PR 43). Action endpoints (freeze/unfreeze, import,
@@ -84,44 +83,44 @@ type Querier interface {
 	CreateDnsZone(ctx context.Context, arg dbq.CreateDnsZoneParams) (dbq.DnsZone, error)
 	UpdateDnsZone(ctx context.Context, arg dbq.UpdateDnsZoneParams) (dbq.DnsZone, error)
 	DeleteDnsZone(ctx context.Context, id uuid.UUID) error
-	SetDnsZoneFrozen(ctx context.Context, id uuid.UUID, frozen bool) (dbq.DnsZone, error)
+	SetDnsZoneFrozen(ctx context.Context, arg dbq.SetDnsZoneFrozenParams) (dbq.DnsZone, error)
 	SetDnsZoneNsec3(ctx context.Context, arg dbq.SetDnsZoneNsec3Params) (dbq.DnsZone, error)
-	ListAllRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsRecordForRender, error)
-	SetDnsHealthCheckResult(ctx context.Context, id uuid.UUID, status string, lastError *string) (int64, error)
+	ListAllRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.ListAllRecordsInZoneRow, error)
+	SetDnsHealthCheckResult(ctx context.Context, arg dbq.SetDnsHealthCheckResultParams) (int64, error)
 	SetDnsServerRenderStatus(ctx context.Context, arg dbq.SetDnsServerRenderStatusParams) (int64, error)
-	CreateDnsServerMetricsSample(ctx context.Context, arg dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsMetricsSampleRow, error)
-	ListDnsServerMetricsSamples(ctx context.Context, serverID uuid.UUID, cutoff time.Time) ([]dbq.DnsMetricsSampleRow, error)
-	ListDnsKeysByZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsKeyRow, error)
-	CreateDnsKey(ctx context.Context, arg dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error)
-	SetDnsZoneSigned(ctx context.Context, id uuid.UUID, signed bool) (int64, error)
-	ListActiveDnsKeysForZoneAndRole(ctx context.Context, zoneID uuid.UUID, role string) ([]dbq.DnsKeyRow, error)
+	CreateDnsServerMetricsSample(ctx context.Context, arg dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsServerMetricsSample, error)
+	ListDnsServerMetricsSamples(ctx context.Context, arg dbq.ListDnsServerMetricsSamplesParams) ([]dbq.DnsServerMetricsSample, error)
+	ListDnsKeysByZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsKey, error)
+	CreateDnsKey(ctx context.Context, arg dbq.CreateDnsKeyParams) (dbq.DnsKey, error)
+	SetDnsZoneSigned(ctx context.Context, arg dbq.SetDnsZoneSignedParams) (int64, error)
+	ListActiveDnsKeysForZoneAndRole(ctx context.Context, arg dbq.ListActiveDnsKeysForZoneAndRoleParams) ([]dbq.DnsKey, error)
 	RetireDnsKey(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteDnsKey(ctx context.Context, id uuid.UUID) (int64, error)
 	RetireAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) (int64, error)
-	DeleteAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsKeyRow, error)
-	GetDnsKey(ctx context.Context, id uuid.UUID) (dbq.DnsKeyRow, error)
+	DeleteAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) ([]dbq.DnsKey, error)
+	GetDnsKey(ctx context.Context, id uuid.UUID) (dbq.DnsKey, error)
 	TouchDnsZone(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteManualRecordsInZone(ctx context.Context, zoneID uuid.UUID) ([]uuid.UUID, error)
 	UpdateDnsZoneSoa(ctx context.Context, arg dbq.UpdateDnsZoneSoaParams) error
-	ListReverseZonesForSite(ctx context.Context, fabricID, siteID uuid.UUID) ([]dbq.DnsZone, error)
-	GetReverseZoneByName(ctx context.Context, fabricID, siteID uuid.UUID, name string) (dbq.DnsZone, error)
-	CreateReverseZone(ctx context.Context, name string, fabricID, siteID uuid.UUID) (dbq.DnsZone, error)
-	ListIPAddressesForSiteWithDnsName(ctx context.Context, siteID uuid.UUID) ([]dbq.IPAddressForSyncRow, error)
+	ListReverseZonesForSite(ctx context.Context, arg dbq.ListReverseZonesForSiteParams) ([]dbq.DnsZone, error)
+	GetReverseZoneByName(ctx context.Context, arg dbq.GetReverseZoneByNameParams) (dbq.DnsZone, error)
+	CreateReverseZone(ctx context.Context, arg dbq.CreateReverseZoneParams) (dbq.DnsZone, error)
+	ListIPAddressesForSiteWithDnsName(ctx context.Context, siteID uuid.UUID) ([]dbq.ListIPAddressesForSiteWithDnsNameRow, error)
 	DeleteIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) error
 	CountIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) (int64, error)
 	CreateProjectedDnsRecord(ctx context.Context, arg dbq.CreateProjectedDnsRecordParams) (uuid.UUID, error)
-	ListDnsSamplesInWindow(ctx context.Context, cutoff time.Time, serverIDs []uuid.UUID) ([]dbq.DnsMetricsSampleRow, error)
-	ListDnsServersForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]dbq.DnsServerForDashboardRow, error)
-	ListDnsZonesForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]dbq.DnsZoneForDashboardRow, error)
+	ListDnsSamplesInWindow(ctx context.Context, arg dbq.ListDnsSamplesInWindowParams) ([]dbq.DnsServerMetricsSample, error)
+	ListDnsServersForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]dbq.ListDnsServersForDashboardRow, error)
+	ListDnsZonesForDashboard(ctx context.Context, fabricID *uuid.UUID) ([]dbq.ListDnsZonesForDashboardRow, error)
 	CountAnycastGroupsForDashboard(ctx context.Context, fabricID *uuid.UUID) (int64, error)
 	CreateDnsRecord(ctx context.Context, arg dbq.CreateDnsRecordParams) (dbq.DnsRecord, error)
 	UpdateDnsRecord(ctx context.Context, arg dbq.UpdateDnsRecordParams) (dbq.DnsRecord, error)
 	DeleteDnsRecord(ctx context.Context, id uuid.UUID) error
-	CreateDnsServerRow(ctx context.Context, arg dbq.CreateDnsServerRowParams) (dbq.DnsServer, error)
-	UpdateDnsServerRow(ctx context.Context, arg dbq.UpdateDnsServerRowParams) (dbq.DnsServer, error)
+	CreateDnsServerRow(ctx context.Context, arg dbq.CreateDnsServerRowParams) (dbq.CreateDnsServerRowRow, error)
+	UpdateDnsServerRow(ctx context.Context, arg dbq.UpdateDnsServerRowParams) (dbq.UpdateDnsServerRowRow, error)
 	DeleteDnsServerRow(ctx context.Context, id uuid.UUID) error
-	CreateAnycastGroup(ctx context.Context, arg dbq.CreateAnycastGroupParams) (dbq.AnycastGroup, error)
-	UpdateAnycastGroup(ctx context.Context, arg dbq.UpdateAnycastGroupParams) (dbq.AnycastGroup, error)
+	CreateAnycastGroup(ctx context.Context, arg dbq.CreateAnycastGroupParams) (dbq.CreateAnycastGroupRow, error)
+	UpdateAnycastGroup(ctx context.Context, arg dbq.UpdateAnycastGroupParams) (dbq.UpdateAnycastGroupRow, error)
 	DeleteAnycastGroup(ctx context.Context, id uuid.UUID) error
 	CreateDnsForwarder(ctx context.Context, arg dbq.CreateDnsForwarderParams) (dbq.DnsForwarder, error)
 	UpdateDnsForwarder(ctx context.Context, arg dbq.UpdateDnsForwarderParams) (dbq.DnsForwarder, error)
@@ -129,25 +128,25 @@ type Querier interface {
 	CreateDnsCatalogZone(ctx context.Context, arg dbq.CreateDnsCatalogZoneParams) (dbq.DnsCatalogZone, error)
 	UpdateDnsCatalogZone(ctx context.Context, arg dbq.UpdateDnsCatalogZoneParams) (dbq.DnsCatalogZone, error)
 	DeleteDnsCatalogZone(ctx context.Context, id uuid.UUID) error
-	CreateDnsBlocklist(ctx context.Context, arg dbq.CreateDnsBlocklistParams) (dbq.DnsBlocklist, error)
-	UpdateDnsBlocklist(ctx context.Context, arg dbq.UpdateDnsBlocklistParams) (dbq.DnsBlocklist, error)
+	CreateDnsBlocklist(ctx context.Context, arg dbq.CreateDnsBlocklistParams) (dbq.CreateDnsBlocklistRow, error)
+	UpdateDnsBlocklist(ctx context.Context, arg dbq.UpdateDnsBlocklistParams) (dbq.UpdateDnsBlocklistRow, error)
 	DeleteDnsBlocklist(ctx context.Context, id uuid.UUID) error
 	CreateDnsBlocklistEntry(ctx context.Context, arg dbq.CreateDnsBlocklistEntryParams) (dbq.DnsBlocklistEntry, error)
 	DeleteDnsBlocklistEntry(ctx context.Context, id uuid.UUID) error
 	CreateDnsView(ctx context.Context, arg dbq.CreateDnsViewParams) (dbq.DnsView, error)
 	UpdateDnsView(ctx context.Context, arg dbq.UpdateDnsViewParams) (dbq.DnsView, error)
 	DeleteDnsView(ctx context.Context, id uuid.UUID) error
-	CreateDnsHealthCheck(ctx context.Context, arg dbq.CreateDnsHealthCheckParams) (dbq.DnsHealthCheck, error)
-	UpdateDnsHealthCheck(ctx context.Context, arg dbq.UpdateDnsHealthCheckParams) (dbq.DnsHealthCheck, error)
+	CreateDnsHealthCheck(ctx context.Context, arg dbq.CreateDnsHealthCheckParams) (dbq.CreateDnsHealthCheckRow, error)
+	UpdateDnsHealthCheck(ctx context.Context, arg dbq.UpdateDnsHealthCheckParams) (dbq.UpdateDnsHealthCheckRow, error)
 	DeleteDnsHealthCheck(ctx context.Context, id uuid.UUID) error
-	CreateBgpPeer(ctx context.Context, arg dbq.CreateBgpPeerParams) (dbq.BgpPeer, error)
-	UpdateBgpPeer(ctx context.Context, arg dbq.UpdateBgpPeerParams) (dbq.BgpPeer, error)
+	CreateBgpPeer(ctx context.Context, arg dbq.CreateBgpPeerParams) (dbq.CreateBgpPeerRow, error)
+	UpdateBgpPeer(ctx context.Context, arg dbq.UpdateBgpPeerParams) (dbq.UpdateBgpPeerRow, error)
 	DeleteBgpPeer(ctx context.Context, id uuid.UUID) error
 	CreateAnycastBinding(ctx context.Context, arg dbq.CreateAnycastBindingParams) (dbq.AnycastBgpBinding, error)
 	DeleteAnycastBinding(ctx context.Context, id uuid.UUID) error
 
 	// Invariants (PR 52)
-	GetZoneFrozenByRecord(ctx context.Context, recordID uuid.UUID) (dbq.ZoneFrozenRow, error)
+	GetZoneFrozenByRecord(ctx context.Context, recordID uuid.UUID) (dbq.GetZoneFrozenByRecordRow, error)
 
 	// ABAC parent-fabric lookups (PR 57). Used by mutation handlers to
 	// resolve {id} → fabric_id before EnforceFabricScope on update/
@@ -325,7 +324,7 @@ func fabricIDFromQuery(w http.ResponseWriter, q map[string][]string) (*uuid.UUID
 	return &id, true
 }
 
-type blocklistsPage = httpx.Page[dbq.DnsBlocklist]
+type blocklistsPage = httpx.Page[dbq.ListDnsBlocklistsRow]
 
 func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -336,7 +335,7 @@ func (h *Handler) listBlocklists(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeIds, ok := scopedListFilter(r, "dns:blocklists:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsBlocklist](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListDnsBlocklistsRow](limit, offset))
 		return
 	}
 	params := dbq.ListDnsBlocklistsParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds}
@@ -439,7 +438,7 @@ func (h *Handler) listViews(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, viewsPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type healthChecksPage = httpx.Page[dbq.DnsHealthCheck]
+type healthChecksPage = httpx.Page[dbq.ListDnsHealthChecksRow]
 
 func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -450,7 +449,7 @@ func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeIds, ok := scopedListFilter(r, "dns:health-checks:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsHealthCheck](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListDnsHealthChecksRow](limit, offset))
 		return
 	}
 	items, err := h.Q.ListDnsHealthChecks(r.Context(), dbq.ListDnsHealthChecksParams{Limit: limit, Offset: offset, FabricID: fid, ScopeFabricIds: scopeIds})
@@ -468,7 +467,7 @@ func (h *Handler) listHealthChecks(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, healthChecksPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type bgpPeersPage = httpx.Page[dbq.BgpPeer]
+type bgpPeersPage = httpx.Page[dbq.ListBgpPeersRow]
 
 func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -483,7 +482,7 @@ func (h *Handler) listBgpPeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if scoped && len(scopeSiteIds) == 0 {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.BgpPeer](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListBgpPeersRow](limit, offset))
 		return
 	}
 	params := dbq.ListBgpPeersParams{Limit: limit, Offset: offset, ScopeSiteIds: scopeSiteIds}
@@ -555,14 +554,14 @@ func (h *Handler) listAnycastBindings(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, anycastBindingsPage{Items: items, Total: total, Limit: limit, Offset: offset})
 }
 
-type serversPage = httpx.Page[dbq.DnsServer]
+type serversPage = httpx.Page[dbq.ListDnsServersRow]
 
 func (h *Handler) listServers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:servers:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.DnsServer](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListDnsServersRow](limit, offset))
 		return
 	}
 	params := dbq.ListDnsServersParams{Limit: limit, Offset: offset, Role: strPtr(q.Get("role")), ScopeFabricIds: scopeIds}
@@ -619,14 +618,14 @@ func (h *Handler) getServer(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, obj)
 }
 
-type anycastGroupsPage = httpx.Page[dbq.AnycastGroup]
+type anycastGroupsPage = httpx.Page[dbq.ListAnycastGroupsRow]
 
 func (h *Handler) listAnycastGroups(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, offset := httpx.PageBounds(q)
 	scopeIds, ok := scopedListFilter(r, "dns:anycast-groups:read")
 	if !ok {
-		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.AnycastGroup](limit, offset))
+		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.ListAnycastGroupsRow](limit, offset))
 		return
 	}
 	params := dbq.ListAnycastGroupsParams{Limit: limit, Offset: offset, Service: strPtr(q.Get("service")), ScopeFabricIds: scopeIds}

@@ -2,7 +2,7 @@
 -- one-list-one-get under sites and the SQL shapes are nearly identical.
 
 -- name: ListBuildings :many
-SELECT id, site_id, name, code, created_at, updated_at
+SELECT *
 FROM buildings
 WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id))
   AND (sqlc.narg(site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(site_ids)::uuid[]))
@@ -20,11 +20,7 @@ WHERE (sqlc.narg(site_id)::uuid IS NULL OR site_id = sqlc.narg(site_id))
 -- handler passes site_ids = NULL when the principal is global, an
 -- empty page when scope can't reach any site, or the concrete
 -- ABAC-expanded site_id set otherwise (same shape as buildings).
-SELECT r.id, r.building_id, r.name, r.code, r.floor_area_sqft,
-       r.design_kw::text AS design_kw,
-       r.design_cooling_tons::text AS design_cooling_tons,
-       r.grid_cols, r.grid_rows,
-       r.created_at, r.updated_at
+SELECT r.*
 FROM rooms r
 JOIN buildings b ON b.id = r.building_id
 WHERE (sqlc.narg(building_id)::uuid IS NULL OR r.building_id = sqlc.narg(building_id))
@@ -41,7 +37,7 @@ WHERE (sqlc.narg(building_id)::uuid IS NULL OR r.building_id = sqlc.narg(buildin
 
 -- name: ListRows :many
 -- PR 96 — 3-hop scope filter: row → room → building → site → scope.
-SELECT r.id, r.room_id, r.name, r.code, r.created_at, r.updated_at
+SELECT r.*
 FROM rows r
 JOIN rooms rm ON rm.id = r.room_id
 JOIN buildings b ON b.id = rm.building_id

@@ -10,16 +10,16 @@
 -- name: SearchSites :many
 SELECT id, name, code
 FROM sites
-WHERE name ILIKE $1 OR code ILIKE $1
+WHERE name ILIKE sqlc.arg(pattern) OR code ILIKE sqlc.arg(pattern)
 ORDER BY name
-LIMIT $2;
+LIMIT sqlc.arg(result_limit);
 
 -- name: SearchRacks :many
 SELECT id, name, site_id
 FROM racks
-WHERE name ILIKE $1 OR code ILIKE $1 OR serial ILIKE $1
+WHERE name ILIKE sqlc.arg(pattern) OR code ILIKE sqlc.arg(pattern) OR serial ILIKE sqlc.arg(pattern)
 ORDER BY name
-LIMIT $2;
+LIMIT sqlc.arg(result_limit);
 
 -- name: SearchAssets :many
 -- mgmt_ip is a TEXT column on assets (not INET); ILIKE works directly.
@@ -28,9 +28,9 @@ LIMIT $2;
 -- without a custom type registration.
 SELECT id, name, hostname, serial, kind::text AS kind, site_id
 FROM assets
-WHERE name ILIKE $1 OR hostname ILIKE $1 OR serial ILIKE $1 OR mgmt_ip ILIKE $1
+WHERE name ILIKE sqlc.arg(pattern) OR hostname ILIKE sqlc.arg(pattern) OR serial ILIKE sqlc.arg(pattern) OR mgmt_ip ILIKE sqlc.arg(pattern)
 ORDER BY name
-LIMIT $2;
+LIMIT sqlc.arg(result_limit);
 
 -- name: SearchIPAddressesByHost :many
 -- Exact match on the host portion of the INET column — Python's
@@ -44,16 +44,16 @@ SELECT id, subnet_id, asset_id,
        role::text AS role, status::text AS status, source::text AS source,
        dns_name
 FROM ip_addresses
-WHERE host(address) = $1
+WHERE host(address) = sqlc.arg(host)
 ORDER BY address
-LIMIT $2;
+LIMIT sqlc.arg(result_limit);
 
 -- name: SearchSubnetsByIDs :many
 -- Bulk fetch for the IP-search enrichment. Projects the columns the
 -- response shape exposes (subnet_id, subnet_prefix, plus the FK keys
 -- the handler walks to fetch vrf+fabric in the same fan-out).
 SELECT id, fabric_id, vrf_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix
 FROM subnets
 WHERE id = ANY($1::uuid[]);
 

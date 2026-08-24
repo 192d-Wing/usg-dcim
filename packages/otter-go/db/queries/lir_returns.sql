@@ -23,13 +23,13 @@
 UPDATE lir_allocations
 SET status                    = 'return_requested',
     return_requested_at       = NOW(),
-    return_requested_by_user_id = $2::uuid,
-    return_reason             = $3::text,
+    return_requested_by_user_id = sqlc.arg(return_requested_by_user_id)::uuid,
+    return_reason             = sqlc.arg(return_reason)::text,
     updated_at                = NOW()
-WHERE id = $1 AND status = 'active'
+WHERE id = sqlc.arg(id) AND status = 'active'
 RETURNING id, request_id, organization_id, pool_id, pool_supernet_id,
           tenant_supernet_id,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
           allocated_at, allocated_by_user_id, status,
           return_requested_at, return_requested_by_user_id, return_reason,
           returned_at, returned_by_user_id,
@@ -50,7 +50,7 @@ RETURNING id, request_id, organization_id, pool_id, pool_supernet_id,
 UPDATE lir_allocations
 SET status                = 'returned',
     returned_at           = NOW(),
-    returned_by_user_id   = $2::uuid,
+    returned_by_user_id   = sqlc.arg(returned_by_user_id)::uuid,
     arin_status           = CASE
         WHEN arin_status = 'registered' THEN 'removing'
         ELSE arin_status
@@ -68,10 +68,10 @@ SET status                = 'returned',
         ELSE arin_last_error
     END,
     updated_at            = NOW()
-WHERE id = $1 AND status = 'return_requested'
+WHERE id = sqlc.arg(id) AND status = 'return_requested'
 RETURNING id, request_id, organization_id, pool_id, pool_supernet_id,
           tenant_supernet_id,
-          host(prefix) || '/' || masklen(prefix) AS prefix,
+          (host(prefix) || '/' || masklen(prefix))::text AS prefix,
           allocated_at, allocated_by_user_id, status,
           return_requested_at, return_requested_by_user_id, return_reason,
           returned_at, returned_by_user_id,
@@ -89,9 +89,11 @@ SELECT
     a.id                                      AS allocation_id,
     a.arin_status,
     a.arin_attempts,
-    host(a.prefix) || '/' || masklen(a.prefix) AS prefix,
-    a.arin_net_handle                         AS net_handle,
-    p.arin_parent_net_handle                  AS parent_net_handle
+    (host(a.prefix) || '/' || masklen(a.prefix))::text AS prefix,
+    -- Both handles are guaranteed non-NULL by the WHERE guards below;
+    -- COALESCE makes that visible to sqlc's nullability inference.
+    COALESCE(a.arin_net_handle, '')           AS net_handle,
+    COALESCE(p.arin_parent_net_handle, '')    AS parent_net_handle
 FROM lir_allocations a
 JOIN lir_pools      p ON p.id = a.pool_id
 WHERE p.arin_parent_net_handle IS NOT NULL
@@ -100,7 +102,7 @@ WHERE p.arin_parent_net_handle IS NOT NULL
         a.arin_status = 'removing'
         OR (
             a.arin_status = 'failed'
-            AND a.arin_attempts < $1::int
+            AND a.arin_attempts < sqlc.arg(max_attempts)::int
             AND (
                 a.arin_last_attempt_at IS NULL
                 OR a.arin_last_attempt_at + (

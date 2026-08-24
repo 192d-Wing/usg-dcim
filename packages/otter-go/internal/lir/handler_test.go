@@ -24,15 +24,15 @@ import (
 
 type fakeQ struct {
 	pools       map[uuid.UUID]dbq.LirPool
-	supernets   map[uuid.UUID]dbq.SupernetLirAttachRow
+	supernets   map[uuid.UUID]dbq.GetSupernetForLirAttachRow
 	requests    map[uuid.UUID]dbq.LirRequest
 	allocations map[uuid.UUID]dbq.LirAllocation
 	// carver inputs, keyed by pool_id
-	carveSources   map[uuid.UUID][]dbq.PoolSupernetForCarveRow
-	carveAllocated map[uuid.UUID][]dbq.AllocatedPrefixRow
+	carveSources   map[uuid.UUID][]dbq.ListPoolSupernetsForCarveRow
+	carveAllocated map[uuid.UUID][]dbq.ListAllocatedPrefixesInPoolRow
 	// system landing fabric — nil to simulate the deployment-missing
 	// path (GetLandingFabric returns ErrNoRows).
-	landing *dbq.LandingFabricRow
+	landing *dbq.GetLandingFabricRow
 	// recorded effects
 	created        *dbq.CreateLirPoolParams
 	updated        *dbq.UpdateLirPoolParams
@@ -50,7 +50,7 @@ type fakeQ struct {
 func newFake() *fakeQ {
 	return &fakeQ{
 		pools:                    map[uuid.UUID]dbq.LirPool{},
-		supernets:                map[uuid.UUID]dbq.SupernetLirAttachRow{},
+		supernets:                map[uuid.UUID]dbq.GetSupernetForLirAttachRow{},
 		allocCountByPool:         map[uuid.UUID]int64{},
 		allocCountByPoolSupernet: map[uuid.UUID]int64{},
 	}
@@ -76,7 +76,7 @@ func (f *fakeQ) CreateLirPool(_ context.Context, a dbq.CreateLirPoolParams) (dbq
 	f.created = &a
 	p := dbq.LirPool{
 		ID: uuid.New(), Name: a.Name, Slug: a.Slug,
-		IpFamily: a.IpFamily, MinPrefixLength: a.MinPrefixLength, MaxPrefixLength: a.MaxPrefixLength,
+		IPFamily: a.IPFamily, MinPrefixLength: a.MinPrefixLength, MaxPrefixLength: a.MaxPrefixLength,
 		Enabled: true,
 	}
 	f.pools[p.ID] = p
@@ -111,17 +111,17 @@ func (f *fakeQ) DeleteLirPool(_ context.Context, id uuid.UUID) error {
 func (f *fakeQ) CountAllocationsForPool(_ context.Context, id uuid.UUID) (int64, error) {
 	return f.allocCountByPool[id], nil
 }
-func (f *fakeQ) ListPoolSourceSupernets(_ context.Context, _ dbq.ListPoolSourceSupernetsParams) ([]dbq.PoolSourceSupernetRow, error) {
+func (f *fakeQ) ListPoolSourceSupernets(_ context.Context, _ dbq.ListPoolSourceSupernetsParams) ([]dbq.ListPoolSourceSupernetsRow, error) {
 	return nil, nil
 }
 func (f *fakeQ) CountPoolSourceSupernets(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) GetSupernetForLirAttach(_ context.Context, id uuid.UUID) (dbq.SupernetLirAttachRow, error) {
+func (f *fakeQ) GetSupernetForLirAttach(_ context.Context, id uuid.UUID) (dbq.GetSupernetForLirAttachRow, error) {
 	if s, ok := f.supernets[id]; ok {
 		return s, nil
 	}
-	return dbq.SupernetLirAttachRow{}, pgx.ErrNoRows
+	return dbq.GetSupernetForLirAttachRow{}, pgx.ErrNoRows
 }
 func (f *fakeQ) AttachSupernetToPool(_ context.Context, a dbq.AttachSupernetToPoolParams) error {
 	f.attached = &a
@@ -172,26 +172,28 @@ func (f *fakeQ) ResetArinJobForRetry(_ context.Context, id uuid.UUID) error {
 // guard: only active allocations flip to return_requested; anything
 // else makes RETURNING empty (pgx.ErrNoRows) so the handler returns
 // 409.
-func (f *fakeQ) RequestReturnLirAllocation(_ context.Context, arg dbq.RequestReturnLirAllocationParams) (dbq.LirAllocation, error) {
+func (f *fakeQ) RequestReturnLirAllocation(_ context.Context, arg dbq.RequestReturnLirAllocationParams) (dbq.RequestReturnLirAllocationRow, error) {
 	a, ok := f.allocations[arg.ID]
 	if !ok || a.Status != "active" {
-		return dbq.LirAllocation{}, pgx.ErrNoRows
+		return dbq.RequestReturnLirAllocationRow{}, pgx.ErrNoRows
 	}
 	a.Status = "return_requested"
 	by := arg.ReturnRequestedByUserID
 	a.ReturnRequestedByUserID = &by
 	a.ReturnReason = &arg.ReturnReason
 	f.allocations[arg.ID] = a
-	return a, nil
+	// Field-identical structs — direct conversion from the stored
+	// LirAllocation to the per-query Row type.
+	return dbq.RequestReturnLirAllocationRow(a), nil
 }
 
 // ConfirmReturnLirAllocation mirrors the SQL: only status='return_requested'
 // flips to 'returned'; arin_status='registered' co-promotes to
 // 'removing' with attempt counters reset; other arin states stay.
-func (f *fakeQ) ConfirmReturnLirAllocation(_ context.Context, arg dbq.ConfirmReturnLirAllocationParams) (dbq.LirAllocation, error) {
+func (f *fakeQ) ConfirmReturnLirAllocation(_ context.Context, arg dbq.ConfirmReturnLirAllocationParams) (dbq.ConfirmReturnLirAllocationRow, error) {
 	a, ok := f.allocations[arg.ID]
 	if !ok || a.Status != "return_requested" {
-		return dbq.LirAllocation{}, pgx.ErrNoRows
+		return dbq.ConfirmReturnLirAllocationRow{}, pgx.ErrNoRows
 	}
 	a.Status = "returned"
 	by := arg.ReturnedByUserID
@@ -203,7 +205,7 @@ func (f *fakeQ) ConfirmReturnLirAllocation(_ context.Context, arg dbq.ConfirmRet
 		a.ArinLastError = nil
 	}
 	f.allocations[arg.ID] = a
-	return a, nil
+	return dbq.ConfirmReturnLirAllocationRow(a), nil
 }
 
 // ---- harness ----
@@ -335,7 +337,7 @@ func TestListPools_EmptyReturnsEmptyArray(t *testing.T) {
 func TestDeletePool_OK(t *testing.T) {
 	f := newFake()
 	id := uuid.New()
-	f.pools[id] = dbq.LirPool{ID: id, IpFamily: 4, MinPrefixLength: 20, MaxPrefixLength: 29}
+	f.pools[id] = dbq.LirPool{ID: id, IPFamily: 4, MinPrefixLength: 20, MaxPrefixLength: 29}
 	rec := do(t, mount(f), "DELETE", "/lir/pools/"+id.String()+"/", nil)
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("got %d", rec.Code)
@@ -348,7 +350,7 @@ func TestDeletePool_OK(t *testing.T) {
 func TestDeletePool_ConflictsWhenAllocationsExist(t *testing.T) {
 	f := newFake()
 	id := uuid.New()
-	f.pools[id] = dbq.LirPool{ID: id, IpFamily: 4, MinPrefixLength: 20, MaxPrefixLength: 29}
+	f.pools[id] = dbq.LirPool{ID: id, IPFamily: 4, MinPrefixLength: 20, MaxPrefixLength: 29}
 	f.allocCountByPool[id] = 3
 	rec := do(t, mount(f), "DELETE", "/lir/pools/"+id.String()+"/", nil)
 	if rec.Code != http.StatusConflict {
@@ -364,14 +366,14 @@ func TestDeletePool_ConflictsWhenAllocationsExist(t *testing.T) {
 func setupPoolAndSupernet(f *fakeQ, family int16) (uuid.UUID, uuid.UUID) {
 	poolID := uuid.New()
 	f.pools[poolID] = dbq.LirPool{
-		ID: poolID, IpFamily: family, MinPrefixLength: 20, MaxPrefixLength: 29,
+		ID: poolID, IPFamily: family, MinPrefixLength: 20, MaxPrefixLength: 29,
 	}
 	sn := uuid.New()
 	prefix := "10.0.0.0/16"
 	if family == 6 {
 		prefix = "2001:db8::/32"
 	}
-	f.supernets[sn] = dbq.SupernetLirAttachRow{ID: sn, Prefix: prefix}
+	f.supernets[sn] = dbq.GetSupernetForLirAttachRow{ID: sn, Prefix: prefix}
 	return poolID, sn
 }
 
@@ -490,8 +492,8 @@ func TestSupernetFamily_V6(t *testing.T) {
 
 func TestValidateAttachCandidate_OK(t *testing.T) {
 	status, _ := validateAttachCandidate(
-		dbq.LirPool{IpFamily: 4},
-		dbq.SupernetLirAttachRow{Prefix: "10.0.0.0/16"},
+		dbq.LirPool{IPFamily: 4},
+		dbq.GetSupernetForLirAttachRow{Prefix: "10.0.0.0/16"},
 	)
 	if status != 0 {
 		t.Errorf("clean case should return 0, got %d", status)

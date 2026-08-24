@@ -1,7 +1,5 @@
 -- name: GetAlertRule :one
-SELECT id, name, description, metric, operator, threshold, duration_seconds,
-       severity::text AS severity, site_scope_id, asset_filter_json, enabled,
-       runbook_url, created_at, updated_at
+SELECT *
 FROM alert_rules
 WHERE id = $1;
 
@@ -11,8 +9,7 @@ WHERE id = $1;
 -- filter matches site_id IN scope OR site_id IS NULL. Mutate path
 -- (PR 59) is restrictive — only global can touch null-site windows.
 -- name: ListMaintenanceWindows :many
-SELECT id, name, site_id, asset_filter_json,
-       starts_at, ends_at, created_by, reason, created_at, updated_at
+SELECT *
 FROM maintenance_windows
 WHERE (sqlc.narg(site_id)::uuid       IS NULL OR site_id = sqlc.narg(site_id))
   AND (sqlc.narg(active_at)::timestamptz IS NULL OR (starts_at <= sqlc.narg(active_at) AND ends_at >= sqlc.narg(active_at)))
@@ -34,7 +31,6 @@ WHERE (sqlc.narg(site_id)::uuid       IS NULL OR site_id = sqlc.narg(site_id))
        OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]));
 
 -- name: GetMaintenanceWindow :one
-SELECT id, name, site_id, asset_filter_json,
-       starts_at, ends_at, created_by, reason, created_at, updated_at
+SELECT *
 FROM maintenance_windows
 WHERE id = $1;

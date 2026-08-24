@@ -25,15 +25,15 @@
 SELECT f.id AS fabric_id, v.id AS default_vrf_id
 FROM fabrics f
 JOIN vrfs v ON v.fabric_id = f.id AND v.is_default = TRUE
-WHERE f.slug = $1::text;
+WHERE f.slug = sqlc.arg(slug)::text;
 
 -- name: ListPoolSupernetsForCarve :many
 -- Source supernets the carver iterates over, ordered by network
 -- address so first-fit picks the lowest-numbered free range. Only
 -- supernets actually attached to the pool are returned.
-SELECT id, host(prefix) || '/' || masklen(prefix) AS prefix
+SELECT id, (host(prefix) || '/' || masklen(prefix))::text AS prefix
 FROM supernets
-WHERE lir_pool_id = $1
+WHERE lir_pool_id = sqlc.arg(pool_id)::uuid
 ORDER BY prefix;
 
 -- name: ListAllocatedPrefixesInPool :many
@@ -42,7 +42,7 @@ ORDER BY prefix;
 -- range is reusable; active and return_requested rows still occupy
 -- space.
 SELECT pool_supernet_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix
 FROM lir_allocations
 WHERE pool_id = $1 AND status != 'returned';
 
@@ -51,19 +51,20 @@ WHERE pool_id = $1 AND status != 'returned';
 -- flip request to approved. Single statement = atomic by Postgres
 -- semantics; partial state cannot escape the network round-trip.
 --
--- $1  request_id            (request being approved)
--- $2  decided_by_user_id    (NIC operator's principal subject)
--- $3  decision_notes        (optional, nullable)
--- $4  approved_pool_id      (the pool the NIC approved into; may
---                            differ from request.pool_id)
--- $5  pool_supernet_id      (the pool source supernet that gets carved)
--- $6  organization_id       (tenant — denormalized off the request)
--- $7  prefix                (the carved CIDR, as text — cast to cidr)
--- $8  landing_fabric_id     (where the new tenant Supernet lives)
--- $9  landing_vrf_id        (default VRF on the landing fabric)
--- $10 supernet_purpose      (nullable — from pool default or request)
--- $11 arin_initial_status   ('none' when pool has no ARIN handle,
---                            'pending' when it does — handler decides)
+-- Named args (sqlc.arg / sqlc.narg):
+--   request_id            (request being approved)
+--   decided_by_user_id    (NIC operator's principal subject)
+--   decision_notes        (optional, nullable)
+--   approved_pool_id      (the pool the NIC approved into; may
+--                          differ from request.pool_id)
+--   pool_supernet_id      (the pool source supernet that gets carved)
+--   organization_id       (tenant — denormalized off the request)
+--   prefix                (the carved CIDR, as text — cast to cidr)
+--   landing_fabric_id     (where the new tenant Supernet lives)
+--   landing_vrf_id        (default VRF on the landing fabric)
+--   supernet_purpose      (nullable — from pool default or request)
+--   arin_initial_status   ('none' when pool has no ARIN handle,
+--                          'pending' when it does — handler decides)
 --
 -- IMPORTANT: PostgreSQL data-modifying CTEs in WITH always execute
 -- regardless of whether their RETURNING is consumed downstream. To
@@ -76,11 +77,11 @@ WITH updated_request AS (
     UPDATE lir_requests
     SET status = 'approved',
         decided_at = NOW(),
-        decided_by_user_id = $2::uuid,
+        decided_by_user_id = sqlc.arg(decided_by_user_id)::uuid,
         decision_notes = sqlc.narg(decision_notes)::text,
-        approved_pool_id = $4::uuid,
+        approved_pool_id = sqlc.arg(approved_pool_id)::uuid,
         updated_at = NOW()
-    WHERE id = $1::uuid AND status = 'pending_approval'
+    WHERE id = sqlc.arg(request_id)::uuid AND status = 'pending_approval'
     RETURNING id, organization_id, requester_user_id, pool_id, site_id,
               ip_family, prefix_length, purpose, classification, justification,
               status, submitted_at, decided_at, decided_by_user_id,
@@ -94,11 +95,12 @@ new_supernet AS (
     )
     SELECT
         gen_random_uuid(),
-        $8::uuid, $9::uuid, $7::cidr,
-        $6::uuid, sqlc.narg(supernet_purpose)::text,
+        sqlc.arg(landing_fabric_id)::uuid, sqlc.arg(landing_vrf_id)::uuid,
+        sqlc.arg(prefix)::cidr,
+        sqlc.arg(organization_id)::uuid, sqlc.narg(supernet_purpose)::text,
         NOW(), NOW()
     FROM updated_request
-    RETURNING id, host(prefix) || '/' || masklen(prefix) AS prefix
+    RETURNING id, (host(prefix) || '/' || masklen(prefix))::text AS prefix
 ),
 new_allocation AS (
     INSERT INTO lir_allocations (
@@ -107,13 +109,16 @@ new_allocation AS (
         status, arin_status, arin_attempts, created_at, updated_at
     )
     SELECT
-        gen_random_uuid(), $1::uuid, $6::uuid, $4::uuid, $5::uuid,
-        new_supernet.id, $7::cidr, NOW(), $2::uuid,
+        gen_random_uuid(), sqlc.arg(request_id)::uuid,
+        sqlc.arg(organization_id)::uuid, sqlc.arg(approved_pool_id)::uuid,
+        sqlc.arg(pool_supernet_id)::uuid,
+        new_supernet.id, sqlc.arg(prefix)::cidr, NOW(),
+        sqlc.arg(decided_by_user_id)::uuid,
         'active', sqlc.arg(arin_initial_status)::text, 0, NOW(), NOW()
     FROM new_supernet
     RETURNING id, request_id, organization_id, pool_id, pool_supernet_id,
               tenant_supernet_id,
-              host(prefix) || '/' || masklen(prefix) AS prefix,
+              (host(prefix) || '/' || masklen(prefix))::text AS prefix,
               allocated_at, allocated_by_user_id, status,
               return_requested_at, return_requested_by_user_id, return_reason,
               returned_at, returned_by_user_id,
@@ -143,10 +148,10 @@ FROM updated_request ur, new_allocation na;
 UPDATE lir_requests
 SET status = 'rejected',
     decided_at = NOW(),
-    decided_by_user_id = $2::uuid,
+    decided_by_user_id = sqlc.arg(decided_by_user_id)::uuid,
     decision_notes = sqlc.arg(reason)::text,
     updated_at = NOW()
-WHERE id = $1 AND status = 'pending_approval'
+WHERE id = sqlc.arg(id) AND status = 'pending_approval'
 RETURNING id, organization_id, requester_user_id, pool_id, site_id,
           ip_family, prefix_length, purpose, classification, justification,
           status, submitted_at, decided_at, decided_by_user_id,
@@ -155,7 +160,7 @@ RETURNING id, organization_id, requester_user_id, pool_id, site_id,
 -- name: GetLirAllocation :one
 SELECT id, request_id, organization_id, pool_id, pool_supernet_id,
        tenant_supernet_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix,
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix,
        allocated_at, allocated_by_user_id, status,
        return_requested_at, return_requested_by_user_id, return_reason,
        returned_at, returned_by_user_id,
@@ -169,7 +174,7 @@ WHERE id = $1;
 -- Org-scope filter mirrors the request listing pattern.
 SELECT id, request_id, organization_id, pool_id, pool_supernet_id,
        tenant_supernet_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix,
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix,
        allocated_at, allocated_by_user_id, status,
        return_requested_at, return_requested_by_user_id, return_reason,
        returned_at, returned_by_user_id,

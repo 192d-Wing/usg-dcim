@@ -32,8 +32,8 @@ type bulkFakeQ struct {
 	enabledErr    error
 	drifted       []uuid.UUID
 	driftedErr    error
-	scopes        map[uuid.UUID]dbq.DhcpScopeForPushRow
-	servers       map[uuid.UUID]dbq.DhcpServerForPushRow
+	scopes        map[uuid.UUID]dbq.GetDhcpScopeForPushRow
+	servers       map[uuid.UUID]dbq.GetDhcpServerForPushRow
 	templates     map[uuid.UUID]dbq.DhcpScopeTemplate
 	claimedKeaIDs map[uuid.UUID][]int32
 
@@ -49,17 +49,17 @@ func (f *bulkFakeQ) ListDriftedScopeIDsForServer(_ context.Context, _ uuid.UUID)
 	f.driftedCalls++
 	return f.drifted, f.driftedErr
 }
-func (f *bulkFakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
+func (f *bulkFakeQ) GetDhcpScopeForPush(_ context.Context, id uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
 	r, ok := f.scopes[id]
 	if !ok {
-		return dbq.DhcpScopeForPushRow{}, pgx.ErrNoRows
+		return dbq.GetDhcpScopeForPushRow{}, pgx.ErrNoRows
 	}
 	return r, nil
 }
-func (f *bulkFakeQ) GetDhcpServerForPush(_ context.Context, id uuid.UUID) (dbq.DhcpServerForPushRow, error) {
+func (f *bulkFakeQ) GetDhcpServerForPush(_ context.Context, id uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
 	r, ok := f.servers[id]
 	if !ok {
-		return dbq.DhcpServerForPushRow{}, pgx.ErrNoRows
+		return dbq.GetDhcpServerForPushRow{}, pgx.ErrNoRows
 	}
 	return r, nil
 }
@@ -93,7 +93,7 @@ func (f *bulkFakeQ) InsertDhcpScopePushHistory(_ context.Context, _ dbq.InsertDh
 // the scope id so tests can build enabled/drifted slices.
 func seedScope(f *bulkFakeQ, serverID uuid.UUID) uuid.UUID {
 	scopeID := uuid.New()
-	f.scopes[scopeID] = dbq.DhcpScopeForPushRow{
+	f.scopes[scopeID] = dbq.GetDhcpScopeForPushRow{
 		ID: scopeID, DhcpServerID: serverID, IPFamily: 4,
 		Prefix: "10.0.0.0/24",
 		PoolsJSON: json.RawMessage(`[]`), PdPoolsJSON: json.RawMessage(`[]`),
@@ -105,8 +105,8 @@ func seedScope(f *bulkFakeQ, serverID uuid.UUID) uuid.UUID {
 
 func newBulkFake(serverID uuid.UUID) *bulkFakeQ {
 	return &bulkFakeQ{
-		scopes:    map[uuid.UUID]dbq.DhcpScopeForPushRow{},
-		servers:   map[uuid.UUID]dbq.DhcpServerForPushRow{serverID: {ID: serverID, KeaURL: "http://kea", Enabled: true}},
+		scopes:    map[uuid.UUID]dbq.GetDhcpScopeForPushRow{},
+		servers:   map[uuid.UUID]dbq.GetDhcpServerForPushRow{serverID: {ID: serverID, KeaURL: "http://kea", Enabled: true}},
 		templates: map[uuid.UUID]dbq.DhcpScopeTemplate{},
 		claimedKeaIDs: map[uuid.UUID][]int32{},
 	}
@@ -186,7 +186,7 @@ func TestPushAllScopes_PartialFailure_BatchContinues(t *testing.T) {
 	// because both scopes reference serverID; instead seed it back so
 	// id1 succeeds, leaving id2's per-scope failure to come from a
 	// deleted scope row.
-	f.servers[serverID] = dbq.DhcpServerForPushRow{ID: serverID, KeaURL: "http://kea", Enabled: true}
+	f.servers[serverID] = dbq.GetDhcpServerForPushRow{ID: serverID, KeaURL: "http://kea", Enabled: true}
 	delete(f.scopes, id2)
 	fk := &fakeKea{subnetResp: []byte(`[{"result":0,"text":"ok"}]`)}
 	r, err := PushAllScopes(context.Background(), f, builderReturning(fk), serverID)

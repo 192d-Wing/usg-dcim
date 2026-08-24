@@ -21,20 +21,20 @@ import (
 
 type Querier interface {
 	ListAsns(ctx context.Context, arg dbq.ListAsnsParams) ([]dbq.Asn, error)
-	CountAsns(ctx context.Context, arg dbq.CountAsnsParams) (int64, error)
+	CountAsns(ctx context.Context, kind *string) (int64, error)
 	ListPrefixLists(ctx context.Context, arg dbq.ListPrefixListsParams) ([]dbq.PrefixList, error)
-	CountPrefixLists(ctx context.Context, arg dbq.CountPrefixListsParams) (int64, error)
-	ListPrefixListEntries(ctx context.Context, arg dbq.ListPrefixListEntriesParams) ([]dbq.PrefixListEntry, error)
-	CountPrefixListEntries(ctx context.Context, arg dbq.CountPrefixListEntriesParams) (int64, error)
+	CountPrefixLists(ctx context.Context, family *string) (int64, error)
+	ListPrefixListEntries(ctx context.Context, arg dbq.ListPrefixListEntriesParams) ([]dbq.ListPrefixListEntriesRow, error)
+	CountPrefixListEntries(ctx context.Context, prefixListID *uuid.UUID) (int64, error)
 
 	ListCommunityLists(ctx context.Context, arg dbq.ListCommunityListsParams) ([]dbq.CommunityList, error)
-	CountCommunityLists(ctx context.Context, arg dbq.CountCommunityListsParams) (int64, error)
+	CountCommunityLists(ctx context.Context, kind *string) (int64, error)
 	ListCommunityListEntries(ctx context.Context, arg dbq.ListCommunityListEntriesParams) ([]dbq.CommunityListEntry, error)
-	CountCommunityListEntries(ctx context.Context, arg dbq.CountCommunityListEntriesParams) (int64, error)
+	CountCommunityListEntries(ctx context.Context, communityListID *uuid.UUID) (int64, error)
 	ListRouteMaps(ctx context.Context, arg dbq.ListRouteMapsParams) ([]dbq.RouteMap, error)
 	CountRouteMaps(ctx context.Context) (int64, error)
 	ListRouteMapEntries(ctx context.Context, arg dbq.ListRouteMapEntriesParams) ([]dbq.RouteMapEntry, error)
-	CountRouteMapEntries(ctx context.Context, arg dbq.CountRouteMapEntriesParams) (int64, error)
+	CountRouteMapEntries(ctx context.Context, routeMapID *uuid.UUID) (int64, error)
 
 	// Mutations (PR 44). TCP AO + asn bulk-rotate deferred.
 	CreateAsn(ctx context.Context, arg dbq.CreateAsnParams) (dbq.Asn, error)
@@ -43,8 +43,8 @@ type Querier interface {
 	CreatePrefixList(ctx context.Context, arg dbq.CreatePrefixListParams) (dbq.PrefixList, error)
 	UpdatePrefixList(ctx context.Context, arg dbq.UpdatePrefixListParams) (dbq.PrefixList, error)
 	DeletePrefixList(ctx context.Context, id uuid.UUID) error
-	CreatePrefixListEntry(ctx context.Context, arg dbq.CreatePrefixListEntryParams) (dbq.PrefixListEntry, error)
-	UpdatePrefixListEntry(ctx context.Context, arg dbq.UpdatePrefixListEntryParams) (dbq.PrefixListEntry, error)
+	CreatePrefixListEntry(ctx context.Context, arg dbq.CreatePrefixListEntryParams) (dbq.CreatePrefixListEntryRow, error)
+	UpdatePrefixListEntry(ctx context.Context, arg dbq.UpdatePrefixListEntryParams) (dbq.UpdatePrefixListEntryRow, error)
 	DeletePrefixListEntry(ctx context.Context, id uuid.UUID) error
 	CreateCommunityList(ctx context.Context, arg dbq.CreateCommunityListParams) (dbq.CommunityList, error)
 	UpdateCommunityList(ctx context.Context, arg dbq.UpdateCommunityListParams) (dbq.CommunityList, error)
@@ -70,7 +70,7 @@ type Querier interface {
 
 	// TCP AO keys + rotate-batch (this PR).
 	ListTcpAoKeys(ctx context.Context, arg dbq.ListTcpAoKeysParams) ([]dbq.TcpAoKey, error)
-	CountTcpAoKeys(ctx context.Context, arg dbq.CountTcpAoKeysParams) (int64, error)
+	CountTcpAoKeys(ctx context.Context, keyChainID *uuid.UUID) (int64, error)
 	GetTcpAoKey(ctx context.Context, id uuid.UUID) (dbq.TcpAoKey, error)
 	CreateTcpAoKey(ctx context.Context, arg dbq.CreateTcpAoKeyParams) (dbq.TcpAoKey, error)
 	UpdateTcpAoKey(ctx context.Context, arg dbq.UpdateTcpAoKeyParams) (dbq.TcpAoKey, error)
@@ -181,7 +181,7 @@ func (h *Handler) listAsns(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountAsns(r.Context(), dbq.CountAsnsParams{Kind: params.Kind})
+	total, err := h.Q.CountAsns(r.Context(), params.Kind)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -207,7 +207,7 @@ func (h *Handler) listPrefixLists(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountPrefixLists(r.Context(), dbq.CountPrefixListsParams{Family: params.Family})
+	total, err := h.Q.CountPrefixLists(r.Context(), params.Family)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -217,7 +217,7 @@ func (h *Handler) listPrefixLists(w http.ResponseWriter, r *http.Request) {
 }
 
 type prefixListEntriesPage struct {
-	Items  []dbq.PrefixListEntry `json:"items"`
+	Items  []dbq.ListPrefixListEntriesRow `json:"items"`
 	Total  int64                 `json:"total"`
 	Limit  int32                 `json:"limit"`
 	Offset int32                 `json:"offset"`
@@ -241,7 +241,7 @@ func (h *Handler) listPrefixListEntries(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountPrefixListEntries(r.Context(), dbq.CountPrefixListEntriesParams{PrefixListID: params.PrefixListID})
+	total, err := h.Q.CountPrefixListEntries(r.Context(), params.PrefixListID)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -269,7 +269,7 @@ func (h *Handler) listCommunityLists(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountCommunityLists(r.Context(), dbq.CountCommunityListsParams{Kind: params.Kind})
+	total, err := h.Q.CountCommunityLists(r.Context(), params.Kind)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -305,7 +305,7 @@ func (h *Handler) listCommunityListEntries(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountCommunityListEntries(r.Context(), dbq.CountCommunityListEntriesParams{CommunityListID: params.CommunityListID})
+	total, err := h.Q.CountCommunityListEntries(r.Context(), params.CommunityListID)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -368,7 +368,7 @@ func (h *Handler) listRouteMapEntries(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountRouteMapEntries(r.Context(), dbq.CountRouteMapEntriesParams{RouteMapID: params.RouteMapID})
+	total, err := h.Q.CountRouteMapEntries(r.Context(), params.RouteMapID)
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

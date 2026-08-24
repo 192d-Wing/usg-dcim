@@ -1,4 +1,4 @@
--- name: FlipStaleTelemetrySources :exec
+-- name: FlipStaleTelemetrySources :execrows
 -- Scheduler job (Go port of Python's freshness_sweep in worker.py:55).
 -- Flips current → stale for sources whose last_success_at is older
 -- than max(60s, poll_interval_seconds * 3). The single UPDATE replaces
@@ -22,9 +22,12 @@ INSERT INTO telemetry_sources (id, site_id, asset_id, collector_id,
                                metric, unit, freshness,
                                last_success_at, last_reading_at, last_value,
                                poll_interval_seconds, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3,
-        $4, $5, 'current'::freshness_state,
-        $6::timestamptz, $7::timestamptz, $8::float,
+VALUES (gen_random_uuid(), sqlc.arg(site_id), sqlc.arg(asset_id),
+        sqlc.arg(collector_id),
+        sqlc.arg(metric), sqlc.narg(unit), 'current'::freshness_state,
+        sqlc.arg(last_success_at)::timestamptz,
+        sqlc.arg(last_reading_at)::timestamptz,
+        sqlc.arg(last_value)::float,
         -- Match Python's TelemetrySource model default of 60s
         -- (models/telemetry_meta.py). The freshness scheduler's
         -- formula is GREATEST(60, poll_interval_seconds * 3), so
@@ -55,9 +58,11 @@ SET collector_id     = EXCLUDED.collector_id,
 INSERT INTO telemetry_samples (ts, site_id, asset_id, collector_id,
                                batch_id, seq, metric, value, unit,
                                received_at, tags)
-VALUES ($1::timestamptz, $2, $3, $4,
-        $5, $6::int, $7, $8::float, $9,
-        $10::timestamptz, $11::jsonb)
+VALUES (sqlc.arg(ts)::timestamptz, sqlc.arg(site_id), sqlc.arg(asset_id),
+        sqlc.arg(collector_id),
+        sqlc.arg(batch_id), sqlc.arg(seq)::int, sqlc.arg(metric),
+        sqlc.arg(value)::float, sqlc.narg(unit),
+        sqlc.arg(received_at)::timestamptz, sqlc.arg(tags)::jsonb)
 ON CONFLICT ON CONSTRAINT uq_telem_sample_dedup DO NOTHING;
 
 -- name: GetTelemetrySeries :many
@@ -67,10 +72,10 @@ ON CONFLICT ON CONSTRAINT uq_telem_sample_dedup DO NOTHING;
 -- chart-rendering assumptions don't change.
 SELECT ts, value
 FROM telemetry_samples
-WHERE site_id  = $1
-  AND asset_id = $2
-  AND metric   = $3
-  AND ts >= $4
-  AND ts <= $5
+WHERE site_id  = sqlc.arg(site_id)
+  AND asset_id = sqlc.arg(asset_id)
+  AND metric   = sqlc.arg(metric)
+  AND ts >= sqlc.arg(start_ts)
+  AND ts <= sqlc.arg(end_ts)
 ORDER BY ts ASC
 LIMIT 10000;

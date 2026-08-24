@@ -33,7 +33,7 @@ RETURNING id, email, display_name, is_active, sso_subject,
 
 -- name: ListAdminRoles :many
 -- PR 75 — paginated list for /admin/roles.
-SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+SELECT *
 FROM roles
 ORDER BY name
 LIMIT $1 OFFSET $2;
@@ -42,19 +42,19 @@ LIMIT $1 OFFSET $2;
 SELECT count(*)::bigint FROM roles;
 
 -- name: GetAdminRole :one
-SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+SELECT *
 FROM roles WHERE id = $1;
 
 -- name: GetAdminRoleByName :one
-SELECT id, name, description, permission_codes, is_system, created_at, updated_at
+SELECT *
 FROM roles WHERE name = $1;
 
 -- name: CreateAdminRole :one
 -- PR 75 — admin role creation. is_system is hardcoded FALSE: only
 -- the migration bootstrap creates system roles, never the API.
 INSERT INTO roles (id, name, description, permission_codes, is_system, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::jsonb, FALSE, NOW(), NOW())
-RETURNING id, name, description, permission_codes, is_system, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(description), sqlc.arg(permission_codes)::jsonb, FALSE, NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateAdminRole :one
 -- PR 75 — update mutable role fields. is_system is immutable
@@ -65,9 +65,9 @@ SET description     = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(d
     permission_codes = CASE WHEN sqlc.arg(permission_codes_set)::bool THEN sqlc.narg(permission_codes)::jsonb ELSE permission_codes END,
     updated_at      = NOW()
 WHERE id = $1 AND is_system = FALSE
-RETURNING id, name, description, permission_codes, is_system, created_at, updated_at;
+RETURNING *;
 
--- name: DeleteAdminRole :exec
+-- name: DeleteAdminRole :execrows
 -- PR 75 — only non-system roles deletable. The API also pre-checks
 -- for assignments and refuses with 409; this SQL is defense-in-
 -- depth (a race between the assignment check and the delete is
@@ -84,18 +84,18 @@ SELECT count(*)::bigint FROM user_roles WHERE role_id = $1;
 -- PR 76 — assignments + scope rows.
 
 -- name: ListUserAssignments :many
-SELECT id, user_id, role_id, created_at, updated_at
+SELECT *
 FROM user_roles
 WHERE user_id = $1
 ORDER BY created_at;
 
 -- name: GetUserRole :one
-SELECT id, user_id, role_id, created_at, updated_at
+SELECT *
 FROM user_roles WHERE id = $1;
 
 -- name: FindUserRoleByUserAndRole :one
 -- Pre-check used by the API for the dup-409 path.
-SELECT id, user_id, role_id, created_at, updated_at
+SELECT *
 FROM user_roles
 WHERE user_id = $1 AND role_id = $2
 LIMIT 1;
@@ -103,16 +103,16 @@ LIMIT 1;
 -- name: CreateUserRole :one
 INSERT INTO user_roles (id, user_id, role_id, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, NOW(), NOW())
-RETURNING id, user_id, role_id, created_at, updated_at;
+RETURNING *;
 
--- name: DeleteUserRole :exec
+-- name: DeleteUserRole :execrows
 -- role_scopes are deleted manually before this; we don't rely on FK
 -- cascade because the schema declares no ON DELETE behavior for the
 -- assignment_id FK.
 DELETE FROM user_roles WHERE id = $1;
 
 -- name: ListRoleScopesByAssignment :many
-SELECT id, assignment_id, scope_type::text AS scope_type, target_id
+SELECT *
 FROM role_scopes
 WHERE assignment_id = $1
 ORDER BY created_at;
@@ -121,15 +121,15 @@ ORDER BY created_at;
 -- Bulk version for the list endpoint: one round-trip for N
 -- assignments' scopes, bucketed in-process. Avoids N+1 on
 -- /admin/users/{id}/assignments.
-SELECT id, assignment_id, scope_type::text AS scope_type, target_id
+SELECT *
 FROM role_scopes
-WHERE assignment_id = ANY($1::uuid[])
+WHERE assignment_id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY assignment_id, created_at;
 
 -- name: CreateRoleScope :one
 INSERT INTO role_scopes (id, assignment_id, scope_type, target_id, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2::scope_type, $3, NOW(), NOW())
-RETURNING id, assignment_id, scope_type::text AS scope_type, target_id;
+VALUES (gen_random_uuid(), sqlc.arg(assignment_id), sqlc.arg(scope_type)::scope_type, sqlc.arg(target_id), NOW(), NOW())
+RETURNING *;
 
 -- name: DeleteRoleScopesForAssignment :exec
 DELETE FROM role_scopes WHERE assignment_id = $1;
@@ -137,15 +137,14 @@ DELETE FROM role_scopes WHERE assignment_id = $1;
 -- name: GetRoleNamesByIDs :many
 -- Hydration helper: many-to-one role lookup so the assignment-list
 -- response includes role_name without a per-row GetRole.
-SELECT id, name FROM roles WHERE id = ANY($1::uuid[]);
+SELECT id, name FROM roles WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
 -- ===== OIDC Role Mappings =====
 -- PR 77 — CRUD for the IdP role → DCIM role table that the OIDC
 -- login flow consults to materialize a Principal's capabilities.
 
 -- name: ListOidcRoleMappings :many
-SELECT id, idp_role, claim_source, dcim_role_id, description,
-       scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at
+SELECT *
 FROM oidc_role_mappings
 ORDER BY idp_role
 LIMIT $1 OFFSET $2;
@@ -154,23 +153,21 @@ LIMIT $1 OFFSET $2;
 SELECT count(*)::bigint FROM oidc_role_mappings;
 
 -- name: GetOidcRoleMapping :one
-SELECT id, idp_role, claim_source, dcim_role_id, description,
-       scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at
+SELECT *
 FROM oidc_role_mappings WHERE id = $1;
 
 -- name: GetOidcRoleMappingByIdpRole :one
 -- Pre-check used by the create handler for the dup-409 path.
-SELECT id, idp_role, claim_source, dcim_role_id, description,
-       scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at
+SELECT *
 FROM oidc_role_mappings WHERE idp_role = $1;
 
 -- name: CreateOidcRoleMapping :one
 INSERT INTO oidc_role_mappings (id, idp_role, claim_source, dcim_role_id,
                                 description, scope_dimension, scope_target,
                                 created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::scope_type, $6, NOW(), NOW())
-RETURNING id, idp_role, claim_source, dcim_role_id, description,
-          scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(idp_role), sqlc.arg(claim_source), sqlc.arg(dcim_role_id),
+        sqlc.arg(description), sqlc.narg(scope_dimension)::scope_type, sqlc.arg(scope_target), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateOidcRoleMapping :one
 -- All five mutable fields are individually opt-in so callers can
@@ -189,10 +186,9 @@ SET claim_source    = COALESCE(sqlc.narg(claim_source)::text, claim_source),
     END,
     updated_at      = NOW()
 WHERE id = $1
-RETURNING id, idp_role, claim_source, dcim_role_id, description,
-          scope_dimension::text AS scope_dimension, scope_target, created_at, updated_at;
+RETURNING *;
 
--- name: DeleteOidcRoleMapping :exec
+-- name: DeleteOidcRoleMapping :execrows
 DELETE FROM oidc_role_mappings WHERE id = $1;
 
 -- name: UpdateAdminUser :one

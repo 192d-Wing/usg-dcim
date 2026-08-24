@@ -42,7 +42,7 @@ const errMaxLen = 2000
 // Queries satisfies it. The cron driver (PR 16) composes this with
 // the scheduler harness's Querier.
 type Querier interface {
-	ListSubnetsForFabricLeaseSync(ctx context.Context, fabricID uuid.UUID) ([]dbq.SubnetForLeaseSyncRow, error)
+	ListSubnetsForFabricLeaseSync(ctx context.Context, fabricID uuid.UUID) ([]dbq.ListSubnetsForFabricLeaseSyncRow, error)
 	FindDhcpLeaseIPAddress(ctx context.Context, arg dbq.FindDhcpLeaseIPAddressParams) (dbq.FindDhcpLeaseIPAddressRow, error)
 	UpdateDhcpLease(ctx context.Context, arg dbq.UpdateDhcpLeaseParams) error
 	InsertDhcpLease(ctx context.Context, arg dbq.InsertDhcpLeaseParams) error

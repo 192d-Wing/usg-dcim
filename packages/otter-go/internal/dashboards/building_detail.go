@@ -18,8 +18,8 @@ import (
 type BuildingDetailQuerier interface {
 	GetBuilding(ctx context.Context, id uuid.UUID) (dbq.Building, error)
 	GetSite(ctx context.Context, id uuid.UUID) (dbq.Site, error)
-	ListRoomsByBuildingIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SiteRoomRow, error)
-	ListRowsByRoomIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.SiteRowRow, error)
+	ListRoomsByBuildingIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.ListRoomsByBuildingIDsRow, error)
+	ListRowsByRoomIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.ListRowsByRoomIDsRow, error)
 	ListRacksByRowIDs(ctx context.Context, rowIDs []uuid.UUID) ([]dbq.Rack, error)
 	ListAssetsByRackIDs(ctx context.Context, rackIDs []uuid.UUID) ([]dbq.Asset, error)
 	capacity.Querier
@@ -154,7 +154,7 @@ func (h *Handler) buildingDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func listRowsForFloors(ctx context.Context, q BuildingDetailQuerier, rooms []dbq.SiteRoomRow) ([]dbq.SiteRowRow, error) {
+func listRowsForFloors(ctx context.Context, q BuildingDetailQuerier, rooms []dbq.ListRoomsByBuildingIDsRow) ([]dbq.ListRowsByRoomIDsRow, error) {
 	if len(rooms) == 0 {
 		return nil, nil
 	}
@@ -165,7 +165,7 @@ func listRowsForFloors(ctx context.Context, q BuildingDetailQuerier, rooms []dbq
 	return q.ListRowsByRoomIDs(ctx, ids)
 }
 
-func listRacksForRows(ctx context.Context, q BuildingDetailQuerier, rows []dbq.SiteRowRow) ([]dbq.Rack, error) {
+func listRacksForRows(ctx context.Context, q BuildingDetailQuerier, rows []dbq.ListRowsByRoomIDsRow) ([]dbq.Rack, error) {
 	if len(rows) == 0 {
 		return nil, nil
 	}

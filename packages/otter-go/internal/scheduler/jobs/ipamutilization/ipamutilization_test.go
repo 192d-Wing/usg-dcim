@@ -13,21 +13,21 @@ import (
 )
 
 type fakeQ struct {
-	subnets   []dbq.SubnetForUtilizationRow
-	supernets []dbq.SupernetForUtilizationRow
-	counts    []dbq.ActiveReservedAddressCountRow
+	subnets   []dbq.ListSubnetsForUtilizationRow
+	supernets []dbq.ListSupernetsForUtilizationRow
+	counts    []dbq.ListActiveReservedAddressCountsBySubnetRow
 	subnetsErr,
 	supernetsErr,
 	countsErr error
 }
 
-func (f *fakeQ) ListSubnetsForUtilization(_ context.Context) ([]dbq.SubnetForUtilizationRow, error) {
+func (f *fakeQ) ListSubnetsForUtilization(_ context.Context) ([]dbq.ListSubnetsForUtilizationRow, error) {
 	return f.subnets, f.subnetsErr
 }
-func (f *fakeQ) ListSupernetsForUtilization(_ context.Context) ([]dbq.SupernetForUtilizationRow, error) {
+func (f *fakeQ) ListSupernetsForUtilization(_ context.Context) ([]dbq.ListSupernetsForUtilizationRow, error) {
 	return f.supernets, f.supernetsErr
 }
-func (f *fakeQ) ListActiveReservedAddressCountsBySubnet(_ context.Context) ([]dbq.ActiveReservedAddressCountRow, error) {
+func (f *fakeQ) ListActiveReservedAddressCountsBySubnet(_ context.Context) ([]dbq.ListActiveReservedAddressCountsBySubnetRow, error) {
 	return f.counts, f.countsErr
 }
 
@@ -57,10 +57,10 @@ func TestRun_SubnetUtilization_Ipv4_HostsMinusTwo(t *testing.T) {
 	// /24: 256 addresses, capacity = 254, used = 100 → free = 60.6%
 	subnetID, fabID := uuid.New(), uuid.New()
 	q := &fakeQ{
-		subnets: []dbq.SubnetForUtilizationRow{
+		subnets: []dbq.ListSubnetsForUtilizationRow{
 			{ID: subnetID, FabricID: fabID, Prefix: "10.0.0.0/24"},
 		},
-		counts: []dbq.ActiveReservedAddressCountRow{
+		counts: []dbq.ListActiveReservedAddressCountsBySubnetRow{
 			{SubnetID: subnetID, UsedCount: 100},
 		},
 	}
@@ -85,10 +85,10 @@ func TestRun_SubnetUtilization_PointToPointClampsTo100(t *testing.T) {
 	// so free_percent = 100 even with used > 0.
 	subnetID, fabID := uuid.New(), uuid.New()
 	q := &fakeQ{
-		subnets: []dbq.SubnetForUtilizationRow{
+		subnets: []dbq.ListSubnetsForUtilizationRow{
 			{ID: subnetID, FabricID: fabID, Prefix: "10.0.0.1/32"},
 		},
-		counts: []dbq.ActiveReservedAddressCountRow{
+		counts: []dbq.ListActiveReservedAddressCountsBySubnetRow{
 			{SubnetID: subnetID, UsedCount: 1},
 		},
 	}
@@ -106,10 +106,10 @@ func TestRun_SubnetUtilization_UsedClampedToCapacity(t *testing.T) {
 	// free = 0%, mirrors Python's `min(used, cap)`.
 	subnetID, fabID := uuid.New(), uuid.New()
 	q := &fakeQ{
-		subnets: []dbq.SubnetForUtilizationRow{
+		subnets: []dbq.ListSubnetsForUtilizationRow{
 			{ID: subnetID, FabricID: fabID, Prefix: "10.0.0.0/28"},
 		},
-		counts: []dbq.ActiveReservedAddressCountRow{
+		counts: []dbq.ListActiveReservedAddressCountsBySubnetRow{
 			{SubnetID: subnetID, UsedCount: 9999},
 		},
 	}
@@ -128,13 +128,12 @@ func TestRun_SupernetUtilization_FoldsChildSubnetCapacities(t *testing.T) {
 	// Free = (65536 - 508) / 65536.
 	supernetID, fabID := uuid.New(), uuid.New()
 	s1ID, s2ID := uuid.New(), uuid.New()
-	supernetIDPtr := supernetID
 	q := &fakeQ{
-		subnets: []dbq.SubnetForUtilizationRow{
-			{ID: s1ID, FabricID: fabID, SupernetID: &supernetIDPtr, Prefix: "10.0.0.0/24"},
-			{ID: s2ID, FabricID: fabID, SupernetID: &supernetIDPtr, Prefix: "10.0.1.0/24"},
+		subnets: []dbq.ListSubnetsForUtilizationRow{
+			{ID: s1ID, FabricID: fabID, SupernetID: supernetID, Prefix: "10.0.0.0/24"},
+			{ID: s2ID, FabricID: fabID, SupernetID: supernetID, Prefix: "10.0.1.0/24"},
 		},
-		supernets: []dbq.SupernetForUtilizationRow{
+		supernets: []dbq.ListSupernetsForUtilizationRow{
 			{ID: supernetID, FabricID: fabID, Prefix: "10.0.0.0/16"},
 		},
 	}
@@ -161,7 +160,7 @@ func TestRun_SubnetWithoutCountRow_TreatsUsedAsZero(t *testing.T) {
 	// `used_by_subnet.get(s.id, 0)`.
 	subnetID, fabID := uuid.New(), uuid.New()
 	q := &fakeQ{
-		subnets: []dbq.SubnetForUtilizationRow{
+		subnets: []dbq.ListSubnetsForUtilizationRow{
 			{ID: subnetID, FabricID: fabID, Prefix: "10.0.0.0/24"},
 		},
 		counts: nil, // no rows
@@ -178,13 +177,14 @@ func TestRun_SubnetWithoutCountRow_TreatsUsedAsZero(t *testing.T) {
 func TestRun_OrphanedSubnetSupernetIDNil_NotFoldedIntoCarvedMap(t *testing.T) {
 	// A subnet with NULL supernet_id (orphaned during a re-carve)
 	// must not contribute to any supernet's carved_capacity. The
-	// supernet result still emits as 100% free.
+	// supernet result still emits as 100% free. NULL supernet_id now
+	// arrives as uuid.Nil (SupernetID is a non-pointer uuid.UUID).
 	supernetID, fabID := uuid.New(), uuid.New()
 	q := &fakeQ{
-		subnets: []dbq.SubnetForUtilizationRow{
-			{ID: uuid.New(), FabricID: fabID, SupernetID: nil, Prefix: "10.0.0.0/24"},
+		subnets: []dbq.ListSubnetsForUtilizationRow{
+			{ID: uuid.New(), FabricID: fabID, SupernetID: uuid.Nil, Prefix: "10.0.0.0/24"},
 		},
-		supernets: []dbq.SupernetForUtilizationRow{
+		supernets: []dbq.ListSupernetsForUtilizationRow{
 			{ID: supernetID, FabricID: fabID, Prefix: "10.0.0.0/16"},
 		},
 	}
@@ -203,7 +203,7 @@ func TestRun_BadPrefix_Skipped(t *testing.T) {
 	// behavior so a malformed row doesn't break the sweep.
 	subnetID, fabID := uuid.New(), uuid.New()
 	q := &fakeQ{
-		subnets: []dbq.SubnetForUtilizationRow{
+		subnets: []dbq.ListSubnetsForUtilizationRow{
 			{ID: subnetID, FabricID: fabID, Prefix: "this-is-not-a-cidr"},
 		},
 	}

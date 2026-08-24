@@ -120,24 +120,24 @@ func TestFindFreePrefixesInSupernet_IgnoresCrossFamilyAllocations(t *testing.T) 
 
 type fakeCarverQ struct {
 	fakeQ
-	supernets []dbq.SupernetForCarverRow
-	allocated []dbq.SubnetPrefixBySupernetRow
+	supernets []dbq.ListSupernetsForCarverRow
+	allocated []dbq.ListSubnetPrefixesBySupernetsRow
 	gotParams dbq.ListSupernetsForCarverParams
 	gotIDs    []uuid.UUID
 }
 
-func (f *fakeCarverQ) ListSupernetsForCarver(_ context.Context, arg dbq.ListSupernetsForCarverParams) ([]dbq.SupernetForCarverRow, error) {
+func (f *fakeCarverQ) ListSupernetsForCarver(_ context.Context, arg dbq.ListSupernetsForCarverParams) ([]dbq.ListSupernetsForCarverRow, error) {
 	f.gotParams = arg
 	return f.supernets, nil
 }
 
-func (f *fakeCarverQ) ListSubnetPrefixesBySupernets(_ context.Context, ids []uuid.UUID) ([]dbq.SubnetPrefixBySupernetRow, error) {
+func (f *fakeCarverQ) ListSubnetPrefixesBySupernets(_ context.Context, ids []uuid.UUID) ([]dbq.ListSubnetPrefixesBySupernetsRow, error) {
 	f.gotIDs = ids
 	want := make(map[uuid.UUID]struct{}, len(ids))
 	for _, id := range ids {
 		want[id] = struct{}{}
 	}
-	out := []dbq.SubnetPrefixBySupernetRow{}
+	out := []dbq.ListSubnetPrefixesBySupernetsRow{}
 	for _, a := range f.allocated {
 		if _, ok := want[a.SupernetID]; ok {
 			out = append(out, a)
@@ -155,10 +155,10 @@ func mountCarver(f *fakeCarverQ) http.Handler {
 func TestFreeSpacePrefixes_HappyPath(t *testing.T) {
 	a := uuid.New()
 	f := &fakeCarverQ{
-		supernets: []dbq.SupernetForCarverRow{
+		supernets: []dbq.ListSupernetsForCarverRow{
 			{ID: a, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/22"},
 		},
-		allocated: []dbq.SubnetPrefixBySupernetRow{
+		allocated: []dbq.ListSubnetPrefixesBySupernetsRow{
 			{SupernetID: a, Prefix: "10.0.0.0/24"},
 		},
 	}
@@ -204,7 +204,7 @@ func TestFreeSpacePrefixes_RequiresPrefixSize(t *testing.T) {
 func TestFreeSpacePrefixes_FamilyFilter(t *testing.T) {
 	a, b := uuid.New(), uuid.New()
 	f := &fakeCarverQ{
-		supernets: []dbq.SupernetForCarverRow{
+		supernets: []dbq.ListSupernetsForCarverRow{
 			{ID: a, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/22"},
 			{ID: b, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "2001:db8::/48"},
 		},
@@ -226,7 +226,7 @@ func TestFreeSpacePrefixes_PrefixSizeBeyondFamilyMaxSkips(t *testing.T) {
 	// the v6 supernet — fine.
 	a, b := uuid.New(), uuid.New()
 	f := &fakeCarverQ{
-		supernets: []dbq.SupernetForCarverRow{
+		supernets: []dbq.ListSupernetsForCarverRow{
 			{ID: a, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/22"},
 			{ID: b, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "2001:db8::/48"},
 		},
@@ -245,7 +245,7 @@ func TestFreeSpacePrefixes_PrefixSizeBeyondFamilyMaxSkips(t *testing.T) {
 func TestFreeSpacePrefixes_LimitPerSupernet(t *testing.T) {
 	a := uuid.New()
 	f := &fakeCarverQ{
-		supernets: []dbq.SupernetForCarverRow{
+		supernets: []dbq.ListSupernetsForCarverRow{
 			{ID: a, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/22"},
 		},
 	}
@@ -265,10 +265,10 @@ func TestFreeSpacePrefixes_OmitsFullSupernets(t *testing.T) {
 	// whole group from the response.
 	a := uuid.New()
 	f := &fakeCarverQ{
-		supernets: []dbq.SupernetForCarverRow{
+		supernets: []dbq.ListSupernetsForCarverRow{
 			{ID: a, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/23"},
 		},
-		allocated: []dbq.SubnetPrefixBySupernetRow{
+		allocated: []dbq.ListSubnetPrefixesBySupernetsRow{
 			{SupernetID: a, Prefix: "10.0.0.0/24"},
 			{SupernetID: a, Prefix: "10.0.1.0/24"},
 		},

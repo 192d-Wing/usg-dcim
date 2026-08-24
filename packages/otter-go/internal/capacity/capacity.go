@@ -109,7 +109,7 @@ func FreeRuns(used []bool, uHeight int32) []FreeRun {
 // Querier is the slice of dbq methods the rollup helpers need. Kept
 // narrow so callers can substitute an in-memory fake in tests.
 type Querier interface {
-	ListPduKwTelemetry(ctx context.Context, assetIDs []uuid.UUID) ([]dbq.PduKwTelemetryRow, error)
+	ListPduKwTelemetry(ctx context.Context, assetIDs []uuid.UUID) ([]dbq.ListPduKwTelemetryRow, error)
 }
 
 // ComputeRackCapacity is the per-rack rollup used by /racks/{id},
@@ -146,7 +146,7 @@ func ComputeManyRackCapacity(
 			allPduIDs = append(allPduIDs, id)
 		}
 	}
-	rowsByAsset := map[uuid.UUID][]dbq.PduKwTelemetryRow{}
+	rowsByAsset := map[uuid.UUID][]dbq.ListPduKwTelemetryRow{}
 	if len(allPduIDs) > 0 {
 		rows, err := q.ListPduKwTelemetry(ctx, allPduIDs)
 		if err != nil {
@@ -160,7 +160,7 @@ func ComputeManyRackCapacity(
 	for _, r := range racks {
 		assets := assetsByRack[r.ID]
 		// Slice the bulk telemetry down to rows for this rack's PDUs.
-		var rackRows []dbq.PduKwTelemetryRow
+		var rackRows []dbq.ListPduKwTelemetryRow
 		for _, id := range pduAssetIDs(assets) {
 			rackRows = append(rackRows, rowsByAsset[id]...)
 		}
@@ -180,7 +180,7 @@ func pduAssetIDs(assets []dbq.Asset) []uuid.UUID {
 }
 
 func assembleRackCapacity(
-	rack dbq.Rack, assets []dbq.Asset, pduRows []dbq.PduKwTelemetryRow,
+	rack dbq.Rack, assets []dbq.Asset, pduRows []dbq.ListPduKwTelemetryRow,
 ) RackCapacity {
 	used := SlotsUsed(assets, rack.UHeight)
 	var uUsed int32
@@ -219,17 +219,14 @@ func assembleRackCapacity(
 // rollupKw sums the kW/W metric values across the PDU telemetry rows.
 // Returns nil when no row carried a parseable value (Python returns
 // None in the same case).
-func rollupKw(rows []dbq.PduKwTelemetryRow) *float64 {
+func rollupKw(rows []dbq.ListPduKwTelemetryRow) *float64 {
 	var total float64
 	any := false
 	for _, r := range rows {
 		if r.LastValue == nil {
 			continue
 		}
-		v, err := strconv.ParseFloat(*r.LastValue, 64)
-		if err != nil {
-			continue
-		}
+		v := *r.LastValue
 		if _, ok := powerMetricKw[r.Metric]; ok {
 			total += v
 			any = true

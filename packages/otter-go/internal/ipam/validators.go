@@ -136,7 +136,7 @@ func validatePurposeCompatible(supernetPurpose, subnetPurpose *string) error {
 func (h *Handler) assertSupernetInsideParent(
 	ctx context.Context, parentID uuid.UUID, prefix netip.Prefix,
 	fabricID, vrfID uuid.UUID,
-) (*dbq.Supernet, error) {
+) (*dbq.GetSupernetRow, error) {
 	parent, err := h.Q.GetSupernet(ctx, parentID)
 	if err != nil {
 		return nil, fmt.Errorf("parent supernet %s not found", parentID)
@@ -151,13 +151,14 @@ func (h *Handler) assertSupernetInsideParent(
 	if !cidrContains(parentPrefix, prefix) {
 		return nil, fmt.Errorf("prefix %s is not contained in parent %s", prefix, parent.Prefix)
 	}
-	return &parent, nil
+	p := parent
+	return &p, nil
 }
 
 // assertSubnetInsideSupernet — same shape, supernet → subnet.
 func (h *Handler) assertSubnetInsideSupernet(
 	ctx context.Context, supernetID uuid.UUID, prefix netip.Prefix,
-) (*dbq.Supernet, error) {
+) (*dbq.GetSupernetRow, error) {
 	parent, err := h.Q.GetSupernet(ctx, supernetID)
 	if err != nil {
 		return nil, fmt.Errorf("supernet %s not found", supernetID)
@@ -169,13 +170,14 @@ func (h *Handler) assertSubnetInsideSupernet(
 	if !cidrContains(parentPrefix, prefix) {
 		return nil, fmt.Errorf("subnet %s is not contained in supernet %s", prefix, parent.Prefix)
 	}
-	return &parent, nil
+	p := parent
+	return &p, nil
 }
 
 // assertAddressInSubnet — IP must be inside subnet's prefix.
 func (h *Handler) assertAddressInSubnet(
 	ctx context.Context, subnetID uuid.UUID, addr netip.Addr,
-) (*dbq.Subnet, error) {
+) (*dbq.GetSubnetRow, error) {
 	subnet, err := h.Q.GetSubnet(ctx, subnetID)
 	if err != nil {
 		return nil, fmt.Errorf("subnet %s not found", subnetID)
@@ -187,5 +189,6 @@ func (h *Handler) assertAddressInSubnet(
 	if !addressInNetwork(addr, subnetPrefix) {
 		return nil, fmt.Errorf("address %s is not contained in subnet %s", addr, subnet.Prefix)
 	}
-	return &subnet, nil
+	s := subnet
+	return &s, nil
 }

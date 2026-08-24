@@ -21,7 +21,7 @@ type createPoolReq struct {
 	Name                   string     `json:"name"`
 	Slug                   string     `json:"slug"`
 	Description            *string    `json:"description"`
-	IpFamily               int16      `json:"ip_family"`
+	IPFamily               int16      `json:"ip_family"`
 	FabricID               *string    `json:"fabric_id"`
 	Classification         *string    `json:"classification"`
 	MinPrefixLength        int16      `json:"min_prefix_length"`
@@ -44,11 +44,11 @@ func (h *Handler) createPool(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnprocessableEntity,"min_prefix_length must be ≤ max_prefix_length")
 		return
 	}
-	if err := validateFamilyPrefix(req.IpFamily, req.MaxPrefixLength); err != nil {
+	if err := validateFamilyPrefix(req.IPFamily, req.MaxPrefixLength); err != nil {
 		writeValidationError(w, err)
 		return
 	}
-	if err := validateFamilyPrefix(req.IpFamily, req.MinPrefixLength); err != nil {
+	if err := validateFamilyPrefix(req.IPFamily, req.MinPrefixLength); err != nil {
 		writeValidationError(w, err)
 		return
 	}
@@ -60,7 +60,7 @@ func (h *Handler) createPool(w http.ResponseWriter, r *http.Request) {
 		Name:                   req.Name,
 		Slug:                   req.Slug,
 		Description:            req.Description,
-		IpFamily:               req.IpFamily,
+		IPFamily:               req.IPFamily,
 		FabricID:               fabricID,
 		Classification:         req.Classification,
 		MinPrefixLength:        req.MinPrefixLength,
@@ -172,11 +172,11 @@ func (h *Handler) updatePool(w http.ResponseWriter, r *http.Request) {
 	// Family is immutable; re-validate both bounds against the
 	// persisted family so a PATCH that pushes max past the cap fails
 	// cleanly with 422.
-	if err := validateFamilyPrefix(cur.IpFamily, newMax); err != nil {
+	if err := validateFamilyPrefix(cur.IPFamily, newMax); err != nil {
 		writeValidationError(w, err)
 		return
 	}
-	if err := validateFamilyPrefix(cur.IpFamily, newMin); err != nil {
+	if err := validateFamilyPrefix(cur.IPFamily, newMin); err != nil {
 		writeValidationError(w, err)
 		return
 	}

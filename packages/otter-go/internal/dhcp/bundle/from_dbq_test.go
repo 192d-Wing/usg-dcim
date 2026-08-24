@@ -14,7 +14,7 @@ func TestFromDbqServer_FieldShape(t *testing.T) {
 	srvID := uuid.New()
 	fabID := uuid.New()
 	cfg := json.RawMessage(`{"dhcp4":{"interfaces-config":{"interfaces":["eth0"]}}}`)
-	src := dbq.DhcpServerBundleRow{
+	src := dbq.GetDhcpServerBundleRowRow{
 		ID:         srvID,
 		Name:       "kea-1",
 		FabricID:   fabID,
@@ -37,7 +37,7 @@ func TestFromDbqScope_NullableTimersAndTemplateID(t *testing.T) {
 	renew := int32(3600)
 	kid := int32(42)
 	pools := json.RawMessage(`[{"first":"10.0.0.10","last":"10.0.0.250"}]`)
-	src := dbq.DhcpScope{
+	src := dbq.ListDhcpScopesForBundleRow{
 		ID:                   scopeID,
 		DhcpServerID:         serverID,
 		Name:                 "office-v4",
@@ -81,7 +81,7 @@ func TestFromDbqScope_NilTemplateID_StaysNil(t *testing.T) {
 	// Specifically guard the typed-nil interface trap — if
 	// uuidPtrToStringPtr were declared with an interface arg, a
 	// *uuid.UUID(nil) wrapped in the iface would panic on .String().
-	src := dbq.DhcpScope{
+	src := dbq.ListDhcpScopesForBundleRow{
 		ID:           uuid.New(),
 		DhcpServerID: uuid.New(),
 		IPFamily:     4,
@@ -146,7 +146,7 @@ func TestRenderBundleEndToEndFromDbqRows(t *testing.T) {
 	}
 	scopeVL := int32(1800)
 	kid := int32(1)
-	scope := dbq.DhcpScope{
+	scope := dbq.ListDhcpScopesForBundleRow{
 		ID:                   uuid.New(),
 		DhcpServerID:         serverID,
 		Name:                 "office-v4",
@@ -158,7 +158,7 @@ func TestRenderBundleEndToEndFromDbqRows(t *testing.T) {
 		TemplateID:           &tplID,
 		Enabled:              true,
 	}
-	srv := dbq.DhcpServerBundleRow{
+	srv := dbq.GetDhcpServerBundleRowRow{
 		ID:         serverID,
 		Name:       "kea-1",
 		FabricID:   uuid.New(),

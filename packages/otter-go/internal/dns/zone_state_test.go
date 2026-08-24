@@ -28,7 +28,7 @@ type fakeZoneStateQ struct {
 	zone        dbq.DnsZone
 	zoneErr     error
 	fabricIDErr error
-	zoneRecords []dbq.DnsRecordForRender
+	zoneRecords []dbq.ListAllRecordsInZoneRow
 }
 
 func (f *fakeZoneStateQ) GetDnsZone(_ context.Context, _ uuid.UUID) (dbq.DnsZone, error) {
@@ -39,7 +39,7 @@ func (f *fakeZoneStateQ) GetDnsZoneFabricID(_ context.Context, _ uuid.UUID) (uui
 	return uuid.Nil, f.fabricIDErr
 }
 
-func (f *fakeZoneStateQ) ListAllRecordsInZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsRecordForRender, error) {
+func (f *fakeZoneStateQ) ListAllRecordsInZone(_ context.Context, _ uuid.UUID) ([]dbq.ListAllRecordsInZoneRow, error) {
 	return f.zoneRecords, nil
 }
 
@@ -278,7 +278,7 @@ func TestPreviewZone_ReturnsBindTextAndRecordCount(t *testing.T) {
 	f := &fakeZoneStateQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com", DefaultTTL: 60,
 			SoaMname: "ns1", SoaRname: "hostmaster", SoaRefresh: 900, SoaRetry: 900, SoaExpire: 1800, SoaMinimum: 60},
-		zoneRecords: []dbq.DnsRecordForRender{
+		zoneRecords: []dbq.ListAllRecordsInZoneRow{
 			{ID: uuid.New(), Name: "www", Type: "A", Data: rec1},
 		},
 	}
@@ -325,7 +325,7 @@ func TestPreviewZone_BadRecordIs422(t *testing.T) {
 	id := uuid.New()
 	f := &fakeZoneStateQ{
 		zone: dbq.DnsZone{ID: id, FabricID: uuid.New(), Name: "example.com", DefaultTTL: 60},
-		zoneRecords: []dbq.DnsRecordForRender{
+		zoneRecords: []dbq.ListAllRecordsInZoneRow{
 			{ID: uuid.New(), Name: "x", Type: "DNSKEY", Data: json.RawMessage(`{}`)},
 		},
 	}

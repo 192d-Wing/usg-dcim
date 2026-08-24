@@ -92,8 +92,12 @@ func TestSettings_BatchQueryExists(t *testing.T) {
 	if q == "" {
 		t.Fatal("GetSystemSettings batch query missing from lir_arin.sql")
 	}
-	if !strings.Contains(q, "ANY($1::text[])") {
-		t.Errorf("batch query must use ANY($1::text[]); got:\n%s", q)
+	// The source uses sqlc's named-arg form (sqlc.arg(keys)::text[]),
+	// which sqlc rewrites to the positional $1::text[] at generation
+	// time — accept either spelling; the load-bearing property is the
+	// single ANY(...::text[]) batch filter.
+	if !strings.Contains(q, "ANY($1::text[])") && !strings.Contains(q, "ANY(sqlc.arg(keys)::text[])") {
+		t.Errorf("batch query must use ANY(<keys param>::text[]); got:\n%s", q)
 	}
 }
 

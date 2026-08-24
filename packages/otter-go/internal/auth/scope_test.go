@@ -178,7 +178,7 @@ func TestEnforceFabricScope_NoCap(t *testing.T) {
 func TestResolveUserScopes_AggregatesPerCap(t *testing.T) {
 	r1 := uuid.New()
 	r2 := uuid.New()
-	rows := []dbq.ScopedCapabilityRow{
+	rows := []dbq.GetUserScopedCapabilitiesRow{
 		{Code: "inventory:sites:read", ScopeType: ptr("region"), TargetID: ptr(r1.String())},
 		{Code: "inventory:sites:read", ScopeType: ptr("region"), TargetID: ptr(r2.String())},
 		{Code: "dns:zones:read", ScopeType: nil, TargetID: nil}, // unrestricted
@@ -195,7 +195,7 @@ func TestResolveUserScopes_AggregatesPerCap(t *testing.T) {
 }
 
 func TestResolveUserScopes_UnknownDimensionFailsClosed(t *testing.T) {
-	rows := []dbq.ScopedCapabilityRow{
+	rows := []dbq.GetUserScopedCapabilitiesRow{
 		{Code: "x", ScopeType: ptr("zone-not-a-thing"), TargetID: ptr("anything")},
 	}
 	out := resolveUserScopes(rows)
@@ -530,7 +530,7 @@ func TestResolveUserScopes_ClassificationDim(t *testing.T) {
 	// flows into Principal.Scopes[cap].Classifications.
 	st := "classification"
 	target := "unclassified"
-	rows := []dbq.ScopedCapabilityRow{
+	rows := []dbq.GetUserScopedCapabilitiesRow{
 		{Code: "inventory:sites:create", ScopeType: &st, TargetID: &target},
 	}
 	out := resolveUserScopes(rows)

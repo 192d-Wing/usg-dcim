@@ -20,7 +20,7 @@ import (
 func (f *fakeQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (f *fakeQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -29,10 +29,10 @@ func (f *fakeQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uu
 func (f *fakeQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -40,7 +40,7 @@ func (f *fakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.Dn
 func (f *fakeImportQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeImportQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeImportQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (f *fakeImportQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -49,10 +49,10 @@ func (f *fakeImportQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context
 func (f *fakeImportQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeImportQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeImportQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeImportQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeImportQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -60,7 +60,7 @@ func (f *fakeImportQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]
 func (f *fakeDashboardQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeDashboardQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeDashboardQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (f *fakeDashboardQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -69,10 +69,10 @@ func (f *fakeDashboardQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Cont
 func (f *fakeDashboardQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeDashboardQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeDashboardQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeDashboardQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeDashboardQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -80,7 +80,7 @@ func (f *fakeDashboardQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) 
 func (f *fakeEnableDnssecQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeEnableDnssecQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeEnableDnssecQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (f *fakeEnableDnssecQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -89,10 +89,10 @@ func (f *fakeEnableDnssecQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.C
 func (f *fakeEnableDnssecQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeEnableDnssecQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeEnableDnssecQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeEnableDnssecQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeEnableDnssecQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -100,7 +100,7 @@ func (f *fakeEnableDnssecQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUI
 func (f *fakeLifecycleQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeLifecycleQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeLifecycleQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (f *fakeLifecycleQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -109,10 +109,10 @@ func (f *fakeLifecycleQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Cont
 func (f *fakeLifecycleQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeLifecycleQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeLifecycleQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeLifecycleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeLifecycleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -120,7 +120,7 @@ func (f *fakeLifecycleQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) 
 func (f *fakeDnssecQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeDnssecQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeDnssecQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (f *fakeDnssecQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -129,10 +129,10 @@ func (f *fakeDnssecQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context
 func (f *fakeDnssecQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeDnssecQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeDnssecQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeDnssecQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeDnssecQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -140,7 +140,7 @@ func (f *fakeDnssecQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]
 func (f *fakeHCResultQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeHCResultQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (f *fakeHCResultQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (f *fakeHCResultQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -149,10 +149,10 @@ func (f *fakeHCResultQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Conte
 func (f *fakeHCResultQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (f *fakeHCResultQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (f *fakeHCResultQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeHCResultQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeHCResultQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -160,7 +160,7 @@ func (f *fakeHCResultQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) (
 func (s *scopedFakeQ) ListDnsZonesByFabric(_ context.Context, _ uuid.UUID) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (s *scopedFakeQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsRecordForBundle, error) {
+func (s *scopedFakeQ) ListDnsRecordsByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.ListDnsRecordsByZoneIDsRow, error) {
 	return nil, nil
 }
 func (s *scopedFakeQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
@@ -169,10 +169,10 @@ func (s *scopedFakeQ) ListUnhealthyEnabledHealthChecksByFabric(_ context.Context
 func (s *scopedFakeQ) GetEnabledDnsCatalogZoneByFabric(_ context.Context, _ uuid.UUID) (dbq.DnsCatalogZone, error) {
 	return dbq.DnsCatalogZone{}, pgx.ErrNoRows
 }
-func (s *scopedFakeQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.AuthDnsServerForCatalog, error) {
+func (s *scopedFakeQ) ListEnabledAuthDnsServersByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledAuthDnsServersByFabricRow, error) {
 	return nil, nil
 }
-func (s *scopedFakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (s *scopedFakeQ) ListDnsKeysByZoneIDs(_ context.Context, _ []uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 
@@ -210,14 +210,14 @@ func (f *fakeQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID) ([]str
 func (f *fakeQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -229,14 +229,14 @@ func (f *fakeImportQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID) 
 func (f *fakeImportQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeImportQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeImportQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeImportQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeImportQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeImportQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeImportQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeImportQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -248,14 +248,14 @@ func (f *fakeDashboardQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUI
 func (f *fakeDashboardQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeDashboardQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeDashboardQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeDashboardQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeDashboardQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeDashboardQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeDashboardQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeDashboardQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -267,14 +267,14 @@ func (f *fakeEnableDnssecQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.
 func (f *fakeEnableDnssecQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeEnableDnssecQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeEnableDnssecQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeEnableDnssecQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeEnableDnssecQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeEnableDnssecQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeEnableDnssecQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeEnableDnssecQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -286,14 +286,14 @@ func (f *fakeLifecycleQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUI
 func (f *fakeLifecycleQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeLifecycleQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeLifecycleQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeLifecycleQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeLifecycleQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeLifecycleQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeLifecycleQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeLifecycleQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -305,14 +305,14 @@ func (f *fakeDnssecQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID) 
 func (f *fakeDnssecQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeDnssecQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeDnssecQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeDnssecQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeDnssecQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeDnssecQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeDnssecQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeDnssecQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -324,14 +324,14 @@ func (f *fakeHCResultQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID
 func (f *fakeHCResultQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (f *fakeHCResultQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (f *fakeHCResultQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (f *fakeHCResultQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (f *fakeHCResultQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (f *fakeHCResultQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (f *fakeHCResultQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (f *fakeHCResultQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows
@@ -343,14 +343,14 @@ func (s *scopedFakeQ) ListApexZoneNamesByFabric(_ context.Context, _ uuid.UUID) 
 func (s *scopedFakeQ) GetSameSiteAuthUnicastIP(_ context.Context, _ uuid.UUID) (string, error) {
 	return "", pgx.ErrNoRows
 }
-func (s *scopedFakeQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.DnsForwarderRow, error) {
+func (s *scopedFakeQ) ListDnsForwardersForBundle(_ context.Context, _ uuid.UUID) ([]dbq.ListDnsForwardersForBundleRow, error) {
 	return nil, nil
 }
-func (s *scopedFakeQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.BlocklistForBundleRow, error) {
+func (s *scopedFakeQ) ListEnabledBlocklistsWithPatternsByFabric(_ context.Context, _ uuid.UUID) ([]dbq.ListEnabledBlocklistsWithPatternsByFabricRow, error) {
 	return nil, nil
 }
-func (s *scopedFakeQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.FabricForRecursiveBundle, error) {
-	return dbq.FabricForRecursiveBundle{}, pgx.ErrNoRows
+func (s *scopedFakeQ) GetFabricForRecursiveBundle(_ context.Context, _ uuid.UUID) (dbq.GetFabricForRecursiveBundleRow, error) {
+	return dbq.GetFabricForRecursiveBundleRow{}, pgx.ErrNoRows
 }
 func (s *scopedFakeQ) GetSystemSetting(_ context.Context, _ string) (dbq.SystemSetting, error) {
 	return dbq.SystemSetting{}, pgx.ErrNoRows

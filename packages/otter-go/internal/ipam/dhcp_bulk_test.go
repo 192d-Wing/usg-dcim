@@ -44,7 +44,7 @@ type dhcpBulkFakeQ struct {
 
 	enabled    []uuid.UUID
 	drifted    []uuid.UUID
-	allWithPri []dbq.DhcpScopeIDAndPriorDriftRow
+	allWithPri []dbq.ListAllScopeIDsAndPriorDriftForServerRow
 }
 
 func (f *dhcpBulkFakeQ) GetDhcpServerFabricID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
@@ -56,7 +56,7 @@ func (f *dhcpBulkFakeQ) ListEnabledScopeIDsForServer(_ context.Context, _ uuid.U
 func (f *dhcpBulkFakeQ) ListDriftedScopeIDsForServer(_ context.Context, _ uuid.UUID) ([]uuid.UUID, error) {
 	return f.drifted, nil
 }
-func (f *dhcpBulkFakeQ) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.DhcpScopeIDAndPriorDriftRow, error) {
+func (f *dhcpBulkFakeQ) ListAllScopeIDsAndPriorDriftForServer(_ context.Context, _ uuid.UUID) ([]dbq.ListAllScopeIDsAndPriorDriftForServerRow, error) {
 	return f.allWithPri, nil
 }
 
@@ -65,8 +65,8 @@ func mountDhcpBulk(f *dhcpBulkFakeQ, rec *recordingAudit) http.Handler {
 	(&Handler{
 		Q:     f,
 		Audit: rec,
-		PushKea: func(_ dbq.DhcpServerForPushRow) push.KeaClient { return &fakeKea{} },
-		DiffKea: func(_ dbq.DhcpServerForPushRow) diff.KeaClient { return &fakeKea{} },
+		PushKea: func(_ dbq.GetDhcpServerForPushRow) push.KeaClient { return &fakeKea{} },
+		DiffKea: func(_ dbq.GetDhcpServerForPushRow) diff.KeaClient { return &fakeKea{} },
 	}).Mount(r)
 	return r
 }

@@ -4,14 +4,11 @@ INSERT INTO dns_zones (id, name, kind, fabric_id, site_id, description,
                        soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
                        default_ttl, signed, zsk_rotation_days, nsec3_iterations, nsec3_opt_out,
                        publish_cds, frozen, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2::dns_zone_kind, $3, $4, $5,
-        $6, $7, $8, $9, $10, $11,
-        $12, FALSE, $13, 0, FALSE,
-        $14, FALSE, NOW(), NOW())
-RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
-          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(kind)::dns_zone_kind, sqlc.arg(fabric_id), sqlc.arg(site_id), sqlc.arg(description),
+        sqlc.arg(soa_mname), sqlc.arg(soa_rname), sqlc.arg(soa_refresh), sqlc.arg(soa_retry), sqlc.arg(soa_expire), sqlc.arg(soa_minimum),
+        sqlc.arg(default_ttl), FALSE, sqlc.arg(zsk_rotation_days), 0, FALSE,
+        sqlc.arg(publish_cds), FALSE, NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateDnsZone :one
 UPDATE dns_zones
@@ -27,10 +24,7 @@ SET description       = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg
     publish_cds = COALESCE(sqlc.narg(publish_cds)::bool, publish_cds),
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
-          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteDnsZone :exec
 DELETE FROM dns_zones WHERE id = $1;
@@ -43,10 +37,7 @@ DELETE FROM dns_zones WHERE id = $1;
 UPDATE dns_zones
 SET frozen = $2, updated_at = NOW()
 WHERE id = $1
-RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
-          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+RETURNING *;
 
 -- name: ListAllRecordsInZone :many
 -- PR 71 — preview reads every record in the zone (unpaginated)
@@ -62,25 +53,20 @@ ORDER BY name, type;
 -- (validated by handler) or NULL to mean "renderer picks a fresh
 -- random salt at sign time." API refuses on unsigned zones.
 UPDATE dns_zones
-SET nsec3_salt = $2,
-    nsec3_iterations = $3,
-    nsec3_opt_out = $4,
+SET nsec3_salt = sqlc.narg(salt)::text,
+    nsec3_iterations = sqlc.arg(iterations),
+    nsec3_opt_out = sqlc.arg(opt_out),
     updated_at = NOW()
-WHERE id = $1
-RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
-          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+WHERE id = sqlc.arg(id)
+RETURNING *;
 
 -- ===== DNS Records =====
 -- name: CreateDnsRecord :one
 INSERT INTO dns_records (id, zone_id, name, type, ttl, data, source,
                          view_id, health_check_id, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::dns_record_type, $4, $5::jsonb, 'manual'::dns_record_source,
-        $6, $7, $8, NOW(), NOW())
-RETURNING id, zone_id, name, type::text AS type, ttl, data, source::text AS source,
-          ipam_address_id, NULL::uuid AS view_id, NULL::uuid AS health_check_id,
-          description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(zone_id), sqlc.arg(name), sqlc.arg(type)::dns_record_type, sqlc.narg(ttl), sqlc.arg(data)::jsonb, 'manual'::dns_record_source,
+        sqlc.narg(view_id), sqlc.narg(health_check_id), sqlc.narg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateDnsRecord :one
 UPDATE dns_records
@@ -95,9 +81,7 @@ SET name        = COALESCE(sqlc.narg(name)::text, name),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, zone_id, name, type::text AS type, ttl, data, source::text AS source,
-          ipam_address_id, view_id, health_check_id,
-          description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteDnsRecord :exec
 DELETE FROM dns_records WHERE id = $1;
@@ -105,7 +89,7 @@ DELETE FROM dns_records WHERE id = $1;
 -- ===== DNS Servers =====
 -- name: CreateDnsServerRow :one
 INSERT INTO dns_servers (id, name, site_id, fabric_id, role, unicast_ip, enabled, anycast_group_id, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4::dns_server_role, $5::inet, $6, $7, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(site_id), sqlc.arg(fabric_id), sqlc.arg(role)::dns_server_role, sqlc.arg(unicast_ip)::inet, sqlc.arg(enabled), sqlc.narg(anycast_group_id), NOW(), NOW())
 RETURNING id, name, site_id, fabric_id, role::text AS role,
           host(unicast_ip) AS unicast_ip, enabled,
           last_render_at, last_render_status, last_render_error, last_render_etag,
@@ -130,9 +114,9 @@ DELETE FROM dns_servers WHERE id = $1;
 -- ===== Anycast groups =====
 -- name: CreateAnycastGroup :one
 INSERT INTO anycast_groups (id, name, fabric_id, service, anycast_ipv4, anycast_ipv6, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::anycast_service, $4::inet, $5::inet, $6, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(fabric_id), sqlc.arg(service)::anycast_service, sqlc.narg(anycast_ipv4)::inet, sqlc.narg(anycast_ipv6)::inet, sqlc.narg(description), NOW(), NOW())
 RETURNING id, name, fabric_id, service::text AS service,
-          host(anycast_ipv4) AS anycast_ipv4, host(anycast_ipv6) AS anycast_ipv6,
+          CASE WHEN anycast_ipv4 IS NULL THEN NULL ELSE host(anycast_ipv4) END AS anycast_ipv4, CASE WHEN anycast_ipv6 IS NULL THEN NULL ELSE host(anycast_ipv6) END AS anycast_ipv6,
           description, created_at, updated_at;
 
 -- name: UpdateAnycastGroup :one
@@ -144,7 +128,7 @@ SET name        = COALESCE(sqlc.narg(name)::text, name),
     updated_at  = NOW()
 WHERE id = $1
 RETURNING id, name, fabric_id, service::text AS service,
-          host(anycast_ipv4) AS anycast_ipv4, host(anycast_ipv6) AS anycast_ipv6,
+          CASE WHEN anycast_ipv4 IS NULL THEN NULL ELSE host(anycast_ipv4) END AS anycast_ipv4, CASE WHEN anycast_ipv6 IS NULL THEN NULL ELSE host(anycast_ipv6) END AS anycast_ipv6,
           description, created_at, updated_at;
 
 -- name: DeleteAnycastGroup :exec
@@ -153,8 +137,8 @@ DELETE FROM anycast_groups WHERE id = $1;
 -- ===== DNS Forwarders =====
 -- name: CreateDnsForwarder :one
 INSERT INTO dns_forwarders (id, name, fabric_id, zone_pattern, upstreams, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4::jsonb, $5, NOW(), NOW())
-RETURNING id, name, fabric_id, zone_pattern, upstreams, description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(fabric_id), sqlc.arg(zone_pattern), sqlc.arg(upstreams)::jsonb, sqlc.narg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateDnsForwarder :one
 UPDATE dns_forwarders
@@ -164,7 +148,7 @@ SET name         = COALESCE(sqlc.narg(name)::text, name),
     description  = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at   = NOW()
 WHERE id = $1
-RETURNING id, name, fabric_id, zone_pattern, upstreams, description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteDnsForwarder :exec
 DELETE FROM dns_forwarders WHERE id = $1;
@@ -173,7 +157,7 @@ DELETE FROM dns_forwarders WHERE id = $1;
 -- name: CreateDnsCatalogZone :one
 INSERT INTO dns_catalog_zones (id, fabric_id, name, enabled, signed, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, FALSE, NOW(), NOW())
-RETURNING id, fabric_id, name, enabled, signed, created_at, updated_at;
+RETURNING *;
 
 -- name: UpdateDnsCatalogZone :one
 UPDATE dns_catalog_zones
@@ -181,7 +165,7 @@ SET name    = COALESCE(sqlc.narg(name)::text, name),
     enabled = COALESCE(sqlc.narg(enabled)::bool, enabled),
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, fabric_id, name, enabled, signed, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteDnsCatalogZone :exec
 DELETE FROM dns_catalog_zones WHERE id = $1;
@@ -189,9 +173,9 @@ DELETE FROM dns_catalog_zones WHERE id = $1;
 -- ===== DNS Blocklists =====
 -- name: CreateDnsBlocklist :one
 INSERT INTO dns_blocklists (id, name, fabric_id, action, sink_ipv4, sink_ipv6, enabled, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::dns_blocklist_action, $4::inet, $5::inet, $6, $7, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(fabric_id), sqlc.arg(action)::dns_blocklist_action, sqlc.narg(sink_ipv4)::inet, sqlc.narg(sink_ipv6)::inet, sqlc.arg(enabled), sqlc.narg(description), NOW(), NOW())
 RETURNING id, name, fabric_id, action::text AS action,
-          host(sink_ipv4) AS sink_ipv4, host(sink_ipv6) AS sink_ipv6,
+          CASE WHEN sink_ipv4 IS NULL THEN NULL ELSE host(sink_ipv4) END AS sink_ipv4, CASE WHEN sink_ipv6 IS NULL THEN NULL ELSE host(sink_ipv6) END AS sink_ipv6,
           enabled, description, created_at, updated_at;
 
 -- name: UpdateDnsBlocklist :one
@@ -205,7 +189,7 @@ SET name      = COALESCE(sqlc.narg(name)::text, name),
     updated_at = NOW()
 WHERE id = $1
 RETURNING id, name, fabric_id, action::text AS action,
-          host(sink_ipv4) AS sink_ipv4, host(sink_ipv6) AS sink_ipv6,
+          CASE WHEN sink_ipv4 IS NULL THEN NULL ELSE host(sink_ipv4) END AS sink_ipv4, CASE WHEN sink_ipv6 IS NULL THEN NULL ELSE host(sink_ipv6) END AS sink_ipv6,
           enabled, description, created_at, updated_at;
 
 -- name: DeleteDnsBlocklist :exec
@@ -215,7 +199,7 @@ DELETE FROM dns_blocklists WHERE id = $1;
 -- name: CreateDnsBlocklistEntry :one
 INSERT INTO dns_blocklist_entries (id, blocklist_id, pattern, description, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
-RETURNING id, blocklist_id, pattern, description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteDnsBlocklistEntry :exec
 DELETE FROM dns_blocklist_entries WHERE id = $1;
@@ -223,8 +207,8 @@ DELETE FROM dns_blocklist_entries WHERE id = $1;
 -- ===== DNS Views =====
 -- name: CreateDnsView :one
 INSERT INTO dns_views (id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::jsonb, $4, $5, NOW(), NOW())
-RETURNING id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at;
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(fabric_id), sqlc.arg(match_cidrs)::jsonb, sqlc.arg(priority), sqlc.narg(description), NOW(), NOW())
+RETURNING *;
 
 -- name: UpdateDnsView :one
 UPDATE dns_views
@@ -234,7 +218,7 @@ SET name        = COALESCE(sqlc.narg(name)::text, name),
     description = CASE WHEN sqlc.arg(description_set)::bool THEN sqlc.narg(description)::text ELSE description END,
     updated_at  = NOW()
 WHERE id = $1
-RETURNING id, name, fabric_id, match_cidrs, priority, description, created_at, updated_at;
+RETURNING *;
 
 -- name: DeleteDnsView :exec
 DELETE FROM dns_views WHERE id = $1;
@@ -244,8 +228,8 @@ DELETE FROM dns_views WHERE id = $1;
 INSERT INTO dns_health_checks (id, name, fabric_id, target_ip, protocol, port, path,
                                interval_seconds, timeout_seconds, enabled, status,
                                created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3::inet, $4::dns_health_check_protocol, $5, $6,
-        $7, $8, $9, 'unknown'::dns_health_check_status, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(fabric_id), sqlc.arg(target_ip)::inet, sqlc.arg(protocol)::dns_health_check_protocol, sqlc.narg(port), sqlc.arg(path),
+        sqlc.arg(interval_seconds), sqlc.arg(timeout_seconds), sqlc.arg(enabled), 'unknown'::dns_health_check_status, NOW(), NOW())
 RETURNING id, name, fabric_id, host(target_ip) AS target_ip,
           protocol::text AS protocol, port, path,
           interval_seconds, timeout_seconds, enabled,
@@ -273,30 +257,28 @@ RETURNING id, name, fabric_id, host(target_ip) AS target_ip,
 -- name: DeleteDnsHealthCheck :exec
 DELETE FROM dns_health_checks WHERE id = $1;
 
--- name: SetDnsServerRenderStatus :exec
+-- name: SetDnsServerRenderStatus :execrows
 -- PR 73 — collector callback after every render attempt. Mirrors
 -- DhcpServer.last_sync_* shape on DnsServer. coredns_version is
 -- optional: if NULL it's left unchanged (existing value sticks),
 -- if non-NULL it's recorded.
 UPDATE dns_servers
 SET last_render_at = NOW(),
-    last_render_status = $2,
-    last_render_error = $3,
-    last_render_etag = $4,
-    coredns_version = COALESCE($5, coredns_version)
-WHERE id = $1;
+    last_render_status = sqlc.arg(status)::text,
+    last_render_error = sqlc.narg(error)::text,
+    last_render_etag = sqlc.narg(etag)::text,
+    coredns_version = COALESCE(sqlc.narg(coredns_version)::text, coredns_version)
+WHERE id = sqlc.arg(id);
 
 -- ===== Dashboard (PR 84) =====
 
 -- name: ListDnsSamplesInWindow :many
 -- All samples from `cutoff` onward, optionally filtered by a set of
 -- server_ids when the caller is fabric-scoped.
-SELECT id, server_id, observed_at, interval_seconds,
-       queries, nxdomain, servfail, noerror,
-       p50_ms, p95_ms, top_names
+SELECT *
 FROM dns_server_metrics_samples
-WHERE observed_at >= $1
-  AND ($2::uuid[] IS NULL OR server_id = ANY($2::uuid[]))
+WHERE observed_at >= sqlc.arg(cutoff)
+  AND (sqlc.arg(server_ids)::uuid[] IS NULL OR server_id = ANY(sqlc.arg(server_ids)::uuid[]))
 ORDER BY observed_at ASC;
 
 -- name: ListDnsServersForDashboard :many
@@ -305,29 +287,26 @@ SELECT id, name, site_id, fabric_id, role::text AS role, host(unicast_ip) AS uni
        last_render_etag, coredns_version, anycast_group_id,
        created_at, updated_at
 FROM dns_servers
-WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid);
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
 
 -- name: ListDnsZonesForDashboard :many
 SELECT id, name, kind::text AS kind, fabric_id, site_id, signed,
        nsec3_iterations
 FROM dns_zones
-WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid);
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
 
 -- name: CountAnycastGroupsForDashboard :one
 SELECT count(*)::bigint FROM anycast_groups
-WHERE ($1::uuid IS NULL OR fabric_id = $1::uuid);
+WHERE (sqlc.narg(fabric_id)::uuid IS NULL OR fabric_id = sqlc.narg(fabric_id));
 
 -- ===== sync-from-ipam (PR 83) =====
 
 -- name: ListReverseZonesForSite :many
-SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
-       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+SELECT *
 FROM dns_zones
 WHERE kind = 'reverse'::dns_zone_kind
-  AND fabric_id = $1
-  AND site_id = $2;
+  AND fabric_id = sqlc.arg(fabric_id)
+  AND site_id = sqlc.arg(site_id)::uuid;
 
 -- name: ListAllSiteDnsZones :many
 -- Used by the dns_sync_from_ipam scheduler job to enumerate every
@@ -335,10 +314,7 @@ WHERE kind = 'reverse'::dns_zone_kind
 -- because the cron processes every site zone in one pass — apex zones
 -- are skipped (operator-curated; the per-zone helper returns (0, 0) on
 -- non-site kinds too, but filtering here keeps the loop tighter).
-SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
-       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+SELECT *
 FROM dns_zones
 WHERE kind = 'site'::dns_zone_kind
 ORDER BY id;
@@ -351,23 +327,17 @@ ORDER BY id;
 -- ("checked" in the result map) matches Python's notion of "rows we
 -- looked at" — Python's select(...).where(...) has no frozen filter
 -- either; rotate_zone_key would raise on a frozen zone there too.
-SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
-       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+SELECT *
 FROM dns_zones
 WHERE signed = true
   AND zsk_rotation_days > 0
 ORDER BY id;
 
 -- name: GetReverseZoneByName :one
-SELECT id, name, kind::text AS kind, fabric_id, site_id, description,
-       soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-       default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-       nsec3_opt_out, publish_cds, frozen, created_at, updated_at
+SELECT *
 FROM dns_zones
 WHERE kind = 'reverse'::dns_zone_kind
-  AND fabric_id = $1 AND site_id = $2 AND name = $3;
+  AND fabric_id = sqlc.arg(fabric_id) AND site_id = sqlc.arg(site_id)::uuid AND name = sqlc.arg(name);
 
 -- name: CreateReverseZone :one
 INSERT INTO dns_zones (
@@ -377,15 +347,12 @@ INSERT INTO dns_zones (
     created_at, updated_at
 )
 VALUES (
-    gen_random_uuid(), $1, 'reverse'::dns_zone_kind, $2, $3,
+    gen_random_uuid(), sqlc.arg(name), 'reverse'::dns_zone_kind, sqlc.arg(fabric_id), sqlc.arg(site_id)::uuid,
     'ns1', 'hostmaster', 900, 900, 1800, 60,
     60, FALSE, 0, FALSE, TRUE, FALSE,
     NOW(), NOW()
 )
-RETURNING id, name, kind::text AS kind, fabric_id, site_id, description,
-          soa_mname, soa_rname, soa_refresh, soa_retry, soa_expire, soa_minimum,
-          default_ttl, signed, zsk_rotation_days, nsec3_salt, nsec3_iterations,
-          nsec3_opt_out, publish_cds, frozen, created_at, updated_at;
+RETURNING *;
 
 -- name: ListIPAddressesForSiteWithDnsName :many
 -- Joins subnets+ip_addresses by site, filters to rows with dns_name set.
@@ -394,20 +361,20 @@ SELECT i.id, i.subnet_id, host(i.address) AS address,
        source::text AS source, dns_name
 FROM ip_addresses i
 JOIN subnets s ON s.id = i.subnet_id
-WHERE s.site_id = $1
+WHERE s.site_id = sqlc.arg(site_id)::uuid
   AND i.dns_name IS NOT NULL;
 
 -- name: DeleteIPAMRecordsInZones :exec
 -- Drop every projector-owned record (source=ipam or =ddns) across
 -- the named zones. Operator-authored manual rows stay put.
 DELETE FROM dns_records
-WHERE zone_id = ANY($1::uuid[])
+WHERE zone_id = ANY(sqlc.arg(zone_ids)::uuid[])
   AND source IN ('ipam'::dns_record_source, 'ddns'::dns_record_source);
 
 -- name: CountIPAMRecordsInZones :one
 -- Pre-count for the response shape (Python returns removed count).
 SELECT count(*)::bigint FROM dns_records
-WHERE zone_id = ANY($1::uuid[])
+WHERE zone_id = ANY(sqlc.arg(zone_ids)::uuid[])
   AND source IN ('ipam'::dns_record_source, 'ddns'::dns_record_source);
 
 -- name: CreateProjectedDnsRecord :one
@@ -420,8 +387,8 @@ INSERT INTO dns_records (
     created_at, updated_at
 )
 VALUES (
-    gen_random_uuid(), $1, $2, $3::dns_record_type, $4, $5::jsonb,
-    $6::dns_record_source, $7, NOW(), NOW()
+    gen_random_uuid(), sqlc.arg(zone_id), sqlc.arg(name), sqlc.arg(type)::dns_record_type, sqlc.narg(ttl), sqlc.arg(data)::jsonb,
+    sqlc.arg(source)::dns_record_source, sqlc.narg(ipam_address_id), NOW(), NOW()
 )
 RETURNING id;
 
@@ -463,14 +430,12 @@ INSERT INTO dns_keys (
     active_from, created_at, updated_at
 )
 VALUES (
-    gen_random_uuid(), $1, $2, $3::dns_key_role, $4::dns_key_algorithm,
-    $5, $6, $7, NOW(), NOW(), NOW()
+    gen_random_uuid(), sqlc.narg(zone_id), sqlc.narg(catalog_id), sqlc.arg(role)::dns_key_role, sqlc.arg(algorithm)::dns_key_algorithm,
+    sqlc.arg(private_pem), sqlc.arg(public_key_b64), sqlc.arg(key_tag), NOW(), NOW(), NOW()
 )
-RETURNING id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
-          private_pem, public_key_b64, key_tag, active_from, retired_at,
-          created_at, updated_at;
+RETURNING *;
 
--- name: SetDnsZoneSigned :exec
+-- name: SetDnsZoneSigned :execrows
 -- Flip the signed flag without bumping the SOA serial — caller
 -- (rotate-key, sync-from-ipam) bumps updated_at separately when
 -- the change should propagate to resolvers.
@@ -480,42 +445,36 @@ UPDATE dns_zones SET signed = $2, updated_at = NOW() WHERE id = $1;
 -- Used by enable-dnssec to find existing keys and by rotate-key to
 -- list keys eligible for retirement. retired_at IS NULL filters to
 -- the currently-signing set.
-SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
-       private_pem, public_key_b64, key_tag, active_from, retired_at,
-       created_at, updated_at
+SELECT *
 FROM dns_keys
-WHERE zone_id = $1 AND role = $2::dns_key_role AND retired_at IS NULL
+WHERE zone_id = sqlc.arg(zone_id)::uuid AND role = sqlc.arg(role)::dns_key_role AND retired_at IS NULL
 ORDER BY active_from DESC;
 
--- name: RetireDnsKey :exec
+-- name: RetireDnsKey :execrows
 -- Marks a key retired without deleting — the renderer still emits
 -- the DNSKEY RR until the next rollover so resolvers caching the
 -- old key can validate. delete_dnssec_key cleans up later.
 UPDATE dns_keys SET retired_at = NOW() WHERE id = $1;
 
--- name: DeleteDnsKey :exec
+-- name: DeleteDnsKey :execrows
 DELETE FROM dns_keys WHERE id = $1;
 
--- name: RetireAllDnsKeysForZone :exec
+-- name: RetireAllDnsKeysForZone :execrows
 -- disable-dnssec retires every key — the renderer drops DNSKEY/
 -- RRSIG output and the zone goes back to unsigned.
-UPDATE dns_keys SET retired_at = NOW() WHERE zone_id = $1 AND retired_at IS NULL;
+UPDATE dns_keys SET retired_at = NOW() WHERE zone_id = sqlc.arg(zone_id)::uuid AND retired_at IS NULL;
 
 -- name: DeleteAllDnsKeysForZone :many
 -- Hard-delete every key for a zone. Returns the deleted rows so the
 -- audit record can list retired key tags. Used by disable-dnssec.
-DELETE FROM dns_keys WHERE zone_id = $1
-RETURNING id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
-          private_pem, public_key_b64, key_tag, active_from, retired_at,
-          created_at, updated_at;
+DELETE FROM dns_keys WHERE zone_id = sqlc.arg(zone_id)::uuid
+RETURNING *;
 
 -- name: GetDnsKey :one
-SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
-       private_pem, public_key_b64, key_tag, active_from, retired_at,
-       created_at, updated_at
+SELECT *
 FROM dns_keys WHERE id = $1;
 
--- name: TouchDnsZone :exec
+-- name: TouchDnsZone :execrows
 -- Bump updated_at so the SOA serial moves and downstream resolvers
 -- pick up the change on their next refresh.
 UPDATE dns_zones SET updated_at = NOW() WHERE id = $1;
@@ -529,11 +488,9 @@ UPDATE dns_zones SET updated_at = NOW() WHERE id = $1;
 -- name: ListDnsKeysByZone :many
 -- PR 79 — list every key bound to a zone, ordered KSK first then
 -- newest active_from first (matches Python's role ASC + active_from DESC).
-SELECT id, zone_id, catalog_id, role::text AS role, algorithm::text AS algorithm,
-       private_pem, public_key_b64, key_tag, active_from, retired_at,
-       created_at, updated_at
+SELECT *
 FROM dns_keys
-WHERE zone_id = $1
+WHERE zone_id = sqlc.arg(zone_id)::uuid
 ORDER BY role::text ASC, active_from DESC;
 
 -- ===== DnsServerMetricsSample (PR 78) =====
@@ -548,50 +505,46 @@ INSERT INTO dns_server_metrics_samples (
     p50_ms, p95_ms, top_names, created_at, updated_at
 )
 VALUES (
-    gen_random_uuid(), $1, COALESCE($2::timestamptz, NOW()), $3,
-    $4, $5, $6, $7, $8, $9, $10::jsonb, NOW(), NOW()
+    gen_random_uuid(), sqlc.arg(server_id), COALESCE(sqlc.narg(observed_at)::timestamptz, NOW()), sqlc.arg(interval_seconds),
+    sqlc.arg(queries), sqlc.arg(nxdomain), sqlc.arg(servfail), sqlc.arg(noerror), sqlc.narg(p50_ms), sqlc.narg(p95_ms), sqlc.arg(top_names)::jsonb, NOW(), NOW()
 )
-RETURNING id, server_id, observed_at, interval_seconds,
-          queries, nxdomain, servfail, noerror,
-          p50_ms, p95_ms, top_names;
+RETURNING *;
 
 -- name: ListDnsServerMetricsSamples :many
 -- Recent samples for one server, oldest-first so the UI can chart
 -- them directly. Caller passes the cutoff so the time-arithmetic
 -- happens in Go (cleaner test surface than building intervals
 -- with `INTERVAL '$2 minutes'`).
-SELECT id, server_id, observed_at, interval_seconds,
-       queries, nxdomain, servfail, noerror,
-       p50_ms, p95_ms, top_names
+SELECT *
 FROM dns_server_metrics_samples
-WHERE server_id = $1
-  AND observed_at >= $2
+WHERE server_id = sqlc.arg(server_id)
+  AND observed_at >= sqlc.arg(cutoff)
 ORDER BY observed_at ASC;
 
--- name: DeleteDnsServerMetricsSamplesOlderThan :exec
+-- name: DeleteDnsServerMetricsSamplesOlderThan :execrows
 -- Cron-driven retention: the dns_server_metrics_samples table grows
 -- unbounded otherwise (every scrape inserts a fresh row). The Go
 -- scheduler's dns_purge_metrics job picks the cutoff in code so the
 -- retention policy stays a single deployment-config knob.
-DELETE FROM dns_server_metrics_samples WHERE observed_at < $1;
+DELETE FROM dns_server_metrics_samples WHERE observed_at < sqlc.arg(cutoff);
 
--- name: SetDnsHealthCheckResult :exec
+-- name: SetDnsHealthCheckResult :execrows
 -- PR 72 — collector callback after running one probe. Status,
 -- last_checked_at, last_error are the only mutable fields. Audit
 -- is intentionally skipped at the handler level — every 30s
 -- probe would flood the audit log; the central worker also writes
 -- this row on its fallback cycles.
 UPDATE dns_health_checks
-SET status = $2::dns_health_check_status,
+SET status = sqlc.arg(status)::dns_health_check_status,
     last_checked_at = NOW(),
-    last_error = $3
-WHERE id = $1;
+    last_error = sqlc.narg(last_error)
+WHERE id = sqlc.arg(id);
 
 -- ===== BGP Peers (dns-managed) =====
 -- name: CreateBgpPeer :one
 INSERT INTO bgp_peers (id, name, site_id, local_asn_id, peer_asn_id, peer_ip,
                        peer_description, tcp_ao_key_chain_id, enabled, created_at, updated_at)
-VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::inet, $6, $7, $8, NOW(), NOW())
+VALUES (gen_random_uuid(), sqlc.arg(name), sqlc.arg(site_id), sqlc.arg(local_asn_id), sqlc.arg(peer_asn_id), sqlc.arg(peer_ip)::inet, sqlc.narg(peer_description), sqlc.narg(tcp_ao_key_chain_id), sqlc.arg(enabled), NOW(), NOW())
 RETURNING id, name, site_id, local_asn_id, peer_asn_id,
           host(peer_ip) AS peer_ip, peer_description, tcp_ao_key_chain_id, enabled,
           created_at, updated_at;

@@ -6,12 +6,12 @@
 
 -- name: ListSubnetsForUtilization :many
 SELECT id, fabric_id, supernet_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix
 FROM subnets;
 
 -- name: ListSupernetsForUtilization :many
 SELECT id, fabric_id,
-       host(prefix) || '/' || masklen(prefix) AS prefix
+       (host(prefix) || '/' || masklen(prefix))::text AS prefix
 FROM supernets;
 
 -- name: ListActiveReservedAddressCountsBySubnet :many

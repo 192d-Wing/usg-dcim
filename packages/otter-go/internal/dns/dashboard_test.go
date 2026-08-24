@@ -47,14 +47,14 @@ func TestQpsFromLastSample_NilReturnsNil(t *testing.T) {
 }
 
 func TestQpsFromLastSample_ZeroIntervalReturnsNil(t *testing.T) {
-	s := dbq.DnsMetricsSampleRow{Queries: 100, IntervalSeconds: 0}
+	s := dbq.DnsServerMetricsSample{Queries: 100, IntervalSeconds: 0}
 	if got := qpsFromLastSample(&s); got != nil {
 		t.Errorf("got %v, want nil for zero interval", got)
 	}
 }
 
 func TestQpsFromLastSample_Basic(t *testing.T) {
-	s := dbq.DnsMetricsSampleRow{Queries: 300, IntervalSeconds: 30}
+	s := dbq.DnsServerMetricsSample{Queries: 300, IntervalSeconds: 30}
 	got := qpsFromLastSample(&s)
 	if got == nil || *got != 10.0 {
 		t.Errorf("got %v, want 10.0 (300/30)", got)
@@ -64,7 +64,7 @@ func TestQpsFromLastSample_Basic(t *testing.T) {
 // ---- unit: weightedLatency ----
 
 func TestWeightedLatency_AllNilReturnsNil(t *testing.T) {
-	samples := []dbq.DnsMetricsSampleRow{{Queries: 100, P50Ms: nil}}
+	samples := []dbq.DnsServerMetricsSample{{Queries: 100, P50Ms: nil}}
 	if got := weightedLatency(samples, extractP50); got != nil {
 		t.Errorf("got %v, want nil", got)
 	}
@@ -73,7 +73,7 @@ func TestWeightedLatency_AllNilReturnsNil(t *testing.T) {
 func TestWeightedLatency_ZeroQueriesSkipped(t *testing.T) {
 	// Sample with 0 queries shouldn't pull the weighted avg.
 	p1, p2 := 5.0, 10.0
-	samples := []dbq.DnsMetricsSampleRow{
+	samples := []dbq.DnsServerMetricsSample{
 		{Queries: 0, P50Ms: &p1}, // skipped
 		{Queries: 100, P50Ms: &p2},
 	}
@@ -86,7 +86,7 @@ func TestWeightedLatency_ZeroQueriesSkipped(t *testing.T) {
 func TestWeightedLatency_WeightsByQueries(t *testing.T) {
 	// (10*100 + 20*300) / (100+300) = 7000/400 = 17.5
 	p1, p2 := 10.0, 20.0
-	samples := []dbq.DnsMetricsSampleRow{
+	samples := []dbq.DnsServerMetricsSample{
 		{Queries: 100, P50Ms: &p1},
 		{Queries: 300, P50Ms: &p2},
 	}
@@ -100,25 +100,25 @@ func TestWeightedLatency_WeightsByQueries(t *testing.T) {
 
 type fakeDashboardQ struct {
 	fakeQ
-	servers     []dbq.DnsServerForDashboardRow
-	zones       []dbq.DnsZoneForDashboardRow
-	samples     []dbq.DnsMetricsSampleRow
+	servers     []dbq.ListDnsServersForDashboardRow
+	zones       []dbq.ListDnsZonesForDashboardRow
+	samples     []dbq.DnsServerMetricsSample
 	agCount     int64
 	gotFabricID *uuid.UUID
 	gotMinutes  int
 }
 
-func (f *fakeDashboardQ) ListDnsServersForDashboard(_ context.Context, fid *uuid.UUID) ([]dbq.DnsServerForDashboardRow, error) {
+func (f *fakeDashboardQ) ListDnsServersForDashboard(_ context.Context, fid *uuid.UUID) ([]dbq.ListDnsServersForDashboardRow, error) {
 	f.gotFabricID = fid
 	return f.servers, nil
 }
-func (f *fakeDashboardQ) ListDnsZonesForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.DnsZoneForDashboardRow, error) {
+func (f *fakeDashboardQ) ListDnsZonesForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.ListDnsZonesForDashboardRow, error) {
 	return f.zones, nil
 }
 func (f *fakeDashboardQ) CountAnycastGroupsForDashboard(_ context.Context, _ *uuid.UUID) (int64, error) {
 	return f.agCount, nil
 }
-func (f *fakeDashboardQ) ListDnsSamplesInWindow(_ context.Context, _ time.Time, _ []uuid.UUID) ([]dbq.DnsMetricsSampleRow, error) {
+func (f *fakeDashboardQ) ListDnsSamplesInWindow(_ context.Context, _ dbq.ListDnsSamplesInWindowParams) ([]dbq.DnsServerMetricsSample, error) {
 	return f.samples, nil
 }
 
@@ -153,16 +153,16 @@ func TestDashboard_CountsAggregated(t *testing.T) {
 	site := uuid.New()
 	srvID := uuid.New()
 	zsk := false
-	zone1 := dbq.DnsZoneForDashboardRow{ID: uuid.New(), FabricID: fab, Signed: true, Nsec3Iterations: 5}
-	zone2 := dbq.DnsZoneForDashboardRow{ID: uuid.New(), FabricID: fab, Signed: false, Nsec3Iterations: 0}
+	zone1 := dbq.ListDnsZonesForDashboardRow{ID: uuid.New(), FabricID: fab, Signed: true, Nsec3Iterations: 5}
+	zone2 := dbq.ListDnsZonesForDashboardRow{ID: uuid.New(), FabricID: fab, Signed: false, Nsec3Iterations: 0}
 	_ = zsk
 	f := &fakeDashboardQ{
-		servers: []dbq.DnsServerForDashboardRow{
-			{ID: srvID, FabricID: fab, SiteID: &site, Role: "auth"},
+		servers: []dbq.ListDnsServersForDashboardRow{
+			{ID: srvID, FabricID: fab, SiteID: site, Role: "auth"},
 		},
-		zones:   []dbq.DnsZoneForDashboardRow{zone1, zone2},
+		zones:   []dbq.ListDnsZonesForDashboardRow{zone1, zone2},
 		agCount: 3,
-		samples: []dbq.DnsMetricsSampleRow{
+		samples: []dbq.DnsServerMetricsSample{
 			{ServerID: srvID, ObservedAt: time.Now(), IntervalSeconds: 30,
 				Queries: 600, Nxdomain: 60, Servfail: 12, Noerror: 528},
 		},
@@ -288,11 +288,11 @@ func TestDashboard_ServerHealthShape(t *testing.T) {
 	status := "ok"
 	now := time.Now()
 	f := &fakeDashboardQ{
-		servers: []dbq.DnsServerForDashboardRow{
+		servers: []dbq.ListDnsServersForDashboardRow{
 			{ID: srvID, Name: "srv-1", Role: "auth", FabricID: uuid.New(),
-				SiteID: &site, LastRenderStatus: &status, LastRenderAt: &now},
+				SiteID: site, LastRenderStatus: &status, LastRenderAt: &now},
 		},
-		samples: []dbq.DnsMetricsSampleRow{
+		samples: []dbq.DnsServerMetricsSample{
 			{ServerID: srvID, IntervalSeconds: 30, Queries: 600, ObservedAt: time.Now()},
 		},
 	}

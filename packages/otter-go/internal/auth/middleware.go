@@ -60,7 +60,7 @@ type Principal struct {
 type Querier interface {
 	GetUserCapabilities(ctx context.Context, userID uuid.UUID) ([]string, error)
 	GetCapabilitiesForIdpRoles(ctx context.Context, idpRoles []string) ([]string, error)
-	GetUserScopedCapabilities(ctx context.Context, userID uuid.UUID) ([]dbq.ScopedCapabilityRow, error)
+	GetUserScopedCapabilities(ctx context.Context, userID uuid.UUID) ([]dbq.GetUserScopedCapabilitiesRow, error)
 	IsJtiRevoked(ctx context.Context, jti string) (bool, error)
 	GetUser(ctx context.Context, id uuid.UUID) (dbq.User, error)
 	GetUserByEmail(ctx context.Context, email string) (dbq.User, error)

@@ -41,14 +41,14 @@ type dhcpPushFakeQ struct {
 
 	scopeFabricID    uuid.UUID
 	scopeFabricErr   error
-	scopeForPush     dbq.DhcpScopeForPushRow
+	scopeForPush     dbq.GetDhcpScopeForPushRow
 	scopeForPushErr  error
-	serverForPush    dbq.DhcpServerForPushRow
+	serverForPush    dbq.GetDhcpServerForPushRow
 	serverForPushErr error
 	template         dbq.DhcpScopeTemplate
 	templateErr      error
 
-	historyRows []dbq.DhcpScopePushHistoryRow
+	historyRows []dbq.DhcpScopePushHistory
 	historyLast dbq.ListDhcpScopePushHistoryByScopeParams
 
 	persistedDiff dbq.WriteDhcpScopeDiffStateParams
@@ -60,11 +60,11 @@ func (f *dhcpPushFakeQ) GetDhcpScopeFabricID(_ context.Context, _ uuid.UUID) (uu
 	return f.scopeFabricID, f.scopeFabricErr
 }
 
-func (f *dhcpPushFakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
+func (f *dhcpPushFakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
 	return f.scopeForPush, f.scopeForPushErr
 }
 
-func (f *dhcpPushFakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
+func (f *dhcpPushFakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
 	return f.serverForPush, f.serverForPushErr
 }
 
@@ -101,7 +101,7 @@ func (f *dhcpPushFakeQ) WriteDhcpScopeDiffState(_ context.Context, a dbq.WriteDh
 	return nil
 }
 
-func (f *dhcpPushFakeQ) ListDhcpScopePushHistoryByScope(_ context.Context, a dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistoryRow, error) {
+func (f *dhcpPushFakeQ) ListDhcpScopePushHistoryByScope(_ context.Context, a dbq.ListDhcpScopePushHistoryByScopeParams) ([]dbq.DhcpScopePushHistory, error) {
 	f.historyLast = a
 	return f.historyRows, nil
 }
@@ -178,8 +178,8 @@ func mountDhcpPush(f *dhcpPushFakeQ, k *fakeKea, rec *recordingAudit) http.Handl
 	(&Handler{
 		Q:     f,
 		Audit: rec,
-		PushKea: func(_ dbq.DhcpServerForPushRow) push.KeaClient { return k },
-		DiffKea: func(_ dbq.DhcpServerForPushRow) diff.KeaClient { return k },
+		PushKea: func(_ dbq.GetDhcpServerForPushRow) push.KeaClient { return k },
+		DiffKea: func(_ dbq.GetDhcpServerForPushRow) diff.KeaClient { return k },
 	}).Mount(r)
 	return r
 }
@@ -196,7 +196,7 @@ func TestPushDhcpScope_Success(t *testing.T) {
 	fabricID := uuid.New()
 	f := &dhcpPushFakeQ{
 		scopeFabricID: fabricID,
-		scopeForPush: dbq.DhcpScopeForPushRow{
+		scopeForPush: dbq.GetDhcpScopeForPushRow{
 			ID:           scopeID,
 			DhcpServerID: serverID,
 			IPFamily:     4,
@@ -207,7 +207,7 @@ func TestPushDhcpScope_Success(t *testing.T) {
 			ReservationsJSON: json.RawMessage(`[]`),
 			Enabled:      true,
 		},
-		serverForPush: dbq.DhcpServerForPushRow{
+		serverForPush: dbq.GetDhcpServerForPushRow{
 			ID: serverID, KeaURL: "http://kea.example", Enabled: true,
 		},
 	}
@@ -318,7 +318,7 @@ func TestDiffDhcpScope_NeverPushed(t *testing.T) {
 	fabricID := uuid.New()
 	f := &dhcpPushFakeQ{
 		scopeFabricID: fabricID,
-		scopeForPush: dbq.DhcpScopeForPushRow{
+		scopeForPush: dbq.GetDhcpScopeForPushRow{
 			ID: scopeID, DhcpServerID: serverID, IPFamily: 4, Prefix: "10.0.0.0/24",
 			PoolsJSON: json.RawMessage(`[]`), PdPoolsJSON: json.RawMessage(`[]`),
 			OptionsJSON: json.RawMessage(`[]`), ReservationsJSON: json.RawMessage(`[]`),
@@ -341,8 +341,8 @@ func TestDiffDhcpScope_NeverPushed(t *testing.T) {
 	if got.Status != "never_pushed" {
 		t.Errorf("status = %q, want never_pushed", got.Status)
 	}
-	if string(f.persistedDiff.LastDiffStatus) != "never_pushed" {
-		t.Errorf("persisted status = %q", f.persistedDiff.LastDiffStatus)
+	if f.persistedDiff.LastDiffStatus == nil || *f.persistedDiff.LastDiffStatus != "never_pushed" {
+		t.Errorf("persisted status = %v", f.persistedDiff.LastDiffStatus)
 	}
 	if f.persistedDiff.LastDiffDeltaJSON != nil {
 		t.Errorf("never_pushed should clear delta_json, got %s", string(f.persistedDiff.LastDiffDeltaJSON))
@@ -390,7 +390,7 @@ func TestPushHistory_Success(t *testing.T) {
 	when := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	f := &dhcpPushFakeQ{
 		scopeFabricID: uuid.New(),
-		historyRows: []dbq.DhcpScopePushHistoryRow{
+		historyRows: []dbq.DhcpScopePushHistory{
 			{
 				ID: uuid.New(), ScopeID: scopeID, ServerID: serverID,
 				Operation: "add", KeaSubnetID: &keaID,

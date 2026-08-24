@@ -161,7 +161,7 @@ func TestRenderBindPrivateKeyFile_BadPemErrors(t *testing.T) {
 func TestRenderDnssecKeyFiles_PairsSortedByFilename(t *testing.T) {
 	pem1 := generatePEM(t, "ed25519")
 	pem2 := generatePEM(t, "ed25519")
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{Algorithm: "ed25519", Role: "zsk", KeyTag: 54321, PublicKeyB64: "AAAA", PrivatePem: pem1},
 		{Algorithm: "ed25519", Role: "ksk", KeyTag: 12345, PublicKeyB64: "AAAA", PrivatePem: pem2},
 	}
@@ -191,7 +191,7 @@ func TestRenderDnssecKeyFiles_PairsSortedByFilename(t *testing.T) {
 
 func TestRenderDnssecKeyFiles_UnsupportedAlgErrors(t *testing.T) {
 	_, err := RenderDnssecKeyFiles("z.example.",
-		[]dbq.DnsKeyRow{{Algorithm: "ml-kem", Role: "ksk", KeyTag: 1}},
+		[]dbq.DnsKey{{Algorithm: "ml-kem", Role: "ksk", KeyTag: 1}},
 		nil,
 	)
 	if err == nil {
@@ -205,7 +205,7 @@ func TestRenderCdnskeyCdsLines_KskOnlyActive(t *testing.T) {
 	// Mix of: active KSK, retired KSK (skipped), ZSK (skipped).
 	now := int64(1700000000)
 	_ = now
-	keys := []dbq.DnsKeyRow{
+	keys := []dbq.DnsKey{
 		{Algorithm: "ed25519", Role: "ksk", KeyTag: 11111, PublicKeyB64: "AAAA"},
 		{Algorithm: "ed25519", Role: "ksk", KeyTag: 22222, PublicKeyB64: "AAAA",
 			RetiredAt: tsPtr(1700000000)},
@@ -232,7 +232,7 @@ func TestRenderCdnskeyCdsLines_KskOnlyActive(t *testing.T) {
 
 func TestRenderCdnskeyCdsLines_NoActiveKsk(t *testing.T) {
 	got := RenderCdnskeyCdsLines("example.com.",
-		[]dbq.DnsKeyRow{{Algorithm: "ed25519", Role: "zsk", KeyTag: 1, PublicKeyB64: "AAAA"}},
+		[]dbq.DnsKey{{Algorithm: "ed25519", Role: "zsk", KeyTag: 1, PublicKeyB64: "AAAA"}},
 	)
 	if len(got) != 0 {
 		t.Errorf("no active KSK should produce no lines; got %v", got)
@@ -241,7 +241,7 @@ func TestRenderCdnskeyCdsLines_NoActiveKsk(t *testing.T) {
 
 func TestRenderCdnskeyCdsLines_BadBase64Skipped(t *testing.T) {
 	got := RenderCdnskeyCdsLines("example.com.",
-		[]dbq.DnsKeyRow{{Algorithm: "ed25519", Role: "ksk", KeyTag: 1, PublicKeyB64: "!!!"}},
+		[]dbq.DnsKey{{Algorithm: "ed25519", Role: "ksk", KeyTag: 1, PublicKeyB64: "!!!"}},
 	)
 	if len(got) != 0 {
 		t.Errorf("malformed public key should be skipped; got %v", got)

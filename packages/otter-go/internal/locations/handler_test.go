@@ -206,16 +206,16 @@ func TestListRooms_PassesSiteIdsForGlobalPrincipal(t *testing.T) {
 	// which the SQL treats as "no filter."
 	f := &fakeQ{}
 	do(t, mount(f), "/rooms")
-	if f.lastR.SiteIds != nil {
-		t.Errorf("global principal should see nil SiteIds, got %v", f.lastR.SiteIds)
+	if f.lastR.SiteIDs != nil {
+		t.Errorf("global principal should see nil SiteIds, got %v", f.lastR.SiteIDs)
 	}
 }
 
 func TestListRows_PassesSiteIdsForGlobalPrincipal(t *testing.T) {
 	f := &fakeQ{}
 	do(t, mount(f), "/rows")
-	if f.lastRow.SiteIds != nil {
-		t.Errorf("global principal should see nil SiteIds, got %v", f.lastRow.SiteIds)
+	if f.lastRow.SiteIDs != nil {
+		t.Errorf("global principal should see nil SiteIds, got %v", f.lastRow.SiteIDs)
 	}
 }
 
@@ -224,16 +224,16 @@ func TestListRoomsParams_HasSiteIds(t *testing.T) {
 	// SiteIds slice the handler threads through. If sqlc regen
 	// drops it, this catches the drift.
 	var p dbq.ListRoomsParams
-	p.SiteIds = []uuid.UUID{uuid.New()}
-	if len(p.SiteIds) != 1 {
-		t.Error("ListRoomsParams.SiteIds not present")
+	p.SiteIDs = []uuid.UUID{uuid.New()}
+	if len(p.SiteIDs) != 1 {
+		t.Error("ListRoomsParams.SiteIDs not present")
 	}
 }
 
 func TestListRowsParams_HasSiteIds(t *testing.T) {
 	var p dbq.ListRowsParams
-	p.SiteIds = []uuid.UUID{uuid.New()}
-	if len(p.SiteIds) != 1 {
-		t.Error("ListRowsParams.SiteIds not present")
+	p.SiteIDs = []uuid.UUID{uuid.New()}
+	if len(p.SiteIDs) != 1 {
+		t.Error("ListRowsParams.SiteIDs not present")
 	}
 }

@@ -15,15 +15,15 @@ import (
 )
 
 type fakeQ struct {
-	sites  []dbq.SearchSiteRow
-	racks  []dbq.SearchRackRow
-	assets []dbq.SearchAssetRow
+	sites  []dbq.SearchSitesRow
+	racks  []dbq.SearchRacksRow
+	assets []dbq.SearchAssetsRow
 
-	ips         []dbq.SearchIPAddressRow
-	subnets     []dbq.SearchSubnetRow
-	vrfs        []dbq.SearchVrfRow
-	fabrics     []dbq.SearchFabricRow
-	assetsMeta  []dbq.SearchAssetMetaRow
+	ips         []dbq.SearchIPAddressesByHostRow
+	subnets     []dbq.SearchSubnetsByIDsRow
+	vrfs        []dbq.SearchVrfsByIDsRow
+	fabrics     []dbq.SearchFabricsByIDsRow
+	assetsMeta  []dbq.SearchAssetsByIDsRow
 
 	gotSitesPattern  string
 	gotRacksPattern  string
@@ -36,34 +36,34 @@ type fakeQ struct {
 	ipErr    error
 }
 
-func (f *fakeQ) SearchSites(_ context.Context, a dbq.SearchSitesParams) ([]dbq.SearchSiteRow, error) {
+func (f *fakeQ) SearchSites(_ context.Context, a dbq.SearchSitesParams) ([]dbq.SearchSitesRow, error) {
 	f.gotSitesPattern = a.Pattern
 	f.gotSitesLimit = a.Limit
 	return f.sites, f.sitesErr
 }
-func (f *fakeQ) SearchRacks(_ context.Context, a dbq.SearchRacksParams) ([]dbq.SearchRackRow, error) {
+func (f *fakeQ) SearchRacks(_ context.Context, a dbq.SearchRacksParams) ([]dbq.SearchRacksRow, error) {
 	f.gotRacksPattern = a.Pattern
 	return f.racks, nil
 }
-func (f *fakeQ) SearchAssets(_ context.Context, a dbq.SearchAssetsParams) ([]dbq.SearchAssetRow, error) {
+func (f *fakeQ) SearchAssets(_ context.Context, a dbq.SearchAssetsParams) ([]dbq.SearchAssetsRow, error) {
 	f.gotAssetsPattern = a.Pattern
 	return f.assets, nil
 }
-func (f *fakeQ) SearchIPAddressesByHost(_ context.Context, a dbq.SearchIPAddressesByHostParams) ([]dbq.SearchIPAddressRow, error) {
+func (f *fakeQ) SearchIPAddressesByHost(_ context.Context, a dbq.SearchIPAddressesByHostParams) ([]dbq.SearchIPAddressesByHostRow, error) {
 	f.gotIPHost = a.Host
 	f.gotIPLimit = a.Limit
 	return f.ips, f.ipErr
 }
-func (f *fakeQ) SearchSubnetsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchSubnetRow, error) {
+func (f *fakeQ) SearchSubnetsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchSubnetsByIDsRow, error) {
 	return f.subnets, nil
 }
-func (f *fakeQ) SearchVrfsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchVrfRow, error) {
+func (f *fakeQ) SearchVrfsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchVrfsByIDsRow, error) {
 	return f.vrfs, nil
 }
-func (f *fakeQ) SearchFabricsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchFabricRow, error) {
+func (f *fakeQ) SearchFabricsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchFabricsByIDsRow, error) {
 	return f.fabrics, nil
 }
-func (f *fakeQ) SearchAssetsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchAssetMetaRow, error) {
+func (f *fakeQ) SearchAssetsByIDs(_ context.Context, _ []uuid.UUID) ([]dbq.SearchAssetsByIDsRow, error) {
 	return f.assetsMeta, nil
 }
 
@@ -81,9 +81,9 @@ func do(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
 func TestGlobalSearch_AllBucketsRender(t *testing.T) {
 	sid, rid, aid := uuid.New(), uuid.New(), uuid.New()
 	f := &fakeQ{
-		sites:  []dbq.SearchSiteRow{{ID: sid, Name: "Site A", Code: "SA"}},
-		racks:  []dbq.SearchRackRow{{ID: rid, Name: "Rack A", SiteID: sid}},
-		assets: []dbq.SearchAssetRow{{ID: aid, Name: "Asset A", Kind: "switch", SiteID: sid}},
+		sites:  []dbq.SearchSitesRow{{ID: sid, Name: "Site A", Code: "SA"}},
+		racks:  []dbq.SearchRacksRow{{ID: rid, Name: "Rack A", SiteID: sid}},
+		assets: []dbq.SearchAssetsRow{{ID: aid, Name: "Asset A", Kind: "switch", SiteID: sid}},
 	}
 	rec := do(t, mount(f), "/search?q=a&limit=10")
 	if rec.Code != http.StatusBadRequest {
@@ -167,15 +167,15 @@ func TestGlobalSearch_IPParsePath(t *testing.T) {
 	subID := sid
 	asPtr := aid
 	f := &fakeQ{
-		ips: []dbq.SearchIPAddressRow{
+		ips: []dbq.SearchIPAddressesByHostRow{
 			{ID: ipID, SubnetID: sid, AssetID: &asPtr, Address: "10.0.0.5", Role: "host", Status: "active", Source: "manual"},
 		},
-		subnets: []dbq.SearchSubnetRow{
+		subnets: []dbq.SearchSubnetsByIDsRow{
 			{ID: subID, FabricID: fid, VrfID: vid, Prefix: "10.0.0.0/24"},
 		},
-		vrfs:       []dbq.SearchVrfRow{{ID: vid, Name: "default"}},
-		fabrics:    []dbq.SearchFabricRow{{ID: fid, Name: "Site A Fab"}},
-		assetsMeta: []dbq.SearchAssetMetaRow{{ID: aid, Name: "switch-a"}},
+		vrfs:       []dbq.SearchVrfsByIDsRow{{ID: vid, Name: "default"}},
+		fabrics:    []dbq.SearchFabricsByIDsRow{{ID: fid, Name: "Site A Fab"}},
+		assetsMeta: []dbq.SearchAssetsByIDsRow{{ID: aid, Name: "switch-a"}},
 	}
 	rec := do(t, mount(f), "/search?q=10.0.0.5")
 	if rec.Code != http.StatusOK {

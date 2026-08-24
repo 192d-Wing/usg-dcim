@@ -36,43 +36,43 @@ func (a *fakeAudit) InsertAuditLog(_ context.Context, p dbq.InsertAuditLogParams
 	return nil
 }
 
-func (f *fakeQ) ListCollectors(_ context.Context, a dbq.ListCollectorsParams) ([]dbq.Collector, error) {
+func (f *fakeQ) ListCollectors(_ context.Context, a dbq.ListCollectorsParams) ([]dbq.ListCollectorsRow, error) {
 	f.last = a
 	return nil, nil
 }
 func (f *fakeQ) CountCollectors(_ context.Context, _ dbq.CountCollectorsParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) GetCollector(_ context.Context, id uuid.UUID) (dbq.Collector, error) {
+func (f *fakeQ) GetCollector(_ context.Context, id uuid.UUID) (dbq.GetCollectorRow, error) {
 	f.getCalls++
 	if f.getMissing {
-		return dbq.Collector{}, pgx.ErrNoRows
+		return dbq.GetCollectorRow{}, pgx.ErrNoRows
 	}
-	return dbq.Collector{ID: id}, nil
+	return dbq.GetCollectorRow{ID: id}, nil
 }
 func (f *fakeQ) EnrollCollector(_ context.Context, a dbq.EnrollCollectorParams) (dbq.EnrollCollectorRow, error) {
 	f.enroll = a
 	return dbq.EnrollCollectorRow{ID: uuid.New(), SiteID: a.SiteID}, nil
 }
-func (f *fakeQ) HeartbeatCollector(_ context.Context, a dbq.HeartbeatCollectorParams) ([]byte, error) {
+func (f *fakeQ) HeartbeatCollector(_ context.Context, a dbq.HeartbeatCollectorParams) (json.RawMessage, error) {
 	f.heartbeat = a
 	if f.hbOverride == nil {
-		return []byte("{}"), nil
+		return json.RawMessage("{}"), nil
 	}
-	return f.hbOverride, nil
+	return json.RawMessage(f.hbOverride), nil
 }
 func (f *fakeQ) InsertCollectorHeartbeat(_ context.Context, a dbq.InsertCollectorHeartbeatParams) error {
 	f.hbRow = a
 	return nil
 }
-func (f *fakeQ) SetCollectorConfigOverrides(_ context.Context, a dbq.SetCollectorConfigOverridesParams) (dbq.Collector, error) {
-	return dbq.Collector{ID: a.ID, ConfigOverridesJson: a.ConfigOverrides}, nil
+func (f *fakeQ) SetCollectorConfigOverrides(_ context.Context, a dbq.SetCollectorConfigOverridesParams) (dbq.SetCollectorConfigOverridesRow, error) {
+	return dbq.SetCollectorConfigOverridesRow{ID: a.ID, ConfigOverrides: a.ConfigOverrides}, nil
 }
-func (f *fakeQ) SetCollectorEnabled(_ context.Context, a dbq.SetCollectorEnabledParams) (dbq.Collector, error) {
-	return dbq.Collector{ID: a.ID, Enabled: a.Enabled}, nil
+func (f *fakeQ) SetCollectorEnabled(_ context.Context, a dbq.SetCollectorEnabledParams) (dbq.SetCollectorEnabledRow, error) {
+	return dbq.SetCollectorEnabledRow{ID: a.ID, Enabled: a.Enabled}, nil
 }
-func (f *fakeQ) DecommissionCollector(_ context.Context, id uuid.UUID) (dbq.Collector, error) {
-	return dbq.Collector{ID: id, Status: "decommissioned"}, nil
+func (f *fakeQ) DecommissionCollector(_ context.Context, id uuid.UUID) (dbq.DecommissionCollectorRow, error) {
+	return dbq.DecommissionCollectorRow{ID: id, Status: "decommissioned"}, nil
 }
 
 // site-scope dependency stubs — global scope, no DB lookups.

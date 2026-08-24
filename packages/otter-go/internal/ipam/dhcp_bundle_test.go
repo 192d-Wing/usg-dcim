@@ -71,7 +71,7 @@ func TestGetDhcpServerBundle_RequiresCap(t *testing.T) {
 	// should 403 before the handler ever runs.
 	serverID := uuid.New()
 	fabricID := uuid.New()
-	f := &fakeQ{bundleServer: dbq.DhcpServerBundleRow{ID: serverID, FabricID: fabricID}}
+	f := &fakeQ{bundleServer: dbq.GetDhcpServerBundleRowRow{ID: serverID, FabricID: fabricID}}
 	rec := authedGet(t, mount(f), authtest.PrincipalWithCaps(), "/ipam/dhcp/servers/"+serverID.String()+"/bundle", "")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("want 403, got %d body=%s", rec.Code, rec.Body.String())
@@ -92,7 +92,7 @@ func TestGetDhcpServerBundle_DeniesOutOfScopeFabric(t *testing.T) {
 			},
 		},
 	)
-	f := &fakeQ{bundleServer: dbq.DhcpServerBundleRow{ID: serverID, FabricID: targetFabric}}
+	f := &fakeQ{bundleServer: dbq.GetDhcpServerBundleRowRow{ID: serverID, FabricID: targetFabric}}
 	rec := authedGet(t, mount(f), p, "/ipam/dhcp/servers/"+serverID.String()+"/bundle", "")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("want 403, got %d body=%s", rec.Code, rec.Body.String())
@@ -111,7 +111,7 @@ func TestGetDhcpServerBundle_CacheHitReturnsRawJSON(t *testing.T) {
 	cachedEtag := "deadbeef" + "cafebabe" // distinctive marker
 	cachedJSON := json.RawMessage(`{"server_id":"abc","ctrl_agent":{},"dhcp4":{"subnet4":[]},"dhcp6":{"subnet6":[]},"etag":"deadbeefcafebabe"}`)
 	etagPtr := cachedEtag
-	f := &fakeQ{bundleServer: dbq.DhcpServerBundleRow{
+	f := &fakeQ{bundleServer: dbq.GetDhcpServerBundleRowRow{
 		ID: serverID, FabricID: fabricID,
 		BundleCacheEtag: &etagPtr,
 		BundleCacheJSON: cachedJSON,
@@ -144,7 +144,7 @@ func TestGetDhcpServerBundle_EmptyCacheEtag_FallsThroughToLiveRender(t *testing.
 	serverID := uuid.New()
 	fabricID := uuid.New()
 	emptyEtag := ""
-	f := &fakeQ{bundleServer: dbq.DhcpServerBundleRow{
+	f := &fakeQ{bundleServer: dbq.GetDhcpServerBundleRowRow{
 		ID: serverID, FabricID: fabricID,
 		BundleCacheEtag: &emptyEtag,
 		BundleCacheJSON: json.RawMessage(`{"server_id":"x"}`),
@@ -170,7 +170,7 @@ func TestGetDhcpServerBundle_CacheHit_IfNoneMatch_304(t *testing.T) {
 	fabricID := uuid.New()
 	etag := "stable-etag"
 	etagPtr := etag
-	f := &fakeQ{bundleServer: dbq.DhcpServerBundleRow{
+	f := &fakeQ{bundleServer: dbq.GetDhcpServerBundleRowRow{
 		ID: serverID, FabricID: fabricID,
 		BundleCacheEtag: &etagPtr,
 		BundleCacheJSON: json.RawMessage(`{}`),
@@ -194,7 +194,7 @@ func TestGetDhcpServerBundle_CacheIncomplete_FallsThroughToLiveRender(t *testing
 	fabricID := uuid.New()
 	etag := "partial-state"
 	f := &fakeQ{
-		bundleServer: dbq.DhcpServerBundleRow{
+		bundleServer: dbq.GetDhcpServerBundleRowRow{
 			ID: serverID, FabricID: fabricID,
 			BundleCacheEtag: &etag,
 			// BundleCacheJSON intentionally nil
@@ -221,12 +221,12 @@ func TestGetDhcpServerBundle_LiveRender_ReturnsKeaBundle(t *testing.T) {
 	vl := int32(3600)
 	kid := int32(1)
 	f := &fakeQ{
-		bundleServer: dbq.DhcpServerBundleRow{
+		bundleServer: dbq.GetDhcpServerBundleRowRow{
 			ID: serverID, FabricID: fabricID,
 			BaseConfig: json.RawMessage(`{"dhcp4":{"interfaces-config":{"interfaces":["eth0"]}}}`),
 			// No cache columns.
 		},
-		bundleScopes: []dbq.DhcpScope{{
+		bundleScopes: []dbq.ListDhcpScopesForBundleRow{{
 			ID: scopeID, DhcpServerID: serverID, IPFamily: 4,
 			Prefix: "10.0.0.0/24", PoolsJSON: json.RawMessage(`[{"first":"10.0.0.10","last":"10.0.0.250"}]`),
 			ValidLifetimeSeconds: &vl, KeaSubnetID: &kid, Enabled: true,
@@ -271,7 +271,7 @@ func TestGetDhcpServerBundle_LiveRender_IfNoneMatch_304(t *testing.T) {
 	serverID := uuid.New()
 	fabricID := uuid.New()
 	f := &fakeQ{
-		bundleServer: dbq.DhcpServerBundleRow{
+		bundleServer: dbq.GetDhcpServerBundleRowRow{
 			ID: serverID, FabricID: fabricID,
 			BaseConfig: json.RawMessage(`{}`),
 		},
@@ -302,8 +302,8 @@ func TestGetDhcpServerBundle_LiveRender_NoTemplates_SkipsBulkLoad(t *testing.T) 
 	fabricID := uuid.New()
 	kid := int32(1)
 	f := &fakeQ{
-		bundleServer: dbq.DhcpServerBundleRow{ID: serverID, FabricID: fabricID, BaseConfig: json.RawMessage(`{}`)},
-		bundleScopes: []dbq.DhcpScope{{
+		bundleServer: dbq.GetDhcpServerBundleRowRow{ID: serverID, FabricID: fabricID, BaseConfig: json.RawMessage(`{}`)},
+		bundleScopes: []dbq.ListDhcpScopesForBundleRow{{
 			ID: uuid.New(), DhcpServerID: serverID, IPFamily: 4,
 			Prefix: "10.0.0.0/24", PoolsJSON: json.RawMessage(`[]`),
 			KeaSubnetID: &kid, Enabled: true,
@@ -327,8 +327,8 @@ func TestGetDhcpServerBundle_LiveRender_DedupesTemplateIDs(t *testing.T) {
 	tplID := uuid.New()
 	kid1, kid2 := int32(1), int32(2)
 	f := &fakeQ{
-		bundleServer: dbq.DhcpServerBundleRow{ID: serverID, FabricID: fabricID, BaseConfig: json.RawMessage(`{}`)},
-		bundleScopes: []dbq.DhcpScope{
+		bundleServer: dbq.GetDhcpServerBundleRowRow{ID: serverID, FabricID: fabricID, BaseConfig: json.RawMessage(`{}`)},
+		bundleScopes: []dbq.ListDhcpScopesForBundleRow{
 			{ID: uuid.New(), DhcpServerID: serverID, IPFamily: 4, Prefix: "10.0.0.0/24",
 				PoolsJSON: json.RawMessage(`[]`), KeaSubnetID: &kid1, TemplateID: &tplID, Enabled: true},
 			{ID: uuid.New(), DhcpServerID: serverID, IPFamily: 4, Prefix: "10.0.1.0/24",

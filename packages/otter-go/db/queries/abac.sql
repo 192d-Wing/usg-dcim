@@ -6,7 +6,7 @@
 -- map[string]Scope by the caller.
 SELECT
     jsonb_array_elements_text(r.permission_codes::jsonb) AS code,
-    rs.scope_type::text AS scope_type,
+    rs.scope_type,
     rs.target_id
 FROM user_roles ur
 JOIN roles r ON r.id = ur.role_id

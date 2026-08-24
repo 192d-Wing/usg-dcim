@@ -20,9 +20,9 @@ import (
 // the orchestrator makes so the test can assert on side effects
 // (rollback, status writes, history rows).
 type fakeQ struct {
-	scope            dbq.DhcpScopeForPushRow
+	scope            dbq.GetDhcpScopeForPushRow
 	scopeErr         error
-	server           dbq.DhcpServerForPushRow
+	server           dbq.GetDhcpServerForPushRow
 	serverErr        error
 	template         *dbq.DhcpScopeTemplate
 	claimedKeaIDs    []int32
@@ -34,15 +34,15 @@ type fakeQ struct {
 	clearedDriftScope   *uuid.UUID
 }
 
-func (f *fakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpScopeForPushRow, error) {
+func (f *fakeQ) GetDhcpScopeForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpScopeForPushRow, error) {
 	if f.scopeErr != nil {
-		return dbq.DhcpScopeForPushRow{}, f.scopeErr
+		return dbq.GetDhcpScopeForPushRow{}, f.scopeErr
 	}
 	return f.scope, nil
 }
-func (f *fakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.DhcpServerForPushRow, error) {
+func (f *fakeQ) GetDhcpServerForPush(_ context.Context, _ uuid.UUID) (dbq.GetDhcpServerForPushRow, error) {
 	if f.serverErr != nil {
-		return dbq.DhcpServerForPushRow{}, f.serverErr
+		return dbq.GetDhcpServerForPushRow{}, f.serverErr
 	}
 	return f.server, nil
 }
@@ -115,14 +115,14 @@ func (f *fakeKea) ConfigWrite(_ context.Context, services []string) ([]byte, err
 }
 
 func builderReturning(fk *fakeKea) KeaClientBuilder {
-	return func(_ dbq.DhcpServerForPushRow) KeaClient { return fk }
+	return func(_ dbq.GetDhcpServerForPushRow) KeaClient { return fk }
 }
 
 // ---- fixtures ----
 
-func validScope(t *testing.T, family int32) dbq.DhcpScopeForPushRow {
+func validScope(t *testing.T, family int32) dbq.GetDhcpScopeForPushRow {
 	t.Helper()
-	return dbq.DhcpScopeForPushRow{
+	return dbq.GetDhcpScopeForPushRow{
 		ID:           uuid.New(),
 		DhcpServerID: uuid.New(),
 		IPFamily:     family,
@@ -146,8 +146,8 @@ func poolsFor(family int32) string {
 	return `[{"first":"2001:db8::10","last":"2001:db8::ffff"}]`
 }
 
-func enabledServer() dbq.DhcpServerForPushRow {
-	return dbq.DhcpServerForPushRow{
+func enabledServer() dbq.GetDhcpServerForPushRow {
+	return dbq.GetDhcpServerForPushRow{
 		ID: uuid.New(), KeaURL: "https://kea.example", Enabled: true,
 	}
 }
@@ -209,7 +209,7 @@ func TestPushScope_ServerDisabled_RefusesWithoutCallingKea(t *testing.T) {
 	scope := validScope(t, 4)
 	q := &fakeQ{
 		scope:  scope,
-		server: dbq.DhcpServerForPushRow{ID: scope.DhcpServerID, KeaURL: "x", Enabled: false},
+		server: dbq.GetDhcpServerForPushRow{ID: scope.DhcpServerID, KeaURL: "x", Enabled: false},
 	}
 	fk := &fakeKea{}
 	r, _ := PushScope(context.Background(), q, builderReturning(fk), scope.ID)
@@ -249,7 +249,7 @@ func TestPushScope_V4FirstPush_AllocatesIDAndCallsAddThenConfigWrite(t *testing.
 	if fk.gotConfigWrite == nil || fk.gotConfigWrite[0] != "dhcp4" {
 		t.Errorf("ConfigWrite should fire for [dhcp4]; got %v", fk.gotConfigWrite)
 	}
-	if q.serverLastPushParam == nil || q.serverLastPushParam.LastPushStatus != "ok" {
+	if q.serverLastPushParam == nil || q.serverLastPushParam.LastPushStatus == nil || *q.serverLastPushParam.LastPushStatus != "ok" {
 		t.Errorf("server last_push not written as ok; got %+v", q.serverLastPushParam)
 	}
 	if q.historyRow == nil || q.historyRow.Status != "ok" || q.historyRow.Operation != "add" {
@@ -367,7 +367,7 @@ func TestPushScope_KeaSidesError_ResultStatusFromInterpret(t *testing.T) {
 	if !strings.Contains(r.Error, "already exists") {
 		t.Errorf("Result.Error should carry Kea text; got %q", r.Error)
 	}
-	if q.serverLastPushParam == nil || q.serverLastPushParam.LastPushStatus != "error" {
+	if q.serverLastPushParam == nil || q.serverLastPushParam.LastPushStatus == nil || *q.serverLastPushParam.LastPushStatus != "error" {
 		t.Errorf("server last_push should be 'error'; got %+v", q.serverLastPushParam)
 	}
 	// On Kea-side error, config_write must NOT have fired (would
@@ -439,7 +439,7 @@ func TestPushScope_MissingTemplate_RendersScopeOnly(t *testing.T) {
 func TestDefaultKeaClientBuilder_PicksUpAuthCredentials(t *testing.T) {
 	user := "monitor"
 	pass := "s3cr3t"
-	server := dbq.DhcpServerForPushRow{
+	server := dbq.GetDhcpServerForPushRow{
 		ID: uuid.New(), KeaURL: "https://kea.example",
 		AuthUsername: &user, AuthPassword: &pass,
 	}
@@ -453,7 +453,7 @@ func TestDefaultKeaClientBuilder_PicksUpAuthCredentials(t *testing.T) {
 }
 
 func TestDefaultKeaClientBuilder_NilAuthPointersAreSafe(t *testing.T) {
-	server := dbq.DhcpServerForPushRow{
+	server := dbq.GetDhcpServerForPushRow{
 		ID: uuid.New(), KeaURL: "https://kea.example",
 		AuthUsername: nil, AuthPassword: nil,
 	}

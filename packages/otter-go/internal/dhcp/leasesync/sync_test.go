@@ -21,7 +21,7 @@ import (
 // captureQ stands in for *dbq.Queries: returns canned reads, records
 // every write so tests can assert on the per-decision SQL params.
 type captureQ struct {
-	subnetRows  []dbq.SubnetForLeaseSyncRow
+	subnetRows  []dbq.ListSubnetsForFabricLeaseSyncRow
 	subnetErr   error
 
 	// findResults maps (subnet_id, address) → row.
@@ -36,7 +36,7 @@ type captureQ struct {
 	stateErr  error
 }
 
-func (c *captureQ) ListSubnetsForFabricLeaseSync(_ context.Context, _ uuid.UUID) ([]dbq.SubnetForLeaseSyncRow, error) {
+func (c *captureQ) ListSubnetsForFabricLeaseSync(_ context.Context, _ uuid.UUID) ([]dbq.ListSubnetsForFabricLeaseSyncRow, error) {
 	return c.subnetRows, c.subnetErr
 }
 func (c *captureQ) FindDhcpLeaseIPAddress(_ context.Context, arg dbq.FindDhcpLeaseIPAddressParams) (dbq.FindDhcpLeaseIPAddressRow, error) {
@@ -105,7 +105,7 @@ func singleSubnetQ(subnetID uuid.UUID, findResults map[string]dbq.FindDhcpLeaseI
 		findResults = map[string]dbq.FindDhcpLeaseIPAddressRow{}
 	}
 	return &captureQ{
-		subnetRows:  []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
+		subnetRows:  []dbq.ListSubnetsForFabricLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
 		findResults: findResults,
 	}
 }
@@ -343,7 +343,7 @@ func TestSyncServer_FindLeaseTransientError_Propagates(t *testing.T) {
 	subnetID := uuid.New()
 	q := &transientFindErrQ{
 		captureQ: captureQ{
-			subnetRows: []dbq.SubnetForLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
+			subnetRows: []dbq.ListSubnetsForFabricLeaseSyncRow{{ID: subnetID, Prefix: "10.0.0.0/24"}},
 		},
 		err: errors.New("conn reset"),
 	}

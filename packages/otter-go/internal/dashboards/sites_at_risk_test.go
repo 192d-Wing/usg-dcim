@@ -20,12 +20,12 @@ import (
 // methods are unused here.
 type fakeArQ struct {
 	fakeQ
-	rows        []dbq.SiteAtRiskRow
+	rows        []dbq.ListSitesAtRiskRow
 	gotSeverity string
 	listErr     error
 }
 
-func (f *fakeArQ) ListSitesAtRisk(_ context.Context, sev string) ([]dbq.SiteAtRiskRow, error) {
+func (f *fakeArQ) ListSitesAtRisk(_ context.Context, sev string) ([]dbq.ListSitesAtRiskRow, error) {
 	f.gotSeverity = sev
 	return f.rows, f.listErr
 }
@@ -37,7 +37,8 @@ func mountAr(f *fakeArQ) http.Handler {
 }
 
 func TestSitesAtRisk_DefaultSeverityIsMajor(t *testing.T) {
-	f := &fakeArQ{rows: []dbq.SiteAtRiskRow{{SiteID: uuid.New(), AlertCount: 3}}}
+	sid := uuid.New()
+	f := &fakeArQ{rows: []dbq.ListSitesAtRiskRow{{SiteID: &sid, AlertCount: 3}}}
 	rec := authtest.ServeRequest(
 		mountAr(f),
 		authtest.PrincipalWithCaps(capDashboardsRead),
@@ -106,7 +107,7 @@ func TestSitesAtRisk_InvalidSeverityIs400(t *testing.T) {
 
 func TestSitesAtRisk_SiteIDRenderedAsString(t *testing.T) {
 	id := uuid.New()
-	f := &fakeArQ{rows: []dbq.SiteAtRiskRow{{SiteID: id, AlertCount: 5}}}
+	f := &fakeArQ{rows: []dbq.ListSitesAtRiskRow{{SiteID: &id, AlertCount: 5}}}
 	rec := authtest.ServeRequest(
 		mountAr(f),
 		authtest.PrincipalWithCaps(capDashboardsRead),

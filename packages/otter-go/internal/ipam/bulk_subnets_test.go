@@ -22,23 +22,23 @@ import (
 // the "skipped" path is testable without a live DB.
 type fakeBulkQ struct {
 	fakeQ
-	supernet     dbq.Supernet
+	supernet     dbq.GetSupernetRow
 	supernetErr  error
 	uniqueViolN  int // first N inserts will return 23505
 	insertedRows []dbq.CreateSubnetParams
 }
 
-func (f *fakeBulkQ) GetSupernet(_ context.Context, _ uuid.UUID) (dbq.Supernet, error) {
+func (f *fakeBulkQ) GetSupernet(_ context.Context, _ uuid.UUID) (dbq.GetSupernetRow, error) {
 	return f.supernet, f.supernetErr
 }
 
-func (f *fakeBulkQ) CreateSubnet(_ context.Context, a dbq.CreateSubnetParams) (dbq.Subnet, error) {
+func (f *fakeBulkQ) CreateSubnet(_ context.Context, a dbq.CreateSubnetParams) (dbq.CreateSubnetRow, error) {
 	if f.uniqueViolN > 0 {
 		f.uniqueViolN--
-		return dbq.Subnet{}, &pgconn.PgError{Code: "23505", Message: "duplicate key"}
+		return dbq.CreateSubnetRow{}, &pgconn.PgError{Code: "23505", Message: "duplicate key"}
 	}
 	f.insertedRows = append(f.insertedRows, a)
-	return dbq.Subnet{ID: uuid.New(), SupernetID: a.SupernetID, Prefix: a.Prefix}, nil
+	return dbq.CreateSubnetRow{ID: uuid.New(), SupernetID: a.SupernetID, Prefix: a.Prefix}, nil
 }
 
 func mountBulk(f *fakeBulkQ) http.Handler {
@@ -71,7 +71,7 @@ func doBulk(t *testing.T, f *fakeBulkQ, rows []map[string]any) *bulkResult {
 
 func TestBulkSubnets_AllInserted(t *testing.T) {
 	supID := uuid.New()
-	f := &fakeBulkQ{supernet: dbq.Supernet{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
+	f := &fakeBulkQ{supernet: dbq.GetSupernetRow{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
 	out := doBulk(t, f, []map[string]any{
 		{"supernet_id": supID, "prefix": "10.0.0.0/24"},
 		{"supernet_id": supID, "prefix": "10.0.1.0/24"},
@@ -88,7 +88,7 @@ func TestBulkSubnets_UniqueViolationSkips(t *testing.T) {
 	// First insert returns 23505 → skipped. Second succeeds.
 	supID := uuid.New()
 	f := &fakeBulkQ{
-		supernet:    dbq.Supernet{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"},
+		supernet:    dbq.GetSupernetRow{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"},
 		uniqueViolN: 1,
 	}
 	out := doBulk(t, f, []map[string]any{
@@ -105,7 +105,7 @@ func TestBulkSubnets_UniqueViolationSkips(t *testing.T) {
 
 func TestBulkSubnets_BadCIDRFails(t *testing.T) {
 	supID := uuid.New()
-	f := &fakeBulkQ{supernet: dbq.Supernet{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
+	f := &fakeBulkQ{supernet: dbq.GetSupernetRow{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
 	out := doBulk(t, f, []map[string]any{
 		{"supernet_id": supID, "prefix": "garbage"},
 		{"supernet_id": supID, "prefix": "10.0.1.0/24"},
@@ -121,7 +121,7 @@ func TestBulkSubnets_BadCIDRFails(t *testing.T) {
 func TestBulkSubnets_RowOutsideSupernetFails(t *testing.T) {
 	// supernet 10.0.0.0/16 but the row asks for 11.0.0.0/24.
 	supID := uuid.New()
-	f := &fakeBulkQ{supernet: dbq.Supernet{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
+	f := &fakeBulkQ{supernet: dbq.GetSupernetRow{ID: supID, FabricID: uuid.New(), VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
 	out := doBulk(t, f, []map[string]any{
 		{"supernet_id": supID, "prefix": "11.0.0.0/24"},
 	})
@@ -173,7 +173,7 @@ func TestBulkSubnets_FabricScopeDeniedFailsRow(t *testing.T) {
 	supFabric := uuid.New()
 	otherFabric := uuid.New()
 	supID := uuid.New()
-	f := &fakeBulkQ{supernet: dbq.Supernet{ID: supID, FabricID: supFabric, VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
+	f := &fakeBulkQ{supernet: dbq.GetSupernetRow{ID: supID, FabricID: supFabric, VrfID: uuid.New(), Prefix: "10.0.0.0/16"}}
 
 	body, _ := json.Marshal([]map[string]any{{"supernet_id": supID, "prefix": "10.0.0.0/24"}})
 	req := httptest.NewRequest("POST", "/ipam/subnets/bulk", bytes.NewReader(body))

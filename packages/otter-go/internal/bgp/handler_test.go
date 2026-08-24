@@ -28,19 +28,19 @@ func (f *fakeQ) ListAsns(_ context.Context, a dbq.ListAsnsParams) ([]dbq.Asn, er
 	f.lastAsn = a
 	return nil, nil
 }
-func (f *fakeQ) CountAsns(_ context.Context, _ dbq.CountAsnsParams) (int64, error) { return 0, nil }
+func (f *fakeQ) CountAsns(_ context.Context, _ *string) (int64, error) { return 0, nil }
 func (f *fakeQ) ListPrefixLists(_ context.Context, a dbq.ListPrefixListsParams) ([]dbq.PrefixList, error) {
 	f.lastPL = a
 	return nil, nil
 }
-func (f *fakeQ) CountPrefixLists(_ context.Context, _ dbq.CountPrefixListsParams) (int64, error) {
+func (f *fakeQ) CountPrefixLists(_ context.Context, _ *string) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListPrefixListEntries(_ context.Context, a dbq.ListPrefixListEntriesParams) ([]dbq.PrefixListEntry, error) {
+func (f *fakeQ) ListPrefixListEntries(_ context.Context, a dbq.ListPrefixListEntriesParams) ([]dbq.ListPrefixListEntriesRow, error) {
 	f.lastEntry = a
 	return nil, nil
 }
-func (f *fakeQ) CountPrefixListEntries(_ context.Context, _ dbq.CountPrefixListEntriesParams) (int64, error) {
+func (f *fakeQ) CountPrefixListEntries(_ context.Context, _ *uuid.UUID) (int64, error) {
 	return 0, nil
 }
 
@@ -48,14 +48,14 @@ func (f *fakeQ) ListCommunityLists(_ context.Context, a dbq.ListCommunityListsPa
 	f.lastCL = a
 	return nil, nil
 }
-func (f *fakeQ) CountCommunityLists(_ context.Context, _ dbq.CountCommunityListsParams) (int64, error) {
+func (f *fakeQ) CountCommunityLists(_ context.Context, _ *string) (int64, error) {
 	return 0, nil
 }
 func (f *fakeQ) ListCommunityListEntries(_ context.Context, a dbq.ListCommunityListEntriesParams) ([]dbq.CommunityListEntry, error) {
 	f.lastCLE = a
 	return nil, nil
 }
-func (f *fakeQ) CountCommunityListEntries(_ context.Context, _ dbq.CountCommunityListEntriesParams) (int64, error) {
+func (f *fakeQ) CountCommunityListEntries(_ context.Context, _ *uuid.UUID) (int64, error) {
 	return 0, nil
 }
 func (f *fakeQ) ListRouteMaps(_ context.Context, a dbq.ListRouteMapsParams) ([]dbq.RouteMap, error) {
@@ -67,7 +67,7 @@ func (f *fakeQ) ListRouteMapEntries(_ context.Context, a dbq.ListRouteMapEntries
 	f.lastRME = a
 	return nil, nil
 }
-func (f *fakeQ) CountRouteMapEntries(_ context.Context, _ dbq.CountRouteMapEntriesParams) (int64, error) {
+func (f *fakeQ) CountRouteMapEntries(_ context.Context, _ *uuid.UUID) (int64, error) {
 	return 0, nil
 }
 
@@ -87,11 +87,11 @@ func (f *fakeQ) UpdatePrefixList(_ context.Context, a dbq.UpdatePrefixListParams
 	return dbq.PrefixList{ID: a.ID}, nil
 }
 func (f *fakeQ) DeletePrefixList(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreatePrefixListEntry(_ context.Context, a dbq.CreatePrefixListEntryParams) (dbq.PrefixListEntry, error) {
-	return dbq.PrefixListEntry{ID: uuid.New(), PrefixListID: a.PrefixListID, Seq: a.Seq, Action: a.Action, Prefix: a.Prefix}, nil
+func (f *fakeQ) CreatePrefixListEntry(_ context.Context, a dbq.CreatePrefixListEntryParams) (dbq.CreatePrefixListEntryRow, error) {
+	return dbq.CreatePrefixListEntryRow{ID: uuid.New(), PrefixListID: a.PrefixListID, Seq: a.Seq, Action: a.Action, Prefix: a.Prefix}, nil
 }
-func (f *fakeQ) UpdatePrefixListEntry(_ context.Context, a dbq.UpdatePrefixListEntryParams) (dbq.PrefixListEntry, error) {
-	return dbq.PrefixListEntry{ID: a.ID}, nil
+func (f *fakeQ) UpdatePrefixListEntry(_ context.Context, a dbq.UpdatePrefixListEntryParams) (dbq.UpdatePrefixListEntryRow, error) {
+	return dbq.UpdatePrefixListEntryRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeletePrefixListEntry(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) CreateCommunityList(_ context.Context, a dbq.CreateCommunityListParams) (dbq.CommunityList, error) {
@@ -150,7 +150,7 @@ func (f *fakeQ) CountKeysInTcpAoKeyChain(_ context.Context, _ uuid.UUID) (int64,
 func (f *fakeQ) ListTcpAoKeys(_ context.Context, _ dbq.ListTcpAoKeysParams) ([]dbq.TcpAoKey, error) {
 	return nil, nil
 }
-func (f *fakeQ) CountTcpAoKeys(_ context.Context, _ dbq.CountTcpAoKeysParams) (int64, error) {
+func (f *fakeQ) CountTcpAoKeys(_ context.Context, _ *uuid.UUID) (int64, error) {
 	return 0, nil
 }
 func (f *fakeQ) GetTcpAoKey(_ context.Context, _ uuid.UUID) (dbq.TcpAoKey, error) {

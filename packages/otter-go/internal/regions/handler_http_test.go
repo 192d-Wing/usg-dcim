@@ -19,7 +19,7 @@ import (
 
 type fakeQuerier struct {
 	list  func(ctx context.Context, arg dbq.ListRegionsParams) ([]dbq.Region, error)
-	count func(ctx context.Context, arg dbq.CountRegionsParams) (int64, error)
+	count func(ctx context.Context, regionIds []uuid.UUID) (int64, error)
 	get   func(ctx context.Context, id uuid.UUID) (dbq.Region, error)
 	// Region-scope expansion knobs.
 	expandSites     func(ctx context.Context, arg dbq.ListSiteIDsForExpansionParams) ([]uuid.UUID, error)
@@ -33,9 +33,9 @@ func (f *fakeQuerier) ListRegions(ctx context.Context, arg dbq.ListRegionsParams
 	return nil, nil
 }
 
-func (f *fakeQuerier) CountRegions(ctx context.Context, arg dbq.CountRegionsParams) (int64, error) {
+func (f *fakeQuerier) CountRegions(ctx context.Context, regionIds []uuid.UUID) (int64, error) {
 	if f.count != nil {
-		return f.count(ctx, arg)
+		return f.count(ctx, regionIds)
 	}
 	return 0, nil
 }
@@ -101,7 +101,7 @@ func TestListRegions_OK(t *testing.T) {
 			}
 			return []dbq.Region{{ID: rid, Name: "Region A", Code: "RA"}}, nil
 		},
-		count: func(context.Context, dbq.CountRegionsParams) (int64, error) { return 1, nil },
+		count: func(context.Context, []uuid.UUID) (int64, error) { return 1, nil },
 	}
 	rec := do(t, mount(f), "GET", "/regions")
 	if rec.Code != 200 {

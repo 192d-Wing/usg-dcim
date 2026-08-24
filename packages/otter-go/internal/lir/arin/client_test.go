@@ -84,10 +84,10 @@ func TestParsePrefixRange_RejectsBadInput(t *testing.T) {
 
 // ---- buildReassignDetailedXML ----
 
-func sampleJob() dbq.ArinSubmitJobRow {
+func sampleJob() dbq.ClaimNextArinSubmitJobRow {
 	state := "VA"
 	post := "20151"
-	return dbq.ArinSubmitJobRow{
+	return dbq.ClaimNextArinSubmitJobRow{
 		Prefix:          "192.0.2.0/26",
 		ParentNetHandle: "NET-192-0-2-0-1",
 		OrgName:         "Example Customer",

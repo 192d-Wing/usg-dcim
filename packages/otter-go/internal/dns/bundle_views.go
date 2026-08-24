@@ -41,7 +41,7 @@ type SplitHorizonResult struct {
 func loadSplitHorizonZoneFiles(
 	ctx context.Context, q viewsQuerier,
 	zones []dbq.DnsZone,
-	recordsByZone map[uuid.UUID][]dbq.DnsRecordForBundle,
+	recordsByZone map[uuid.UUID][]dbq.ListDnsRecordsByZoneIDsRow,
 	unhealthy map[uuid.UUID]struct{},
 ) (SplitHorizonResult, error) {
 	out := SplitHorizonResult{
@@ -104,7 +104,7 @@ func fetchViewsByFabric(
 	return out, nil
 }
 
-func hasViewBoundRecord(recs []dbq.DnsRecordForBundle) bool {
+func hasViewBoundRecord(recs []dbq.ListDnsRecordsByZoneIDsRow) bool {
 	for _, r := range recs {
 		if r.ViewID != nil {
 			return true
@@ -115,7 +115,7 @@ func hasViewBoundRecord(recs []dbq.DnsRecordForBundle) bool {
 
 func emitSplitHorizonFiles(
 	out *SplitHorizonResult, z dbq.DnsZone,
-	recs []dbq.DnsRecordForBundle, zoneViews []dbq.DnsView,
+	recs []dbq.ListDnsRecordsByZoneIDsRow, zoneViews []dbq.DnsView,
 	unhealthy map[uuid.UUID]struct{},
 ) error {
 	// Default file — null-view records only.
@@ -149,9 +149,9 @@ func emitSplitHorizonFiles(
 // None`). Passing viewID=nil filters to null-view only — used for
 // the default zone file.
 func filterRecordsForView(
-	recs []dbq.DnsRecordForBundle, viewID *uuid.UUID,
-) []dbq.DnsRecordForBundle {
-	out := make([]dbq.DnsRecordForBundle, 0, len(recs))
+	recs []dbq.ListDnsRecordsByZoneIDsRow, viewID *uuid.UUID,
+) []dbq.ListDnsRecordsByZoneIDsRow {
+	out := make([]dbq.ListDnsRecordsByZoneIDsRow, 0, len(recs))
 	for _, r := range recs {
 		if viewID == nil {
 			if r.ViewID == nil {

@@ -1,6 +1,6 @@
 module github.com/usg-dcim/packages/badger
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/goburrow/modbus v0.1.0

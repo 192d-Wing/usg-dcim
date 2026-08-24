@@ -25,39 +25,39 @@ import (
 // configure them per scenario.
 type moveFakeQ struct {
 	fakeQ
-	supernet       *dbq.SupernetForMoveRow
+	supernet       *dbq.GetSupernetForMoveRow
 	getSupernetErr error
-	vrf            *dbq.VrfForMoveRow
+	vrf            *dbq.GetVrfForMoveRow
 	getVrfErr      error
-	moveResult     dbq.Supernet
+	moveResult     dbq.MoveSupernetRow
 	moveErr        error
 	movedCalls     []dbq.MoveSupernetParams
 }
 
-func (m *moveFakeQ) GetSupernetForMove(_ context.Context, _ uuid.UUID) (dbq.SupernetForMoveRow, error) {
+func (m *moveFakeQ) GetSupernetForMove(_ context.Context, _ uuid.UUID) (dbq.GetSupernetForMoveRow, error) {
 	if m.getSupernetErr != nil {
-		return dbq.SupernetForMoveRow{}, m.getSupernetErr
+		return dbq.GetSupernetForMoveRow{}, m.getSupernetErr
 	}
 	if m.supernet == nil {
-		return dbq.SupernetForMoveRow{}, pgx.ErrNoRows
+		return dbq.GetSupernetForMoveRow{}, pgx.ErrNoRows
 	}
 	return *m.supernet, nil
 }
 
-func (m *moveFakeQ) GetVrfForMove(_ context.Context, _ uuid.UUID) (dbq.VrfForMoveRow, error) {
+func (m *moveFakeQ) GetVrfForMove(_ context.Context, _ uuid.UUID) (dbq.GetVrfForMoveRow, error) {
 	if m.getVrfErr != nil {
-		return dbq.VrfForMoveRow{}, m.getVrfErr
+		return dbq.GetVrfForMoveRow{}, m.getVrfErr
 	}
 	if m.vrf == nil {
-		return dbq.VrfForMoveRow{}, pgx.ErrNoRows
+		return dbq.GetVrfForMoveRow{}, pgx.ErrNoRows
 	}
 	return *m.vrf, nil
 }
 
-func (m *moveFakeQ) MoveSupernet(_ context.Context, a dbq.MoveSupernetParams) (dbq.Supernet, error) {
+func (m *moveFakeQ) MoveSupernet(_ context.Context, a dbq.MoveSupernetParams) (dbq.MoveSupernetRow, error) {
 	m.movedCalls = append(m.movedCalls, a)
 	if m.moveErr != nil {
-		return dbq.Supernet{}, m.moveErr
+		return dbq.MoveSupernetRow{}, m.moveErr
 	}
 	return m.moveResult, nil
 }
@@ -115,9 +115,9 @@ func fabricScopedPrincipal(fabricIDs ...uuid.UUID) auth.Principal {
 
 // happySupernet returns a SupernetForMoveRow that satisfies every
 // source-side guard: in landing fabric, tenant-owned, real prefix.
-func happySupernet(orgID uuid.UUID) *dbq.SupernetForMoveRow {
+func happySupernet(orgID uuid.UUID) *dbq.GetSupernetForMoveRow {
 	owner := orgID
-	return &dbq.SupernetForMoveRow{
+	return &dbq.GetSupernetForMoveRow{
 		ID:                  uuid.New(),
 		CurrentFabricID:     uuid.New(),
 		CurrentVrfID:        uuid.New(),
@@ -136,8 +136,8 @@ func TestMove_OK(t *testing.T) {
 	src := happySupernet(orgID)
 	q := &moveFakeQ{
 		supernet:   src,
-		vrf:        &dbq.VrfForMoveRow{ID: targetVrf, FabricID: targetFabric},
-		moveResult: dbq.Supernet{ID: src.ID, FabricID: targetFabric, VrfID: targetVrf},
+		vrf:        &dbq.GetVrfForMoveRow{ID: targetVrf, FabricID: targetFabric},
+		moveResult: dbq.MoveSupernetRow{ID: src.ID, FabricID: targetFabric, VrfID: targetVrf},
 	}
 	rec := sendMove(t, mountMove(q), src.ID, map[string]any{
 		"fabric_id": targetFabric.String(), "vrf_id": targetVrf.String(),
@@ -263,7 +263,7 @@ func TestMove_VrfInWrongFabricIs422(t *testing.T) {
 	wrongFabric := uuid.New()
 	q := &moveFakeQ{
 		supernet: src,
-		vrf:      &dbq.VrfForMoveRow{ID: uuid.New(), FabricID: wrongFabric},
+		vrf:      &dbq.GetVrfForMoveRow{ID: uuid.New(), FabricID: wrongFabric},
 	}
 	rec := sendMove(t, mountMove(q), src.ID, map[string]any{
 		"fabric_id": targetFabric.String(), "vrf_id": uuid.NewString(),
@@ -279,7 +279,7 @@ func TestMove_TargetFabricOutOfScopeIs403(t *testing.T) {
 	targetFabric := uuid.New()
 	q := &moveFakeQ{
 		supernet: src,
-		vrf:      &dbq.VrfForMoveRow{ID: uuid.New(), FabricID: targetFabric},
+		vrf:      &dbq.GetVrfForMoveRow{ID: uuid.New(), FabricID: targetFabric},
 	}
 	// Principal scoped to a different fabric.
 	p := fabricScopedPrincipal(uuid.New())
@@ -299,7 +299,7 @@ func TestMove_RaceOrChildSubnetsIs409(t *testing.T) {
 	targetFabric := uuid.New()
 	q := &moveFakeQ{
 		supernet: src,
-		vrf:      &dbq.VrfForMoveRow{ID: uuid.New(), FabricID: targetFabric},
+		vrf:      &dbq.GetVrfForMoveRow{ID: uuid.New(), FabricID: targetFabric},
 		moveErr:  pgx.ErrNoRows,
 	}
 	rec := sendMove(t, mountMove(q), src.ID, map[string]any{

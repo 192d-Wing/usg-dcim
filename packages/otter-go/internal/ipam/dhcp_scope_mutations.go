@@ -130,7 +130,7 @@ func (h *Handler) createDhcpScope(w http.ResponseWriter, r *http.Request) {
 			"prefix":         req.Prefix,
 		},
 	})
-	httpx.JSON(w, http.StatusCreated, toDhcpScopeOut(out))
+	httpx.JSON(w, http.StatusCreated, toDhcpScopeOut(dbq.GetDhcpScopeRow(out)))
 }
 
 // dhcpScopeUpdateReq is the PATCH payload. Every nullable column
@@ -275,7 +275,7 @@ func (h *Handler) updateDhcpScope(w http.ResponseWriter, r *http.Request) {
 		TargetType: "dhcp_scope", TargetID: id.String(),
 		Diff: buildDhcpScopeAuditDiff(&req),
 	})
-	httpx.JSON(w, http.StatusOK, toDhcpScopeOut(out))
+	httpx.JSON(w, http.StatusOK, toDhcpScopeOut(dbq.GetDhcpScopeRow(out)))
 }
 
 // buildDhcpScopeUpdateParams resolves the JSONB null-vs-omitted
@@ -411,21 +411,21 @@ func (h *Handler) restoreDhcpScope(w http.ResponseWriter, r *http.Request) {
 			"prefix":         existing.Prefix,
 		},
 	})
-	httpx.JSON(w, http.StatusOK, toDhcpScopeOut(out))
+	httpx.JSON(w, http.StatusOK, toDhcpScopeOut(dbq.GetDhcpScopeRow(out)))
 }
 
 // loadScopeForMutation pre-fetches the scope row + enforces fabric
 // scope on its dhcp_server_id. Shared by PATCH/DELETE/RESTORE.
 // Returns (existing, false) and writes the response on missing /
 // unauthorized.
-func (h *Handler) loadScopeForMutation(w http.ResponseWriter, r *http.Request, id uuid.UUID, capCode string) (dbq.DhcpScope, bool) {
+func (h *Handler) loadScopeForMutation(w http.ResponseWriter, r *http.Request, id uuid.UUID, capCode string) (dbq.GetDhcpScopeRow, bool) {
 	existing, err := h.Q.GetDhcpScope(r.Context(), id)
 	if err != nil {
 		mapErr(w, err, errDhcpScopeNotFoundCRUD)
-		return dbq.DhcpScope{}, false
+		return dbq.GetDhcpScopeRow{}, false
 	}
 	if !h.enforceDhcpServerFabric(w, r, existing.DhcpServerID, capCode) {
-		return dbq.DhcpScope{}, false
+		return dbq.GetDhcpScopeRow{}, false
 	}
 	return existing, true
 }

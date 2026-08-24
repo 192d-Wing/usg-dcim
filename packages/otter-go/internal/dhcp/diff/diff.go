@@ -69,8 +69,8 @@ var listFields = map[string]struct{}{
 // satisfies it. The HTTP handler in a follow-up PR composes this
 // with the larger ipam.Querier via embedding.
 type Querier interface {
-	GetDhcpScopeForPush(ctx context.Context, id uuid.UUID) (dbq.DhcpScopeForPushRow, error)
-	GetDhcpServerForPush(ctx context.Context, id uuid.UUID) (dbq.DhcpServerForPushRow, error)
+	GetDhcpScopeForPush(ctx context.Context, id uuid.UUID) (dbq.GetDhcpScopeForPushRow, error)
+	GetDhcpServerForPush(ctx context.Context, id uuid.UUID) (dbq.GetDhcpServerForPushRow, error)
 	GetDhcpScopeTemplateForPush(ctx context.Context, id uuid.UUID) (dbq.DhcpScopeTemplate, error)
 	WriteDhcpScopeDiffState(ctx context.Context, arg dbq.WriteDhcpScopeDiffStateParams) error
 }
@@ -85,12 +85,12 @@ type KeaClient interface {
 
 // KeaClientBuilder mirrors push.KeaClientBuilder. Production wires
 // kea.New(...); tests inject a fake.
-type KeaClientBuilder func(server dbq.DhcpServerForPushRow) KeaClient
+type KeaClientBuilder func(server dbq.GetDhcpServerForPushRow) KeaClient
 
 // DefaultKeaClientBuilder wires production *kea.Client instances.
 // Same shape as push.DefaultKeaClientBuilder; not shared because
 // the KeaClient interface here is a strict subset.
-func DefaultKeaClientBuilder(server dbq.DhcpServerForPushRow) KeaClient {
+func DefaultKeaClientBuilder(server dbq.GetDhcpServerForPushRow) KeaClient {
 	user, pass := "", ""
 	if server.AuthUsername != nil {
 		user = *server.AuthUsername
@@ -176,7 +176,7 @@ func DiffScope(ctx context.Context, q Querier, build KeaClientBuilder, scopeID u
 	}, nil
 }
 
-func renderDCIMSubnet(scope dbq.DhcpScopeForPushRow, tpl *dbq.DhcpScopeTemplate) map[string]any {
+func renderDCIMSubnet(scope dbq.GetDhcpScopeForPushRow, tpl *dbq.DhcpScopeTemplate) map[string]any {
 	bundleScope := bundle.FromDbqScopeForPush(scope)
 	var bundleTpl *bundle.Template
 	if tpl != nil {
@@ -415,9 +415,10 @@ func PersistDiffState(ctx context.Context, q Querier, r Result) error {
 		}
 		deltaJSON = b
 	}
+	statusStr := string(r.Status)
 	return q.WriteDhcpScopeDiffState(ctx, dbq.WriteDhcpScopeDiffStateParams{
 		ID:                r.ScopeID,
-		LastDiffStatus:    string(r.Status),
+		LastDiffStatus:    &statusStr,
 		LastDiffDeltaJSON: deltaJSON,
 	})
 }

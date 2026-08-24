@@ -41,7 +41,7 @@ const Name = "dhcp_sync"
 // ForLeaseSync iterates the fleet; the embedded leasesync.Querier
 // powers per-server SyncServer calls. *dbq.Queries satisfies both.
 type Querier interface {
-	ListEnabledDhcpServersForLeaseSync(ctx context.Context) ([]dbq.DhcpServerForLeaseSyncRow, error)
+	ListEnabledDhcpServersForLeaseSync(ctx context.Context) ([]dbq.ListEnabledDhcpServersForLeaseSyncRow, error)
 	leasesync.Querier
 }
 
@@ -168,7 +168,7 @@ func logPreview(s string) string {
 // toServer maps the row projection to the leasesync.Server input.
 // Pointer-to-string fields fall back to empty string — the Kea client
 // uses the empty pair as "unauthenticated" (services/kea.py:120).
-func toServer(row dbq.DhcpServerForLeaseSyncRow) leasesync.Server {
+func toServer(row dbq.ListEnabledDhcpServersForLeaseSyncRow) leasesync.Server {
 	user, pass := "", ""
 	if row.AuthUsername != nil {
 		user = *row.AuthUsername

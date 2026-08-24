@@ -43,8 +43,8 @@ const Name = "dhcp_bundle_rerender"
 // established; WriteDhcpBundleCache is the new sink.
 type Querier interface {
 	ListEnabledDhcpServerIDs(ctx context.Context) ([]uuid.UUID, error)
-	GetDhcpServerBundleRow(ctx context.Context, id uuid.UUID) (dbq.DhcpServerBundleRow, error)
-	ListDhcpScopesForBundle(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.DhcpScope, error)
+	GetDhcpServerBundleRow(ctx context.Context, id uuid.UUID) (dbq.GetDhcpServerBundleRowRow, error)
+	ListDhcpScopesForBundle(ctx context.Context, dhcpServerID uuid.UUID) ([]dbq.ListDhcpScopesForBundleRow, error)
 	ListDhcpScopeTemplatesByIDs(ctx context.Context, ids []uuid.UUID) ([]dbq.DhcpScopeTemplate, error)
 	WriteDhcpBundleCache(ctx context.Context, arg dbq.WriteDhcpBundleCacheParams) error
 }
@@ -152,7 +152,7 @@ func (j *Job) rerenderOne(ctx context.Context, id uuid.UUID) (didRender, didWrit
 	}
 	if err := j.Q.WriteDhcpBundleCache(ctx, dbq.WriteDhcpBundleCacheParams{
 		ID:              srv.ID,
-		BundleCacheEtag: b.Etag,
+		BundleCacheEtag: &b.Etag,
 		BundleCacheJSON: encoded,
 	}); err != nil {
 		return didRender, false, fmt.Errorf("write cache: %w", err)
@@ -164,7 +164,7 @@ func (j *Job) rerenderOne(ctx context.Context, id uuid.UUID) (didRender, didWrit
 // rerenderOne caller stays linear. The shared helper handles the
 // scope + template reads and the renderer invocation; this method
 // exists only to thread j.Q through with the right type.
-func (j *Job) renderForServer(ctx context.Context, srv dbq.DhcpServerBundleRow) (bundle.KeaBundle, error) {
+func (j *Job) renderForServer(ctx context.Context, srv dbq.GetDhcpServerBundleRowRow) (bundle.KeaBundle, error) {
 	return bundle.BuildForServer(ctx, j.Q, srv)
 }
 

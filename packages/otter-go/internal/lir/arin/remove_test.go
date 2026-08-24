@@ -90,14 +90,14 @@ func TestRemoveClassify_429IsTransient(t *testing.T) {
 // ---- ProcessOneRemove ----
 
 type fakeRemoveJobQ struct {
-	jobs     []dbq.ArinRemoveJobRow
+	jobs     []dbq.ClaimNextArinRemoveJobRow
 	removed  []uuid.UUID
 	failed   []dbq.MarkArinFailedParams
 }
 
-func (f *fakeRemoveJobQ) ClaimNextArinRemoveJob(_ context.Context, _ int32) (dbq.ArinRemoveJobRow, error) {
+func (f *fakeRemoveJobQ) ClaimNextArinRemoveJob(_ context.Context, _ int32) (dbq.ClaimNextArinRemoveJobRow, error) {
 	if len(f.jobs) == 0 {
-		return dbq.ArinRemoveJobRow{}, pgx.ErrNoRows
+		return dbq.ClaimNextArinRemoveJobRow{}, pgx.ErrNoRows
 	}
 	j := f.jobs[0]
 	f.jobs = f.jobs[1:]
@@ -139,7 +139,7 @@ func TestProcessOneRemove_NoJobsReturnsFalse(t *testing.T) {
 
 func TestProcessOneRemove_SuccessMarksRemoved(t *testing.T) {
 	allocID := uuid.New()
-	q := &fakeRemoveJobQ{jobs: []dbq.ArinRemoveJobRow{{
+	q := &fakeRemoveJobQ{jobs: []dbq.ClaimNextArinRemoveJobRow{{
 		AllocationID: allocID, NetHandle: "NET-OK-1", ParentNetHandle: "NET-PARENT-1",
 	}}}
 	w := &Worker{Log: discardLogRemove()}
@@ -160,7 +160,7 @@ func TestProcessOneRemove_SuccessMarksRemoved(t *testing.T) {
 
 func TestProcessOneRemove_TransientMarksFailed(t *testing.T) {
 	allocID := uuid.New()
-	q := &fakeRemoveJobQ{jobs: []dbq.ArinRemoveJobRow{{AllocationID: allocID, NetHandle: "NET-x"}}}
+	q := &fakeRemoveJobQ{jobs: []dbq.ClaimNextArinRemoveJobRow{{AllocationID: allocID, NetHandle: "NET-x"}}}
 	w := &Worker{Log: discardLogRemove()}
 	if _, err := w.ProcessOneRemove(context.Background(), q,
 		&fakeRemoveClient{err: errors.New("arin transient: 503")}); err != nil {

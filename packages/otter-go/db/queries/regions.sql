@@ -1,7 +1,7 @@
 -- name: ListRegions :many
 -- ABAC: caller passes the set of region IDs in scope (computed from the
 -- caller's site scope). NULL = no restriction.
-SELECT id, name, code, description, created_at, updated_at
+SELECT *
 FROM regions
 WHERE (sqlc.narg(region_ids)::uuid[] IS NULL OR id = ANY(sqlc.narg(region_ids)::uuid[]))
 ORDER BY code
@@ -13,7 +13,7 @@ FROM regions
 WHERE (sqlc.narg(region_ids)::uuid[] IS NULL OR id = ANY(sqlc.narg(region_ids)::uuid[]));
 
 -- name: GetRegion :one
-SELECT id, name, code, description, created_at, updated_at
+SELECT *
 FROM regions
 WHERE id = $1;
 
@@ -23,4 +23,4 @@ WHERE id = $1;
 -- "show regions that contain at least one in-scope site."
 SELECT DISTINCT region_id
 FROM sites
-WHERE id = ANY($1::uuid[]);
+WHERE id = ANY(sqlc.arg(site_ids)::uuid[]);

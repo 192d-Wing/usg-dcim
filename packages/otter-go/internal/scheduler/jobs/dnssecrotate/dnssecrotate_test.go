@@ -14,7 +14,7 @@ import (
 
 type fakeQ struct {
 	zones       []dbq.DnsZone
-	activeByZ   map[uuid.UUID][]dbq.DnsKeyRow
+	activeByZ   map[uuid.UUID][]dbq.DnsKey
 	createCalls int
 	retireCalls int
 	touchCalls  int
@@ -38,19 +38,19 @@ func (f *fakeQ) ListSignedZonesWithZskRotation(_ context.Context) ([]dbq.DnsZone
 	}
 	return f.zones, nil
 }
-func (f *fakeQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, zoneID uuid.UUID, role string) ([]dbq.DnsKeyRow, error) {
-	f.rolesSeen = append(f.rolesSeen, role)
-	return f.activeByZ[zoneID], nil
+func (f *fakeQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, arg dbq.ListActiveDnsKeysForZoneAndRoleParams) ([]dbq.DnsKey, error) {
+	f.rolesSeen = append(f.rolesSeen, arg.Role)
+	return f.activeByZ[arg.ZoneID], nil
 }
-func (f *fakeQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error) {
+func (f *fakeQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKey, error) {
 	f.createCalls++
 	f.createAlgorithms = append(f.createAlgorithms, a.Algorithm)
 	if a.ZoneID != nil {
 		if err, ok := f.createErrFor[*a.ZoneID]; ok {
-			return dbq.DnsKeyRow{}, err
+			return dbq.DnsKey{}, err
 		}
 	}
-	return dbq.DnsKeyRow{ID: uuid.New()}, nil
+	return dbq.DnsKey{ID: uuid.New()}, nil
 }
 func (f *fakeQ) RetireDnsKey(_ context.Context, _ uuid.UUID) (int64, error) {
 	f.retireCalls++
@@ -76,7 +76,7 @@ func TestRun_RotatesDueZones(t *testing.T) {
 	z2 := zone(t, "zone2.example.", 30, false) // fresh
 	q := &fakeQ{
 		zones: []dbq.DnsZone{z1, z2},
-		activeByZ: map[uuid.UUID][]dbq.DnsKeyRow{
+		activeByZ: map[uuid.UUID][]dbq.DnsKey{
 			// z1 uses ed25519 — verifies the algorithm-inheritance path
 			// at the cron level. If RotateZoneKey ever stopped reading
 			// active[0].Algorithm, this test would catch a silent
@@ -129,7 +129,7 @@ func TestRun_PerZoneIsolation_OneFailsOneSucceeds(t *testing.T) {
 	old := nowAt.Add(-100 * 24 * time.Hour)
 	q := &fakeQ{
 		zones: []dbq.DnsZone{bad, good},
-		activeByZ: map[uuid.UUID][]dbq.DnsKeyRow{
+		activeByZ: map[uuid.UUID][]dbq.DnsKey{
 			bad.ID:  {{ID: uuid.New(), Algorithm: "ecdsap256sha256", ActiveFrom: old}},
 			good.ID: {{ID: uuid.New(), Algorithm: "ecdsap256sha256", ActiveFrom: old}},
 		},
@@ -185,7 +185,7 @@ func TestRun_SkipsFrozenZones(t *testing.T) {
 	z := zone(t, "frozen.example.", 30, true)
 	q := &fakeQ{
 		zones: []dbq.DnsZone{z},
-		activeByZ: map[uuid.UUID][]dbq.DnsKeyRow{
+		activeByZ: map[uuid.UUID][]dbq.DnsKey{
 			z.ID: {{ID: uuid.New(), Algorithm: "ecdsap256sha256", ActiveFrom: frozen.Add(-100 * 24 * time.Hour)}},
 		},
 	}
@@ -234,7 +234,7 @@ func TestRun_AllZonesFail_LoopContinues(t *testing.T) {
 	old := nowAt.Add(-100 * 24 * time.Hour)
 	q := &fakeQ{
 		zones: []dbq.DnsZone{z1, z2},
-		activeByZ: map[uuid.UUID][]dbq.DnsKeyRow{
+		activeByZ: map[uuid.UUID][]dbq.DnsKey{
 			z1.ID: {{ID: uuid.New(), Algorithm: "ecdsap256sha256", ActiveFrom: old}},
 			z2.ID: {{ID: uuid.New(), Algorithm: "ecdsap256sha256", ActiveFrom: old}},
 		},

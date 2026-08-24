@@ -16,7 +16,7 @@ import (
 )
 
 type listPoolSupernetsResponse struct {
-	Items  []dbq.PoolSourceSupernetRow `json:"items"`
+	Items  []dbq.ListPoolSourceSupernetsRow `json:"items"`
 	Total  int64                       `json:"total"`
 	Limit  int32                       `json:"limit"`
 	Offset int32                       `json:"offset"`
@@ -49,7 +49,7 @@ func (h *Handler) listPoolSupernets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if items == nil {
-		items = []dbq.PoolSourceSupernetRow{}
+		items = []dbq.ListPoolSourceSupernetsRow{}
 	}
 	httpx.JSON(w, http.StatusOK, listPoolSupernetsResponse{
 		Items: items, Total: total, Limit: limit, Offset: offset,
@@ -112,14 +112,14 @@ func (h *Handler) attachPoolSupernet(w http.ResponseWriter, r *http.Request) {
 // handler so attachPoolSupernet stays under the cognitive-complexity
 // budget and so unit tests can exercise the validation matrix
 // without a fake DB.
-func validateAttachCandidate(pool dbq.LirPool, candidate dbq.SupernetLirAttachRow) (int, string) {
+func validateAttachCandidate(pool dbq.LirPool, candidate dbq.GetSupernetForLirAttachRow) (int, string) {
 	if candidate.LirPoolID != nil {
 		return http.StatusConflict, "supernet is already attached to a pool"
 	}
 	if candidate.OwnerOrganizationID != nil {
 		return http.StatusConflict, "tenant-owned supernet cannot be a pool source"
 	}
-	if supernetFamily(candidate.Prefix) != pool.IpFamily {
+	if supernetFamily(candidate.Prefix) != pool.IPFamily {
 		return http.StatusUnprocessableEntity,
 			"supernet family doesn't match pool family"
 	}

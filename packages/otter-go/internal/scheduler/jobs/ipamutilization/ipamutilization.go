@@ -38,9 +38,9 @@ const Name = "ipam_utilization_sweep"
 // Querier is the slim sqlc surface the job calls. *dbq.Queries
 // satisfies it; tests inject a fake that returns canned rows.
 type Querier interface {
-	ListSubnetsForUtilization(ctx context.Context) ([]dbq.SubnetForUtilizationRow, error)
-	ListSupernetsForUtilization(ctx context.Context) ([]dbq.SupernetForUtilizationRow, error)
-	ListActiveReservedAddressCountsBySubnet(ctx context.Context) ([]dbq.ActiveReservedAddressCountRow, error)
+	ListSubnetsForUtilization(ctx context.Context) ([]dbq.ListSubnetsForUtilizationRow, error)
+	ListSupernetsForUtilization(ctx context.Context) ([]dbq.ListSupernetsForUtilizationRow, error)
+	ListActiveReservedAddressCountsBySubnet(ctx context.Context) ([]dbq.ListActiveReservedAddressCountsBySubnetRow, error)
 }
 
 // Gauges holds the two Prometheus Gauge vectors the job sets. Wired
@@ -108,9 +108,7 @@ func (j *Job) Run(ctx context.Context) (map[string]any, error) {
 		freePct := freePercent(cap, used)
 		j.Gauges.SubnetFreePercent.WithLabelValues(s.FabricID.String(), s.ID.String()).Set(freePct)
 		subnetsEmitted++
-		if s.SupernetID != nil {
-			carvedBySupernet[*s.SupernetID] += cap
-		}
+		carvedBySupernet[s.SupernetID] += cap
 	}
 	supernets, err := j.Q.ListSupernetsForUtilization(ctx)
 	if err != nil {

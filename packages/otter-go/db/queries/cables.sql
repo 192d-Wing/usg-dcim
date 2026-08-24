@@ -1,6 +1,5 @@
 -- name: ListCables :many
-SELECT id, site_id, a_asset_id, a_port, b_asset_id, b_port,
-       medium, color, length_m, label, face, created_at, updated_at
+SELECT *
 FROM cables
 WHERE (sqlc.narg(site_id)::uuid  IS NULL OR site_id      = sqlc.narg(site_id))
   AND (sqlc.narg(asset_id)::uuid IS NULL OR (a_asset_id = sqlc.narg(asset_id) OR b_asset_id = sqlc.narg(asset_id)))
@@ -26,7 +25,6 @@ WHERE (sqlc.narg(site_id)::uuid  IS NULL OR site_id      = sqlc.narg(site_id))
   AND (sqlc.narg(scope_site_ids)::uuid[] IS NULL OR site_id = ANY(sqlc.narg(scope_site_ids)::uuid[]));
 
 -- name: GetCable :one
-SELECT id, site_id, a_asset_id, a_port, b_asset_id, b_port,
-       medium, color, length_m, label, face, created_at, updated_at
+SELECT *
 FROM cables
 WHERE id = $1;

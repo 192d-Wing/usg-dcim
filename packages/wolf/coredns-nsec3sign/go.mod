@@ -1,6 +1,6 @@
 module github.com/192d-wing/coredns-nsec3sign
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/coredns/caddy v1.1.4

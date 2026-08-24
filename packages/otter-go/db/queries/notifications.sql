@@ -1,8 +1,5 @@
 -- name: ListNotificationChannels :many
-SELECT id, name, kind::text AS kind, config_json,
-       severity_to_text(min_severity) AS min_severity,
-       notify_on_fire, notify_on_resolve, enabled,
-       created_at, updated_at
+SELECT *
 FROM notification_channels
 ORDER BY name
 LIMIT $1 OFFSET $2;
@@ -16,10 +13,7 @@ SELECT count(*)::bigint FROM notification_channels;
 -- design — the channel table is bounded by operator-defined config
 -- (a fleet has at most tens of channels), and the cron walks every
 -- one to filter via channelMatches.
-SELECT id, name, kind::text AS kind, config_json,
-       severity_to_text(min_severity) AS min_severity,
-       notify_on_fire, notify_on_resolve, enabled,
-       created_at, updated_at
+SELECT *
 FROM notification_channels
 WHERE enabled = true
 ORDER BY name;
@@ -29,9 +23,6 @@ ORDER BY name;
 -- channel before running its filter + sender. Returns the same row
 -- shape as ListNotificationChannels (severity enum demoted to text
 -- so the Go side doesn't need to import the Postgres enum type).
-SELECT id, name, kind::text AS kind, config_json,
-       min_severity::text AS min_severity,
-       notify_on_fire, notify_on_resolve, enabled,
-       created_at, updated_at
+SELECT *
 FROM notification_channels
 WHERE id = $1;

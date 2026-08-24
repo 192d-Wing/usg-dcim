@@ -50,20 +50,20 @@ WHERE id = $1;
 -- this is a quick index scan.
 --
 -- Pre-conditions enforced inline:
---   * Supernet is currently in $4 (the landing fabric ID resolved
---     by the handler from the slug).
+--   * Supernet is currently in expected_current_fabric_id (the
+--     landing fabric ID resolved by the handler from the slug).
 --   * No subnet references this supernet.
 -- Pre-conditions enforced by the handler before this call:
 --   * Supernet is tenant-owned (owner_organization_id IS NOT NULL).
 --   * Org-scope check on owner_organization_id.
---   * Fabric-scope check on $2 (the target fabric).
+--   * Fabric-scope check on target_fabric_id (the target fabric).
 --   * Target VRF belongs to target fabric.
 UPDATE supernets s
-SET fabric_id  = $2,
-    vrf_id     = $3,
+SET fabric_id  = sqlc.arg(target_fabric_id),
+    vrf_id     = sqlc.arg(target_vrf_id),
     updated_at = NOW()
-WHERE s.id = $1
-  AND s.fabric_id = $4
+WHERE s.id = sqlc.arg(id)
+  AND s.fabric_id = sqlc.arg(expected_current_fabric_id)
   AND NOT EXISTS (SELECT 1 FROM subnets WHERE supernet_id = s.id)
 RETURNING s.id, s.fabric_id, s.vrf_id, s.parent_supernet_id, s.site_id,
           host(s.prefix) || '/' || masklen(s.prefix) AS prefix,

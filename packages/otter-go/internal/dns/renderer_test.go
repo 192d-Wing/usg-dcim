@@ -12,14 +12,14 @@ import (
 	dbq "github.com/usg-dcim/packages/otter-go/db/generated"
 )
 
-func record(name, rtype string, data map[string]any) dbq.DnsRecordForRender {
+func record(name, rtype string, data map[string]any) dbq.ListAllRecordsInZoneRow {
 	b, _ := json.Marshal(data)
-	return dbq.DnsRecordForRender{
+	return dbq.ListAllRecordsInZoneRow{
 		ID: uuid.New(), Name: name, Type: rtype, Data: b,
 	}
 }
 
-func recordWithTTL(name, rtype string, ttl int32, data map[string]any) dbq.DnsRecordForRender {
+func recordWithTTL(name, rtype string, ttl int32, data map[string]any) dbq.ListAllRecordsInZoneRow {
 	r := record(name, rtype, data)
 	r.TTL = &ttl
 	return r
@@ -136,7 +136,7 @@ func TestRenderZoneFile_HasOriginAndSOA(t *testing.T) {
 
 func TestRenderZoneFile_SortsByNameThenType(t *testing.T) {
 	z := mkZone()
-	records := []dbq.DnsRecordForRender{
+	records := []dbq.ListAllRecordsInZoneRow{
 		record("www", "A", map[string]any{"target": "10.0.0.2"}),
 		record("api", "AAAA", map[string]any{"target": "2001:db8::1"}),
 		record("api", "A", map[string]any{"target": "10.0.0.1"}),
@@ -161,14 +161,14 @@ func TestRenderZoneFile_EmptyRecordsStillRendersSOA(t *testing.T) {
 }
 
 func TestRenderZoneFile_BadRecordDataReturnsError(t *testing.T) {
-	bad := dbq.DnsRecordForRender{Name: "x", Type: "A", Data: json.RawMessage(`{"not_target":"x"}`)}
+	bad := dbq.ListAllRecordsInZoneRow{Name: "x", Type: "A", Data: json.RawMessage(`{"not_target":"x"}`)}
 	// The JSON Unmarshal succeeds but emits "" for the target —
 	// not great, but matches Python: schemas validate the payload
 	// at write time so a malformed row would have to be hand-
 	// inserted to reach here. Verify that an explicitly bad type
 	// returns the expected error path.
 	bad.Type = "WAT"
-	_, err := renderZoneFile(mkZone(), []dbq.DnsRecordForRender{bad})
+	_, err := renderZoneFile(mkZone(), []dbq.ListAllRecordsInZoneRow{bad})
 	if err == nil {
 		t.Error("expected error for unknown record type")
 	}
@@ -179,7 +179,7 @@ func TestRenderZoneFile_PythonShapeFidelity(t *testing.T) {
 	// shape: SOA followed by sorted records, tab-separated fields,
 	// trailing newline on each line.
 	z := mkZone()
-	records := []dbq.DnsRecordForRender{
+	records := []dbq.ListAllRecordsInZoneRow{
 		record("@", "NS", map[string]any{"target": "ns1.example.com."}),
 		record("www", "A", map[string]any{"target": "10.0.0.1"}),
 		record("www", "AAAA", map[string]any{"target": "2001:db8::1"}),

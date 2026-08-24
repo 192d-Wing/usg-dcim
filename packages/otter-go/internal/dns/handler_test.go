@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -66,17 +65,17 @@ func (f *fakeQ) ListDnsRecords(_ context.Context, a dbq.ListDnsRecordsParams) ([
 func (f *fakeQ) CountDnsRecords(_ context.Context, _ dbq.CountDnsRecordsParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListDnsServers(_ context.Context, a dbq.ListDnsServersParams) ([]dbq.DnsServer, error) {
+func (f *fakeQ) ListDnsServers(_ context.Context, a dbq.ListDnsServersParams) ([]dbq.ListDnsServersRow, error) {
 	f.lastServer = a
 	return nil, nil
 }
 func (f *fakeQ) CountDnsServers(_ context.Context, _ dbq.CountDnsServersParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) GetDnsServer(_ context.Context, _ uuid.UUID) (dbq.DnsServer, error) {
-	return dbq.DnsServer{}, pgx.ErrNoRows
+func (f *fakeQ) GetDnsServer(_ context.Context, _ uuid.UUID) (dbq.GetDnsServerRow, error) {
+	return dbq.GetDnsServerRow{}, pgx.ErrNoRows
 }
-func (f *fakeQ) ListAnycastGroups(_ context.Context, a dbq.ListAnycastGroupsParams) ([]dbq.AnycastGroup, error) {
+func (f *fakeQ) ListAnycastGroups(_ context.Context, a dbq.ListAnycastGroupsParams) ([]dbq.ListAnycastGroupsRow, error) {
 	f.lastAnycast = a
 	return nil, nil
 }
@@ -97,18 +96,18 @@ func (f *fakeQ) ListDnsCatalogZones(_ context.Context, a dbq.ListDnsCatalogZones
 func (f *fakeQ) CountDnsCatalogZones(_ context.Context, _ dbq.CountDnsCatalogZonesParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListDnsBlocklists(_ context.Context, a dbq.ListDnsBlocklistsParams) ([]dbq.DnsBlocklist, error) {
+func (f *fakeQ) ListDnsBlocklists(_ context.Context, a dbq.ListDnsBlocklistsParams) ([]dbq.ListDnsBlocklistsRow, error) {
 	f.lastBL = a
 	return nil, nil
 }
 func (f *fakeQ) CountDnsBlocklists(_ context.Context, _ dbq.CountDnsBlocklistsParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) GetDnsBlocklist(_ context.Context, _ uuid.UUID) (dbq.DnsBlocklist, error) {
+func (f *fakeQ) GetDnsBlocklist(_ context.Context, _ uuid.UUID) (dbq.GetDnsBlocklistRow, error) {
 	if f.blGetErr != nil {
-		return dbq.DnsBlocklist{}, f.blGetErr
+		return dbq.GetDnsBlocklistRow{}, f.blGetErr
 	}
-	return dbq.DnsBlocklist{}, nil
+	return dbq.GetDnsBlocklistRow{}, nil
 }
 func (f *fakeQ) ListDnsBlocklistPatternsByID(_ context.Context, _ uuid.UUID) ([]string, error) {
 	return f.existingPats, nil
@@ -151,14 +150,14 @@ func (f *fakeQ) ListDnsViews(_ context.Context, a dbq.ListDnsViewsParams) ([]dbq
 func (f *fakeQ) CountDnsViews(_ context.Context, _ dbq.CountDnsViewsParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListDnsHealthChecks(_ context.Context, a dbq.ListDnsHealthChecksParams) ([]dbq.DnsHealthCheck, error) {
+func (f *fakeQ) ListDnsHealthChecks(_ context.Context, a dbq.ListDnsHealthChecksParams) ([]dbq.ListDnsHealthChecksRow, error) {
 	f.lastHC = a
 	return nil, nil
 }
 func (f *fakeQ) CountDnsHealthChecks(_ context.Context, _ dbq.CountDnsHealthChecksParams) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) ListBgpPeers(_ context.Context, a dbq.ListBgpPeersParams) ([]dbq.BgpPeer, error) {
+func (f *fakeQ) ListBgpPeers(_ context.Context, a dbq.ListBgpPeersParams) ([]dbq.ListBgpPeersRow, error) {
 	f.lastPeer = a
 	return nil, nil
 }
@@ -182,23 +181,23 @@ func (f *fakeQ) UpdateDnsZone(_ context.Context, a dbq.UpdateDnsZoneParams) (dbq
 	return dbq.DnsZone{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsZone(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) SetDnsZoneFrozen(_ context.Context, id uuid.UUID, frozen bool) (dbq.DnsZone, error) {
-	return dbq.DnsZone{ID: id, Frozen: frozen}, nil
+func (f *fakeQ) SetDnsZoneFrozen(_ context.Context, a dbq.SetDnsZoneFrozenParams) (dbq.DnsZone, error) {
+	return dbq.DnsZone{ID: a.ID, Frozen: a.Frozen}, nil
 }
 func (f *fakeQ) SetDnsZoneNsec3(_ context.Context, a dbq.SetDnsZoneNsec3Params) (dbq.DnsZone, error) {
 	return dbq.DnsZone{ID: a.ID, Nsec3Salt: a.Salt, Nsec3Iterations: a.Iterations, Nsec3OptOut: a.OptOut, Signed: true}, nil
 }
-func (f *fakeQ) ListAllRecordsInZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsRecordForRender, error) {
+func (f *fakeQ) ListAllRecordsInZone(_ context.Context, _ uuid.UUID) ([]dbq.ListAllRecordsInZoneRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) SetDnsHealthCheckResult(_ context.Context, _ uuid.UUID, _ string, _ *string) (int64, error) {
+func (f *fakeQ) SetDnsHealthCheckResult(_ context.Context, _ dbq.SetDnsHealthCheckResultParams) (int64, error) {
 	return 1, nil
 }
 func (f *fakeQ) SetDnsServerRenderStatus(_ context.Context, _ dbq.SetDnsServerRenderStatusParams) (int64, error) {
 	return 1, nil
 }
-func (f *fakeQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsMetricsSampleRow, error) {
-	return dbq.DnsMetricsSampleRow{
+func (f *fakeQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.CreateDnsServerMetricsSampleParams) (dbq.DnsServerMetricsSample, error) {
+	return dbq.DnsServerMetricsSample{
 		ID: uuid.New(), ServerID: a.ServerID,
 		IntervalSeconds: a.IntervalSeconds,
 		Queries:         a.Queries, Nxdomain: a.Nxdomain,
@@ -206,21 +205,21 @@ func (f *fakeQ) CreateDnsServerMetricsSample(_ context.Context, a dbq.CreateDnsS
 		P50Ms: a.P50Ms, P95Ms: a.P95Ms, TopNames: a.TopNames,
 	}, nil
 }
-func (f *fakeQ) ListDnsServerMetricsSamples(_ context.Context, _ uuid.UUID, _ time.Time) ([]dbq.DnsMetricsSampleRow, error) {
+func (f *fakeQ) ListDnsServerMetricsSamples(_ context.Context, _ dbq.ListDnsServerMetricsSamplesParams) ([]dbq.DnsServerMetricsSample, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeQ) ListDnsKeysByZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
-func (f *fakeQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKeyRow, error) {
-	return dbq.DnsKeyRow{ID: uuid.New(), ZoneID: a.ZoneID, Role: a.Role,
+func (f *fakeQ) CreateDnsKey(_ context.Context, a dbq.CreateDnsKeyParams) (dbq.DnsKey, error) {
+	return dbq.DnsKey{ID: uuid.New(), ZoneID: a.ZoneID, Role: a.Role,
 		Algorithm: a.Algorithm, PrivatePem: a.PrivatePem,
 		PublicKeyB64: a.PublicKeyB64, KeyTag: a.KeyTag}, nil
 }
-func (f *fakeQ) SetDnsZoneSigned(_ context.Context, _ uuid.UUID, _ bool) (int64, error) {
+func (f *fakeQ) SetDnsZoneSigned(_ context.Context, _ dbq.SetDnsZoneSignedParams) (int64, error) {
 	return 1, nil
 }
-func (f *fakeQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, _ uuid.UUID, _ string) ([]dbq.DnsKeyRow, error) {
+func (f *fakeQ) ListActiveDnsKeysForZoneAndRole(_ context.Context, _ dbq.ListActiveDnsKeysForZoneAndRoleParams) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
 func (f *fakeQ) RetireDnsKey(_ context.Context, _ uuid.UUID) (int64, error) {
@@ -232,11 +231,11 @@ func (f *fakeQ) DeleteDnsKey(_ context.Context, _ uuid.UUID) (int64, error) {
 func (f *fakeQ) RetireAllDnsKeysForZone(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 0, nil
 }
-func (f *fakeQ) DeleteAllDnsKeysForZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKeyRow, error) {
+func (f *fakeQ) DeleteAllDnsKeysForZone(_ context.Context, _ uuid.UUID) ([]dbq.DnsKey, error) {
 	return nil, nil
 }
-func (f *fakeQ) GetDnsKey(_ context.Context, _ uuid.UUID) (dbq.DnsKeyRow, error) {
-	return dbq.DnsKeyRow{}, pgx.ErrNoRows
+func (f *fakeQ) GetDnsKey(_ context.Context, _ uuid.UUID) (dbq.DnsKey, error) {
+	return dbq.DnsKey{}, pgx.ErrNoRows
 }
 func (f *fakeQ) TouchDnsZone(_ context.Context, _ uuid.UUID) (int64, error) {
 	return 1, nil
@@ -247,16 +246,16 @@ func (f *fakeQ) DeleteManualRecordsInZone(_ context.Context, _ uuid.UUID) ([]uui
 func (f *fakeQ) UpdateDnsZoneSoa(_ context.Context, _ dbq.UpdateDnsZoneSoaParams) error {
 	return nil
 }
-func (f *fakeQ) ListReverseZonesForSite(_ context.Context, _, _ uuid.UUID) ([]dbq.DnsZone, error) {
+func (f *fakeQ) ListReverseZonesForSite(_ context.Context, _ dbq.ListReverseZonesForSiteParams) ([]dbq.DnsZone, error) {
 	return nil, nil
 }
-func (f *fakeQ) GetReverseZoneByName(_ context.Context, _, _ uuid.UUID, _ string) (dbq.DnsZone, error) {
+func (f *fakeQ) GetReverseZoneByName(_ context.Context, _ dbq.GetReverseZoneByNameParams) (dbq.DnsZone, error) {
 	return dbq.DnsZone{}, pgx.ErrNoRows
 }
-func (f *fakeQ) CreateReverseZone(_ context.Context, _ string, _, _ uuid.UUID) (dbq.DnsZone, error) {
+func (f *fakeQ) CreateReverseZone(_ context.Context, _ dbq.CreateReverseZoneParams) (dbq.DnsZone, error) {
 	return dbq.DnsZone{ID: uuid.New()}, nil
 }
-func (f *fakeQ) ListIPAddressesForSiteWithDnsName(_ context.Context, _ uuid.UUID) ([]dbq.IPAddressForSyncRow, error) {
+func (f *fakeQ) ListIPAddressesForSiteWithDnsName(_ context.Context, _ uuid.UUID) ([]dbq.ListIPAddressesForSiteWithDnsNameRow, error) {
 	return nil, nil
 }
 func (f *fakeQ) DeleteIPAMRecordsInZones(_ context.Context, _ []uuid.UUID) error {
@@ -268,13 +267,13 @@ func (f *fakeQ) CountIPAMRecordsInZones(_ context.Context, _ []uuid.UUID) (int64
 func (f *fakeQ) CreateProjectedDnsRecord(_ context.Context, _ dbq.CreateProjectedDnsRecordParams) (uuid.UUID, error) {
 	return uuid.New(), nil
 }
-func (f *fakeQ) ListDnsSamplesInWindow(_ context.Context, _ time.Time, _ []uuid.UUID) ([]dbq.DnsMetricsSampleRow, error) {
+func (f *fakeQ) ListDnsSamplesInWindow(_ context.Context, _ dbq.ListDnsSamplesInWindowParams) ([]dbq.DnsServerMetricsSample, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListDnsServersForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.DnsServerForDashboardRow, error) {
+func (f *fakeQ) ListDnsServersForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.ListDnsServersForDashboardRow, error) {
 	return nil, nil
 }
-func (f *fakeQ) ListDnsZonesForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.DnsZoneForDashboardRow, error) {
+func (f *fakeQ) ListDnsZonesForDashboard(_ context.Context, _ *uuid.UUID) ([]dbq.ListDnsZonesForDashboardRow, error) {
 	return nil, nil
 }
 func (f *fakeQ) CountAnycastGroupsForDashboard(_ context.Context, _ *uuid.UUID) (int64, error) {
@@ -287,18 +286,18 @@ func (f *fakeQ) UpdateDnsRecord(_ context.Context, a dbq.UpdateDnsRecordParams) 
 	return dbq.DnsRecord{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsRecord(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateDnsServerRow(_ context.Context, a dbq.CreateDnsServerRowParams) (dbq.DnsServer, error) {
-	return dbq.DnsServer{ID: uuid.New(), Name: a.Name, SiteID: a.SiteID, FabricID: a.FabricID, Role: a.Role}, nil
+func (f *fakeQ) CreateDnsServerRow(_ context.Context, a dbq.CreateDnsServerRowParams) (dbq.CreateDnsServerRowRow, error) {
+	return dbq.CreateDnsServerRowRow{ID: uuid.New(), Name: a.Name, SiteID: a.SiteID, FabricID: a.FabricID, Role: a.Role}, nil
 }
-func (f *fakeQ) UpdateDnsServerRow(_ context.Context, a dbq.UpdateDnsServerRowParams) (dbq.DnsServer, error) {
-	return dbq.DnsServer{ID: a.ID}, nil
+func (f *fakeQ) UpdateDnsServerRow(_ context.Context, a dbq.UpdateDnsServerRowParams) (dbq.UpdateDnsServerRowRow, error) {
+	return dbq.UpdateDnsServerRowRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsServerRow(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateAnycastGroup(_ context.Context, a dbq.CreateAnycastGroupParams) (dbq.AnycastGroup, error) {
-	return dbq.AnycastGroup{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, Service: a.Service}, nil
+func (f *fakeQ) CreateAnycastGroup(_ context.Context, a dbq.CreateAnycastGroupParams) (dbq.CreateAnycastGroupRow, error) {
+	return dbq.CreateAnycastGroupRow{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, Service: a.Service}, nil
 }
-func (f *fakeQ) UpdateAnycastGroup(_ context.Context, a dbq.UpdateAnycastGroupParams) (dbq.AnycastGroup, error) {
-	return dbq.AnycastGroup{ID: a.ID}, nil
+func (f *fakeQ) UpdateAnycastGroup(_ context.Context, a dbq.UpdateAnycastGroupParams) (dbq.UpdateAnycastGroupRow, error) {
+	return dbq.UpdateAnycastGroupRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteAnycastGroup(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) CreateDnsForwarder(_ context.Context, a dbq.CreateDnsForwarderParams) (dbq.DnsForwarder, error) {
@@ -315,11 +314,11 @@ func (f *fakeQ) UpdateDnsCatalogZone(_ context.Context, a dbq.UpdateDnsCatalogZo
 	return dbq.DnsCatalogZone{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsCatalogZone(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateDnsBlocklist(_ context.Context, a dbq.CreateDnsBlocklistParams) (dbq.DnsBlocklist, error) {
-	return dbq.DnsBlocklist{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, Action: a.Action}, nil
+func (f *fakeQ) CreateDnsBlocklist(_ context.Context, a dbq.CreateDnsBlocklistParams) (dbq.CreateDnsBlocklistRow, error) {
+	return dbq.CreateDnsBlocklistRow{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, Action: a.Action}, nil
 }
-func (f *fakeQ) UpdateDnsBlocklist(_ context.Context, a dbq.UpdateDnsBlocklistParams) (dbq.DnsBlocklist, error) {
-	return dbq.DnsBlocklist{ID: a.ID}, nil
+func (f *fakeQ) UpdateDnsBlocklist(_ context.Context, a dbq.UpdateDnsBlocklistParams) (dbq.UpdateDnsBlocklistRow, error) {
+	return dbq.UpdateDnsBlocklistRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsBlocklist(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) CreateDnsBlocklistEntry(_ context.Context, a dbq.CreateDnsBlocklistEntryParams) (dbq.DnsBlocklistEntry, error) {
@@ -334,26 +333,26 @@ func (f *fakeQ) UpdateDnsView(_ context.Context, a dbq.UpdateDnsViewParams) (dbq
 	return dbq.DnsView{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsView(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateDnsHealthCheck(_ context.Context, a dbq.CreateDnsHealthCheckParams) (dbq.DnsHealthCheck, error) {
-	return dbq.DnsHealthCheck{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, TargetIP: a.TargetIP, Protocol: a.Protocol}, nil
+func (f *fakeQ) CreateDnsHealthCheck(_ context.Context, a dbq.CreateDnsHealthCheckParams) (dbq.CreateDnsHealthCheckRow, error) {
+	return dbq.CreateDnsHealthCheckRow{ID: uuid.New(), Name: a.Name, FabricID: a.FabricID, TargetIP: a.TargetIP, Protocol: a.Protocol}, nil
 }
-func (f *fakeQ) UpdateDnsHealthCheck(_ context.Context, a dbq.UpdateDnsHealthCheckParams) (dbq.DnsHealthCheck, error) {
-	return dbq.DnsHealthCheck{ID: a.ID}, nil
+func (f *fakeQ) UpdateDnsHealthCheck(_ context.Context, a dbq.UpdateDnsHealthCheckParams) (dbq.UpdateDnsHealthCheckRow, error) {
+	return dbq.UpdateDnsHealthCheckRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteDnsHealthCheck(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) CreateBgpPeer(_ context.Context, a dbq.CreateBgpPeerParams) (dbq.BgpPeer, error) {
-	return dbq.BgpPeer{ID: uuid.New(), Name: a.Name, SiteID: a.SiteID}, nil
+func (f *fakeQ) CreateBgpPeer(_ context.Context, a dbq.CreateBgpPeerParams) (dbq.CreateBgpPeerRow, error) {
+	return dbq.CreateBgpPeerRow{ID: uuid.New(), Name: a.Name, SiteID: a.SiteID}, nil
 }
-func (f *fakeQ) UpdateBgpPeer(_ context.Context, a dbq.UpdateBgpPeerParams) (dbq.BgpPeer, error) {
-	return dbq.BgpPeer{ID: a.ID}, nil
+func (f *fakeQ) UpdateBgpPeer(_ context.Context, a dbq.UpdateBgpPeerParams) (dbq.UpdateBgpPeerRow, error) {
+	return dbq.UpdateBgpPeerRow{ID: a.ID}, nil
 }
 func (f *fakeQ) DeleteBgpPeer(_ context.Context, _ uuid.UUID) error { return nil }
 func (f *fakeQ) CreateAnycastBinding(_ context.Context, a dbq.CreateAnycastBindingParams) (dbq.AnycastBgpBinding, error) {
 	return dbq.AnycastBgpBinding{ID: uuid.New(), DnsServerID: a.DnsServerID, BgpPeerID: a.BgpPeerID}, nil
 }
 func (f *fakeQ) DeleteAnycastBinding(_ context.Context, _ uuid.UUID) error { return nil }
-func (f *fakeQ) GetZoneFrozenByRecord(_ context.Context, _ uuid.UUID) (dbq.ZoneFrozenRow, error) {
-	return dbq.ZoneFrozenRow{ZoneID: uuid.New(), Frozen: false}, nil
+func (f *fakeQ) GetZoneFrozenByRecord(_ context.Context, _ uuid.UUID) (dbq.GetZoneFrozenByRecordRow, error) {
+	return dbq.GetZoneFrozenByRecordRow{ZoneID: uuid.New(), Frozen: false}, nil
 }
 
 // ABAC parent-fabric lookups (PR 57). Tests that don't care about scope

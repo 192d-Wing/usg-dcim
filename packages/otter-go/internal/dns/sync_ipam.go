@@ -147,10 +147,10 @@ type syncResponse struct {
 // internal/scheduler/jobs/dnssync, specifically) can satisfy it
 // without depending on the larger handler.Querier interface.
 type SyncQuerier interface {
-	ListReverseZonesForSite(ctx context.Context, fabricID, siteID uuid.UUID) ([]dbq.DnsZone, error)
-	GetReverseZoneByName(ctx context.Context, fabricID, siteID uuid.UUID, name string) (dbq.DnsZone, error)
-	CreateReverseZone(ctx context.Context, name string, fabricID, siteID uuid.UUID) (dbq.DnsZone, error)
-	ListIPAddressesForSiteWithDnsName(ctx context.Context, siteID uuid.UUID) ([]dbq.IPAddressForSyncRow, error)
+	ListReverseZonesForSite(ctx context.Context, arg dbq.ListReverseZonesForSiteParams) ([]dbq.DnsZone, error)
+	GetReverseZoneByName(ctx context.Context, arg dbq.GetReverseZoneByNameParams) (dbq.DnsZone, error)
+	CreateReverseZone(ctx context.Context, arg dbq.CreateReverseZoneParams) (dbq.DnsZone, error)
+	ListIPAddressesForSiteWithDnsName(ctx context.Context, siteID uuid.UUID) ([]dbq.ListIPAddressesForSiteWithDnsNameRow, error)
 	DeleteIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) error
 	CountIPAMRecordsInZones(ctx context.Context, zoneIDs []uuid.UUID) (int64, error)
 	CreateProjectedDnsRecord(ctx context.Context, arg dbq.CreateProjectedDnsRecordParams) (uuid.UUID, error)
@@ -167,7 +167,7 @@ func SyncIPAMRecordsForZone(ctx context.Context, q SyncQuerier, zone dbq.DnsZone
 	if zone.Kind != "site" || zone.SiteID == nil {
 		return 0, 0, nil
 	}
-	revZones, err := q.ListReverseZonesForSite(ctx, zone.FabricID, *zone.SiteID)
+	revZones, err := q.ListReverseZonesForSite(ctx, dbq.ListReverseZonesForSiteParams{FabricID: zone.FabricID, SiteID: *zone.SiteID})
 	if err != nil {
 		return 0, 0, err
 	}
@@ -242,7 +242,7 @@ func SyncIPAMRecordsForZone(ctx context.Context, q SyncQuerier, zone dbq.DnsZone
 // touchedRev set so we don't bump SOA on reverse zones we didn't
 // actually write to.
 func emitForwardAndReverse(
-	ctx context.Context, q SyncQuerier, forward dbq.DnsZone, ip dbq.IPAddressForSyncRow,
+	ctx context.Context, q SyncQuerier, forward dbq.DnsZone, ip dbq.ListIPAddressesForSiteWithDnsNameRow,
 	revByName map[string]dbq.DnsZone,
 ) (int, uuid.UUID, error) {
 	rtype, err := recordTypeForAddr(ip.Address)
@@ -271,11 +271,11 @@ func emitForwardAndReverse(
 	rev, ok := revByName[revOrigin]
 	if !ok {
 		// Try to fetch first in case a concurrent sync created it.
-		existing, gerr := q.GetReverseZoneByName(ctx, forward.FabricID, *forward.SiteID, revOrigin)
+		existing, gerr := q.GetReverseZoneByName(ctx, dbq.GetReverseZoneByNameParams{FabricID: forward.FabricID, SiteID: *forward.SiteID, Name: revOrigin})
 		if gerr == nil {
 			rev = existing
 		} else if errors.Is(gerr, pgx.ErrNoRows) {
-			created, cerr := q.CreateReverseZone(ctx, revOrigin, forward.FabricID, *forward.SiteID)
+			created, cerr := q.CreateReverseZone(ctx, dbq.CreateReverseZoneParams{Name: revOrigin, FabricID: forward.FabricID, SiteID: *forward.SiteID})
 			if cerr != nil {
 				return 1, uuid.Nil, cerr
 			}

@@ -23,7 +23,7 @@ var validSeverities = map[string]struct{}{
 // from the enterprise + free-space Queriers so each test file's stubs
 // stay narrow.
 type SitesAtRiskQuerier interface {
-	ListSitesAtRisk(ctx context.Context, minSeverity string) ([]dbq.SiteAtRiskRow, error)
+	ListSitesAtRisk(ctx context.Context, minSeverity string) ([]dbq.ListSitesAtRiskRow, error)
 }
 
 // sitesAtRiskResponse mirrors Python's `{"sites": [{site_id, alert_count}]}`

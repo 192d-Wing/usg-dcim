@@ -108,7 +108,7 @@ func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Building](limit, offset))
 		return
 	}
-	params := dbq.ListBuildingsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
+	params := dbq.ListBuildingsParams{Limit: limit, Offset: offset, SiteIDs: scopeSiteIds}
 	if v := q.Get("site_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -123,7 +123,7 @@ func (h *Handler) listBuildings(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	total, err := h.Q.CountBuildings(r.Context(), dbq.CountBuildingsParams{SiteID: params.SiteID, SiteIds: scopeSiteIds})
+	total, err := h.Q.CountBuildings(r.Context(), dbq.CountBuildingsParams{SiteID: params.SiteID, SiteIDs: scopeSiteIds})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -149,7 +149,7 @@ func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Room](limit, offset))
 		return
 	}
-	params := dbq.ListRoomsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
+	params := dbq.ListRoomsParams{Limit: limit, Offset: offset, SiteIDs: scopeSiteIds}
 	if v := q.Get("building_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -165,7 +165,7 @@ func (h *Handler) listRooms(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	total, err := h.Q.CountRooms(r.Context(), dbq.CountRoomsParams{
-		BuildingID: params.BuildingID, SiteIds: scopeSiteIds,
+		BuildingID: params.BuildingID, SiteIDs: scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
@@ -190,7 +190,7 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusOK, httpx.EmptyPage[dbq.Row](limit, offset))
 		return
 	}
-	params := dbq.ListRowsParams{Limit: limit, Offset: offset, SiteIds: scopeSiteIds}
+	params := dbq.ListRowsParams{Limit: limit, Offset: offset, SiteIDs: scopeSiteIds}
 	if v := q.Get("room_id"); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
@@ -206,7 +206,7 @@ func (h *Handler) listRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	total, err := h.Q.CountRows(r.Context(), dbq.CountRowsParams{
-		RoomID: params.RoomID, SiteIds: scopeSiteIds,
+		RoomID: params.RoomID, SiteIDs: scopeSiteIds,
 	})
 	if err != nil {
 		status, msg := httpx.Mapped(err)

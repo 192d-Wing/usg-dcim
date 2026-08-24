@@ -89,7 +89,7 @@ func (h *Handler) listUserAssignments(w http.ResponseWriter, r *http.Request) {
 // in O(2) round-trips (one for scopes, one for role names) rather
 // than N+1.
 func (h *Handler) hydrateAssignments(
-	ctx context.Context, rows []dbq.UserRoleRow,
+	ctx context.Context, rows []dbq.UserRole,
 ) ([]assignmentOut, error) {
 	if len(rows) == 0 {
 		return []assignmentOut{}, nil
@@ -186,7 +186,7 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 	// Dup-check: a (user, role) pair can only be assigned once.
 	// The UNIQUE constraint would catch a race but the pre-check
 	// gives a clean 409.
-	if _, err := h.Q.FindUserRoleByUserAndRole(r.Context(), req.UserID, req.RoleID); err == nil {
+	if _, err := h.Q.FindUserRoleByUserAndRole(r.Context(), dbq.FindUserRoleByUserAndRoleParams{UserID: req.UserID, RoleID: req.RoleID}); err == nil {
 		httpx.Error(w, http.StatusConflict, "user is already assigned to this role")
 		return
 	} else if !errors.Is(err, pgx.ErrNoRows) {
@@ -194,7 +194,7 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, status, msg)
 		return
 	}
-	assignment, err := h.Q.CreateUserRole(r.Context(), req.UserID, req.RoleID)
+	assignment, err := h.Q.CreateUserRole(r.Context(), dbq.CreateUserRoleParams{UserID: req.UserID, RoleID: req.RoleID})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -218,7 +218,7 @@ func (h *Handler) createAssignment(w http.ResponseWriter, r *http.Request) {
 		TargetType: "user_role",
 		TargetID:   assignment.ID.String(),
 	})
-	out, err := h.hydrateAssignments(r.Context(), []dbq.UserRoleRow{assignment})
+	out, err := h.hydrateAssignments(r.Context(), []dbq.UserRole{assignment})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)

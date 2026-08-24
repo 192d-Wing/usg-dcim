@@ -127,8 +127,8 @@ func EmptyFleetSummary() FleetSummary {
 // insertion order of fabric_ids — same posture as Python's
 // `by_fabric: dict` whose iteration order matches insertion.
 func Aggregate(
-	servers []dbq.DhcpServerDriftSummaryRow,
-	scopesByServer map[uuid.UUID][]dbq.DhcpScopeDriftStatusRow,
+	servers []dbq.ListDhcpServersForDriftSummaryRow,
+	scopesByServer map[uuid.UUID][]dbq.ListDhcpScopeDriftStatusByServersRow,
 	alertCountsByScopeID map[string]int,
 ) (FleetSummary, []FabricSummary, []ServerSummary) {
 	fleet := emptyScopeCounts()
@@ -179,7 +179,7 @@ func Aggregate(
 // last_diff_status maps to "never_pushed"; any status outside the
 // fixed-key set lands in "error" (defensive — matches Python at
 // services/dhcp_drift_summary.py:109-112).
-func tallyServerScopes(scopes []dbq.DhcpScopeDriftStatusRow, alertCountsByScopeID map[string]int) (map[string]int, int) {
+func tallyServerScopes(scopes []dbq.ListDhcpScopeDriftStatusByServersRow, alertCountsByScopeID map[string]int) (map[string]int, int) {
 	counts := emptyScopeCounts()
 	alerts := 0
 	for _, sc := range scopes {
@@ -198,7 +198,7 @@ func tallyServerScopes(scopes []dbq.DhcpScopeDriftStatusRow, alertCountsByScopeI
 
 // buildServerSummary assembles one ServerSummary value. Extracted
 // from Aggregate to keep the main loop body short.
-func buildServerSummary(srv dbq.DhcpServerDriftSummaryRow, counts map[string]int, alerts, scopesTotal int) ServerSummary {
+func buildServerSummary(srv dbq.ListDhcpServersForDriftSummaryRow, counts map[string]int, alerts, scopesTotal int) ServerSummary {
 	return ServerSummary{
 		ServerID:       srv.ID.String(),
 		ServerName:     srv.Name,
@@ -267,8 +267,8 @@ func AlertCountsByScopeID(dedupeKeys []string) map[string]int {
 }
 
 // ScopesByServer indexes the flat scope result by server id.
-func ScopesByServer(rows []dbq.DhcpScopeDriftStatusRow) map[uuid.UUID][]dbq.DhcpScopeDriftStatusRow {
-	out := map[uuid.UUID][]dbq.DhcpScopeDriftStatusRow{}
+func ScopesByServer(rows []dbq.ListDhcpScopeDriftStatusByServersRow) map[uuid.UUID][]dbq.ListDhcpScopeDriftStatusByServersRow {
+	out := map[uuid.UUID][]dbq.ListDhcpScopeDriftStatusByServersRow{}
 	for _, r := range rows {
 		out[r.DhcpServerID] = append(out[r.DhcpServerID], r)
 	}

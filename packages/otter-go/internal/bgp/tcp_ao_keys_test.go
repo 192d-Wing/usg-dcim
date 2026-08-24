@@ -52,7 +52,7 @@ func (f *tcpAoKeysFake) ListTcpAoKeys(_ context.Context, a dbq.ListTcpAoKeysPara
 	f.lastListKeys = a
 	return f.listKeysResult, nil
 }
-func (f *tcpAoKeysFake) CountTcpAoKeys(_ context.Context, _ dbq.CountTcpAoKeysParams) (int64, error) {
+func (f *tcpAoKeysFake) CountTcpAoKeys(_ context.Context, _ *uuid.UUID) (int64, error) {
 	return int64(len(f.listKeysResult)), nil
 }
 func (f *tcpAoKeysFake) CreateTcpAoKey(ctx context.Context, a dbq.CreateTcpAoKeyParams) (dbq.TcpAoKey, error) {

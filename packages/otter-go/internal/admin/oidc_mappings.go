@@ -60,7 +60,7 @@ type oidcMappingOut struct {
 // in two round-trips total (rows + role-name lookup). Matches the
 // pattern used by listUserAssignments.
 func (h *Handler) hydrateMappings(
-	r *http.Request, rows []dbq.OidcRoleMappingRow,
+	r *http.Request, rows []dbq.OidcRoleMapping,
 ) ([]oidcMappingOut, error) {
 	if len(rows) == 0 {
 		return []oidcMappingOut{}, nil
@@ -199,7 +199,7 @@ func (h *Handler) createOidcMapping(w http.ResponseWriter, r *http.Request) {
 		TargetType: "oidc_role_mapping",
 		TargetID:   out.ID.String(),
 	})
-	hydrated, err := h.hydrateMappings(r, []dbq.OidcRoleMappingRow{out})
+	hydrated, err := h.hydrateMappings(r, []dbq.OidcRoleMapping{out})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
@@ -305,7 +305,7 @@ func (h *Handler) updateOidcMapping(w http.ResponseWriter, r *http.Request) {
 		TargetType: "oidc_role_mapping",
 		TargetID:   id.String(),
 	})
-	hydrated, err := h.hydrateMappings(r, []dbq.OidcRoleMappingRow{out})
+	hydrated, err := h.hydrateMappings(r, []dbq.OidcRoleMapping{out})
 	if err != nil {
 		status, msg := httpx.Mapped(err)
 		httpx.Error(w, status, msg)
