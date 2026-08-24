@@ -646,7 +646,7 @@ func resolveUserScopes(rows []dbq.GetUserScopedCapabilitiesRow) map[string]Scope
 	out := map[string]Scope{}
 	for _, r := range rows {
 		s := out[r.Code]
-		add := scopeRowToDimension(&r.ScopeType, r.TargetID)
+		add := scopeRowToDimension(r.ScopeType, r.TargetID)
 		out[r.Code] = s.Union(add)
 	}
 	return out

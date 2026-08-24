@@ -77,7 +77,7 @@ ORDER BY day;
 -- visualization). ENUMs cast to ::text per convention.
 SELECT *
 FROM assets
-WHERE rack_id = $1
+WHERE rack_id = sqlc.arg(rack_id)::uuid
 ORDER BY rack_position_u ASC NULLS LAST;
 
 -- name: ListOpenAlertsByAssetIDs :many
@@ -164,7 +164,7 @@ WHERE site_id = $1;
 -- the rollup `total` field.
 SELECT severity::text AS severity, COUNT(id)::bigint AS n
 FROM alerts
-WHERE site_id = $1 AND state = 'firing'
+WHERE site_id = sqlc.arg(site_id)::uuid AND state = 'firing'
 GROUP BY severity;
 
 -- name: ListSiteCollectors :many
@@ -226,7 +226,7 @@ SELECT metric, unit, source_system,
        freshness::text AS freshness,
        last_value, last_reading_at, last_success_at, poll_interval_seconds
 FROM telemetry_sources
-WHERE asset_id = $1
+WHERE asset_id = sqlc.arg(asset_id)::uuid
 ORDER BY metric;
 
 -- name: ListAssetIPAddresses :many
@@ -238,7 +238,7 @@ SELECT id, subnet_id,
        role::text AS role, status::text AS status, source::text AS source,
        dns_name, description, dhcp_lease_expires_at
 FROM ip_addresses
-WHERE asset_id = $1
+WHERE asset_id = sqlc.arg(asset_id)::uuid
 ORDER BY role, address;
 
 -- name: ListRecentAssetAlerts :many
@@ -246,7 +246,7 @@ ORDER BY role, address;
 SELECT id, severity::text AS severity, state::text AS state,
        summary, first_seen_at, last_seen_at
 FROM alerts
-WHERE asset_id = $1
+WHERE asset_id = sqlc.arg(asset_id)::uuid
 ORDER BY last_seen_at DESC
 LIMIT 10;
 

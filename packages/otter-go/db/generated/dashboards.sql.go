@@ -124,7 +124,7 @@ SELECT id, subnet_id,
        role::text AS role, status::text AS status, source::text AS source,
        dns_name, description, dhcp_lease_expires_at
 FROM ip_addresses
-WHERE asset_id = $1
+WHERE asset_id = $1::uuid
 ORDER BY role, address
 `
 
@@ -143,7 +143,7 @@ type ListAssetIPAddressesRow struct {
 // ORDER BY role asc, address asc matches Python. host(address)
 // strips the prefix length so finch gets the bare host string
 // (same trick the search handler uses).
-func (q *Queries) ListAssetIPAddresses(ctx context.Context, assetID *uuid.UUID) ([]ListAssetIPAddressesRow, error) {
+func (q *Queries) ListAssetIPAddresses(ctx context.Context, assetID uuid.UUID) ([]ListAssetIPAddressesRow, error) {
 	rows, err := q.db.Query(ctx, listAssetIPAddresses, assetID)
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ SELECT metric, unit, source_system,
        freshness::text AS freshness,
        last_value, last_reading_at, last_success_at, poll_interval_seconds
 FROM telemetry_sources
-WHERE asset_id = $1
+WHERE asset_id = $1::uuid
 ORDER BY metric
 `
 
@@ -291,7 +291,7 @@ const listAssetsByRackOrdered = `-- name: ListAssetsByRackOrdered :many
 
 SELECT site_id, rack_id, parent_asset_id, name, hostname, kind, manufacturer, model, serial, firmware, rack_position_u, rack_units, mgmt_ip, mgmt_protocol, mgmt_port, mgmt_credentials_ref, lifecycle_state, install_date, warranty_expires, metadata_json, id, created_at, updated_at, face, mount, pdu_side, psu_count, port_count
 FROM assets
-WHERE rack_id = $1
+WHERE rack_id = $1::uuid
 ORDER BY rack_position_u ASC NULLS LAST
 `
 
@@ -301,7 +301,7 @@ ORDER BY rack_position_u ASC NULLS LAST
 // capacity reuses internal/capacity.
 // Order by rack_position_u asc nulls last (Python parity for the rack
 // visualization). ENUMs cast to ::text per convention.
-func (q *Queries) ListAssetsByRackOrdered(ctx context.Context, rackID *uuid.UUID) ([]Asset, error) {
+func (q *Queries) ListAssetsByRackOrdered(ctx context.Context, rackID uuid.UUID) ([]Asset, error) {
 	rows, err := q.db.Query(ctx, listAssetsByRackOrdered, rackID)
 	if err != nil {
 		return nil, err
@@ -822,7 +822,7 @@ const listRecentAssetAlerts = `-- name: ListRecentAssetAlerts :many
 SELECT id, severity::text AS severity, state::text AS state,
        summary, first_seen_at, last_seen_at
 FROM alerts
-WHERE asset_id = $1
+WHERE asset_id = $1::uuid
 ORDER BY last_seen_at DESC
 LIMIT 10
 `
@@ -837,7 +837,7 @@ type ListRecentAssetAlertsRow struct {
 }
 
 // 10 most-recent alerts on the asset, ordered by last_seen_at desc.
-func (q *Queries) ListRecentAssetAlerts(ctx context.Context, assetID *uuid.UUID) ([]ListRecentAssetAlertsRow, error) {
+func (q *Queries) ListRecentAssetAlerts(ctx context.Context, assetID uuid.UUID) ([]ListRecentAssetAlertsRow, error) {
 	rows, err := q.db.Query(ctx, listRecentAssetAlerts, assetID)
 	if err != nil {
 		return nil, err
@@ -961,7 +961,7 @@ func (q *Queries) ListRowsByRoomIDs(ctx context.Context, dollar_1 []uuid.UUID) (
 const listSiteAlertsBySeverity = `-- name: ListSiteAlertsBySeverity :many
 SELECT severity::text AS severity, COUNT(id)::bigint AS n
 FROM alerts
-WHERE site_id = $1 AND state = 'firing'
+WHERE site_id = $1::uuid AND state = 'firing'
 GROUP BY severity
 `
 
@@ -973,7 +973,7 @@ type ListSiteAlertsBySeverityRow struct {
 // Aggregation for the site KPI block — firing alert counts grouped
 // by severity. Caller fans out into the `{severity: count}` dict +
 // the rollup `total` field.
-func (q *Queries) ListSiteAlertsBySeverity(ctx context.Context, siteID *uuid.UUID) ([]ListSiteAlertsBySeverityRow, error) {
+func (q *Queries) ListSiteAlertsBySeverity(ctx context.Context, siteID uuid.UUID) ([]ListSiteAlertsBySeverityRow, error) {
 	rows, err := q.db.Query(ctx, listSiteAlertsBySeverity, siteID)
 	if err != nil {
 		return nil, err

@@ -293,7 +293,7 @@ func (q *Queries) GetSubnetFabricID(ctx context.Context, id uuid.UUID) (uuid.UUI
 const getUserScopedCapabilities = `-- name: GetUserScopedCapabilities :many
 SELECT
     jsonb_array_elements_text(r.permission_codes::jsonb) AS code,
-    rs.scope_type::text AS scope_type,
+    rs.scope_type,
     rs.target_id
 FROM user_roles ur
 JOIN roles r ON r.id = ur.role_id
@@ -303,7 +303,7 @@ WHERE ur.user_id = $1
 
 type GetUserScopedCapabilitiesRow struct {
 	Code      string  `json:"code"`
-	ScopeType string  `json:"scope_type"`
+	ScopeType *string `json:"scope_type"`
 	TargetID  *string `json:"target_id"`
 }
 

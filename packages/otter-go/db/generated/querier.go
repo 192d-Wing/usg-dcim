@@ -968,7 +968,7 @@ type Querier interface {
 	// ORDER BY role asc, address asc matches Python. host(address)
 	// strips the prefix length so finch gets the bare host string
 	// (same trick the search handler uses).
-	ListAssetIPAddresses(ctx context.Context, assetID *uuid.UUID) ([]ListAssetIPAddressesRow, error)
+	ListAssetIPAddresses(ctx context.Context, assetID uuid.UUID) ([]ListAssetIPAddressesRow, error)
 	// ---- /dashboards/assets/{asset_id} (Phase 2c) — asset health view ----
 	// The endpoint loads the asset entity + telemetry-source freshness +
 	// bound IPs + 10 most-recent alerts. One round-trip per joined surface
@@ -987,7 +987,7 @@ type Querier interface {
 	// capacity reuses internal/capacity.
 	// Order by rack_position_u asc nulls last (Python parity for the rack
 	// visualization). ENUMs cast to ::text per convention.
-	ListAssetsByRackOrdered(ctx context.Context, rackID *uuid.UUID) ([]Asset, error)
+	ListAssetsByRackOrdered(ctx context.Context, rackID uuid.UUID) ([]Asset, error)
 	// Same projection as ListAssetsByRackIDs but anchored to a single
 	// site. ENUMs cast to ::text matching the codebase convention.
 	ListAssetsBySite(ctx context.Context, siteID uuid.UUID) ([]Asset, error)
@@ -1350,7 +1350,7 @@ type Querier interface {
 	// Python ANDs them — match that.
 	ListRacksForFreeSpace(ctx context.Context, arg ListRacksForFreeSpaceParams) ([]Rack, error)
 	// 10 most-recent alerts on the asset, ordered by last_seen_at desc.
-	ListRecentAssetAlerts(ctx context.Context, assetID *uuid.UUID) ([]ListRecentAssetAlertsRow, error)
+	ListRecentAssetAlerts(ctx context.Context, assetID uuid.UUID) ([]ListRecentAssetAlertsRow, error)
 	// Used by handler-side ABAC: collapse the in-scope site list to the
 	// regions that contain them, since the Python `list_regions` filter is
 	// "show regions that contain at least one in-scope site."
@@ -1393,7 +1393,7 @@ type Querier interface {
 	// Aggregation for the site KPI block — firing alert counts grouped
 	// by severity. Caller fans out into the `{severity: count}` dict +
 	// the rollup `total` field.
-	ListSiteAlertsBySeverity(ctx context.Context, siteID *uuid.UUID) ([]ListSiteAlertsBySeverityRow, error)
+	ListSiteAlertsBySeverity(ctx context.Context, siteID uuid.UUID) ([]ListSiteAlertsBySeverityRow, error)
 	// Per-site collector list. Caller computes the by-status breakdown +
 	// the stale count using its own stale_threshold (same env var the
 	// enterprise overview reads).
