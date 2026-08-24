@@ -125,9 +125,8 @@ jobs:
           go-version: '1.26.5'
           cache-dependency-path: packages/otter-go/go.sum
 
-      - name: Install sqlc (pinned)
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
-
+      # sqlc runs via the go.mod `tool` directive — version and hashes
+      # are pinned by go.mod/go.sum like any other dependency.
       - name: Migrate
         env:
           DCIM_POSTGRES_DSN: postgres://dcim:dcim@localhost:5432/dcim
@@ -148,7 +147,7 @@ jobs:
 
       - name: sqlc generate
         working-directory: packages/otter-go/db
-        run: sqlc generate
+        run: go tool sqlc generate
 
       - name: Fail on drift
         run: |

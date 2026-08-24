@@ -20,4 +20,4 @@ tasks:
     desc: Regenerate db/generated from db/queries via sqlc
     dir: ../../packages/otter-go/db
     cmds:
-      - sqlc generate
+      - go tool sqlc generate

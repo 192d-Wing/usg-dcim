@@ -14,7 +14,7 @@ sql:
       #         if ($0 ~ /_timescaledb_internal|timescaledb\.continuous/) drop=1;
       #         if ($0 ~ /;[[:space:]]*$/) { if (!drop) printf "%s", buf; buf=""; drop=0 } }
       #         END { if (!drop) printf "%s", buf }' > db/schema.sql
-      #   cd db && sqlc generate
+      #   cd db && go tool sqlc generate
       # schema.sql is gitignored; CI regenerates it from a migrated
       # Postgres service container and fails on generated/ drift.
       - schema.sql
