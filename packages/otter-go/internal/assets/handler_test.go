@@ -20,6 +20,16 @@ type fakeQ struct {
 	last     dbq.ListAssetsParams
 	seeded   []dbq.SeedPduOutletsParams
 	seedFail bool
+
+	// Hard-delete knobs. asset, when set, is what GetAsset returns
+	// (nil keeps the ErrNoRows default); the counters feed the 409
+	// guards; the slices record which cleanup calls actually ran.
+	asset         *dbq.Asset
+	childCount    int64
+	cableCount    int64
+	detachedIPs   []uuid.UUID
+	deletedAlerts []uuid.UUID
+	deletedAssets []uuid.UUID
 }
 
 func (f *fakeQ) SeedPduOutlets(_ context.Context, a dbq.SeedPduOutletsParams) (int64, error) {
@@ -38,7 +48,28 @@ func (f *fakeQ) CountAssets(_ context.Context, _ dbq.CountAssetsParams) (int64, 
 	return 0, nil
 }
 func (f *fakeQ) GetAsset(_ context.Context, _ uuid.UUID) (dbq.Asset, error) {
+	if f.asset != nil {
+		return *f.asset, nil
+	}
 	return dbq.Asset{}, pgx.ErrNoRows
+}
+func (f *fakeQ) CountChildAssets(_ context.Context, _ *uuid.UUID) (int64, error) {
+	return f.childCount, nil
+}
+func (f *fakeQ) CountCablesForAsset(_ context.Context, _ uuid.UUID) (int64, error) {
+	return f.cableCount, nil
+}
+func (f *fakeQ) DetachIPAddressesFromAsset(_ context.Context, assetID *uuid.UUID) (int64, error) {
+	f.detachedIPs = append(f.detachedIPs, *assetID)
+	return 0, nil
+}
+func (f *fakeQ) DeleteAlertsForAsset(_ context.Context, assetID *uuid.UUID) (int64, error) {
+	f.deletedAlerts = append(f.deletedAlerts, *assetID)
+	return 0, nil
+}
+func (f *fakeQ) DeleteAsset(_ context.Context, id uuid.UUID) (int64, error) {
+	f.deletedAssets = append(f.deletedAssets, id)
+	return 1, nil
 }
 func (f *fakeQ) CreateAsset(_ context.Context, a dbq.CreateAssetParams) (dbq.Asset, error) {
 	return dbq.Asset{ID: uuid.New(), SiteID: a.SiteID, Name: a.Name, Kind: a.Kind,

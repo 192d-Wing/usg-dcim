@@ -25,11 +25,21 @@ export function uniq(): string {
   return Date.now().toString(36).slice(-6);
 }
 
-/** Drive the real login UI (local-credentials disclosure included). */
+/**
+ * Drive the real login UI. Since /auth/methods went backend-driven,
+ * the local form is immediately visible when SSO is off (this
+ * stack); the "use local credentials" disclosure only exists on
+ * SSO-enabled stacks — click it if it's there.
+ */
 export async function loginViaUi(page: Page): Promise<void> {
   await page.goto('/login');
-  await page.getByRole('button', { name: /use local credentials/i }).click();
-  await page.getByLabel('Email').fill(CREDS.email);
+  const disclosure = page.getByRole('button', { name: /use local credentials/i });
+  const emailField = page.getByLabel('Email');
+  await expect(emailField.or(disclosure).first()).toBeVisible();
+  if (await disclosure.isVisible()) {
+    await disclosure.click();
+  }
+  await emailField.fill(CREDS.email);
   await page.getByLabel('Password').fill(CREDS.password);
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.locator('a[href="/sites"]').first()).toBeVisible();
@@ -85,8 +95,22 @@ export class Api {
     expect(r.ok(), `DELETE ${path}: ${r.status()}`).toBeTruthy();
   }
 
-  /** A fresh rack for this run in the fixture row (racks have no
-   *  DELETE, so per-run racks isolate specs from each other). */
+  /** Best-effort teardown for a per-run rack: hard-DELETEs its assets
+   *  (child-asset/cable guards permitting), then the rack itself.
+   *  Returns true when the rack is gone; false when a 409 guard (or
+   *  anything else) kept it — callers treat that as non-fatal, the
+   *  per-run rack just lingers like it always used to. */
+  async deleteRunRack(rackId: string): Promise<boolean> {
+    const assets = await this.list('/inventory/assets', { rack_id: rackId });
+    for (const a of assets) {
+      await this.rq.delete(`${this.base}/api/v1/inventory/assets/${a.id}`, { headers: this.headers() });
+    }
+    const r = await this.rq.delete(`${this.base}/api/v1/inventory/racks/${rackId}`, { headers: this.headers() });
+    return r.ok();
+  }
+
+  /** A fresh rack for this run in the fixture row (per-run racks
+   *  isolate specs from each other; deleteRunRack tears one down). */
   async createRunRack(code: string): Promise<{ rackId: string; siteId: string }> {
     const { siteId } = await this.ensureFixtures();
     const bldg = (await this.list('/inventory/buildings', { site_id: siteId }))

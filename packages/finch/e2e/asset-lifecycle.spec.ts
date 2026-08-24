@@ -1,9 +1,10 @@
 // Asset lifecycle on the rack page: add a device through the modal
 // (slot collision validation included), the rack-edit orphan guard,
-// moving a device, and decommissioning it from the asset page.
-// Assets have no DELETE API (decommission is a lifecycle state), so
-// each run works in its own freshly created rack under the E2E-RACKS
-// fixture building and leaves only inert decommissioned assets.
+// moving a device, decommissioning it from the asset page, then hard-
+// deleting the device and finally the per-run rack (delete is the
+// mistakes/test-hygiene path; decommission stays the lifecycle path).
+// Each run works in its own freshly created rack under the E2E-RACKS
+// fixture building and now cleans up after itself via the deletes.
 import { test, expect, type Page } from '@playwright/test';
 import { Api, FIXTURES, uniq } from './helpers';
 
@@ -123,4 +124,40 @@ test('device opens from the table and decommissions from its page', async ({ pag
   // canDecommission goes false once the state lands — the button is
   // the observable proof the page refreshed into the new state.
   await expect(page.getByRole('button', { name: 'Decommission' })).toBeHidden();
+});
+
+// Hard delete is the UX-debt batch addition: decommission only flips
+// lifecycle_state, so deleting the already-decommissioned device must
+// work — and doing it last leaves the rack empty for its own delete.
+test('delete the decommissioned device from its page', async ({ page }) => {
+  await page.goto(`/racks/${rackId}`);
+  await devicesTable(page).getByRole('row', { name: new RegExp(assetName) }).click();
+  await expect(page).toHaveURL(/\/assets\/[0-9a-f-]+/);
+
+  await page.getByRole('button', { name: 'Delete device' }).click();
+  const modal = page.getByRole('dialog');
+  await expect(modal.getByText(`Delete ${assetName}?`)).toBeVisible();
+  await modal.getByRole('button', { name: 'Delete', exact: true }).click();
+
+  await expect(page.getByText(`${assetName} deleted`).first()).toBeVisible();
+  // Success navigates back to the rack; the device must be gone.
+  await expect(page).toHaveURL(new RegExp(`/racks/${rackId}`));
+  await expect(page.locator('h1:visible').first()).toContainText(rackCode);
+  await expect(devicesTable(page).getByRole('row', { name: new RegExp(assetName) })).toBeHidden();
+});
+
+test('delete the emptied per-run rack from its page', async ({ page }) => {
+  await page.goto(`/racks/${rackId}`);
+  await expect(page.locator('h1:visible').first()).toContainText(rackCode);
+
+  await page.getByRole('button', { name: 'Delete rack' }).click();
+  const modal = page.getByRole('dialog');
+  await expect(modal.getByText(`Delete ${rackCode}?`)).toBeVisible();
+  await modal.getByRole('button', { name: 'Delete', exact: true }).click();
+
+  await expect(page.getByText(`Rack ${rackCode} deleted`).first()).toBeVisible();
+  // Success lands on the racks list, minus the deleted rack.
+  await expect(page).toHaveURL(/\/racks$/);
+  await expect(page.getByRole('heading', { name: 'Racks' })).toBeVisible();
+  await expect(page.getByRole('link', { name: new RegExp(rackCode) })).toBeHidden();
 });

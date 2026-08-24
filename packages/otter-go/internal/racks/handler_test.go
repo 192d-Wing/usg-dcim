@@ -20,6 +20,11 @@ type fakeQ struct {
 	list   func(ctx context.Context, a dbq.ListRacksParams) ([]dbq.Rack, error)
 	get    func(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
 	update func(ctx context.Context, a dbq.UpdateRackParams) (dbq.Rack, error)
+
+	// Hard-delete knobs: assetCount feeds CountAssetsInRack, deleted
+	// records the ids DeleteRack was called with.
+	assetCount int64
+	deleted    []uuid.UUID
 }
 
 func (f *fakeQ) ListRacks(ctx context.Context, a dbq.ListRacksParams) ([]dbq.Rack, error) {
@@ -46,6 +51,13 @@ func (f *fakeQ) UpdateRack(ctx context.Context, a dbq.UpdateRackParams) (dbq.Rac
 }
 func (f *fakeQ) GetRackAssetsForShrinkCheck(_ context.Context, _ uuid.UUID) ([]dbq.GetRackAssetsForShrinkCheckRow, error) {
 	return nil, nil
+}
+func (f *fakeQ) CountAssetsInRack(_ context.Context, _ *uuid.UUID) (int64, error) {
+	return f.assetCount, nil
+}
+func (f *fakeQ) DeleteRack(_ context.Context, id uuid.UUID) (int64, error) {
+	f.deleted = append(f.deleted, id)
+	return 1, nil
 }
 func (f *fakeQ) GetSiteRegionID(_ context.Context, _ uuid.UUID) (uuid.UUID, error) {
 	return uuid.Nil, nil

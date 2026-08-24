@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
@@ -15,6 +16,7 @@ import ColumnLayout from '@cloudscape-design/components/column-layout';
 import Container from '@cloudscape-design/components/container';
 import ContentLayout from '@cloudscape-design/components/content-layout';
 import Header from '@cloudscape-design/components/header';
+import Modal from '@cloudscape-design/components/modal';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 import Spinner from '@cloudscape-design/components/spinner';
 import StatusIndicator, { StatusIndicatorProps } from '@cloudscape-design/components/status-indicator';
@@ -68,7 +70,9 @@ export function AssetShowPage() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [decomOpen, setDecomOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const canWrite = hasCapability('inventory:assets:update');
+  const canDelete = hasCapability('inventory:assets:delete');
   const detail = useQuery({
     queryKey: ['asset-detail', id],
     queryFn: async () => (await http.get<AssetDetail>(`/dashboards/assets/${id}`)).data,
@@ -117,6 +121,11 @@ export function AssetShowPage() {
                   Decommission
                 </Button>
               )}
+              {canDelete && (
+                <Button onClick={() => setDeleteOpen(true)} iconName="close">
+                  Delete device
+                </Button>
+              )}
               {a.lifecycle_state === 'active'
                 ? <StatusIndicator type="success">{a.lifecycle_state}</StatusIndicator>
                 : <StatusIndicator type="warning">{a.lifecycle_state}</StatusIndicator>}
@@ -137,6 +146,21 @@ export function AssetShowPage() {
           onOpenChange={setDecomOpen}
           onDecommissioned={() => qc.invalidateQueries({ queryKey: ['asset-detail', id] })}
         />
+
+        {canDelete && deleteOpen && (
+          <DeleteAssetModal
+            asset={{ id: a.id, name: a.name, kind: a.kind }}
+            onDismiss={() => setDeleteOpen(false)}
+            onDeleted={() => {
+              // The rack page caches its detail for 30s (staleTime) —
+              // mark it stale so the Devices table can't resurrect
+              // the deleted device on the way back.
+              qc.invalidateQueries({ queryKey: ['rack-detail'] });
+              if (a.rack_id) nav(`/racks/${a.rack_id}`);
+              else nav('/racks');
+            }}
+          />
+        )}
 
         <Container header={<Header variant="h2">Details</Header>}>
           <ColumnLayout columns={6} variant="text-grid">
@@ -242,6 +266,57 @@ export function AssetShowPage() {
         />
       </SpaceBetween>
     </ContentLayout>
+  );
+}
+
+// Hard delete — for mistakes and test hygiene; decommission stays the
+// lifecycle path. Child assets and logged cables make the backend
+// refuse with 409, and that message surfaces verbatim in the toast.
+function DeleteAssetModal({
+  asset, onDismiss, onDeleted,
+}: Readonly<{
+  asset: { id: string; name: string; kind: string };
+  onDismiss: () => void;
+  onDeleted: () => void;
+}>) {
+  const [submitting, setSubmitting] = useState(false);
+
+  async function onConfirm() {
+    setSubmitting(true);
+    try {
+      await http.delete(`/inventory/assets/${asset.id}`);
+      toast.success(`${asset.name} deleted`);
+      onDeleted();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed to delete asset');
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      visible
+      onDismiss={onDismiss}
+      header={`Delete ${asset.name}?`}
+      footer={
+        <Box float="right">
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button onClick={onDismiss}>Cancel</Button>
+            <Button variant="primary" loading={submitting} onClick={onConfirm}>
+              Delete
+            </Button>
+          </SpaceBetween>
+        </Box>
+      }
+    >
+      <Box>
+        This permanently removes <b>{asset.name}</b> ({asset.kind}) from
+        inventory — unlike decommission, nothing is kept for historical
+        reports. IP bindings detach and this asset's alerts are dropped.
+        Devices with child assets or logged cables can't be deleted until
+        those are removed.
+      </Box>
+    </Modal>
   );
 }
 

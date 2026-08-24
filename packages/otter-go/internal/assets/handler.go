@@ -35,6 +35,17 @@ type Querier interface {
 	DeleteConsumerPowerConnections(ctx context.Context, assetID uuid.UUID) error
 	DeletePduPowerConnections(ctx context.Context, pduAssetID uuid.UUID) error
 
+	// Hard delete (UX-debt batch). Decommission remains the lifecycle
+	// path; DELETE is for mistakes and test hygiene. Guards: child
+	// assets and logged cables refuse the delete (409); IP bindings
+	// detach and alerts drop; outlets + power connections ride the
+	// schema's ON DELETE CASCADE.
+	CountChildAssets(ctx context.Context, parentAssetID *uuid.UUID) (int64, error)
+	CountCablesForAsset(ctx context.Context, assetID uuid.UUID) (int64, error)
+	DetachIPAddressesFromAsset(ctx context.Context, assetID *uuid.UUID) (int64, error)
+	DeleteAlertsForAsset(ctx context.Context, assetID *uuid.UUID) (int64, error)
+	DeleteAsset(ctx context.Context, id uuid.UUID) (int64, error)
+
 	// Placement invariants (PR 51)
 	GetRack(ctx context.Context, id uuid.UUID) (dbq.Rack, error)
 	ListRackAssetsForPlacement(ctx context.Context, arg dbq.ListRackAssetsForPlacementParams) ([]dbq.ListRackAssetsForPlacementRow, error)
@@ -74,6 +85,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability("inventory:assets:create")).Post("/assets", h.create)
 	r.With(auth.RequireCapability("inventory:assets:update")).Patch("/assets/{id}", h.update)
 	r.With(auth.RequireCapability("inventory:assets:update")).Post("/assets/{id}/decommission", h.decommission)
+	r.With(auth.RequireCapability("inventory:assets:delete")).Delete("/assets/{id}", h.delete)
 	r.With(auth.RequireCapability("inventory:bulk:execute")).Post("/assets/bulk", h.bulkUpsert)
 }
 

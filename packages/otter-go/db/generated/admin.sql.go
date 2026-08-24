@@ -697,6 +697,28 @@ func (q *Queries) ListUserAssignments(ctx context.Context, userID uuid.UUID) ([]
 	return items, nil
 }
 
+const setUserPasswordHash = `-- name: SetUserPasswordHash :execrows
+UPDATE users SET password_hash = $1::text,
+                 updated_at = NOW()
+WHERE id = $2
+`
+
+type SetUserPasswordHashParams struct {
+	PasswordHash string    `json:"password_hash"`
+	ID           uuid.UUID `json:"id"`
+}
+
+// Local password set/reset for admin-created users (UX-debt batch).
+// The handler bcrypts; NULL is never written here — clearing a
+// password isn't offered.
+func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setUserPasswordHash, arg.PasswordHash, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateAdminRole = `-- name: UpdateAdminRole :one
 UPDATE roles
 SET description     = CASE WHEN $2::bool THEN $3::text ELSE description END,

@@ -111,10 +111,20 @@ type Querier interface {
 	CountAsns(ctx context.Context, kind *string) (int64, error)
 	CountAsnsForOrganization(ctx context.Context, orgID uuid.UUID) (int64, error)
 	CountAssets(ctx context.Context, arg CountAssetsParams) (int64, error)
+	CountAssetsInRack(ctx context.Context, rackID *uuid.UUID) (int64, error)
 	CountAuditLog(ctx context.Context, arg CountAuditLogParams) (int64, error)
 	CountBgpPeers(ctx context.Context, arg CountBgpPeersParams) (int64, error)
 	CountBuildings(ctx context.Context, arg CountBuildingsParams) (int64, error)
 	CountCables(ctx context.Context, arg CountCablesParams) (int64, error)
+	CountCablesForAsset(ctx context.Context, assetID uuid.UUID) (int64, error)
+	// ===== Hard delete (UX-debt batch) =====
+	// Decommission remains the lifecycle path; DELETE is for mistakes
+	// and test hygiene. Guards are enforced by the handler: child
+	// assets and cables refuse the delete (409), IP bindings detach,
+	// alerts purge, and outlets + power drops ride the FK cascades.
+	// Telemetry-instrumented assets still refuse via the RESTRICT FKs
+	// (mapped to a conflict error).
+	CountChildAssets(ctx context.Context, parentAssetID *uuid.UUID) (int64, error)
 	CountCollectors(ctx context.Context, arg CountCollectorsParams) (int64, error)
 	CountCommunityListEntries(ctx context.Context, communityListID *uuid.UUID) (int64, error)
 	CountCommunityLists(ctx context.Context, kind *string) (int64, error)
@@ -390,12 +400,14 @@ type Querier interface {
 	// still caught by the FK constraint).
 	DeleteAdminRole(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteAlertRule(ctx context.Context, id uuid.UUID) error
+	DeleteAlertsForAsset(ctx context.Context, assetID *uuid.UUID) (int64, error)
 	// Hard-delete every key for a zone. Returns the deleted rows so the
 	// audit record can list retired key tags. Used by disable-dnssec.
 	DeleteAllDnsKeysForZone(ctx context.Context, zoneID uuid.UUID) ([]DnsKey, error)
 	DeleteAnycastBinding(ctx context.Context, id uuid.UUID) error
 	DeleteAnycastGroup(ctx context.Context, id uuid.UUID) error
 	DeleteAsn(ctx context.Context, id uuid.UUID) error
+	DeleteAsset(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteBgpPeer(ctx context.Context, id uuid.UUID) error
 	// Deletes rely on FK constraints to refuse when downstream rows
 	// (rooms in a building, rows in a room, racks in a row) still exist.
@@ -452,6 +464,7 @@ type Querier interface {
 	DeletePduPowerConnections(ctx context.Context, pduAssetID uuid.UUID) error
 	DeletePrefixList(ctx context.Context, id uuid.UUID) error
 	DeletePrefixListEntry(ctx context.Context, id uuid.UUID) error
+	DeleteRack(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteRoleScopesForAssignment(ctx context.Context, assignmentID uuid.UUID) error
 	DeleteRoom(ctx context.Context, id uuid.UUID) error
 	DeleteRouteMap(ctx context.Context, id uuid.UUID) error
@@ -484,6 +497,7 @@ type Querier interface {
 	// work, but losing the explicit step would also lose the audit trail
 	// for the cascade).
 	DetachAllPoolSupernets(ctx context.Context, poolID uuid.UUID) error
+	DetachIPAddressesFromAsset(ctx context.Context, assetID *uuid.UUID) (int64, error)
 	DetachSupernetFromPool(ctx context.Context, arg DetachSupernetFromPoolParams) error
 	// ===== Collectors =====
 	// Creates a pending collector row with the hashed enrollment token.
@@ -1677,6 +1691,10 @@ type Querier interface {
 	// (rotate-key, sync-from-ipam) bumps updated_at separately when
 	// the change should propagate to resolvers.
 	SetDnsZoneSigned(ctx context.Context, arg SetDnsZoneSignedParams) (int64, error)
+	// Local password set/reset for admin-created users (UX-debt batch).
+	// The handler bcrypts; NULL is never written here — clearing a
+	// password isn't offered.
+	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) (int64, error)
 	// Site-id walkers for ABAC. Room → building → site, row → room →
 	// building → site. Used by the locations PATCH/DELETE handlers to
 	// resolve a row/room/building to its owning site for EnforceSiteScope.

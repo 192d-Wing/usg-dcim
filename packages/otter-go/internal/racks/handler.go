@@ -27,6 +27,11 @@ type Querier interface {
 	UpdateRack(ctx context.Context, arg dbq.UpdateRackParams) (dbq.Rack, error)
 	GetRackAssetsForShrinkCheck(ctx context.Context, rackID uuid.UUID) ([]dbq.GetRackAssetsForShrinkCheckRow, error)
 
+	// Hard delete (UX-debt batch). Decommission remains the asset
+	// lifecycle path; rack DELETE is for mistakes and test hygiene.
+	CountAssetsInRack(ctx context.Context, rackID *uuid.UUID) (int64, error)
+	DeleteRack(ctx context.Context, id uuid.UUID) (int64, error)
+
 	// PR 54: ABAC SiteMatches expansion.
 	GetSiteRegionID(ctx context.Context, id uuid.UUID) (uuid.UUID, error)
 	GetSiteOrganizationID(ctx context.Context, id uuid.UUID) (*uuid.UUID, error)
@@ -48,6 +53,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.With(auth.RequireCapability(capRacksRead)).Get("/racks/{id}", h.get)
 	r.With(auth.RequireCapability("inventory:racks:create")).Post("/racks", h.create)
 	r.With(auth.RequireCapability("inventory:racks:update")).Patch("/racks/{id}", h.update)
+	r.With(auth.RequireCapability("inventory:racks:delete")).Delete("/racks/{id}", h.delete)
 }
 
 type listResponse = httpx.Page[dbq.Rack]

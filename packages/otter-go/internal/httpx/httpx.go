@@ -28,6 +28,30 @@ func Error(w http.ResponseWriter, status int, msg string) {
 	JSON(w, status, map[string]string{"detail": msg})
 }
 
+// DecodeJSON decodes the request body into dst. On failure it writes
+// 400 {"detail": "invalid request body: <decode error>"} and returns
+// false so handlers can short-circuit:
+//
+//	var req createReq
+//	if !httpx.DecodeJSON(w, r, &req) { return }
+//
+// The decode error's own text is surfaced because it names the actual
+// problem (e.g. `json: cannot unmarshal number into Go struct field
+// createReq.length_m of type string`). The old pattern — folding the
+// decode error into the handler's field-validation branch — produced
+// misleading 400s: a wire-type mismatch on length_m surfaced as
+// "a_asset_id and b_asset_id required". encoding/json error strings
+// are short and carry no request payload, so echoing them is bounded
+// and safe. Field-presence validation stays in the handler, after
+// this returns true.
+func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		Error(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return false
+	}
+	return true
+}
+
 // MapPGError converts pgx sentinel errors to HTTP status codes.
 // Returns (status, message). Use Mapped() to short-circuit a handler:
 //

@@ -7,9 +7,34 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"time"
 )
+
+// tokenCapShape matches a plausibly-valid capability code for storage
+// on an API token: two or three colon-separated segments, each either
+// lowercase-with-hyphens (the catalog shape `domain:resource:action`,
+// or the two-segment specialty shape like `power:control`) or a `*`
+// wildcard segment. The bare global `*` is special-cased in
+// validTokenCapability.
+//
+// This is deliberately shape-only, not catalog membership: the
+// canonical capabilityCatalog lives in internal/admin, and admin
+// already imports auth (for RequireCapability / Principal), so auth
+// importing admin would be an import cycle. Shape validation still
+// turns garbage ("Sites:Read", "a:b:c:d", "") into a 400 instead of
+// silently persisting it on the token; a well-shaped-but-nonexistent
+// code is harmless — no route ever requires it.
+var tokenCapShape = regexp.MustCompile(`^([a-z-]+|\*)(:([a-z-]+|\*)){1,2}$`)
+
+// validTokenCapability reports whether code may be stored in an API
+// token's permission_codes. `*` itself is allowed — whether the caller
+// may actually grant it is the separate no-escalation check in
+// issueToken.
+func validTokenCapability(code string) bool {
+	return code == "*" || tokenCapShape.MatchString(code)
+}
 
 // hashAPIToken mirrors Python security.tokens.hash_api_token:
 // sha256(plaintext).hexdigest(). The plaintext is what the operator

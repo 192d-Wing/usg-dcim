@@ -2,10 +2,12 @@
 // admin UI. Users: create, role assignment, unassignment, deactivate
 // (users have no DELETE — one inactive E2E user accumulates per run).
 // API tokens: issue/reveal/revoke through the UI with live API
-// verification. Gating: the SPA is seeded with a limited API token
-// (the token UI can only delegate capabilities the caller holds, and
-// the admin holds only `*`, so the granular token is issued via the
-// API) and the nav/buttons must hide everything the token lacks.
+// verification; wildcard admins get the full capability catalog in
+// the picker so they can issue granular tokens from the UI too.
+// Gating: the SPA is seeded with a limited API token (issued via the
+// API for speed) and the nav/buttons must hide everything the token
+// lacks. Passwords: an admin sets a local password on a user and the
+// user's credentials work against the login API.
 import { test, expect } from '@playwright/test';
 import { Api, FIXTURES, uniq } from './helpers';
 
@@ -171,4 +173,60 @@ test.describe('capability gating with a read-only principal', () => {
     await expect(page.getByRole('button', { name: 'Add floor' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Add row' })).toHaveCount(0);
   });
+});
+
+// ---- UX-debt batch additions (serial suite — keep at the end) ----
+
+test('wildcard admin issues a granular token from the catalog-backed picker', async ({ page }) => {
+  // The admin's only literal cap is `*`, so before the catalog-backed
+  // picker this checkbox list held a single `*` entry and granular
+  // issuance was API-only.
+  page.on('dialog', (d) => d.accept());
+  const granularName = `E2E Granular ${runId}`;
+  await page.goto('/settings/tokens');
+  await page.getByRole('button', { name: 'Issue token' }).click();
+  const modal = page.getByRole('dialog');
+  await modal.getByLabel('Name', { exact: true }).fill(granularName);
+  // Catalog codes the admin does not literally hold must be offered…
+  await modal.getByRole('checkbox', { name: 'inventory:sites:read' }).check();
+  // …and `*` itself must still be present for full-power tokens.
+  await expect(modal.getByRole('checkbox', { name: '*' })).toBeVisible();
+  await modal.getByRole('button', { name: 'Issue token' }).click();
+
+  await expect(page.getByRole('dialog').getByText('copy it now', { exact: false })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  const row = page.getByRole('row', { name: new RegExp(granularName) });
+  await expect(row.getByText('inventory:sites:read')).toBeVisible();
+  await row.getByRole('button', { name: `Revoke ${granularName}` }).click();
+  await expect(page.getByText('Token revoked').first()).toBeVisible();
+});
+
+test('admin sets a local password and the user can log in with it', async ({ page, request, baseURL }) => {
+  // The user created earlier in this spec was deactivated by its own
+  // test, so use a fresh admin-created user (they start with no
+  // password_hash — exactly the account shape this endpoint exists for).
+  const pwEmail = `e2e-pw-${runId}@dcim.local`;
+  const pwValue = `E2E-local-pw-${runId}`;
+  const api = await Api.login(request, baseURL!);
+  await api.post('/admin/users', {
+    email: pwEmail, display_name: 'E2E Password User', is_active: true,
+  });
+
+  await page.goto('/admin');
+  const row = page.getByRole('row', { name: new RegExp(pwEmail) });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: `Set password for ${pwEmail}` }).click();
+  const modal = page.getByRole('dialog');
+  await modal.getByLabel('New password').fill(pwValue);
+  await modal.getByLabel('Confirm password').fill(pwValue);
+  await modal.getByRole('button', { name: 'Set password' }).click();
+  await expect(page.getByText('Password set').first()).toBeVisible();
+
+  // API-level verification: the freshly set credentials mint a JWT.
+  const login = await request.post(`${baseURL}/api/v1/auth/login`, {
+    data: { email: pwEmail, password: pwValue },
+  });
+  expect(login.ok(), `login as ${pwEmail}: ${login.status()}`).toBeTruthy();
+  expect((await login.json()).access_token).toBeTruthy();
 });

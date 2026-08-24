@@ -203,3 +203,11 @@ SET display_name = CASE WHEN sqlc.arg(display_name_set)::bool THEN sqlc.narg(dis
 WHERE id = $1
 RETURNING id, email, display_name, is_active, sso_subject,
           last_login_at, created_at, updated_at;
+
+-- name: SetUserPasswordHash :execrows
+-- Local password set/reset for admin-created users (UX-debt batch).
+-- The handler bcrypts; NULL is never written here — clearing a
+-- password isn't offered.
+UPDATE users SET password_hash = sqlc.arg(password_hash)::text,
+                 updated_at = NOW()
+WHERE id = sqlc.arg(id);

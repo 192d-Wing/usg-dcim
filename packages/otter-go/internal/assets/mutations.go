@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -310,6 +311,92 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		Action: "asset.update", TargetType: "asset", TargetID: id.String(), SiteID: &sid,
 	})
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// ---- Hard delete ----
+
+// delete hard-removes an asset. Decommission remains the lifecycle
+// path (it only flips lifecycle_state); DELETE is for mistakes and
+// test hygiene. Child assets and logged cables refuse with 409; IP
+// bindings detach and this asset's alerts drop first so the row can
+// go. Outlets + power connections ride ON DELETE CASCADE. Telemetry-
+// instrumented assets hit the FK RESTRICT, which httpx.Mapped turns
+// into a 409 — acceptable: those aren't "mistake" assets.
+//
+// Sequential autocommit calls, no tx: detach/delete steps are
+// idempotent-ish and a failure midway leaves only detached IPs /
+// dropped alerts, which a retry (or decommission) cleans up.
+func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id is not a uuid")
+		return
+	}
+	current, err := h.Q.GetAsset(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpx.Error(w, http.StatusNotFound, "asset not found")
+			return
+		}
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if !h.enforceSite(w, r, current.SiteID, "inventory:assets:delete") {
+		return
+	}
+	children, err := h.Q.CountChildAssets(r.Context(), &id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if children > 0 {
+		httpx.Error(w, http.StatusConflict, fmt.Sprintf("asset has %d child assets; move or delete them first", children))
+		return
+	}
+	cables, err := h.Q.CountCablesForAsset(r.Context(), id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if cables > 0 {
+		httpx.Error(w, http.StatusConflict, fmt.Sprintf("asset has %d cables logged; delete them first", cables))
+		return
+	}
+	detachedIPs, err := h.Q.DetachIPAddressesFromAsset(r.Context(), &id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	droppedAlerts, err := h.Q.DeleteAlertsForAsset(r.Context(), &id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	rows, err := h.Q.DeleteAsset(r.Context(), id)
+	if err != nil {
+		status, msg := httpx.Mapped(err)
+		httpx.Error(w, status, msg)
+		return
+	}
+	if rows == 0 {
+		// Raced with a concurrent delete between the pre-fetch and here.
+		httpx.Error(w, http.StatusNotFound, "asset not found")
+		return
+	}
+	sid := current.SiteID
+	audit.Record(r.Context(), h.Audit, nil, audit.Event{
+		Action: "asset.delete", TargetType: "asset", TargetID: id.String(), SiteID: &sid,
+		Metadata: map[string]any{
+			"detached_ip_addresses": detachedIPs,
+			"deleted_alerts":        droppedAlerts,
+		},
+	})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---- Decommission ----

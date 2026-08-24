@@ -66,8 +66,10 @@ export function RackShowPage() {
   const [mode, setMode] = useState<'stencil' | 'block'>('stencil');
   const [editOpen, setEditOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [moving, setMoving] = useState<RackDetail['assets'][number] | null>(null);
   const canWrite = hasCapability('inventory:racks:update');
+  const canDelete = hasCapability('inventory:racks:delete');
 
   const detail = useQuery({
     queryKey: ['rack-detail', id],
@@ -127,6 +129,9 @@ export function RackShowPage() {
                   </Button>
                   <Button iconName="edit" onClick={() => setEditOpen(true)}>Edit rack</Button>
                 </>
+              )}
+              {canDelete && (
+                <Button iconName="remove" onClick={() => setDeleteOpen(true)}>Delete rack</Button>
               )}
             </SpaceBetween>
           }
@@ -262,8 +267,74 @@ export function RackShowPage() {
             />
           </Modal>
         )}
+        {canDelete && deleteOpen && (
+          <DeleteRackModal
+            rack={r}
+            deviceCount={assets.length}
+            onDismiss={() => setDeleteOpen(false)}
+            onDeleted={() => nav('/racks')}
+          />
+        )}
       </SpaceBetween>
     </ContentLayout>
+  );
+}
+
+// Hard delete — for mistakes and test hygiene; decommission stays the
+// asset lifecycle path. The backend refuses racks with mounted assets
+// (409) and that message surfaces verbatim in the toast.
+function DeleteRackModal({
+  rack, deviceCount, onDismiss, onDeleted,
+}: Readonly<{
+  rack: RackDetail['rack'];
+  deviceCount: number;
+  onDismiss: () => void;
+  onDeleted: () => void;
+}>) {
+  const [submitting, setSubmitting] = useState(false);
+
+  async function onConfirm() {
+    setSubmitting(true);
+    try {
+      await http.delete(`/inventory/racks/${rack.id}`);
+      toast.success(`Rack ${rack.code} deleted`);
+      onDeleted();
+    } catch (err: any) {
+      toast.error(err?.message ?? 'failed to delete rack');
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Modal
+      visible
+      onDismiss={onDismiss}
+      header={`Delete ${rack.code}?`}
+      footer={
+        <Box float="right">
+          <SpaceBetween size="xs" direction="horizontal">
+            <Button onClick={onDismiss}>Cancel</Button>
+            <Button variant="primary" loading={submitting} onClick={onConfirm}>
+              Delete
+            </Button>
+          </SpaceBetween>
+        </Box>
+      }
+    >
+      <SpaceBetween size="s">
+        <Box>
+          This permanently removes rack <b>{rack.code} · {rack.name}</b> from
+          inventory. Racks with mounted devices can't be deleted — move or
+          delete the devices first.
+        </Box>
+        {deviceCount > 0 && (
+          <Alert type="warning">
+            This rack still shows {deviceCount} device{deviceCount === 1 ? '' : 's'} — the
+            delete will be refused until they're moved or deleted.
+          </Alert>
+        )}
+      </SpaceBetween>
+    </Modal>
   );
 }
 

@@ -32,8 +32,14 @@ type createReq struct {
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var req createReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
-		req.AAssetID == uuid.Nil || req.BAssetID == uuid.Nil {
+	// Decode failures and missing-field failures answer differently on
+	// purpose: a wire-type mismatch (e.g. {"length_m": 5} — number
+	// where NUMERIC-as-string is expected) used to fall through to the
+	// misleading "a_asset_id and b_asset_id required".
+	if !httpx.DecodeJSON(w, r, &req) {
+		return
+	}
+	if req.AAssetID == uuid.Nil || req.BAssetID == uuid.Nil {
 		httpx.Error(w, http.StatusBadRequest, "a_asset_id and b_asset_id required")
 		return
 	}
@@ -209,8 +215,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req updateReq
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.Error(w, http.StatusBadRequest, "bad request body")
+	// Surfaces the real decode error (including updateReq.UnmarshalJSON's
+	// "a_asset_id cannot be null") instead of a flat "bad request body".
+	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
 	newA := resolveEndpoint(req.AAssetID, existing.AAssetID)

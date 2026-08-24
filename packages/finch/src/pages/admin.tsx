@@ -138,6 +138,7 @@ function UsersTab() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
   const [assigningTo, setAssigningTo] = useState<User | null>(null);
+  const [settingPasswordFor, setSettingPasswordFor] = useState<User | null>(null);
 
   async function refresh() { await tableQuery.refetch(); }
 
@@ -194,12 +195,15 @@ function UsersTab() {
               <SpaceBetween size="xxs" direction="horizontal">
                 <Button onClick={() => setAssigningTo(u)}>Roles</Button>
                 <Button iconName="edit" variant="inline-icon" onClick={() => setEditing(u)} ariaLabel={`Edit ${u.email}`} />
+                <Button iconName="lock-private" variant="inline-icon"
+                  onClick={() => setSettingPasswordFor(u)}
+                  ariaLabel={`Set password for ${u.email}`} />
                 <Button iconName={u.is_active ? 'status-stopped' : 'status-positive'}
                   variant="inline-icon" onClick={() => toggleActive(u)}
                   ariaLabel={u.is_active ? `Deactivate ${u.email}` : `Activate ${u.email}`} />
               </SpaceBetween>
             ),
-            width: 200,
+            width: 230,
           },
         ]}
         empty={<Box textAlign="center" color="inherit" padding="m">No users.</Box>}
@@ -228,7 +232,83 @@ function UsersTab() {
       >
         {assigningTo && <AssignmentsManager user={assigningTo} />}
       </Modal>
+      <Modal
+        visible={settingPasswordFor !== null}
+        onDismiss={() => setSettingPasswordFor(null)}
+        header={`Set password for ${settingPasswordFor?.email ?? ''}`}
+        size="medium"
+      >
+        {settingPasswordFor && (
+          <SetPasswordForm
+            user={settingPasswordFor}
+            onDone={() => setSettingPasswordFor(null)}
+          />
+        )}
+      </Modal>
     </SpaceBetween>
+  );
+}
+
+// Local password set/reset (UX-debt batch). POST
+// /admin/users/{id}/password — the only way an admin-created user can
+// obtain local credentials (user create deliberately has no password
+// field). Backend enforces the same 12-char minimum surfaced here.
+const MIN_PASSWORD_CHARS = 12;
+
+function SetPasswordForm({ user, onDone }: Readonly<{ user: User; onDone: () => void }>) {
+  const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (password.length < MIN_PASSWORD_CHARS) {
+      errs.password = `At least ${MIN_PASSWORD_CHARS} characters`;
+    }
+    if (confirm !== password) errs.confirm = 'Passwords do not match';
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+    setSubmitting(true);
+    try {
+      await http.post(`/admin/users/${user.id}/password`, { password });
+      toast.success('Password set');
+      onDone();
+    } catch (err: any) { toast.error(err?.message ?? 'failed to set password'); } finally { setSubmitting(false); }
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <Form
+        actions={
+          <Button variant="primary" formAction="submit" loading={submitting}>
+            {submitting ? 'Setting…' : 'Set password'}
+          </Button>
+        }
+      >
+        <SpaceBetween size="m">
+          <FormField
+            label="New password"
+            description={`Minimum ${MIN_PASSWORD_CHARS} characters. The user signs in with it via "Use local credentials" on the login page.`}
+            errorText={errors.password}
+          >
+            <Input
+              type="password"
+              value={password}
+              onChange={({ detail }) => setPassword(detail.value)}
+            />
+          </FormField>
+          <FormField label="Confirm password" errorText={errors.confirm}>
+            <Input
+              type="password"
+              value={confirm}
+              onChange={({ detail }) => setConfirm(detail.value)}
+            />
+          </FormField>
+        </SpaceBetween>
+      </Form>
+    </form>
   );
 }
 

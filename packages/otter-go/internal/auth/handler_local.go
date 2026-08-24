@@ -185,8 +185,23 @@ func (h *Handler) issueToken(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "name required")
 		return
 	}
+	// Malformed codes 400 before the escalation check. Without this a
+	// `*` holder — who passes HasCapability for ANY string — could
+	// persist typos onto a token and only notice when the token's
+	// requests 403. Catalog membership can't be checked here (importing
+	// internal/admin's capabilityCatalog would be an import cycle, admin
+	// already imports auth), so this is shape-only; see
+	// validTokenCapability.
+	for _, code := range req.PermissionCodes {
+		if !validTokenCapability(code) {
+			httpx.Error(w, http.StatusBadRequest, "malformed capability code: "+code)
+			return
+		}
+	}
 	// No-escalation: every requested code must be granted by an
 	// existing capability the issuer holds (exact or wildcard match).
+	// A `*` holder passes for every code, so wildcard admins can issue
+	// granular tokens they'd otherwise "not hold" literally.
 	var extra []string
 	for _, code := range req.PermissionCodes {
 		if !HasCapability(p.Capabilities, code) {

@@ -49,6 +49,9 @@ func (h *Handler) Mount(r chi.Router, authMW ...func(http.Handler) http.Handler)
 // both Mount (single-chain) and MountPublic (split-chain) so the
 // route list lives in exactly one place.
 func (h *Handler) publicRoutes(r chi.Router) {
+	// /methods is public by design — it tells the (unauthenticated)
+	// login screen which sign-in paths this deployment supports.
+	r.Get("/methods", h.methods)
 	r.Get("/oidc/login", h.oidcLogin)
 	r.Get("/oidc/callback", h.oidcCallback)
 	r.Get("/oidc/logout", h.oidcLogout)

@@ -12,6 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const countAssetsInRack = `-- name: CountAssetsInRack :one
+SELECT count(*)::bigint FROM assets WHERE rack_id = $1
+`
+
+func (q *Queries) CountAssetsInRack(ctx context.Context, rackID *uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAssetsInRack, rackID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createBuilding = `-- name: CreateBuilding :one
 INSERT INTO buildings (id, site_id, name, code, created_at, updated_at)
 VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
@@ -271,6 +282,18 @@ DELETE FROM buildings WHERE id = $1
 func (q *Queries) DeleteBuilding(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteBuilding, id)
 	return err
+}
+
+const deleteRack = `-- name: DeleteRack :execrows
+DELETE FROM racks WHERE id = $1
+`
+
+func (q *Queries) DeleteRack(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRack, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteRoom = `-- name: DeleteRoom :exec

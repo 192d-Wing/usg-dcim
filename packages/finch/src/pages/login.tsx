@@ -2,9 +2,15 @@
 // Layout/styles live in globals.css (.login-shell). All visible copy,
 // colors, and the Cloudscape mode come from config/login-branding.ts.
 //
-// When SSO is enabled, only the E-ICAM button is shown. Local
-// email/password form is a break-glass fallback, revealed by a
-// disclosure link and hidden again once SSO is unavailable.
+// Whether SSO is offered comes from the backend at runtime (GET
+// /api/v1/auth/methods — sso is true exactly when the API has OIDC
+// configured), not from a build-time constant, so environments without
+// an IdP (e.g. the windep dev cluster) never render a dead E-ICAM
+// button. Branding constants still control the button's label and the
+// page's skin. When SSO is on, only the E-ICAM button is shown and the
+// local email/password form is a break-glass fallback behind a
+// disclosure link; while the methods call is in flight (or failed) the
+// page falls back to local-form-visible / SSO-hidden.
 
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useLogin } from '@refinedev/core';
@@ -17,15 +23,24 @@ import Input from '@cloudscape-design/components/input';
 import SpaceBetween from '@cloudscape-design/components/space-between';
 
 import { loginBranding } from '@/config/login-branding';
+import { http } from '@/lib/http';
 
 type Values = { email: string; password: string };
+
+/** GET /auth/methods response — see otter-go internal/auth/handler_methods.go. */
+type AuthMethods = {
+  local: boolean;
+  sso: boolean;
+  /** Navigation target for the SSO button; present only when sso is true. */
+  sso_login_url?: string;
+};
 
 // CSS custom properties consumed by .login-shell and descendants in
 // globals.css. Typed as a CSSProperties extension so TS accepts the
 // `--var` keys.
 type BrandVars = CSSProperties & Record<`--login-${string}`, string>;
 
-function initiateOidc() {
+function initiateOidc(loginUrl: string) {
   const randomB64 = (bytes = 16) => {
     const buf = new Uint8Array(bytes);
     globalThis.crypto.getRandomValues(buf);
@@ -36,9 +51,9 @@ function initiateOidc() {
   const nonce = randomB64();
   sessionStorage.setItem('dcim.oidc.state', state);
   sessionStorage.setItem('dcim.oidc.nonce', nonce);
-  const sep = loginBranding.sso.loginUrl.includes('?') ? '&' : '?';
+  const sep = loginUrl.includes('?') ? '&' : '?';
   globalThis.location.href =
-    `${loginBranding.sso.loginUrl}${sep}state=${state}&nonce=${nonce}`;
+    `${loginUrl}${sep}state=${state}&nonce=${nonce}`;
 }
 
 export function LoginPage() {
@@ -48,8 +63,37 @@ export function LoginPage() {
   const [emailErr, setEmailErr] = useState<string | undefined>();
   const [passwordErr, setPasswordErr] = useState<string | undefined>();
   const [formErr, setFormErr] = useState<string | undefined>();
+  // Backend-reported auth methods. null until the fetch resolves — and
+  // stays null when it fails — which the derived values below treat as
+  // "no SSO": local form visible, no E-ICAM button. A hidden SSO button
+  // during the (fast) fetch is harmless; a dead one never is.
+  const [methods, setMethods] = useState<AuthMethods | null>(null);
+  // The user's explicit show/hide choice via the disclosure link.
+  // null = no choice yet → derive the default from SSO availability.
+  const [localFormPref, setLocalFormPref] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    http
+      .get<AuthMethods>('/auth/methods')
+      .then(({ data }) => {
+        if (!cancelled) setMethods(data);
+      })
+      .catch(() => {
+        // Leave methods null — fallback already shows the local form.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Branding stays a kill-switch (a skin can opt out of the button
+  // entirely), but it can no longer conjure a button the backend
+  // can't honor.
+  const ssoEnabled = loginBranding.sso.enabled && (methods?.sso ?? false);
+  const ssoLoginUrl = methods?.sso_login_url ?? loginBranding.sso.loginUrl;
   // Local form is always visible when SSO is off; hidden by default when SSO is on.
-  const [showLocalForm, setShowLocalForm] = useState(!loginBranding.sso.enabled);
+  const showLocalForm = localFormPref ?? !ssoEnabled;
 
   // Force the configured Cloudscape mode while the login page is
   // mounted; restore the previous mode on unmount based on <html>.
@@ -125,14 +169,14 @@ export function LoginPage() {
           <h2 className="login-title">{loginBranding.formTitle}</h2>
           <p className="login-subtitle">{loginBranding.formSubtitle}</p>
 
-          {loginBranding.sso.enabled && (
-            <Button variant="primary" fullWidth onClick={initiateOidc}>
+          {ssoEnabled && (
+            <Button variant="primary" fullWidth onClick={() => initiateOidc(ssoLoginUrl)}>
               {loginBranding.sso.label}
             </Button>
           )}
 
           {showLocalForm && (
-            <form onSubmit={onSubmit} style={loginBranding.sso.enabled ? { marginTop: '1.5rem' } : undefined}>
+            <form onSubmit={onSubmit} style={ssoEnabled ? { marginTop: '1.5rem' } : undefined}>
               <Form
                 errorText={formErr}
                 actions={
@@ -170,7 +214,7 @@ export function LoginPage() {
             </form>
           )}
 
-          {loginBranding.sso.enabled && (
+          {ssoEnabled && (
             <p className="login-footer-note" style={{ marginTop: '1.25rem' }}>
               {showLocalForm ? (
                 <>
@@ -178,7 +222,7 @@ export function LoginPage() {
                   <button
                     type="button"
                     className="login-fallback-toggle"
-                    onClick={() => setShowLocalForm(false)}
+                    onClick={() => setLocalFormPref(false)}
                   >
                     Hide local login
                   </button>
@@ -187,7 +231,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   className="login-fallback-toggle"
-                  onClick={() => setShowLocalForm(true)}
+                  onClick={() => setLocalFormPref(true)}
                 >
                   E-ICAM unavailable? Use local credentials
                 </button>
@@ -195,7 +239,7 @@ export function LoginPage() {
             </p>
           )}
 
-          {!loginBranding.sso.enabled && (
+          {!ssoEnabled && (
             <p className="login-footer-note">{loginBranding.footerNote}</p>
           )}
         </div>
