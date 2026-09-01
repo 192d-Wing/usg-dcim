@@ -16,7 +16,7 @@
 # emulate. TARGETOS/TARGETARCH are empty on single-arch builds and Go
 # falls back to the host defaults, so plain `podman build` behaves
 # exactly as before.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY packages/shared-go ./packages/shared-go
