@@ -22,6 +22,10 @@ let fabricId = '';
 /** Row-name matcher for a literal prefix/address. */
 const rx = (s: string) => new RegExp(s.replaceAll('.', '\\.'));
 
+/** Supernet-tree row. The tree is a plain <table> whose rows carry
+ *  dnd-kit drag attributes (role="button"), so they are not ARIA rows. */
+const treeRow = (page: Page, prefix: string) => page.locator('tr', { hasText: prefix });
+
 test.beforeAll(async ({ request, baseURL }) => {
   const api = await Api.login(request, baseURL!);
   const f = await api.post('/ipam/fabrics', {
@@ -70,14 +74,14 @@ async function openVrf(page: Page) {
 /** Supernet tree → expand the run's supernet. */
 async function expandSupernet(page: Page) {
   await openVrf(page);
-  await page.getByRole('row', { name: rx(supernetPrefix) }).click();
+  await treeRow(page, supernetPrefix).click();
   await expect(page.getByRole('button', { name: /Add subnet here/ })).toBeVisible();
 }
 
 /** Supernet tree → the run's subnet's Addresses view. */
 async function openSubnet(page: Page) {
   await expandSupernet(page);
-  await page.getByRole('row', { name: rx(subnetPrefix) }).click();
+  await treeRow(page, subnetPrefix).click();
   await expect(page.getByRole('button', { name: 'Allocate IP' })).toBeVisible();
 }
 
@@ -90,7 +94,7 @@ test('create a supernet in the VRF', async ({ page }) => {
   await modal.getByRole('button', { name: 'Create', exact: true }).click();
 
   await expect(page.getByText('Supernet created')).toBeVisible();
-  await expect(page.getByRole('row', { name: rx(supernetPrefix) })).toBeVisible();
+  await expect(treeRow(page, supernetPrefix)).toBeVisible();
 });
 
 test('add a subnet inside the supernet', async ({ page }) => {
@@ -101,7 +105,7 @@ test('add a subnet inside the supernet', async ({ page }) => {
   await modal.getByRole('button', { name: 'Create', exact: true }).click();
 
   await expect(page.getByText('Subnet created')).toBeVisible();
-  await expect(page.getByRole('row', { name: rx(subnetPrefix) })).toBeVisible();
+  await expect(treeRow(page, subnetPrefix)).toBeVisible();
 });
 
 test('reject a subnet outside its supernet', async ({ page }) => {
@@ -115,7 +119,7 @@ test('reject a subnet outside its supernet', async ({ page }) => {
   await expect(modal).toBeVisible();
   await expect(page.getByText('Subnet created')).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('row', { name: rx(outsidePrefix) })).toHaveCount(0);
+  await expect(treeRow(page, outsidePrefix)).toHaveCount(0);
 });
 
 test('allocate an address in the subnet', async ({ page }) => {
