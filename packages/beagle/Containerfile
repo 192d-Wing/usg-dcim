@@ -3,7 +3,7 @@
 # Native build stage + GOOS/GOARCH cross-compile so multi-arch builds
 # don't run the Go compiler under qemu; empty TARGETOS/TARGETARCH on
 # single-arch builds fall back to host defaults.
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 ARG TARGETOS TARGETARCH
 WORKDIR /src
 COPY packages/shared-go ./packages/shared-go

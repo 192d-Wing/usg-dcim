@@ -74,8 +74,8 @@ jobs:
           # Matches the golang:1.26-alpine builder in every Containerfile —
           # test on what we ship on. go.work's go directive is the floor,
           # not this value; setup-go v6 defaults GOTOOLCHAIN=local, so this
-          # only has to satisfy it, and 1.26.5 >= go.work's 1.25.7.
-          go-version: '1.26.5'
+          # only has to satisfy it, and 1.27.3 >= go.work's 1.26.9.
+          go-version: '1.27.3'
           # Cache derived from the per-package go.sum so each matrix shard
           # gets its own warm cache without cross-contamination.
           cache-dependency-path: packages/${{ matrix.pkg }}/go.sum
@@ -122,7 +122,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.27.3'
           cache-dependency-path: packages/otter-go/go.sum
 
       # sqlc runs via the go.mod `tool` directive — version and hashes
@@ -173,7 +173,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.27.3'
           cache-dependency-path: packages/wolf/coredns-nsec3sign/go.sum
 
       - name: go build
@@ -218,7 +218,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: '1.26.5'
+          go-version: '1.27.3'
           cache-dependency-path: packages/otter-go/go.sum
 
       - name: Build otter-go
@@ -297,7 +297,7 @@ jobs:
 
       - name: Cache Playwright browsers
         id: pw-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-${{ hashFiles('packages/finch/package-lock.json') }}
@@ -327,7 +327,7 @@ jobs:
 
       - name: Upload failure artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-failure
           path: |
@@ -425,11 +425,12 @@ jobs:
           password: ${{ secrets.REPO1 }}
 
       # arm64 shards need binfmt handlers for the final-stage RUNs.
-      # qemu-user-static registers them kernel-wide with the F flag via
-      # systemd-binfmt, which buildah picks up without further setup.
+      # qemu-user-binfmt (qemu-user-static before Ubuntu 26.04) registers
+      # them kernel-wide with the F flag via systemd-binfmt, which buildah
+      # picks up without further setup.
       - name: Enable qemu for arm64 stages
         if: contains(matrix.platforms || '', 'arm64')
-        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user-static
+        run: sudo apt-get update -q && { sudo apt-get install -y -q qemu-user-binfmt || sudo apt-get install -y -q qemu-user-static; }
 
       # Multi-arch shards build each platform in its own SEQUENTIAL
       # step and assemble the manifest list by hand. Passing both
@@ -448,7 +449,7 @@ jobs:
       # images would stop sharing the alpine/nginx/UBI base layers.
       - name: Build ${{ matrix.image }} (native, build-only shards)
         if: ${{ !matrix.platforms }}
-        uses: redhat-actions/buildah-build@3a51aade9afa17e5c78256bcbe2e1ee08c7b995b # v3.0.2
+        uses: redhat-actions/buildah-build@719e3c40d8af9790c23eca13f7daa339f2867034 # v3.1.0
         with:
           image: ${{ matrix.image }}
           tags: ${{ env.IMAGE_TAGS }}
