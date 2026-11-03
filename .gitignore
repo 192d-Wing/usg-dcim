@@ -54,4 +54,9 @@ build/
 
 # Plan docs the operator is keeping local for now
 .claude/plans/catalog-zones.md
-.claude/
+.claude/*
+!.claude/agents/
+!.claude/skills/
+
+# Agent workflow run directories
+.agent-runs/
