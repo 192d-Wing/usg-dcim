@@ -425,11 +425,12 @@ jobs:
           password: ${{ secrets.REPO1 }}
 
       # arm64 shards need binfmt handlers for the final-stage RUNs.
-      # qemu-user-static registers them kernel-wide with the F flag via
-      # systemd-binfmt, which buildah picks up without further setup.
+      # qemu-user-binfmt (qemu-user-static before Ubuntu 26.04) registers
+      # them kernel-wide with the F flag via systemd-binfmt, which buildah
+      # picks up without further setup.
       - name: Enable qemu for arm64 stages
         if: contains(matrix.platforms || '', 'arm64')
-        run: sudo apt-get update -q && sudo apt-get install -y -q qemu-user-static
+        run: sudo apt-get update -q && { sudo apt-get install -y -q qemu-user-binfmt || sudo apt-get install -y -q qemu-user-static; }
 
       # Multi-arch shards build each platform in its own SEQUENTIAL
       # step and assemble the manifest list by hand. Passing both
