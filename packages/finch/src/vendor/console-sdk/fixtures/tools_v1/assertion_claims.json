@@ -1,0 +1,1 @@
+{"iss":"https://console.ops.example.mil","aud":"hello","sub":"8f1c","preferred_username":"jdoe","name":"Jane Doe","roles":["hello:user"],"ctx":{"site":"dc1","tenant":null,"environment":null},"sid":"Zm9vYmFyYmF6cXV4MTIzNA","jti":"c2l4dGVlbmJ5dGVzcmFuZG9t","iat":1793814900,"nbf":1793814900,"exp":1793814960,"acr":"urn:usg:cac"}

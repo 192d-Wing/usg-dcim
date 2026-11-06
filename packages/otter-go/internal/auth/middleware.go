@@ -53,7 +53,21 @@ type Principal struct {
 	// Label is the audit-trail-friendly identifier. Today it's
 	// "user:<uuid>"; once API tokens land it'll be "token:<id>".
 	Label string
+	// Method records how the request authenticated: MethodConsole for a
+	// gateway assertion, MethodAPIToken for dcim_ tokens, "" for session
+	// JWTs (/auth/me then reports local vs oidc from the user row).
+	Method string
+	// SessionID / AssertionID are the console sid and assertion jti
+	// (console method only), carried into audit metadata.
+	SessionID   string
+	AssertionID string
 }
+
+// Principal.Method values.
+const (
+	MethodConsole  = "console"
+	MethodAPIToken = "api_token"
+)
 
 // Querier is the slice of sqlc methods the verify path needs. Lets
 // tests swap in an in-memory fake without a real Postgres pool.
@@ -81,12 +95,12 @@ type Querier interface {
 
 // Verifying returns the production JWT middleware. Every request must
 // carry an Authorization: Bearer <JWT> header. The handler chain:
-//   1. Reject if header missing/malformed.
-//   2. Verify HS256 signature against primary or any rotated secret.
-//   3. Reject if exp passed (jwt lib enforces this for us).
-//   4. Reject if jti is in revoked_jtis and not yet pruned.
-//   5. Build capabilities = user_role caps ∪ oidc-mapped caps.
-//   6. Inject Principal into r.Context().
+//  1. Reject if header missing/malformed.
+//  2. Verify HS256 signature against primary or any rotated secret.
+//  3. Reject if exp passed (jwt lib enforces this for us).
+//  4. Reject if jti is in revoked_jtis and not yet pruned.
+//  5. Build capabilities = user_role caps ∪ oidc-mapped caps.
+//  6. Inject Principal into r.Context().
 func Verifying(log *slog.Logger, q Querier, cfg VerifierConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -131,6 +145,8 @@ func Verifying(log *slog.Logger, q Querier, cfg VerifierConfig) func(http.Handle
 				httpx.Error(w, http.StatusInternalServerError, "auth backend unavailable")
 				return
 			}
+			// POAM: standalone path still fails open on a scope query
+			// error (console path returns 503); tracked for a later round.
 			// Best-effort scope resolution. A failure here doesn't
 			// 500 the request — it leaves Scopes nil and ABAC paths
 			// fall back to global (matching pre-PR-53 behavior). The

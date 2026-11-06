@@ -1,5 +1,6 @@
 import type { AuthProvider } from '@refinedev/core';
 import { http, TOKEN_KEY } from './http';
+import { endSession, getEmbeddedIdentity, isEmbedded, setEmbeddedIdentity } from './embedded';
 
 type Identity = {
   id: string | null;
@@ -10,7 +11,52 @@ type Identity = {
 const IDENTITY_KEY = 'dcim.identity';
 const ID_TOKEN_KEY = 'dcim.id_token';
 
-export const authProvider: AuthProvider = {
+// Embedded in the console: identity lives in memory only (no token,
+// identity or id_token in localStorage), sign-in/out belong to the
+// console, and a 401 never redirects to /login (the shell shows its
+// "session ended" state instead).
+export const embeddedAuthProvider: AuthProvider = {
+  async login() {
+    return {
+      success: false,
+      error: { name: 'LoginError', message: 'Sign-in is handled by the console.' },
+    };
+  },
+  async logout() {
+    return { success: true };
+  },
+  async check() {
+    try {
+      const me = await http.get('/auth/me');
+      if (me.data?.auth_mode !== 'console') {
+        endSession();
+        return { authenticated: false, logout: false };
+      }
+      setEmbeddedIdentity({
+        id: me.data.user?.id ?? null,
+        email: me.data.user?.email ?? null,
+        capabilities: me.data.capabilities ?? [],
+      });
+      return { authenticated: true };
+    } catch {
+      // 401 already ended the session via the http interceptor; this also
+      // covers network failures. endSession() is idempotent (one notify).
+      endSession();
+      return { authenticated: false, logout: false };
+    }
+  },
+  async onError() {
+    return {};
+  },
+  async getPermissions() {
+    return getEmbeddedIdentity()?.capabilities ?? [];
+  },
+  async getIdentity() {
+    return getEmbeddedIdentity();
+  },
+};
+
+export const standaloneAuthProvider: AuthProvider = {
   async login({ email, password }: { email: string; password: string }) {
     try {
       const r = await http.post('/auth/login', { email, password });
@@ -99,6 +145,17 @@ export const authProvider: AuthProvider = {
   async getIdentity() {
     return identityFromCache();
   },
+};
+
+// Dispatches per call so detection (which completes before first render)
+// decides the branch; standalone behaviour is the original provider.
+export const authProvider: AuthProvider = {
+  login: (p) => (isEmbedded() ? embeddedAuthProvider : standaloneAuthProvider).login(p),
+  logout: (p) => (isEmbedded() ? embeddedAuthProvider : standaloneAuthProvider).logout(p),
+  check: (p) => (isEmbedded() ? embeddedAuthProvider : standaloneAuthProvider).check(p),
+  onError: (e) => (isEmbedded() ? embeddedAuthProvider : standaloneAuthProvider).onError(e),
+  getPermissions: (p) => (isEmbedded() ? embeddedAuthProvider : standaloneAuthProvider).getPermissions!(p),
+  getIdentity: (p) => (isEmbedded() ? embeddedAuthProvider : standaloneAuthProvider).getIdentity!(p),
 };
 
 function identityFromCache(): Identity | null {

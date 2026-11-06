@@ -90,8 +90,23 @@ func Record(ctx context.Context, q Recorder, log *slog.Logger, ev Event) {
 			params.DiffJson = b
 		}
 	}
-	if ev.Metadata != nil {
-		if b, err := json.Marshal(ev.Metadata); err == nil {
+	meta := ev.Metadata
+	if p, ok := auth.From(ctx); ok && (p.SessionID != "" || p.AssertionID != "") {
+		// COMPLIANCE MAPPING:
+		// - NIST 800-53: AU-3 (Content of Audit Records) — console sid/jti correlate tool rows with gateway rows
+		meta = make(map[string]any, len(ev.Metadata)+2)
+		for k, v := range ev.Metadata {
+			meta[k] = v
+		}
+		if p.SessionID != "" {
+			meta["console_sid"] = p.SessionID
+		}
+		if p.AssertionID != "" {
+			meta["console_jti"] = p.AssertionID
+		}
+	}
+	if meta != nil {
+		if b, err := json.Marshal(meta); err == nil {
 			params.MetadataJson = b
 		}
 	}

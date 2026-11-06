@@ -11,6 +11,9 @@ import { authProvider } from '@/lib/auth-provider';
 import { accessControlProvider } from '@/lib/access-control-provider';
 
 import { Shell } from '@/components/layout/cloudscape-shell';
+import { SessionEndedPage } from '@/components/layout/embedded-shell';
+import { isEmbedded } from '@/lib/embedded';
+import { routerBasename } from '@/lib/base-path';
 import { Toaster } from 'sonner';
 import Box from '@cloudscape-design/components/box';
 import Spinner from '@cloudscape-design/components/spinner';
@@ -62,7 +65,7 @@ function PageFallback() {
 
 export function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={routerBasename()}>
       <Refine
         dataProvider={dataProvider}
         authProvider={authProvider}
@@ -91,7 +94,10 @@ export function App() {
           <Route path="/login/callback" element={<LoginCallbackPage />} />
           <Route path="/logout" element={<LogoutPage />} />
           <Route element={
-            <Authenticated key="auth-required" fallback={<CatchAllNavigate to="/login" />}>
+            <Authenticated
+              key="auth-required"
+              fallback={isEmbedded() ? <SessionEndedPage /> : <CatchAllNavigate to="/login" />}
+            >
               <Shell />
             </Authenticated>
           }>
@@ -130,7 +136,8 @@ export function App() {
             <Route path="/login" element={<LoginPage />} />
           </Route>
         </Routes>
-        <Toaster theme="dark" />
+        {/* Embedded: toasts are forwarded to the console by EmbeddedShell. */}
+        {!isEmbedded() && <Toaster theme="dark" />}
       </Refine>
     </BrowserRouter>
   );

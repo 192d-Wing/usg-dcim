@@ -200,8 +200,35 @@ func main() {
 			OldSecrets:    oldSecrets,
 		})
 		log.Info("auth_jwt_enabled", "old_secrets", len(oldSecrets))
+	} else if m, _ := auth.ParseAuthMode(env.String("OTTER_AUTH_MODE", "")); m == auth.ModeConsole {
+		authMW = nil // replaced below by the console dispatcher
 	} else {
 		authMW = auth.MustStub(log)
+	}
+	// OTTER_AUTH_MODE: standalone (default, unchanged) | console | both.
+	authMode, err := auth.ParseAuthMode(env.String("OTTER_AUTH_MODE", ""))
+	if err != nil {
+		log.Error("auth_mode_invalid", "err", err)
+		os.Exit(1)
+	}
+	authHandler.Mode = authMode
+	if authMode == auth.ModeBoth && jwtSecret == "" {
+		// both keeps the standalone bearer path; never on the stub.
+		log.Error("auth_mode_invalid", "err", "OTTER_AUTH_MODE=both requires DCIM_JWT_SECRET")
+		os.Exit(1)
+	}
+	if authMode != auth.ModeStandalone {
+		bearerMW := authMW // both: existing bearer path
+		if authMode == auth.ModeConsole {
+			bearerMW = auth.APITokenOnly(q) // automation tokens only
+		}
+		consoleAuth, err := buildConsoleAuth(log, q, oidcCfg.Issuer)
+		if err != nil {
+			log.Error("console_auth_init_failed", "err", err)
+			os.Exit(1)
+		}
+		authMW = auth.Dispatch(authMode, consoleAuth, bearerMW)
+		log.Info("auth_mode", "mode", string(authMode))
 	}
 	r.Route("/api/v1", func(r chi.Router) {
 		// /api/v1/auth/{login,logout,refresh,oidc/*} must remain
@@ -272,4 +299,40 @@ func main() {
 	if err := srv.Shutdown(shCtx); err != nil {
 		log.Error("shutdown_error", "err", err)
 	}
+}
+
+// buildConsoleAuth reads the OTTER_CONSOLE_* env keys.
+func buildConsoleAuth(log *slog.Logger, q *dbq.Queries, standaloneIssuer string) (*auth.ConsoleAuth, error) {
+	upstream := env.String("OTTER_CONSOLE_UPSTREAM_ISSUER", "")
+	if err := auth.CheckUpstreamIssuer(upstream, standaloneIssuer); err != nil {
+		return nil, err
+	}
+	jwks, err := auth.NewJWKSCache(env.String("OTTER_CONSOLE_JWKS_URL", ""), env.Bool("OTTER_CONSOLE_JWKS_ALLOW_HTTP", false))
+	if err != nil {
+		return nil, err
+	}
+	if d := env.Int("OTTER_CONSOLE_JWKS_REFRESH_SECS", 300); d > 0 {
+		jwks.Refresh = time.Duration(d) * time.Second
+		if jwks.MaxAge < 2*jwks.Refresh {
+			jwks.MaxAge = 2 * jwks.Refresh
+		}
+	}
+	var acrs []string
+	for _, v := range strings.Split(env.String("OTTER_CONSOLE_REQUIRED_ACR", ""), ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			acrs = append(acrs, v)
+		}
+	}
+	v, err := auth.NewConsoleVerifier(auth.ConsoleConfig{
+		Issuer:       env.String("OTTER_CONSOLE_ISSUER", ""),
+		Audience:     env.String("OTTER_CONSOLE_TOOL_ID", "dcim"),
+		RequiredACRs: acrs,
+		Leeway:       time.Duration(env.Int("OTTER_CONSOLE_LEEWAY_SECS", 30)) * time.Second,
+		JWKS:         jwks,
+		AllowDevACR:  env.Bool("OTTER_CONSOLE_DEV_ACR_ALLOWED", false),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &auth.ConsoleAuth{Log: log, Q: q, Verifier: v, Audit: q, UpstreamIssuer: upstream}, nil
 }

@@ -118,6 +118,7 @@ func apiTokenPrincipal(ctx context.Context, q Querier, raw string) (Principal, b
 		Subject:      tok.OwnerUserID,
 		Capabilities: effective,
 		Label:        "token:" + tok.ID.String(),
+		Method:       MethodAPIToken,
 	}, true
 }
 
@@ -131,4 +132,3 @@ func decodeStringArray(raw []byte) ([]string, error) {
 	}
 	return out, nil
 }
-

@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 
 export default defineConfig({
+  // Standalone: '/'. Console embed build: VITE_BASE=/t/dcim/ (see nginx.local.conf).
+  base: process.env.VITE_BASE || '/',
   plugins: [react()],
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },
