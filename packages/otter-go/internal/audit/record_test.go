@@ -93,3 +93,23 @@ func TestRecord_BackendErrorSwallowed(t *testing.T) {
 	r := &recRecorder{err: io.EOF}
 	Record(context.Background(), r, nopLogger(), Event{Action: "x"})
 }
+
+func TestRecord_CarriesConsoleSidAndJti(t *testing.T) {
+	r := &recRecorder{}
+	ctx := auth.WithPrincipal(context.Background(), auth.Principal{
+		Subject: uuid.New(), Label: "user:x", Method: auth.MethodConsole,
+		SessionID: "sid-1", AssertionID: "jti-1",
+	})
+	in := map[string]any{"k": "v"}
+	Record(ctx, r, nopLogger(), Event{Action: "site.create", Metadata: in})
+	var m map[string]any
+	if err := json.Unmarshal(r.gotParams.MetadataJson, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["console_sid"] != "sid-1" || m["console_jti"] != "jti-1" || m["k"] != "v" {
+		t.Fatalf("metadata: %v", m)
+	}
+	if _, mutated := in["console_sid"]; mutated {
+		t.Fatal("caller metadata mutated")
+	}
+}

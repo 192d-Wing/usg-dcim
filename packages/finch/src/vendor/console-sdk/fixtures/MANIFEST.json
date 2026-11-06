@@ -1,0 +1,600 @@
+{
+  "$comment": "Language-neutral protocol v1 fixture corpus. Format documented in README.md next to this file.",
+  "format": "usg-ops-console.protocol-fixtures",
+  "format_version": 1,
+  "protocol": 1,
+  "limits": {
+    "max_message_bytes": 16384,
+    "max_notify_chars": 500
+  },
+  "fixtures": [
+    {
+      "file": "sdk_v1/shell.Focus.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Focus",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 Focus."
+    },
+    {
+      "file": "sdk_v1/shell.Init.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Init",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 Init."
+    },
+    {
+      "file": "sdk_v1/shell.Init.pre-m4.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Init",
+      "case": "missing-optional",
+      "valid": true,
+      "expect": "decode",
+      "description": "Init as sent by a pre-M4 shell: no path/tool_id."
+    },
+    {
+      "file": "sdk_v1/shell.Navigate.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Navigate",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 Navigate."
+    },
+    {
+      "file": "sdk_v1/shell.ScopeChanged.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "ScopeChanged",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 ScopeChanged."
+    },
+    {
+      "file": "sdk_v1/shell.SessionRefreshed.failed.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "SessionRefreshed",
+      "case": "missing-optional",
+      "valid": true,
+      "expect": "decode",
+      "description": "Failed refresh: idle_expires_at absent."
+    },
+    {
+      "file": "sdk_v1/shell.SessionRefreshed.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "SessionRefreshed",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 SessionRefreshed."
+    },
+    {
+      "file": "sdk_v1/shell.ThemeChanged.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "ThemeChanged",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 ThemeChanged."
+    },
+    {
+      "file": "sdk_v1/tool.FocusShell.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "FocusShell",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 FocusShell."
+    },
+    {
+      "file": "sdk_v1/tool.NavigateConsole.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "NavigateConsole",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 NavigateConsole."
+    },
+    {
+      "file": "sdk_v1/tool.Notify.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "Notify",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 Notify."
+    },
+    {
+      "file": "sdk_v1/tool.PathChanged.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "PathChanged",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 PathChanged."
+    },
+    {
+      "file": "sdk_v1/tool.Ready.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "Ready",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 Ready."
+    },
+    {
+      "file": "sdk_v1/tool.RequestSessionRefresh.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "RequestSessionRefresh",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 RequestSessionRefresh."
+    },
+    {
+      "file": "sdk_v1/tool.SetBadge.clear.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetBadge",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 SetBadge."
+    },
+    {
+      "file": "sdk_v1/tool.SetBadge.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetBadge",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 SetBadge."
+    },
+    {
+      "file": "sdk_v1/tool.SetBreadcrumbs.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetBreadcrumbs",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 SetBreadcrumbs."
+    },
+    {
+      "file": "sdk_v1/tool.SetTitle.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetTitle",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 SetTitle."
+    },
+    {
+      "file": "sdk_v1_cases/shell.ScopeChanged.missing-optional.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "ScopeChanged",
+      "case": "missing-optional",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1_cases/shell.ScopeChanged.missing-optional.canonical.json",
+      "description": "Scope with every field omitted decodes as all-null."
+    },
+    {
+      "file": "sdk_v1_cases/shell.Init.missing-optional.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Init",
+      "case": "missing-optional",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1_cases/shell.Init.missing-optional.canonical.json",
+      "description": "Init with sparse scope and user.roles omitted (reserved, defaults to [])."
+    },
+    {
+      "file": "sdk_v1_cases/tool.FocusShell.missing-optional.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "FocusShell",
+      "case": "missing-optional",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1_cases/tool.FocusShell.missing-optional.canonical.json",
+      "description": "FocusShell without reverse defaults to false."
+    },
+    {
+      "file": "sdk_v1_cases/tool.SetBadge.missing-optional.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetBadge",
+      "case": "missing-optional",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1/tool.SetBadge.clear.json",
+      "description": "SetBadge without count is a clear (count null)."
+    },
+    {
+      "file": "sdk_v1_cases/shell.Init.extra-field.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Init",
+      "case": "extra-field",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1/shell.Init.json",
+      "description": "Unknown top-level and nested fields from a newer shell are ignored."
+    },
+    {
+      "file": "sdk_v1_cases/shell.ThemeChanged.extra-field.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "ThemeChanged",
+      "case": "extra-field",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1/shell.ThemeChanged.json",
+      "description": "Unknown field ignored."
+    },
+    {
+      "file": "sdk_v1_cases/tool.Notify.extra-field.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "Notify",
+      "case": "extra-field",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1/tool.Notify.json",
+      "description": "Unknown field from a newer tool SDK ignored."
+    },
+    {
+      "file": "sdk_v1_cases/tool.Ready.extra-field.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "Ready",
+      "case": "extra-field",
+      "valid": true,
+      "expect": "decode",
+      "canonical": "sdk_v1/tool.Ready.json",
+      "description": "Unknown field ignored."
+    },
+    {
+      "file": "sdk_v1_cases/tool.Notify.long-message.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "Notify",
+      "case": "notify-over-cap",
+      "valid": true,
+      "expect": "decode",
+      "description": "Message over MAX_NOTIFY_CHARS still decodes; the shell truncates on display."
+    },
+    {
+      "file": "sdk_v1_cases/shell.unknown-type.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "Type from a future protocol: ignored, not an error."
+    },
+    {
+      "file": "sdk_v1_cases/shell.missing-type.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "Object without type: ignored."
+    },
+    {
+      "file": "sdk_v1_cases/shell.non-string-type.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "Non-string type: ignored."
+    },
+    {
+      "file": "sdk_v1_cases/tool.unknown-type.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "Type from a future protocol: ignored, not an error."
+    },
+    {
+      "file": "sdk_v1_cases/tool.missing-type.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "Object without type: ignored."
+    },
+    {
+      "file": "sdk_v1_cases/tool.non-string-type.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "Non-string type: ignored."
+    },
+    {
+      "file": "sdk_v1_cases/tool.cross-direction.Init.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "A shell-to-tool type is unknown to the tool-to-shell decoder."
+    },
+    {
+      "file": "sdk_v1_cases/shell.cross-direction.Ready.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "unknown-type",
+      "valid": true,
+      "expect": "ignore",
+      "description": "A tool-to-shell type is unknown to the shell-to-tool decoder."
+    },
+    {
+      "file": "sdk_v1_cases/shell.Navigate.missing-required.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Navigate",
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "Known type without required path."
+    },
+    {
+      "file": "sdk_v1_cases/shell.Focus.bad-enum.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Focus",
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "edge outside first|last."
+    },
+    {
+      "file": "sdk_v1_cases/tool.Notify.bad-level.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "Notify",
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "level outside info|success|warning|error."
+    },
+    {
+      "file": "sdk_v1_cases/tool.Ready.wrong-type-field.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "Ready",
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "protocol must be an unsigned integer."
+    },
+    {
+      "file": "sdk_v1_cases/tool.SetBreadcrumbs.bad-item.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetBreadcrumbs",
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "items are [label, path] string pairs."
+    },
+    {
+      "file": "sdk_v1_cases/shell.not-json.txt",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "Not JSON."
+    },
+    {
+      "file": "sdk_v1_cases/shell.non-object.array.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "JSON array, not an object."
+    },
+    {
+      "file": "sdk_v1_cases/shell.non-object.string.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "JSON string, not an object."
+    },
+    {
+      "file": "sdk_v1_cases/shell.non-object.null.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "JSON null."
+    },
+    {
+      "file": "sdk_v1_cases/tool.not-json.txt",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "Not JSON."
+    },
+    {
+      "file": "sdk_v1_cases/tool.non-object.array.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "JSON array, not an object."
+    },
+    {
+      "file": "sdk_v1_cases/tool.non-object.string.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "JSON string, not an object."
+    },
+    {
+      "file": "sdk_v1_cases/tool.non-object.null.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "malformed",
+      "valid": false,
+      "expect": "malformed",
+      "description": "JSON null."
+    },
+    {
+      "file": "sdk_v1_cases/tool.SetTitle.at-limit.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetTitle",
+      "case": "at-limit",
+      "valid": true,
+      "expect": "decode",
+      "description": "Exactly MAX_MESSAGE_BYTES UTF-8 bytes: accepted."
+    },
+    {
+      "file": "sdk_v1_cases/tool.SetTitle.oversize.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": "SetTitle",
+      "case": "oversize",
+      "valid": false,
+      "expect": "too_large",
+      "description": "MAX_MESSAGE_BYTES + 1 bytes: dropped before parsing."
+    },
+    {
+      "file": "sdk_v1_cases/shell.Navigate.oversize.json",
+      "kind": "sdk-message",
+      "direction": "shell-to-tool",
+      "type": "Navigate",
+      "case": "oversize",
+      "valid": false,
+      "expect": "too_large",
+      "description": "Over the cap: dropped before parsing."
+    },
+    {
+      "file": "sdk_v1_cases/tool.unknown-type.oversize.json",
+      "kind": "sdk-message",
+      "direction": "tool-to-shell",
+      "type": null,
+      "case": "oversize",
+      "valid": false,
+      "expect": "too_large",
+      "description": "Size cap applies before type dispatch, even for unknown types."
+    },
+    {
+      "file": "tools_v1/assertion_claims.json",
+      "kind": "http-json",
+      "direction": "gateway-to-upstream",
+      "type": "AssertionClaims",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 AssertionClaims body."
+    },
+    {
+      "file": "tools_v1/error_bad_request.json",
+      "kind": "http-json",
+      "direction": "gateway-to-client",
+      "type": "AuthErrorBody",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 AuthErrorBody body."
+    },
+    {
+      "file": "tools_v1/launch_request.json",
+      "kind": "http-json",
+      "direction": "shell-to-gateway",
+      "type": "LaunchRequest",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 LaunchRequest body."
+    },
+    {
+      "file": "tools_v1/launch_response.json",
+      "kind": "http-json",
+      "direction": "gateway-to-shell",
+      "type": "LaunchResponse",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 LaunchResponse body."
+    },
+    {
+      "file": "tools_v1/tool_context.json",
+      "kind": "http-json",
+      "direction": "gateway-to-tool",
+      "type": "ToolContext",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 ToolContext body."
+    },
+    {
+      "file": "tools_v1/tools_response.json",
+      "kind": "http-json",
+      "direction": "gateway-to-shell",
+      "type": "ToolsResponse",
+      "case": "canonical",
+      "valid": true,
+      "expect": "decode",
+      "description": "Frozen v1 ToolsResponse body."
+    }
+  ]
+}

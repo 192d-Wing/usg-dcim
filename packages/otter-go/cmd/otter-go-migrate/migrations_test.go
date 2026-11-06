@@ -104,8 +104,8 @@ func TestExpectedAlembicHeadIsLatest(t *testing.T) {
 	last := versions[len(versions)-1]
 	// Highest embedded goose version_id. Bump this when a migration is
 	// added so the guard keeps catching an accidental/forgotten add.
-	// 69 = 00069_rack_grid_placement.sql (floor-plan tile placement).
-	if last != 69 {
+	// 70 = 00070_console_dcim_admin_mapping.sql (console dcim:admin mapping).
+	if last != 70 {
 		t.Errorf("embedded migrations changed (last version_id=%d); bump the expected version in this test", last)
 	}
 	if expectedAlembicHead == "" {

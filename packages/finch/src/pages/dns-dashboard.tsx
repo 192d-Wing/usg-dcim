@@ -346,7 +346,7 @@ function GlobalKpiStrip({ overall }: Readonly<{ overall: DashGlobal | undefined 
 
 export function DnsDashboardPage() {
   const navigate = useNavigate();
-  const { fabricId, fabrics } = useFabricScope();
+  const { fabricId, fabrics, unmatchedSite } = useFabricScope();
   const [windowId, setWindowId] = useState<WindowId>('60');
   const minutes = Number(windowId);
 
@@ -365,6 +365,8 @@ export function DnsDashboardPage() {
     ),
     refetchInterval: 30_000,
     staleTime: 25_000,
+    // Embedded with an unmapped console site: empty state, not the global view.
+    enabled: !unmatchedSite,
   });
 
   const activeFabric = fabrics.find((f) => f.id === fabricId);
@@ -383,7 +385,7 @@ export function DnsDashboardPage() {
 
   const scopeLabel = activeFabric
     ? `fabric: ${activeFabric.name}`
-    : 'all fabrics';
+    : unmatchedSite ? 'no matching fabric' : 'all fabrics';
   const timelineLabel = WINDOW_OPTIONS.find((o) => o.id === windowId)?.text ?? `${minutes}m`;
   // Storage footer note. Shows the rough disk envelope of the
   // metrics-samples table so operators can decide whether to tighten

@@ -227,7 +227,7 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
   // Fabric scope comes from the TopNavigation's region selector now —
   // see FabricScopeProvider. Drilling into a zone clears when the
   // operator switches fabrics so we don't surface a stale records page.
-  const { fabricId, isLoading: fabricsLoading } = useFabricScope();
+  const { fabricId, isLoading: fabricsLoading, unmatchedSite } = useFabricScope();
   const [zoneId, setZoneId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('zones');
 
@@ -237,7 +237,9 @@ export function DnsTab({ canWrite }: { canWrite: boolean }) {
     return (
       <Container>
         <Box padding="m" color="text-status-inactive">
-          {fabricsLoading ? 'Loading fabrics…' : 'No fabrics yet — pick or create one in IPAM → Fabrics.'}
+          {fabricsLoading ? 'Loading fabrics…' : unmatchedSite
+            ? 'No DCIM fabric matches the console site. Change the site in the console.'
+            : 'No fabrics yet — pick or create one in IPAM → Fabrics.'}
         </Box>
       </Container>
     );

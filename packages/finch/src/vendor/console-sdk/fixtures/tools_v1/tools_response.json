@@ -1,0 +1,1 @@
+{"tools":[{"id":"hello","title":"Hello Tool","category":"Examples","icon":"puzzle","origin":"https://hello.tools.ops.example.mil","entry":"/","nav":[{"label":"Overview","path":"/"}],"scopes":["site","tenant"]}]}

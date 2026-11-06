@@ -11,8 +11,9 @@ import type {
   CrudFilters, CrudOperators, CrudSorting, DataProvider,
 } from '@refinedev/core';
 import { http } from './http';
+import { apiBase } from './base-path';
 
-const baseURL = '/api/v1';
+const baseURL = apiBase();
 
 function buildQuery(
   pagination: { current?: number; pageSize?: number } | undefined,

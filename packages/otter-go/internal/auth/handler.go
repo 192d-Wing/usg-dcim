@@ -18,6 +18,27 @@ type Handler struct {
 	Mint   MintConfig    // session-JWT signing config; matches the verifier's PrimarySecret
 	Fernet FernetConfig  // refresh-token at-rest encryption; empty Keys → plaintext fallback
 	Audit  AuditRecorder // nil-safe; when set, login/logout/token-CRUD/refresh write audit rows
+	// Mode is OTTER_AUTH_MODE. In console mode the standalone session
+	// routes (login, logout, refresh, oidc/*) are refused with 404; in
+	// both mode they are refused for requests that carry a console
+	// assertion. Zero value = standalone.
+	Mode AuthMode
+}
+
+// standaloneOnly refuses standalone session routes when the console owns
+// the session.
+//
+// COMPLIANCE MAPPING:
+// - NIST 800-53: CM-7 (Least Functionality) — standalone login surface disabled in console mode
+func (h *Handler) standaloneOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h.Mode == ModeConsole ||
+			(h.Mode == ModeBoth && len(r.Header.Values(ConsoleAssertionHeader)) > 0) {
+			httpx.Error(w, http.StatusNotFound, "not available in console auth mode")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Mount registers every /auth/* route under the parent router's
@@ -52,6 +73,7 @@ func (h *Handler) publicRoutes(r chi.Router) {
 	// /methods is public by design — it tells the (unauthenticated)
 	// login screen which sign-in paths this deployment supports.
 	r.Get("/methods", h.methods)
+	r = r.With(h.standaloneOnly)
 	r.Get("/oidc/login", h.oidcLogin)
 	r.Get("/oidc/callback", h.oidcCallback)
 	r.Get("/oidc/logout", h.oidcLogout)
@@ -92,6 +114,10 @@ type meResponse struct {
 	User         *meUser  `json:"user"`
 	ViaToken     bool     `json:"via_token"`
 	Capabilities []string `json:"capabilities"`
+	// AuthMode is how this request authenticated: "console" (gateway
+	// assertion), "oidc" (session JWT for an SSO-linked user), "local"
+	// (session JWT for a password user) or "api_token". Additive field.
+	AuthMode string `json:"auth_mode"`
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
@@ -102,11 +128,20 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 	}
 	caps := append([]string(nil), p.Capabilities...)
 	sort.Strings(caps)
-	resp := meResponse{ViaToken: false, Capabilities: caps}
+	resp := meResponse{ViaToken: false, Capabilities: caps, AuthMode: p.Method}
 	if u, err := h.Q.GetUser(r.Context(), p.Subject); err == nil {
 		resp.User = &meUser{ID: u.ID.String(), Email: u.Email}
+		if resp.AuthMode == "" {
+			resp.AuthMode = "local"
+			if u.SsoSubject != nil && *u.SsoSubject != "" {
+				resp.AuthMode = "oidc"
+			}
+		}
 	} else {
 		resp.User = &meUser{ID: p.Subject.String()}
+		if resp.AuthMode == "" {
+			resp.AuthMode = "local"
+		}
 	}
 	httpx.JSON(w, http.StatusOK, resp)
 }

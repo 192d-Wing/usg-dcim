@@ -23,6 +23,8 @@ import HelpPanel from '@cloudscape-design/components/help-panel';
 import Box from '@cloudscape-design/components/box';
 import { GlobalSearch } from '@/components/global-search';
 import { FabricScopeProvider, useFabricScope } from '@/contexts/fabric-scope';
+import { isEmbedded } from '@/lib/embedded';
+import { EmbeddedShell } from './embedded-shell';
 
 type NavItem = {
   href: string;
@@ -91,9 +93,16 @@ function breadcrumbsFor(path: string): { text: string; href: string }[] {
 export function CloudscapeShell() {
   return (
     <FabricScopeProvider>
-      <ShellBody />
+      {isEmbedded() ? <EmbeddedShellBody /> : <ShellBody />}
     </FabricScopeProvider>
   );
+}
+
+function EmbeddedShellBody() {
+  const location = useLocation();
+  const crumbs = useMemo(() => breadcrumbsFor(location.pathname), [location.pathname]);
+  const { unmatchedSite } = useFabricScope();
+  return <EmbeddedShell crumbs={crumbs} unmatchedSite={unmatchedSite} />;
 }
 
 function ShellBody() {

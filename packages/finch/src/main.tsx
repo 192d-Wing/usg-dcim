@@ -14,6 +14,7 @@ import { applyDensity, applyMode, Density, Mode } from '@cloudscape-design/globa
 import '@fontsource/lato/400.css';
 import '@fontsource/lato/700.css';
 import './globals.css';
+import { initEmbedded } from './lib/embedded';
 
 applyDensity(Density.Comfortable);
 // Match Cloudscape's mode to Tailwind's. Our index.html ships with
@@ -66,6 +67,11 @@ class RootErrorBoundary extends React.Component<
 // clear it before mounting React.
 const rootEl = document.getElementById('root')!;
 rootEl.innerHTML = '';
+
+// Decide embedded vs standalone before the first render so the auth
+// provider, http client and shell pick one branch. Unframed loads skip
+// detection entirely.
+await initEmbedded();
 
 ReactDOM.createRoot(rootEl).render(
   <React.StrictMode>
